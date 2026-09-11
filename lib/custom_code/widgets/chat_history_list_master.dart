@@ -29,6 +29,10 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 // 보기와 비용 기능을 가르는 판정 한 벌. 공부방·과금 티커와 같은 자리를 본다.
 import '/custom_code/services/study_access.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
+import '/custom_code/services/deepgram_prewarm_session.dart'
+    show deepgramLanguageCode;
+import '/custom_code/services/origin_language_session.dart'
+    show kOriginLanguageOptions, koreanLanguageDisplayName;
 // 직접 통화 방을 가리는 필드 이름. 목록이 Replay 표를 붙일 때 본다.
 import '/custom_code/services/duo_canonical.dart';
 
@@ -154,14 +158,27 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
 
   // ── Keepers 튜터링 상태 ──
   bool _keeperTutoringLoading = false;
-  String _keeperTutoringKo = '';
-  String _keeperTutoringAnswerEn = '';
+  String _keeperTutoringPrompt = '';
+  String _keeperTutoringAnswer = '';
   String _keeperTutoringCorrected = '';
   String _keeperTutoringCorrection = '';
   String _keeperTutoringUsageTip = ''; // 🆕 활용가치 있는 구문/관용구 팁 (있을 때만)
   String _keeperTutoringTranscript = '';
-  // 🆕 Another Sentence 중복 회피: 최근 생성한 한국어 문장(최대 6개) 기억
-  final List<String> _keeperRecentKoSentences = [];
+  // 🆕 Another Sentence 중복 회피: 최근 생성한 문제 문장(최대 6개) 기억
+  final List<String> _keeperRecentPrompts = [];
+
+  // 🎓 [TUTORING-LANG] 키퍼는 여러 방에서 모인 목록이라 **방 문서가 없다.**
+  //   그래서 언어 짝을 읽어올 데가 없어 예전에는 한국어→영어로 박아 두었다.
+  //   이제 **줄마다 한 번** 고르게 하고 그 값을 키퍼 문서에 적어 둔다 —
+  //   다음부터는 안 묻는다. 적혀 있는 줄은 골라는 단계 없이 바로 시작한다.
+  static const String kKeeperNativeLangField = 'tutoring_native_lang';
+  static const String kKeeperTargetLangField = 'tutoring_target_lang';
+  String _keeperTutoringNative = '';
+  String _keeperTutoringTarget = '';
+
+  /// 이 줄의 언어 짝을 아직 모른다 — 시트 첫 단계에서 고르게 한다.
+  bool _keeperTutoringNeedsLangPick = false;
+  String _keeperTutoringDocId = '';
   bool _keeperIsRecording = false;
   AudioRecorder? _keeperRecorder;
   Uint8List? _keeperCorrectedAudio;
@@ -1179,7 +1196,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 icon: Icons.school_rounded,
                 color: Colors.deepPurpleAccent,
                 tooltip: '실전 튜터링',
-                onTap: () => _showKeeperTutoringPopup(doc.id, translated),
+                onTap: () =>
+                    _showKeeperTutoringPopup(doc.id, data, translated),
               ),
               // 3) 다른 표현 보기 — 히스토리 말풍선과 같은 팝업이다
               _buildKeeperAction(
@@ -1429,7 +1447,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   //  Keepers 튜터링 팝업 (chat_history_master의 패턴 재사용)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  void _showKeeperTutoringPopup(String keeperId, String baseText) {
+  void _showKeeperTutoringPopup(
+      String keeperId, Map<String, dynamic> keeperData, String baseText) {
     if (baseText.trim().isEmpty || _apiKey.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text("튜터링을 시작할 수 없습니다.",
@@ -1438,9 +1457,30 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
       return;
     }
 
+    // 🎓 [TUTORING-LANG] 이 줄에 적혀 있으면 그대로 쓰고, 없으면 첫 단계에서
+    //   고르게 한다. 로비 설정은 **기본값일 뿐**이다 — 그 키퍼를 담던 시절과
+    //   지금 설정이 다를 수 있어서 고른 값을 줄에 남긴다.
+    _keeperTutoringDocId = keeperId;
+    final String savedNative =
+        (keeperData[kKeeperNativeLangField] ?? '').toString().trim();
+    final String savedTarget =
+        (keeperData[kKeeperTargetLangField] ?? '').toString().trim();
+    final bool known = savedNative.isNotEmpty && savedTarget.isNotEmpty;
+    _keeperTutoringNative = known
+        ? savedNative
+        : (FFAppState().nativeLang.isNotEmpty
+            ? FFAppState().nativeLang
+            : 'Korean');
+    _keeperTutoringTarget = known
+        ? savedTarget
+        : (FFAppState().targetLang.isNotEmpty
+            ? FFAppState().targetLang
+            : 'English');
+    _keeperTutoringNeedsLangPick = !known;
+
     // 상태 초기화
-    _keeperTutoringKo = '';
-    _keeperTutoringAnswerEn = '';
+    _keeperTutoringPrompt = '';
+    _keeperTutoringAnswer = '';
     _keeperTutoringCorrected = '';
     _keeperTutoringCorrection = '';
     _keeperTutoringUsageTip = '';
@@ -1448,11 +1488,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     _keeperIsRecording = false;
     _keeperCorrectedAudio = null;
     _keeperIsPlayingCorrected = false;
-    _keeperTutoringLoading = true;
+    // 언어를 아직 모르면 생성부터 하지 않는다. 모르는 짝으로 만든 문제는
+    // 버려야 하고, 버릴 것을 만드는 동안 과금이 돈다.
+    _keeperTutoringLoading = !_keeperTutoringNeedsLangPick;
     _keeperDialogSetState = null;
 
     // STEP 1: 응용 문장 생성
-    _generateKeeperAppText(baseText);
+    if (!_keeperTutoringNeedsLangPick) _generateKeeperAppText(baseText);
 
     BillingTicker.instance.setRate(BillingRate.full);
 
@@ -1490,6 +1532,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   }
 
   Future<void> _generateKeeperAppText(String baseText) async {
+    // 🎓 [TUTORING-LANG] STEP 0에서 정해진 짝. 예전에는 Korean/English로
+    //   프롬프트에 박혀 있었다.
+    final String promptLang = _keeperTutoringNative;
+    final String targetLang = _keeperTutoringTarget;
     try {
       final response = await http.post(
         Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -1505,13 +1551,23 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             {
               'role': 'system',
               'content':
-                  r"""You are a grammar application tutor. Keep ONLY the core grammar pattern (tense / structure / word order) of the input English sentence. Then create ONE completely NEW Korean sentence that uses the SAME structure but an ENTIRELY DIFFERENT topic, vocabulary, and situation from the input — it must not be a paraphrase of the input. Also provide one natural English answer for that new Korean sentence. reply ONLY in JSON: {"ko": "새 한국어 문장", "en": "영어 정답"}""",
+                  'You are a grammar application tutor. Keep ONLY the core '
+                      'grammar pattern (tense / structure / word order) of the '
+                      'input $targetLang sentence. Then create ONE completely '
+                      'NEW $promptLang sentence that uses the SAME structure '
+                      'but an ENTIRELY DIFFERENT topic, vocabulary, and '
+                      'situation from the input — it must not be a paraphrase '
+                      'of the input. Also provide one natural $targetLang '
+                      'answer for that new $promptLang sentence. '
+                      'reply ONLY in JSON: '
+                      '{"prompt": "new $promptLang sentence", '
+                      '"answer": "$targetLang answer"}',
             },
             {
               'role': 'user',
-              'content': _keeperRecentKoSentences.isEmpty
-                  ? 'Input English sentence: "$baseText"'
-                  : 'Input English sentence: "$baseText"\n\nDo NOT repeat the topic or wording of these recently used Korean sentences — pick a clearly different subject:\n- ${_keeperRecentKoSentences.join("\n- ")}',
+              'content': _keeperRecentPrompts.isEmpty
+                  ? 'Input $targetLang sentence: "$baseText"'
+                  : 'Input $targetLang sentence: "$baseText"\n\nDo NOT repeat the topic or wording of these recently used $promptLang sentences — pick a clearly different subject:\n- ${_keeperRecentPrompts.join("\n- ")}',
             },
           ],
         }),
@@ -1519,13 +1575,18 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         final jsonResult = jsonDecode(data['choices'][0]['message']['content']);
-        _keeperTutoringKo = (jsonResult['ko'] as String? ?? '').trim();
-        _keeperTutoringAnswerEn = (jsonResult['en'] as String? ?? '').trim();
+        // 옛 판은 키가 ko/en이었다. 섞여 와도 빈 화면이 되지 않게 둘 다 본다.
+        _keeperTutoringPrompt =
+            ((jsonResult['prompt'] ?? jsonResult['ko']) as String? ?? '')
+                .trim();
+        _keeperTutoringAnswer =
+            ((jsonResult['answer'] ?? jsonResult['en']) as String? ?? '')
+                .trim();
         // 🆕 최근 문장 기록(중복 회피용, 최대 6개 유지)
-        if (_keeperTutoringKo.isNotEmpty) {
-          _keeperRecentKoSentences.add(_keeperTutoringKo);
-          if (_keeperRecentKoSentences.length > 6) {
-            _keeperRecentKoSentences.removeAt(0);
+        if (_keeperTutoringPrompt.isNotEmpty) {
+          _keeperRecentPrompts.add(_keeperTutoringPrompt);
+          if (_keeperRecentPrompts.length > 6) {
+            _keeperRecentPrompts.removeAt(0);
           }
         }
       }
@@ -1537,7 +1598,183 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     }
   }
 
+  /// 🎓 [TUTORING-LANG] 시트의 첫 단계. **줄마다 한 번만** 지나간다 —
+  /// 고른 값을 키퍼 문서에 적어 두므로 다음에 같은 줄을 열면 안 나온다.
+  Widget _buildKeeperLangPickBody(String baseText, {VoidCallback? onClose}) {
+    Widget picker({
+      required String label,
+      required String value,
+      required void Function(String) onPick,
+    }) =>
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 76,
+                child: Text(label,
+                    style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold)),
+              ),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: kOriginLanguageOptions.contains(value)
+                          ? value
+                          : kOriginLanguageOptions.first,
+                      isExpanded: true,
+                      dropdownColor: const Color(0xFF2A2A2A),
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 14),
+                      icon: const Icon(Icons.expand_more_rounded,
+                          color: Colors.white38),
+                      items: kOriginLanguageOptions
+                          .map((String lang) => DropdownMenuItem<String>(
+                                value: lang,
+                                child: Text(koreanLanguageDisplayName(lang)),
+                              ))
+                          .toList(),
+                      onChanged: (String? v) {
+                        if (v == null) return;
+                        onPick(v);
+                        _keeperDialogSetState?.call(() {});
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1E),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _keepersColor.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.school_rounded, color: _keepersColor, size: 20),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text("Keepers 실전 튜터링",
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15)),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.white38, size: 20),
+                onPressed: onClose,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(baseText,
+                style: const TextStyle(
+                    color: Colors.white70, fontSize: 13, height: 1.4)),
+          ),
+          const Divider(color: Colors.white12, height: 24),
+          _buildStepHeader('STEP 0', '언어', _keepersColor),
+          const SizedBox(height: 4),
+          const Text(
+            '이 줄은 처음입니다. 어느 말을 어느 말로 옮겨 말할지 한 번만 정해 주세요.',
+            style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          picker(
+            label: '문제(원문)',
+            value: _keeperTutoringNative,
+            onPick: (String v) => _keeperTutoringNative = v,
+          ),
+          picker(
+            label: '말하기(배울)',
+            value: _keeperTutoringTarget,
+            onPick: (String v) => _keeperTutoringTarget = v,
+          ),
+          // 같은 언어끼리는 옮길 것이 없다. 시작을 막고 이유를 적는다.
+          if (_keeperTutoringNative == _keeperTutoringTarget)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text('두 언어가 같으면 옮겨 말할 것이 없습니다.',
+                  style: TextStyle(
+                      color: Colors.orangeAccent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold)),
+            ),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _keepersColor,
+                disabledBackgroundColor: Colors.white12,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: _keeperTutoringNative == _keeperTutoringTarget
+                  ? null
+                  : () => _startKeeperTutoringWithLangs(baseText),
+              child: const Text('이 짝으로 시작',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 고른 짝을 **줄에 적고** 문제 만들기로 넘어간다. 적어 두는 것이 곧
+  /// "다음부터 안 묻는다"이다.
+  Future<void> _startKeeperTutoringWithLangs(String baseText) async {
+    final String docId = _keeperTutoringDocId;
+    _keeperTutoringNeedsLangPick = false;
+    _keeperTutoringLoading = true;
+    _keeperDialogSetState?.call(() {});
+    _generateKeeperAppText(baseText);
+    if (docId.isEmpty) return;
+    try {
+      await currentUserReference!.collection('keepers').doc(docId).update({
+        kKeeperNativeLangField: _keeperTutoringNative,
+        kKeeperTargetLangField: _keeperTutoringTarget,
+      });
+    } catch (e) {
+      // 못 적어도 이번 연습은 그대로 돈다. 다음에 한 번 더 물을 뿐이다.
+      debugPrint('[KEEPER-TUTORING] lang_save_failed(${e.runtimeType})');
+    }
+  }
+
   Widget _buildKeeperTutoringBody(String baseText, {VoidCallback? onClose}) {
+    if (_keeperTutoringNeedsLangPick) {
+      return _buildKeeperLangPickBody(baseText, onClose: onClose);
+    }
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(16),
@@ -1594,7 +1831,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               child: CircularProgressIndicator(
                   color: _keepersColor, strokeWidth: 2),
             ))
-          else if (_keeperTutoringKo.isNotEmpty)
+          else if (_keeperTutoringPrompt.isNotEmpty)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
@@ -1604,7 +1841,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 border:
                     Border.all(color: Colors.cyanAccent.withValues(alpha: 0.2)),
               ),
-              child: Text(_keeperTutoringKo,
+              child: Text(_keeperTutoringPrompt,
                   style: const TextStyle(
                       color: Colors.white, fontSize: 15, height: 1.5)),
             )
@@ -1616,7 +1853,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           // ── STEP 2: 도전 (녹음) ──
           _buildStepHeader('STEP 2', '도전', Colors.orangeAccent),
           const SizedBox(height: 8),
-          if (_keeperTutoringKo.isNotEmpty)
+          if (_keeperTutoringPrompt.isNotEmpty)
             Center(
               child: GestureDetector(
                 onTap: _keeperIsRecording
@@ -1798,13 +2035,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           const SizedBox(height: 16),
 
           // ── 다시 하기 버튼 ──
-          if (!_keeperTutoringLoading && _keeperTutoringKo.isNotEmpty)
+          if (!_keeperTutoringLoading && _keeperTutoringPrompt.isNotEmpty)
             Center(
               child: TextButton.icon(
                 onPressed: () {
                   _keeperTutoringLoading = true;
-                  _keeperTutoringKo = '';
-                  _keeperTutoringAnswerEn = '';
+                  _keeperTutoringPrompt = '';
+                  _keeperTutoringAnswer = '';
                   _keeperTutoringCorrected = '';
                   _keeperTutoringCorrection = '';
                   _keeperTutoringUsageTip = '';
@@ -1906,7 +2143,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           'POST', Uri.parse('https://api.openai.com/v1/audio/transcriptions'));
       request.headers['Authorization'] = 'Bearer $_apiKey';
       request.fields['model'] = OpenAiTranscribeService.model;
-      request.fields['language'] = 'en';
+      // 🎓 [TUTORING-LANG] 사용자가 말하는 것은 STEP 0에서 고른 배울 언어다.
+      request.fields['language'] =
+          deepgramLanguageCode(_keeperTutoringTarget);
       request.files.add(http.MultipartFile.fromBytes('file', audioBytes,
           filename: 'audio.m4a'));
       final response = await request.send();
@@ -1922,7 +2161,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   }
 
   Future<void> _correctKeeperAnswer(String userAnswer) async {
-    if (_apiKey.isEmpty || _keeperTutoringAnswerEn.isEmpty) return;
+    if (_apiKey.isEmpty || _keeperTutoringAnswer.isEmpty) return;
+    // 🎓 [TUTORING-LANG] STEP 0에서 정해진 짝. 피드백은 원문 언어로 쓴다 —
+    //   못 알아들으면 교정이 아니다.
+    final String promptLang = _keeperTutoringNative;
+    final String targetLang = _keeperTutoringTarget;
     try {
       final response = await http.post(
         Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -1938,23 +2181,23 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             {
               'role': 'user',
               'content':
-                  '''You are a strict but fair English tutor for a Korean learner.
+                  '''You are a strict but fair $targetLang tutor for a $promptLang-speaking learner.
 
-[KOREAN_PROMPT] (the meaning the user MUST express): "${_keeperTutoringKo}"
-[EXAMPLE_EN] (ONE natural example answer — NOT the only correct answer): "${_keeperTutoringAnswerEn}"
-[USER_SPEECH]: "$userAnswer"
+[PROMPT] (in $promptLang — the meaning the user MUST express): "${_keeperTutoringPrompt}"
+[EXAMPLE] (ONE natural $targetLang example answer — NOT the only correct answer): "${_keeperTutoringAnswer}"
+[USER_SPEECH] (the learner speaking $targetLang): "$userAnswer"
 
-Judge OBJECTIVELY. The [KOREAN_PROMPT] is the source of truth for MEANING.
+Judge OBJECTIVELY. The [PROMPT] is the source of truth for MEANING.
 
 RULES — follow exactly:
-1. MEANING CHECK (most important): Does [USER_SPEECH] express the SAME meaning as [KOREAN_PROMPT]?
-   - Different wording, synonyms, or a different valid structure are FINE as long as the meaning matches [KOREAN_PROMPT]. Do not mark a real paraphrase wrong.
+1. MEANING CHECK (most important): Does [USER_SPEECH] express the SAME meaning as [PROMPT]?
+   - Different wording, synonyms, or a different valid structure are FINE as long as the meaning matches [PROMPT]. Do not mark a real paraphrase wrong.
    - BUT if a content word changes the intended meaning (e.g. said "order" when the prompt means "arrive", wrong verb/noun, or a tense that changes the intent), it is WRONG. Do NOT praise it.
    - Ignore minor STT noise (punctuation, capitalization).
-2. If the meaning matches AND grammar is correct: set "corrected" to the user's own sentence cleaned of STT noise only, and "explanation" to one short Korean praise line (you may append "다른 표현: [EXAMPLE_EN]").
-3. If there is a real error: set "corrected" to an English sentence that is BOTH grammatical AND matches [KOREAN_PROMPT]'s meaning, and "explanation" to ENCOURAGING, constructive Korean feedback in 2-3 sentences. Do NOT merely say it is wrong: FIRST say what the user's sentence actually means as it stands, THEN show the specific small fix and the meaning it unlocks — e.g. "지금 문장은 '...' 뜻이에요. 'X'를 'Y'로 바꾸면 '...'가 됩니다." Be warm and positive; never scold.
-4. "usage_tip_ko": Suggest 1-2 MORE NATURAL, more native-like or idiomatic ways to say the SAME meaning as "corrected" (a native-speaker upgrade). For each, put the English expression first, then a short Korean note on the nuance or feel it adds and why a native might prefer it. Aim at real spoken-English naturalness — idioms, natural phrasings, or common conversational add-ons (e.g. "though", "actually", "you know") — NOT a plain synonym swap and NOT just making the sentence longer. Write the notes in Korean. If "corrected" is already the most natural way and there is genuinely nothing valuable to add, use "".
-5. Output ONLY JSON with exactly these keys: {"corrected": "...", "explanation": "...", "usage_tip_ko": "..."}''',
+2. If the meaning matches AND grammar is correct: set "corrected" to the user's own sentence cleaned of STT noise only, and "explanation" to one short praise line written in $promptLang (you may append the [EXAMPLE] as an alternative phrasing).
+3. If there is a real error: set "corrected" to a $targetLang sentence that is BOTH grammatical AND matches [PROMPT]'s meaning, and "explanation" to ENCOURAGING, constructive feedback written in $promptLang, 2-3 sentences. Do NOT merely say it is wrong: FIRST say what the user's sentence actually means as it stands, THEN show the specific small fix and the meaning it unlocks. Be warm and positive; never scold.
+4. "usage_tip": Suggest 1-2 MORE NATURAL, more native-like or idiomatic ways to say the SAME meaning as "corrected" (a native-speaker upgrade). For each, put the $targetLang expression first, then a short note in $promptLang on the nuance or feel it adds and why a native might prefer it. Aim at real spoken naturalness — idioms, natural phrasings, or common conversational add-ons — NOT a plain synonym swap and NOT just making the sentence longer. Write the notes in $promptLang. If "corrected" is already the most natural way and there is genuinely nothing valuable to add, use "".
+5. Output ONLY JSON with exactly these keys: {"corrected": "...", "explanation": "...", "usage_tip": "..."}''',
             },
           ],
         }),
@@ -1966,8 +2209,11 @@ RULES — follow exactly:
             (jsonResult['corrected'] as String? ?? '').trim();
         _keeperTutoringCorrection =
             (jsonResult['explanation'] as String? ?? '').trim();
+        // 옇 키(usage_tip_ko)도 함께 읽는다.
         _keeperTutoringUsageTip =
-            (jsonResult['usage_tip_ko'] as String? ?? '').trim();
+            ((jsonResult['usage_tip'] ?? jsonResult['usage_tip_ko']) as String?
+                    ?? '')
+                .trim();
         _keeperDialogSetState?.call(() {});
 
         // STEP 4: 교정 문장 TTS 생성
