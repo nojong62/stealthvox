@@ -65,6 +65,15 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     with BillingIdleMixin<ChatHistoryListMaster> {
   String _selectedFilter = 'All';
   Set<String> _selectedDocIds = {};
+  Set<String> _visibleHistoryDocIds = {};
+
+  /// 📏 [RANGE] 화면에 보이는 순서 그대로. 범위를 잡으려면 집합으로는
+  /// 부족하다 — 둘 사이가 어디까지인지는 순서가 있어야 정해진다.
+  List<String> _visibleHistoryDocOrder = <String>[];
+
+  /// 📏 [RANGE] 마지막으로 네모를 짚은 자리. 여기서부터 길게 누른 자리까지가
+  /// 한 범위다. 목록에서 사라지면 같이 지운다.
+  String? _rangeAnchorDocId;
 
   // ── Idle Timeout (무반응 과금 정지, History List: 자동 이동 없음) ──────────
   // 🔧 틱 방식: 1초마다 활동 여부 확인. 키퍼 재생/튜터링/녹음 중엔 카운터 0 유지.
@@ -121,6 +130,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     setState(() {
       _selectedFilter = newFilter;
       _selectedDocIds.clear();
+      _visibleHistoryDocIds.clear();
+      _visibleHistoryDocOrder = <String>[];
+      _rangeAnchorDocId = null;
     });
 
     final isKeepers = newFilter == 'Keepers';
@@ -419,6 +431,29 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           return rn.contains(_selectedFilter);
         }).toList();
 
+        // 현재 모드에서 실제로 목록에 보이는 기록만 범위 선택 대상으로 삼는다.
+        // 스트림 갱신으로 사라진 기록이 선택 상태에 남지 않도록 함께 정리한다.
+        final visibleIds = filteredDocs.map((doc) => doc.id).toSet();
+        final visibleIdsChanged =
+            visibleIds.length != _visibleHistoryDocIds.length ||
+                !visibleIds.every(_visibleHistoryDocIds.contains);
+        if (visibleIdsChanged) {
+          _visibleHistoryDocIds = visibleIds;
+          _visibleHistoryDocOrder =
+              filteredDocs.map((doc) => doc.id).toList(growable: false);
+          _selectedDocIds.retainAll(_visibleHistoryDocIds);
+          // 사라진 기록을 기준점으로 들고 있으면 범위가 엉뚱한 데서 시작한다.
+          if (_rangeAnchorDocId != null &&
+              !_visibleHistoryDocIds.contains(_rangeAnchorDocId)) {
+            _rangeAnchorDocId = null;
+          }
+          // 필터 바가 이 StreamBuilder보다 먼저 만들어지므로, 새 목록 ID를
+          // 반영한 상태로 다음 프레임에서 한 번 더 그린다.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() {});
+          });
+        }
+
         if (filteredDocs.isEmpty) {
           return Center(
             child: Column(
@@ -613,21 +648,59 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             children: _selectedFilter == 'All' || _selectedFilter == 'Keepers'
                 ? [
                     _buildFilterChip('Duo', 'Duo', Icons.people),
-                    _buildFilterChip(
-                        'Circle', 'Circle', Icons.forum),
-                    _buildFilterChip(
-                        'Scenario', 'Scenario', Icons.smart_toy),
+                    _buildFilterChip('Circle', 'Circle', Icons.forum),
+                    _buildFilterChip('Scenario', 'Scenario', Icons.smart_toy),
                     _buildKeepersChip(),
                   ]
                 : [
                     _buildDeleteActionChip(),
-                    _buildFilterChip(
-                        _selectedFilter,
-                        _selectedFilter,
+                    _buildRangeHintChip(),
+                    _buildFilterChip(_selectedFilter, _selectedFilter,
                         _getIconForRoom(_selectedFilter)),
                   ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// 📏 [RANGE] 보이지 않는 손짓은 쓰이지 않는다. 전체선택 단추가 있던
+  /// 자리에 **사용법 한 줄**을 둔다 — 누르는 단추가 아니라 안내다.
+  ///
+  /// 기준점을 짚기 전과 뒤에 문구가 바뀜다. "끝을 길게"라고 말해 주지
+  /// 않으면 처음 짚은 사람은 그다음을 모른다.
+  Widget _buildRangeHintChip() {
+    final bool armed = _rangeAnchorDocId != null &&
+        _visibleHistoryDocIds.contains(_rangeAnchorDocId);
+    return Container(
+      margin: const EdgeInsets.only(right: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: armed ? const Color(0xFF3A3A3A) : Colors.transparent,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: armed ? const Color(0xFF9E9E9E) : Colors.white12,
+          width: armed ? 1.5 : 1.0,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            armed ? Icons.swipe_down_alt_rounded : Icons.touch_app_rounded,
+            size: 16,
+            color: armed ? const Color(0xFFBDBDBD) : Colors.white38,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            armed ? '끝을 길게 누르면 사이 모두' : '첫 칸 탭 → 끝 칸 길게',
+            style: TextStyle(
+              color: armed ? const Color(0xFFBDBDBD) : Colors.white38,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -815,6 +888,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     //   정돈된 결과가 곧 그 방의 히스토리다(2026-09-04).
     final bool isDuoDirect = (data[kDuoModeField] ?? '') == 'direct';
     bool isChecked = _selectedDocIds.contains(doc.id);
+    // 전체 목록에서도 현재 화면의 기록을 개별·범위로 선택할 수 있다.
     bool showCheckbox = _selectedFilter != 'All';
 
     return GestureDetector(
@@ -858,13 +932,48 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             if (showCheckbox)
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
+                // 📏 [RANGE] 탭은 한 칸을 집고 **그 자리를 기준점으로 삼는다.**
+                //   지울 때도 기준점은 여기로 옮긴다 — Gmail·탐색기의 Shift+클릭이
+                //   그렇게 움직인다. 방금 손댄 자리가 다음 범위의 한쪽 끝이 된다.
                 onTap: () => setState(() {
                   if (isChecked) {
                     _selectedDocIds.remove(doc.id);
                   } else {
                     _selectedDocIds.add(doc.id);
                   }
+                  _rangeAnchorDocId = doc.id;
                 }),
+                // 📏 [RANGE] 길게 누르면 기준점부터 여기까지 **사이를 모두** 집는다.
+                //
+                //   카드 본체의 탭과 길게 누르기는 이미 임자가 있다(들어가기·덧메뉴).
+                //   그래서 범위 집기는 **네모 자리**가 맡는다 — 여기는 원래부터
+                //   고르는 손짓만 받던 자리라 넣어도 기존 동작을 뺏지 않는다.
+                //
+                //   기준점이 없거나 목록에서 사라졌으면 그냥 하나 집는다 — 길게
+                //   눌렀는데 아무 일도 안 일어나면 누른 사람은 고장으로 안다.
+                onLongPress: () {
+                  final int to = _visibleHistoryDocOrder.indexOf(doc.id);
+                  final int from = _rangeAnchorDocId == null
+                      ? -1
+                      : _visibleHistoryDocOrder.indexOf(_rangeAnchorDocId!);
+                  if (from < 0 || to < 0) {
+                    HapticFeedback.selectionClick();
+                    setState(() {
+                      _selectedDocIds.add(doc.id);
+                      _rangeAnchorDocId = doc.id;
+                    });
+                    return;
+                  }
+                  final int lo = from < to ? from : to;
+                  final int hi = from < to ? to : from;
+                  HapticFeedback.mediumImpact();
+                  setState(() {
+                    _selectedDocIds
+                        .addAll(_visibleHistoryDocOrder.sublist(lo, hi + 1));
+                    // 집은 끝이 다음 범위의 시작이 된다. 이어서 집기가 된다.
+                    _rangeAnchorDocId = doc.id;
+                  });
+                },
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(4, 10, 14, 10),
                   child: IgnorePointer(
