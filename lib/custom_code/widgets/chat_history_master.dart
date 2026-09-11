@@ -37,6 +37,8 @@ import '/custom_code/services/origin_language_session.dart'
     show detectOriginScript, koreanLanguageDisplayName, textContradictsLanguage;
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
+import '/custom_code/services/deepgram_prewarm_session.dart'
+    show deepgramLanguageCode;
 import '/custom_code/services/transcript_repair_guard.dart';
 import 'alt_style_popup.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
@@ -429,14 +431,14 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   String appCorrectedText = "";
   StateSetter? _dialogSetState;
   bool _appIsRecording = false;
-  String _appAnswerEn = "";
+  String _appAnswerTarget = "";
   String _appCorrection = "";
   String _appUsageTip = ""; // 🆕 활용가치 있는 구문/관용구 팁 (있을 때만)
   Uint8List? _appCorrectedAudio;
   bool _isPlayingAppAudio = false;
   String _appTranscript = "";
   // 🆕 Another Sentence 중복 회피: 최근 생성한 한국어 문장(최대 6개) 기억
-  final List<String> _appRecentKoSentences = [];
+  final List<String> _appRecentPromptSentences = [];
 
   // ── Idle Timeout (무반응 과금 정지, History: 자동 이동 없음) ──────────────
   // 🔧 틱 방식: 1초마다 활동 여부 확인. 튜터링/녹음/오디오 재생 중엔 카운터 0 유지.
@@ -2910,6 +2912,17 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     return name.isEmpty ? 'English' : name;
   }
 
+  /// 이 세션의 CHAT(원문) 언어 이름. 비어 있으면 한국어로 본다.
+  ///
+  /// 🎓 [TUTORING] 튜터링은 **원문 언어로 준 문장을 배울 언어로 말해 보는**
+  ///   연습이다. 그래서 두 이름이 다 필요하다 — 예전에는 원문=한국어,
+  ///   배울=영어로 프롬프트에 박혀 있어서, 일본어로 배우는 사람에게도
+  ///   한국어 문장을 주고 영어로 답하라고 했다.
+  String _sessionNativeLangName() {
+    final name = (_sessionNativeLang ?? '').trim();
+    return name.isEmpty ? 'Korean' : name;
+  }
+
   /// 같은 뜻을 스타일만 바꿔 늘어놓는다. 목록도 생성 규칙도 공용이다.
   void _showAltStylePopup(String baseText) {
     if (!_guardPaidStudy()) return;
@@ -2933,7 +2946,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       activeAppDocId = docId;
       appOriginalText = "";
       appCorrectedText = "";
-      _appAnswerEn = "";
+      _appAnswerTarget = "";
       _appCorrection = "";
       _appTranscript = "";
       _appIsRecording = false;
@@ -3032,7 +3045,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           ),
           const SizedBox(height: 14),
 
-          // Step 1: 로딩 or 한국어 응용 문장
+          // Step 1: 로딩 or 응용 문제(원문 언어)
           if (isGeneratingApp)
             const Center(
               child: Padding(
@@ -3042,7 +3055,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
               ),
             )
           else if (appOriginalText.isNotEmpty) ...[
-            // 한국어 문장 박스
+            // 문제 문장 박스 — 이 방의 원문 언어로 온다
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
@@ -3062,10 +3075,12 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
               ),
             ),
             const SizedBox(height: 6),
-            const Text(
-              "위 문장을 영어로 말해보세요",
+            Text(
+              '위 문장을 '
+              '${koreanLanguageDisplayName(_sessionTargetLangName())}로 '
+              '말해보세요',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white38, fontSize: 11),
+              style: const TextStyle(color: Colors.white38, fontSize: 11),
             ),
             const SizedBox(height: 16),
 
@@ -3078,7 +3093,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                       onTap: () {
                         if (_appIsRecording) {
                           _stopAppRecordAndProcess(
-                              appOriginalText, _appAnswerEn);
+                              appOriginalText, _appAnswerTarget);
                         } else {
                           _startAppRecording();
                         }
@@ -3326,6 +3341,11 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     setState(() => isGeneratingApp = true);
     _dialogSetState?.call(() {});
 
+    // 🎓 [TUTORING] 문제는 **원문 언어**로 주고 답은 **배울 언어**로 말한다.
+    //   이 두 줄이 예전에는 Korean/English로 박혀 있었다.
+    final String promptLang = _sessionNativeLangName();
+    final String targetLang = _sessionTargetLangName();
+
     try {
       final response = await http.post(
         Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -3341,13 +3361,23 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
             {
               'role': 'system',
               'content':
-                  r"""You are a grammar application tutor. Keep ONLY the core grammar pattern (tense / structure / word order) of the input English sentence. Then create ONE completely NEW Korean sentence that uses the SAME structure but an ENTIRELY DIFFERENT topic, vocabulary, and situation from the input — it must not be a paraphrase of the input. Also provide one natural English answer for that new Korean sentence. reply ONLY in JSON: {"ko": "새 한국어 문장", "en": "영어 정답"}""",
+                  'You are a grammar application tutor. Keep ONLY the core '
+                      'grammar pattern (tense / structure / word order) of the '
+                      'input $targetLang sentence. Then create ONE completely '
+                      'NEW $promptLang sentence that uses the SAME structure '
+                      'but an ENTIRELY DIFFERENT topic, vocabulary, and '
+                      'situation from the input — it must not be a paraphrase '
+                      'of the input. Also provide one natural $targetLang '
+                      'answer for that new $promptLang sentence. '
+                      'reply ONLY in JSON: '
+                      '{"prompt": "new $promptLang sentence", '
+                      '"answer": "$targetLang answer"}',
             },
             {
               'role': 'user',
-              'content': _appRecentKoSentences.isEmpty
-                  ? 'Input English sentence: "$baseText"'
-                  : 'Input English sentence: "$baseText"\n\nDo NOT repeat the topic or wording of these recently used Korean sentences — pick a clearly different subject:\n- ${_appRecentKoSentences.join("\n- ")}',
+              'content': _appRecentPromptSentences.isEmpty
+                  ? 'Input $targetLang sentence: "$baseText"'
+                  : 'Input $targetLang sentence: "$baseText"\n\nDo NOT repeat the topic or wording of these recently used $promptLang sentences — pick a clearly different subject:\n- ${_appRecentPromptSentences.join("\n- ")}',
             },
           ],
         }),
@@ -3356,19 +3386,24 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         final jsonResult = jsonDecode(data['choices'][0]['message']['content']);
-        final newKo = (jsonResult['ko'] as String? ?? '').trim();
+        // 옛 판은 키가 ko/en이었다. 캐시된 응답이 섞여 와도 읽히게 둘 다 본다.
+        final newPrompt = ((jsonResult['prompt'] ?? jsonResult['ko']) as String?
+                ?? '')
+            .trim();
         setState(() {
-          appOriginalText = newKo;
-          _appAnswerEn = (jsonResult['en'] as String? ?? '').trim();
+          appOriginalText = newPrompt;
+          _appAnswerTarget =
+              ((jsonResult['answer'] ?? jsonResult['en']) as String? ?? '')
+                  .trim();
           appCorrectedText = "";
           _appCorrection = "";
           _appUsageTip = "";
         });
         // 🆕 최근 문장 기록(중복 회피용, 최대 6개 유지)
-        if (newKo.isNotEmpty) {
-          _appRecentKoSentences.add(newKo);
-          if (_appRecentKoSentences.length > 6) {
-            _appRecentKoSentences.removeAt(0);
+        if (newPrompt.isNotEmpty) {
+          _appRecentPromptSentences.add(newPrompt);
+          if (_appRecentPromptSentences.length > 6) {
+            _appRecentPromptSentences.removeAt(0);
           }
         }
         _dialogSetState?.call(() {});
@@ -3405,7 +3440,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   // 📦 [Box 18-C: 실전 튜터링 - 녹음 중지 → STT → GPT 교정]
   Future<void> _stopAppRecordAndProcess(
-      String targetKo, String targetEn) async {
+      String promptSentence, String exampleAnswer) async {
     if (!_paidStudySilentlyAllowed('tutoring_stt')) return;
     _resumeHistoryFromUserAction();
     final path = await appAudioRecorder.stop();
@@ -3414,13 +3449,21 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     if (path == null || !mounted) return;
     if (mounted) setState(() => isGeneratingApp = true);
     _dialogSetState?.call(() {});
+
+    // 🎓 [TUTORING] 문제는 원문 언어, 말하는 것은 배울 언어, 피드백은 다시
+    //   원문 언어(= 이 사람이 편한 말)다. 셋 다 방 문서에서 온다.
+    final String promptLang = _sessionNativeLangName();
+    final String targetLang = _sessionTargetLangName();
+
     try {
       // 1. Whisper STT
       final uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
       final request = http.MultipartRequest('POST', uri);
       request.headers['Authorization'] = 'Bearer $_apiKey';
       request.fields['model'] = OpenAiTranscribeService.model;
-      request.fields['language'] = 'en';
+      // 🎓 [TUTORING] 사용자가 말하는 것은 **배울 언어**다. 'en' 고정이면
+      //   일본어를 배우는 사람의 발화를 영어로 알아들으려 한다.
+      request.fields['language'] = deepgramLanguageCode(targetLang);
       request.files.add(await http.MultipartFile.fromPath('file', path));
       final streamed =
           await request.send().timeout(const Duration(seconds: 15));
@@ -3434,29 +3477,29 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         _dialogSetState?.call(() {});
       }
 
-      // 2. GPT correction + reason — 한국어 원문을 "의미 기준"으로 삼아 객관적으로 채점
+      // 2. GPT correction + reason — 원문 언어 문제를 "의미 기준"으로 삼아 객관적으로 채점
       final corrPrompt =
-          '''You are a strict but fair English tutor for a Korean learner.
+          '''You are a strict but fair $targetLang tutor for a $promptLang-speaking learner.
 
-[KOREAN_PROMPT] (the meaning the user MUST express): "$targetKo"
-[EXAMPLE_EN] (ONE natural example answer — NOT the only correct answer): "$targetEn"
-[USER_SPEECH]: "$transcript"
+[PROMPT] (in $promptLang — the meaning the user MUST express): "$promptSentence"
+[EXAMPLE] (ONE natural $targetLang example answer — NOT the only correct answer): "$exampleAnswer"
+[USER_SPEECH] (the learner speaking $targetLang): "$transcript"
 
-Judge OBJECTIVELY. The [KOREAN_PROMPT] is the source of truth for MEANING.
+Judge OBJECTIVELY. The [PROMPT] is the source of truth for MEANING.
 
 RULES — follow exactly:
-1. MEANING CHECK (most important): Does [USER_SPEECH] express the SAME meaning as [KOREAN_PROMPT]?
-   - Different wording, synonyms, or a different valid structure are FINE as long as the meaning matches [KOREAN_PROMPT]. Do not mark a real paraphrase wrong.
+1. MEANING CHECK (most important): Does [USER_SPEECH] express the SAME meaning as [PROMPT]?
+   - Different wording, synonyms, or a different valid structure are FINE as long as the meaning matches [PROMPT]. Do not mark a real paraphrase wrong.
    - BUT if a content word changes the intended meaning (e.g. said "order" when the prompt means "arrive", wrong verb/noun, or a tense that changes the intent), it is WRONG. Do NOT praise it.
    - Ignore minor STT noise (punctuation, capitalization).
-2. If the meaning matches [KOREAN_PROMPT] AND the grammar is correct:
-   - "corrected_en" = the user's OWN sentence, cleaned of STT noise only. Do NOT replace it with [EXAMPLE_EN].
-   - "reason_ko" = one short Korean praise line. You MAY append "다른 표현: [EXAMPLE_EN]".
-3. If there is a real error (meaning mismatch vs [KOREAN_PROMPT], grammar, tense, word order, word choice, or a real pronunciation/spelling error):
-   - "corrected_en" = a corrected English sentence that is BOTH grammatical AND matches [KOREAN_PROMPT]'s meaning. Fix the actual error; keep the parts that are already correct.
-   - "reason_ko" = ENCOURAGING, constructive Korean feedback in 2-3 sentences. Do NOT merely say it is wrong. FIRST acknowledge what [USER_SPEECH] actually means as it stands, so the learner sees their attempt made sense. THEN point to the specific small fix and the meaning it unlocks — e.g. "지금 말한 문장은 '...'라는 뜻이에요. 여기서 'X'를 'Y'로 바꾸면 '...'라는 원하던 의미가 됩니다." Be specific, warm, and positive; never scold. Never invent an error that is not present.
-4. "usage_tip_ko": Suggest 1-2 MORE NATURAL, more native-like or idiomatic ways to say the SAME meaning as "corrected_en" (a native-speaker upgrade). For each, put the English expression first, then a short Korean note on the nuance or feel it adds and why a native might prefer it. Aim at real spoken-English naturalness — idioms, natural phrasings, or common conversational add-ons (e.g. "though", "actually", "you know") — NOT a plain synonym swap and NOT just making the sentence longer. Write the notes in Korean. If "corrected_en" is already the most natural way and there is genuinely nothing valuable to add, use "".
-5. Output ONLY valid JSON with exactly these three keys: {"corrected_en": "...", "reason_ko": "...", "usage_tip_ko": "..."}''';
+2. If the meaning matches [PROMPT] AND the grammar is correct:
+   - "corrected" = the user's OWN sentence, cleaned of STT noise only. Do NOT replace it with [EXAMPLE].
+   - "reason" = one short praise line written in $promptLang. You MAY append the [EXAMPLE] as an alternative phrasing.
+3. If there is a real error (meaning mismatch vs [PROMPT], grammar, tense, word order, word choice, or a real pronunciation/spelling error):
+   - "corrected" = a corrected $targetLang sentence that is BOTH grammatical AND matches [PROMPT]'s meaning. Fix the actual error; keep the parts that are already correct.
+   - "reason" = ENCOURAGING, constructive feedback written in $promptLang, 2-3 sentences. Do NOT merely say it is wrong. FIRST acknowledge what [USER_SPEECH] actually means as it stands, so the learner sees their attempt made sense. THEN point to the specific small fix and the meaning it unlocks. Be specific, warm, and positive; never scold. Never invent an error that is not present.
+4. "usage_tip": Suggest 1-2 MORE NATURAL, more native-like or idiomatic ways to say the SAME meaning as "corrected" (a native-speaker upgrade). For each, put the $targetLang expression first, then a short note in $promptLang on the nuance or feel it adds and why a native might prefer it. Aim at real spoken naturalness — idioms, natural phrasings, or common conversational add-ons — NOT a plain synonym swap and NOT just making the sentence longer. Write the notes in $promptLang. If "corrected" is already the most natural way and there is genuinely nothing valuable to add, use "".
+5. Output ONLY valid JSON with exactly these three keys: {"corrected": "...", "reason": "...", "usage_tip": "..."}''';
 
       final resp = await http.post(
         Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -3478,9 +3521,13 @@ RULES — follow exactly:
       if (resp.statusCode == 200) {
         final rd = jsonDecode(utf8.decode(resp.bodyBytes));
         final jr = jsonDecode(rd['choices'][0]['message']['content']);
-        final correctedEn = (jr['corrected_en'] as String? ?? '').trim();
-        final reasonKo = (jr['reason_ko'] as String? ?? '').trim();
-        final usageTip = (jr['usage_tip_ko'] as String? ?? '').trim();
+        // 옛 키(corrected_en/reason_ko/usage_tip_ko)도 함께 읽는다.
+        final correctedEn =
+            ((jr['corrected'] ?? jr['corrected_en']) as String? ?? '').trim();
+        final reasonKo =
+            ((jr['reason'] ?? jr['reason_ko']) as String? ?? '').trim();
+        final usageTip =
+            ((jr['usage_tip'] ?? jr['usage_tip_ko']) as String? ?? '').trim();
         if (mounted)
           setState(() {
             _appCorrection = "$correctedEn\n\n$reasonKo";
