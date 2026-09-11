@@ -37,13 +37,14 @@ import 'package:http/http.dart' as http;
 ///
 /// `const`라서 릴리스에서는 이 값을 보는 가지가 통째로 접힌다.
 ///
-/// 🤖 **지금은 내려 두었다.** 폰 두 대로 시험하게 되면서 시험앱 화면에 토글이
-///   남아 있을 이유가 없어졌다. 본체(`DuoRobot`)도 대화방의 호출부 세 곳도
-///   그대로 살아 있고, `const false`라 시험앱에는 그 가지가 실려 나가지도
-///   않는다.
+/// 🤖 **2026-09-11: 다시 올렸다.** 만능 통역을 재생 경로까지 손보면서 한 판을
+///   여러 번 돌려야 하는데, 그때마다 폰 두 대와 사람 둘을 붙이는 것이 검증
+///   횟수를 줄이고 있었다. 로봇은 통역의 번역·TTS·재생까지 그대로 태우므로
+///   그 반복에 맞는다(못 보는 것은 파일 머릿말의 두 가지).
 ///
-/// **되살리려면 이 값을 `kDebugMode`로 되돌리면 된다.** 그것뿐이다.
-const bool kDuoRobotAvailable = false;
+/// ⚠️ 릴리스에는 여전히 없다 — `kDebugMode`라 그 가지가 빌드에서 빠진다.
+///   다시 내리려면 `false`로 돌리면 된다.
+const bool kDuoRobotAvailable = kDebugMode;
 
 /// 로봇이 쓰는 가짜 발신자 id. 실제 사람의 uid와 절대 겹치지 않는 모양이다.
 const String kDuoRobotSenderUid = 'duo_robot_debug';
