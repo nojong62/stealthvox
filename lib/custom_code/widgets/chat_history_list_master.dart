@@ -672,35 +672,70 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   Widget _buildRangeHintChip() {
     final bool armed = _rangeAnchorDocId != null &&
         _visibleHistoryDocIds.contains(_rangeAnchorDocId);
-    return Container(
-      margin: const EdgeInsets.only(right: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: armed ? const Color(0xFF3A3A3A) : Colors.transparent,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: armed ? const Color(0xFF9E9E9E) : Colors.white12,
-          width: armed ? 1.5 : 1.0,
+    // 🚫 [RANGE] **기준점을 찍었을 때만 눌린다.** 그때 하는 일은 하나뿐이고
+    //   ─ 기준점 취소 ─ 글자와 ✕가 그렇게 말한다. 기준점이 없을 때는 아예
+    //   안 눌리게 둔다. 그 상태에서 눌리면 "무언가 골라 주는 단추"로 읽혀
+    //   방금 걷어낸 전체선택 자리로 되돌아간다.
+    return GestureDetector(
+      onTap: armed
+          ? () {
+              HapticFeedback.selectionClick();
+              setState(() => _rangeAnchorDocId = null);
+            }
+          : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(right: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: armed ? const Color(0xFF3A3A3A) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: armed ? const Color(0xFF9E9E9E) : Colors.white12,
+            width: armed ? 1.5 : 1.0,
+          ),
         ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            armed ? Icons.swipe_down_alt_rounded : Icons.touch_app_rounded,
-            size: 16,
-            color: armed ? const Color(0xFFBDBDBD) : Colors.white38,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            armed ? '끝을 길게 누르면 사이 모두' : '첫 칸 탭 → 끝 칸 길게',
-            style: TextStyle(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              armed ? Icons.swipe_down_alt_rounded : Icons.touch_app_rounded,
+              size: 16,
               color: armed ? const Color(0xFFBDBDBD) : Colors.white38,
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
             ),
-          ),
-        ],
+            const SizedBox(width: 6),
+            Text(
+              armed ? '끝 칸 길게' : '첫 칸 탭 → 끝 칸 길게',
+              style: TextStyle(
+                color: armed ? const Color(0xFFBDBDBD) : Colors.white38,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            // 취소는 기준점이 있을 때만 나타난다. 없을 때 ✕가 보이면
+            // 무엇을 취소하는 것인지 알 수 없다.
+            if (armed) ...[
+              const SizedBox(width: 8),
+              Container(
+                width: 1,
+                height: 12,
+                color: Colors.white24,
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.close_rounded,
+                  size: 15, color: Color(0xFFBDBDBD)),
+              const SizedBox(width: 3),
+              const Text(
+                '취소',
+                style: TextStyle(
+                  color: Color(0xFFBDBDBD),
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -2020,6 +2055,7 @@ RULES — follow exactly:
                 if (!mounted) return;
                 setState(() {
                   _selectedDocIds.clear();
+                  _rangeAnchorDocId = null;
                 });
 
                 messenger.showSnackBar(const SnackBar(

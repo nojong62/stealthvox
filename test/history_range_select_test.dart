@@ -141,14 +141,35 @@ void main() {
       expect(list, contains('onLongPress: () => _showOptionMenu(doc)'));
     });
 
-    test('안내는 단추가 아니라 글이다 — 누를 것이 없다', () {
+    test('안내 칩은 기준점이 있을 때만 눌린다', () {
       final int a = list.indexOf('Widget _buildRangeHintChip()');
       expect(a, greaterThan(-1));
       final String body =
           list.substring(a, list.indexOf('// ── Keepers 전용 필터 칩 ──', a));
-      expect(body, isNot(contains('GestureDetector')),
-          reason: '안내가 눌리면 사용자는 그것이 전체선택인 줄 안다');
       expect(body, contains('첫 칸 탭 → 끝 칸 길게'));
+      expect(_flat(body), contains('onTap: armed ?'),
+          reason: '기준점이 없을 때도 눌리면 전체선택 자리로 되돌아간다');
+      expect(_flat(body), contains('onTap: armed ? () { '
+          'HapticFeedback.selectionClick(); '
+          'setState(() => _rangeAnchorDocId = null); } : null'));
+    });
+
+    test('취소 표시는 기준점이 있을 때만 나온다', () {
+      final int a = list.indexOf('Widget _buildRangeHintChip()');
+      final String body =
+          list.substring(a, list.indexOf('// ── Keepers 전용 필터 칩 ──', a));
+      final int mark = body.indexOf('if (armed) ...[');
+      expect(mark, greaterThan(-1),
+          reason: '없을 때 ✕가 보이면 무엇을 취소하는지 알 수 없다');
+      expect(body.substring(mark), contains('Icons.close_rounded'));
+      expect(body.substring(mark), contains("'취소'"));
+    });
+
+    test('지우고 나면 기준점도 함께 사라진다', () {
+      final int a = list.indexOf('_showBatchDeleteDialog');
+      final int b = list.indexOf('_selectedDocIds.clear();', a);
+      expect(b, greaterThan(-1));
+      expect(list.substring(b, b + 120), contains('_rangeAnchorDocId = null'));
     });
   });
 }
