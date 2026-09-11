@@ -331,9 +331,52 @@ class TtsPrefetch {
 }
 
 // ====================================================================
+// PCM 재생기 계약
+// --------------------------------------------------------------------
+// 어댑터가 재생기에 바라는 것은 여덟뿐이다. 이 계약을 떼어 둔 이유는
+// 하나다 — **듀오 통역만 다른 곳으로 소리를 낸다.**
+//
+//   서클톡·시나리오톡·로봇  → [PcmStreamPlayer]  (flutter_sound, USAGE_MEDIA)
+//   듀오 통역              → 네이티브 백엔드     (USAGE_VOICE_COMMUNICATION)
+//
+// 통역은 WebRTC가 잡은 통화 세션 위에서 돌기 때문이다. 그 상태에서
+// 볼륨 키는 STREAM_VOICE_CALL을 잡는데, 미디어로 나가는 소리에는 그 키가
+// 닿지 않는다 — 사용자가 통역 음량을 올리고 내릴 방법이 없었다
+// (2026-09-11 실기기: 미디어 0이면 무음, 키를 눈러도 VOICE_CALL만 움직였다).
+//
+// ⚠️ 기본값은 언제나 [PcmStreamPlayer]다. 주입하지 않은 호출부는
+//   지금과 한 글자도 다르지 않게 동작한다.
+// ====================================================================
+abstract class TtsPcmSink {
+  /// 재생 세션을 열고 첫 샘플부터 [volume]을 적용한다.
+  Future<void> begin({required int sampleRate, required double volume});
+
+  /// 백프레셔 있는 feed — await가 풀리는 속도가 대략 재생 속도를 따른다.
+  ///
+  /// 이 의미를 깨면 어댑터가 실제 소비 속도보다 훨씬 앞서 밀어 버퍼가
+  /// 무한으로 쌍인다. 구현체는 반드시 이 약속을 지킨다.
+  Future<void> feed(Uint8List data);
+
+  /// 마지막 샘플까지 내보낸 뒤 세션을 닫는다.
+  Future<void> finish();
+
+  /// 즉시 중단. 남은 소리를 버린다.
+  Future<void> abort();
+
+  Future<void> setVolume(double volume);
+
+  /// 아직 안 낌 재생 시간(ms). 기기에 묻지 않고 feed 총량으로 산에한다.
+  int remainingPlaybackMs();
+
+  bool get isSessionActive;
+
+  Future<void> dispose();
+}
+
+// ====================================================================
 // PCM 스트리밍 재생기 (flutter_sound)
 // ====================================================================
-class PcmStreamPlayer {
+class PcmStreamPlayer implements TtsPcmSink {
   final FlutterSoundPlayer _player = FlutterSoundPlayer();
   bool _opened = false;
   bool _sessionActive = false;
@@ -449,7 +492,11 @@ class TtsAdapter {
     this.onPlaybackEnd,
     this.onHistoryAudioReady,
     this.onPrerollReport,
-  });
+    /// 🔊 소리를 어디로 낼 것인가. 넘기지 않으면 지금까지와 같은
+    /// flutter_sound 재생기다 — 서클톡·시나리오톡·로봇은 손대지 않는다.
+    /// 듀오 통역만 통화 경로 백엔드를 넘긴다([TtsPcmSink] 주석).
+    TtsPcmSink? pcmSink,
+  }) : _pcmPlayer = pcmSink ?? PcmStreamPlayer();
 
   final String Function() apiKeyProvider;
   final void Function(String tag, String msg)? onLog;
@@ -464,7 +511,7 @@ class TtsAdapter {
   /// wav는 TtsAdapterConfig.historyFormat 규격.
   final void Function(TtsRequest request, Uint8List wav)? onHistoryAudioReady;
 
-  final PcmStreamPlayer _pcmPlayer = PcmStreamPlayer();
+  final TtsPcmSink _pcmPlayer;
   final List<TtsUtterance> _queue = [];
   final Set<TtsPrefetch> _prefetches = <TtsPrefetch>{};
   TtsUtterance? _current;

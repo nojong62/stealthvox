@@ -43,6 +43,7 @@ import '/custom_code/services/duo_stt_ab_probe.dart';
 import '/custom_code/services/duo_stt_pipeline.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate;
+import '/custom_code/services/duo_interp_pcm_player.dart';
 import '/custom_code/services/origin_language_session.dart'
     show
         detectOriginScript,
@@ -975,6 +976,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   /// 상대 발화 재생기. tts-1 PCM을 받는 대로 튼다(mp3 통파일 대기 없음).
   TtsAdapter? _interpTts;
+  /// 🔊 [INTERP-PLAY] 통역 TTS를 통화 경로로 내보내는 재생기.
+  /// 어댑터와 수명을 같이한다 — 계측값을 프리롤 줄에 실으려고 들고 있다.
+  DuoInterpPcmPlayer? _interpPcmSink;
   int _interpTtsTurnSeq = 0;
 
   /// 🔇 [ECHO] 앱이 마지막으로 말을 끝낸 시각.
@@ -4586,7 +4590,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (_isDirectMode) return null;
     final existing = _interpTts;
     if (existing != null) return existing;
+    // 🔊 [INTERP-PLAY] 통역만 통화 경로로 소리를 낸다. 서클톡·시나리오톡·
+    //   로봇은 주입하지 않으므로 예전 그대로 flutter_sound로 나간다.
+    //   되돌리려면 이 인자 한 줄을 지우면 된다.
+    final sink = DuoInterpPcmPlayer(
+      onLog: (tag, msg) => _lgDuo('[INTERP-TTS]$tag', msg),
+    );
+    _interpPcmSink = sink;
     final adapter = TtsAdapter(
+      pcmSink: sink,
       apiKeyProvider: () => _openAiKey,
       onLog: (tag, msg) => _lgDuo('[INTERP-TTS]$tag', msg),
       // 🔇 [ECHO] **게이트는 여기서 닫힌다.** 예전에는 `speak`를 부르기 직전에
@@ -4607,7 +4619,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           'turn=${r.turnId} targetMs=${r.targetPrerollMs} '
               'actualMs=${r.actualPrerollMs} bufferedMs=${r.bufferedMsAtStart} '
               'ttsTtfbMs=${r.ttsTtfbMs} playbackStartMs=${r.playbackStartMs} '
-              'underruns=${r.underrunCount} recoveries=${r.recoveryCount}'),
+              'underruns=${r.underrunCount} recoveries=${r.recoveryCount} '
+              // 🚰 공급이 재생에 밀리는가 / 버퍼가 쌌이는가. 두 값이면
+              //   백프레셔가 살아 있는지 계속 감시할 수 있다.
+              'feedMaxMs=${_interpPcmSink?.feedMaxMs ?? -1} '
+              'bufferedPeakMs=${_interpPcmSink?.bufferedPeakMs ?? -1}'),
     );
     _interpTts = adapter;
     return adapter;
