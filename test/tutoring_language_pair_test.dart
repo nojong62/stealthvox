@@ -164,17 +164,33 @@ void main() {
     final String kjudge =
         _region(keep, 'Future<void> _correctKeeperAnswer(', 'STEP 4');
 
-    test('고른 값을 적어 둘 칸이 정해져 있다', () {
-      expect(keep, contains("kKeeperNativeLangField = 'tutoring_native_lang'"));
+    test('줄에 매이는 것은 배울 언어 하나뿐이다', () {
       expect(keep, contains("kKeeperTargetLangField = 'tutoring_target_lang'"));
+      expect(keep, isNot(contains('kKeeperNativeLangField')),
+          reason: '원문은 이 사람의 말이라 줄마다 달라지지 않는다');
     });
 
-    test('이미 적힌 줄은 묻지 않는다', () {
-      final String open = _region(
-          keep, 'void _showKeeperTutoringPopup(', '// 상태 초기화');
+    test('원문 언어는 로비 설정에서 그때그때 읽는다', () {
+      final String open =
+          _region(keep, 'void _showKeeperTutoringPopup(', '// 상태 초기화');
       expect(_flat(open),
-          contains('final bool known = savedNative.isNotEmpty && savedTarget.isNotEmpty;'));
-      expect(open, contains('_keeperTutoringNeedsLangPick = !known;'));
+          contains("_keeperTutoringNative = FFAppState().nativeLang.isNotEmpty "
+              "? FFAppState().nativeLang : 'Korean';"));
+    });
+
+    test('배울 언어가 적힌 줄은 묻지 않는다', () {
+      final String open =
+          _region(keep, 'void _showKeeperTutoringPopup(', '// 상태 초기화');
+      expect(open, contains('_keeperTutoringNeedsLangPick = savedTarget.isEmpty;'));
+    });
+
+    test('고르는 칸은 하나다 — 배울 언어', () {
+      final String pick = _region(keep, 'Widget _buildKeeperLangPickBody(',
+          'Future<void> _startKeeperTutoringWithLangs');
+      expect(pick, contains("label: '배울 언어'"));
+      expect(pick, isNot(contains("label: '문제(원문)'")));
+      // 문제가 어느 말로 나오는지는 글로 알려 준다.
+      expect(_flat(pick), contains(r"문제는 ${koreanLanguageDisplayName(_keeperTutoringNative)}로 나옵니다."));
     });
 
     test('모르는 줄은 문제부터 만들지 않는다 — 버릴 것에 과금하지 않는다', () {
@@ -199,7 +215,6 @@ void main() {
       expect(start, contains('_generateKeeperAppText(baseText)'));
       expect(_flat(start),
           contains("collection('keepers').doc(docId).update({"));
-      expect(start, contains('kKeeperNativeLangField: _keeperTutoringNative'));
       expect(start, contains('kKeeperTargetLangField: _keeperTutoringTarget'));
     });
 

@@ -169,9 +169,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
 
   // 🎓 [TUTORING-LANG] 키퍼는 여러 방에서 모인 목록이라 **방 문서가 없다.**
   //   그래서 언어 짝을 읽어올 데가 없어 예전에는 한국어→영어로 박아 두었다.
-  //   이제 **줄마다 한 번** 고르게 하고 그 값을 키퍼 문서에 적어 둔다 —
-  //   다음부터는 안 묻는다. 적혀 있는 줄은 골라는 단계 없이 바로 시작한다.
-  static const String kKeeperNativeLangField = 'tutoring_native_lang';
+  //   이제 **줄마다 한 번** 배울 언어를 고르게 하고 그 값만 적어 둔다 —
+  //   다음부터는 안 묻는다. 원문 언어는 이 사람의 말이라 줄에 매지 않고
+  //   로비 설정에서 그때그때 읽는다.
   static const String kKeeperTargetLangField = 'tutoring_target_lang';
   String _keeperTutoringNative = '';
   String _keeperTutoringTarget = '';
@@ -1461,22 +1461,21 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     //   고르게 한다. 로비 설정은 **기본값일 뿐**이다 — 그 키퍼를 담던 시절과
     //   지금 설정이 다를 수 있어서 고른 값을 줄에 남긴다.
     _keeperTutoringDocId = keeperId;
-    final String savedNative =
-        (keeperData[kKeeperNativeLangField] ?? '').toString().trim();
+    // 🗣️ 문제를 낼 언어는 **이 사람의 말**이다. 줄마다 달라지는 값이 아니라
+    //   묻지 않는다 — 로비 설정에서 그때그때 읽는다. 설정을 바꾸면 피드백
+    //   언어도 같이 따라가는 것이 맞다.
+    _keeperTutoringNative =
+        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+    // 🎯 배울 언어만 줄에 매인다. 한 키퍼를 영어로 연습하다 일본어로 바꾸는
+    //   일은 있어도, 내 모국어가 줄마다 바뀌지는 않는다.
     final String savedTarget =
         (keeperData[kKeeperTargetLangField] ?? '').toString().trim();
-    final bool known = savedNative.isNotEmpty && savedTarget.isNotEmpty;
-    _keeperTutoringNative = known
-        ? savedNative
-        : (FFAppState().nativeLang.isNotEmpty
-            ? FFAppState().nativeLang
-            : 'Korean');
-    _keeperTutoringTarget = known
+    _keeperTutoringTarget = savedTarget.isNotEmpty
         ? savedTarget
         : (FFAppState().targetLang.isNotEmpty
             ? FFAppState().targetLang
             : 'English');
-    _keeperTutoringNeedsLangPick = !known;
+    _keeperTutoringNeedsLangPick = savedTarget.isEmpty;
 
     // 상태 초기화
     _keeperTutoringPrompt = '';
@@ -1707,18 +1706,15 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           const Divider(color: Colors.white12, height: 24),
           _buildStepHeader('STEP 0', '언어', _keepersColor),
           const SizedBox(height: 4),
-          const Text(
-            '이 줄은 처음입니다. 어느 말을 어느 말로 옮겨 말할지 한 번만 정해 주세요.',
-            style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.4),
+          Text(
+            '이 줄은 처음입니다. 어느 말로 말해 볼지 한 번만 정해 주세요.\n'
+            '문제는 ${koreanLanguageDisplayName(_keeperTutoringNative)}로 나옵니다.',
+            style: const TextStyle(
+                color: Colors.white38, fontSize: 11, height: 1.4),
           ),
           const SizedBox(height: 12),
           picker(
-            label: '문제(원문)',
-            value: _keeperTutoringNative,
-            onPick: (String v) => _keeperTutoringNative = v,
-          ),
-          picker(
-            label: '말하기(배울)',
+            label: '배울 언어',
             value: _keeperTutoringTarget,
             onPick: (String v) => _keeperTutoringTarget = v,
           ),
@@ -1767,8 +1763,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     _generateKeeperAppText(baseText);
     if (docId.isEmpty) return;
     try {
+      // 배울 언어만 적는다. 원문은 로비 설정에서 읽으므로 줄에 매어 두면
+      // 나중에 설정을 바꿨을 때 옛 값이 발목을 잡는다.
       await currentUserReference!.collection('keepers').doc(docId).update({
-        kKeeperNativeLangField: _keeperTutoringNative,
         kKeeperTargetLangField: _keeperTutoringTarget,
       });
     } catch (e) {
