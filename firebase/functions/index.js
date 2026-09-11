@@ -60,6 +60,12 @@ const realtimeModes = new Set(["anyone", "roleplay", "duo", "step_first_turn"]);
 const realtimeRequestTimestamps = new Map();
 
 admin.initializeApp();
+const { interpretUtterance } = require("./duo_interpreter");
+
+// Callable Interpreter v2 is deployed dark while the client rollout flag is
+// false. Existing direct/realtime functions keep their original regions and
+// implementations.
+exports.interpretUtterance = interpretUtterance;
 
 function realtimeFailure(code, message) {
   return new functions.https.HttpsError(code, message);

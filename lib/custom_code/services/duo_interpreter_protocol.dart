@@ -20,6 +20,11 @@ const String kDuoInterpreterCallableCandidate = 'callable';
 /// protocol while still exercising the room lock and compatibility logic.
 const bool kDuoCallablePcV2RolloutEnabled = false;
 
+/// Internal emulator/device builds may force a pre-created callable room.
+/// This is a compile-time gate and remains false for every release build.
+const bool kDuoCallablePcV2InternalTest =
+    bool.fromEnvironment('DUO_INTERPRETER_CALLABLE_INTERNAL');
+
 bool duoInterpreterCallableCapability({
   required String remoteCandidate,
   bool rolloutEnabled = kDuoCallablePcV2RolloutEnabled,

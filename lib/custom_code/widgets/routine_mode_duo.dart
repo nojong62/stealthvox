@@ -36,6 +36,7 @@ import 'package:flutter/foundation.dart' as foundation;
 import '/custom_code/services/duo_direct_audio.dart';
 import '/custom_code/services/duo_partner_echo.dart';
 import '/custom_code/services/duo_interpreter_protocol.dart';
+import '/custom_code/services/duo_interpreter_callable.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/duo_transcript_gate.dart';
 import '/custom_code/services/duo_stt_ab_probe.dart';
@@ -1608,10 +1609,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   final List<String> _summaryLines = [];
 
   DocumentReference? _myHistoryRef;
+  // 첫 발화 PCM은 History 문서보다 먼저 도착할 수 있다. 그 쓰기가 끝난 뒤
+  // 임시 폴더를 실제 방으로 옮겨야 rename/delete 경합으로 잃지 않는다.
+  Future<void> _pendingDuoPcmWrite = Future<void>.value();
   DocumentReference? _duoSessionRef;
   StreamSubscription? _partnerJoinedSubscription;
   String? _interpreterProtocol;
   Future<String?>? _interpreterProtocolLock;
+  DuoInterpreterCallableClient? _interpreterCallable;
+  final Map<String, String> _interpreterUtteranceIds = {};
+  StreamSubscription? _utteranceSubscription;
+  bool _utterancesPrimed = false;
+  final Map<String, Map<String, dynamic>> _callableUtterances = {};
+  final Set<String> _callableTtsReserved = {};
+  bool _callableTtsDraining = false;
+  int _callableLastConsumedTargetSeq = 0;
 
   /// 직접 대화 게스트가 호스트 이탈을 지켜보는 구독. 호스트용
   /// [_partnerJoinedSubscription]과 **따로 둔다** — 같은 필드를 쓰면 한쪽이
@@ -1812,6 +1824,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _trialCallTimer?.cancel();
     _partnerJoinedSubscription?.cancel();
     _hostExitSubscription?.cancel();
+    _utteranceSubscription?.cancel();
     _messageSubscription?.cancel(); // 🆕 메시지 채널 구독 해제
     // 🆕 직접 대화 통화 경로(마이크·릴레이·전사·재생) 즉시 정리
     unawaited(_stopDirectCall('dispose'));
@@ -4159,6 +4172,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     unawaited(utterance.firstAudio.then((_) {
       lat?.firstTtsAudioReady ??= DateTime.now();
       lat?.playbackStart ??= DateTime.now();
+      onPlaybackStart?.call();
     }).catchError((Object _) {}));
     try {
       await utterance.done.timeout(const Duration(seconds: 30));
@@ -4395,6 +4409,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       (_interpTransport ?? _fallbackInterpTransport) ==
       kDuoInterpTransportWebrtc;
 
+  bool get _useInterpCallable =>
+      _interpreterProtocol == kDuoInterpreterProtocolCallablePcV2 &&
+      (kDuoCallablePcV2RolloutEnabled || kDuoCallablePcV2InternalTest);
+
   /// 통로를 **한 번만** 박는다. 두 번째 호출부터는 아무것도 하지 않는다.
   ///
   /// 부르는 자리가 둘인 것은 순서 때문이다. 메시지 리스너는 마이크보다 먼저
@@ -4402,10 +4420,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   void _pinInterpTransport(String reason) {
     if (_interpTransport != null) return;
     final String raw = _interpTransportRaw;
-    final String resolved =
-        (raw == kDuoInterpTransportWebrtc || raw == kDuoInterpTransportFirestore)
-            ? raw
-            : _fallbackInterpTransport;
+    final String resolved = (raw == kDuoInterpTransportWebrtc ||
+            raw == kDuoInterpTransportFirestore)
+        ? raw
+        : _fallbackInterpTransport;
     _interpTransport = resolved;
     _lgDuo(
         '[INTERP-TRANSPORT]',
@@ -4595,6 +4613,49 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 화면·히스토리는 내 폰 사정이라 상대를 붙잡을 이유가 없다.
   /// [pcmKey]는 이 발화의 소리를 가리키는 열쇠다. 통역 경로도 내 마이크에서
   /// 나온 말이라, 직접 대화와 같은 규칙으로 창고와 이어 둔다.
+  String _immutableInterpreterUtteranceId(String itemId, int seq) {
+    final key = itemId.isNotEmpty ? itemId : 'seq:$seq';
+    return _interpreterUtteranceIds.putIfAbsent(key, _newInterpreterUuid);
+  }
+
+  String _newInterpreterUuid() {
+    final bytes =
+        List<int>.generate(16, (_) => math.Random.secure().nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex =
+        bytes.map((value) => value.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+        '${hex.substring(20)}';
+  }
+
+  Future<Map<String, dynamic>> _submitCallableUtterance({
+    required String utteranceId,
+    required String sourceText,
+  }) async {
+    final roomId = _duoSessionRef?.id;
+    if (roomId == null || roomId.isEmpty) {
+      throw StateError('callable interpreter has no room');
+    }
+    final client = _interpreterCallable ??= DuoInterpreterCallableClient();
+    Object? lastError;
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        return await client.submit(
+          roomId: roomId,
+          utteranceId: utteranceId,
+          sourceText: sourceText,
+        );
+      } catch (error) {
+        lastError = error;
+        if (attempt == 3) rethrow;
+        await Future<void>.delayed(Duration(milliseconds: 250 * attempt));
+      }
+    }
+    throw lastError ?? StateError('callable submit failed');
+  }
+
   Future<void> _processRelayPipeline(String finalTranscript,
       {String pcmKey = ''}) async {
     _turnCounter++;
@@ -4622,12 +4683,45 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
     // 1. 상대에게 넘긴다. 번역하지 않은 내 말 그대로 — 상대 폰이 자기 대화
     //    언어로 옮긴다(두 사람의 대화 언어가 다를 수 있으므로 내가 옮기면 안 된다).
-    if (_useInterpWebrtc) {
+    if (_useInterpCallable) {
+      final utteranceId = _immutableInterpreterUtteranceId(pcmKey, seq);
+      final requestStartedAt = DateTime.now();
+      try {
+        final result = await _submitCallableUtterance(
+          utteranceId: utteranceId,
+          sourceText: spoken,
+        );
+        _lgDuo(
+          '[INTERP-CALLABLE]',
+          'accepted utterance=$utteranceId seq=${result['seq'] ?? seq} '
+              'status=${result['status'] ?? 'processing'} '
+              'requestMs=${DateTime.now().difference(requestStartedAt).inMilliseconds}',
+        );
+        // Phase 1B keeps the existing personal History write temporarily. The
+        // server-owned utterance remains the live source for callable rooms.
+        unawaited(_saveHistoryMessage(
+          '',
+          spoken,
+          _myRole,
+          mode: kDuoModeInterpreter,
+          seq: (result['seq'] as num?)?.toInt() ?? seq,
+          spokenAt: spokenAt,
+          sourceLang: myNative,
+          pcmKey: pcmKey,
+          deferTarget: true,
+        ));
+        _robotRespond(spoken);
+      } catch (error) {
+        _lgDuo(
+          '[INTERP-CALLABLE]',
+          'submit_failed utterance=$utteranceId error=${error.runtimeType}',
+        );
+      }
+    } else if (_useInterpWebrtc) {
       // 📨 [INTERP-DATA] 실시간 통로는 DataChannel이다. Firestore는 기록으로만
       //   남기고 **기다리지 않는다** — 기록이 느리다고 상대 목소리가 늦어지면
       //   안 된다는 것이 이 구조의 핵심이다.
-      final String msgId =
-          '$_myRole-$seq-${spokenAt.millisecondsSinceEpoch}';
+      final String msgId = '$_myRole-$seq-${spokenAt.millisecondsSinceEpoch}';
       final DateTime sendStartedAt = DateTime.now();
       // 📮 payload를 **변수로 먼저 만든다.** 못 보내면 이것을 그대로 큐에
       //   넣고, 채널이 열릴 때 같은 것을 다시 민다 — `msgId`도 그대로다.
@@ -4940,8 +5034,101 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   }
 
   // 🆕 [상대 발화 리스너] 공유 채널 구독 → 상대(senderRole≠나) 메시지만 처리
+  void _listenForCallableUtterances() {
+    final ref = _duoSessionRef;
+    if (ref == null) return;
+    _utteranceSubscription?.cancel();
+    _utterancesPrimed = false;
+    _utteranceSubscription = ref
+        .collection('utterances')
+        .orderBy('seq')
+        .snapshots()
+        .listen((snapshot) {
+      if (_isExiting || !mounted) return;
+      for (final doc in snapshot.docs) {
+        final data = Map<String, dynamic>.from(doc.data());
+        data['__utteranceDocId'] = doc.id;
+        _callableUtterances[doc.id] = data;
+      }
+      if (!_utterancesPrimed) {
+        var baseline = _callableLastConsumedTargetSeq;
+        for (final data in _callableUtterances.values) {
+          if (data['toUid']?.toString() != _myUid) continue;
+          final seq = (data['seq'] as num?)?.toInt() ?? 0;
+          if (seq > baseline) baseline = seq;
+        }
+        _callableLastConsumedTargetSeq = baseline;
+        _utterancesPrimed = true;
+      }
+      if (mounted) setState(() {});
+      unawaited(_drainCallableTts());
+    });
+  }
+
+  List<Map<String, dynamic>> _callableIncomingInOrder() {
+    final values = _callableUtterances.values
+        .where((data) => data['toUid']?.toString() == _myUid)
+        .where((data) =>
+            ((data['seq'] as num?)?.toInt() ?? 0) >
+            _callableLastConsumedTargetSeq)
+        .toList();
+    values.sort((a, b) => ((a['seq'] as num?)?.toInt() ?? 0).compareTo(
+          (b['seq'] as num?)?.toInt() ?? 0,
+        ));
+    return values;
+  }
+
+  Future<void> _drainCallableTts() async {
+    if (_callableTtsDraining || !_useInterpCallable) return;
+    _callableTtsDraining = true;
+    try {
+      while (!_isExiting && mounted) {
+        final pending = _callableIncomingInOrder();
+        if (pending.isEmpty) break;
+        final data = pending.first;
+        final id = data['__utteranceDocId']?.toString() ?? '';
+        final status = data['status']?.toString() ?? '';
+        final seq = (data['seq'] as num?)?.toInt() ?? 0;
+        if (id.isEmpty || seq <= 0) break;
+        if (_callableTtsReserved.contains(id)) break;
+        if (status == 'processing') break;
+        if (status == 'failed') {
+          _callableLastConsumedTargetSeq = seq;
+          continue;
+        }
+        if (status != 'ready') break;
+        final targetText = data['targetText']?.toString().trim() ?? '';
+        if (targetText.isEmpty) {
+          _callableLastConsumedTargetSeq = seq;
+          continue;
+        }
+        _callableTtsReserved.add(id);
+        var playbackStarted = false;
+        await _speakPartner(
+          targetText,
+          onPlaybackStart: () {
+            playbackStarted = true;
+            if (seq > _callableLastConsumedTargetSeq) {
+              _callableLastConsumedTargetSeq = seq;
+            }
+          },
+        );
+        if (!playbackStarted) {
+          _callableTtsReserved.remove(id);
+          break;
+        }
+      }
+    } finally {
+      _callableTtsDraining = false;
+    }
+  }
+
   void _listenForMessages() {
     if (_duoSessionRef == null) return;
+    if (_useInterpCallable && !_isDirectMode) {
+      _listenForCallableUtterances();
+      return;
+    }
     // 🔀 [INTERP-TRANSPORT] **스냅샷을 보기 전에** 통로를 박는다. 리스너는
     //   마이크보다 먼저 붙으므로, 여기서 안 박으면 첫 상대 발화를 빌드 타임
     //   기본값으로 판단하게 된다 — 그 값이 Remote Config와 다르면 그 한 건이

@@ -189,6 +189,18 @@ service cloud.firestore {
                 .data.get('partnerUid', '') == request.auth.uid);
       }
 
+      // Callable Interpreter utterances are server-owned. Participants may
+      // restore live UI state, but no client may forge seq, direction, status,
+      // translation, or processing leases.
+      match /utterances/{utteranceId} {
+        allow read: if isAuth()
+          && (get(/databases/$(database)/documents/duo_sessions/$(roomId))
+                .data.get('hostUid', '') == request.auth.uid
+              || get(/databases/$(database)/documents/duo_sessions/$(roomId))
+                .data.get('partnerUid', '') == request.auth.uid);
+        allow create, update, delete: if false;
+      }
+
       // One shared, tidied conversation per call. Both phones read it to
       // rebuild their own study room, and a guest who signs in to an existing
       // account afterwards restores that call from here -- so read must stay

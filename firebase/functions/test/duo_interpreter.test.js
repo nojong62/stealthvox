@@ -1,0 +1,22 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const admin = require('firebase-admin');
+const {
+  reserveUtterance, finishUtterance, createInterpretUtteranceHandler,
+  buildTranslationPrompt, PROCESSING, READY, FAILED,
+} = require('../duo_interpreter');
+
+class Ref { constructor(db,path){this.db=db;this.path=path;} collection(n){return new Collection(this.db,`${this.path}/${n}`);} async get(){const v=this.db.docs.get(this.path);return {exists:v!==undefined,data:()=>v};} }
+class Collection { constructor(db,path){this.db=db;this.path=path;this.filters=[];} doc(id){return new Ref(this.db,`${this.path}/${id}`);} where(){return this;} orderBy(){return this;} limit(){return this;} async get(){const prefix=`${this.path}/`;const docs=[...this.db.docs].filter(([p])=>p.startsWith(prefix)&&!p.slice(prefix.length).includes('/')).map(([p,v])=>({id:p.slice(prefix.length),data:()=>v}));return {docs};} }
+class Tx { constructor(db){this.db=db;} async get(ref){return ref.get();} set(ref,data){this.db.docs.set(ref.path,{...(this.db.docs.get(ref.path)||{}),...data});} update(ref,data){this.set(ref,data);} }
+class Db { constructor(){this.docs=new Map();this.inTransaction=false;} doc(p){return new Ref(this,p);} collection(p){return new Collection(this,p);} async runTransaction(fn){this.inTransaction=true;try{return await fn(new Tx(this));}finally{this.inTransaction=false;}} }
+const room = {hostUid:'h',partnerUid:'g',hostLang:'ko',partnerLang:'en',mode:'interpreter',state:'active',isPartnerJoined:true,interpreterProtocol:'callable_pc_v2',lastSeq:0};
+const ctx = uid => ({auth:{uid}});
+const data = (id='u1', text='안녕') => ({roomId:'r',utteranceId:id,sourceText:text});
+function seed(db){db.docs.set('duo_sessions/r',room);}
+
+test('reserve assigns one global seq and is idempotent', async()=>{const db=new Db();seed(db);const a=await reserveUtterance({db,context:ctx('h'),data:data(),now:()=>1000,tokenFactory:()=> 't1'});assert.equal(a.seq,1);assert.equal(a.status,PROCESSING);const b=await reserveUtterance({db,context:ctx('h'),data:data(),now:()=>1100,tokenFactory:()=> 't2'});assert.equal(b.reused,true);assert.equal(b.seq,1);assert.equal(db.docs.get('duo_sessions/r/utterances/u1').processingToken,'t1');});
+test('stale processing reclaims token without changing seq', async()=>{const db=new Db();seed(db);await reserveUtterance({db,context:ctx('h'),data:data(),now:()=>1000,tokenFactory:()=> 'old'});const d=db.docs.get('duo_sessions/r/utterances/u1');d.leaseExpiresAt=admin.firestore.Timestamp.fromMillis(1);const b=await reserveUtterance({db,context:ctx('h'),data:data(),now:()=>2000,tokenFactory:()=> 'new'});assert.equal(b.reclaimed,true);assert.equal(b.seq,1);assert.equal(db.docs.get('duo_sessions/r/utterances/u1').processingToken,'new');assert.equal(db.docs.get('duo_sessions/r/utterances/u1').attempt,2);});
+test('fencing rejects late worker completion', async()=>{const db=new Db();seed(db);await reserveUtterance({db,context:ctx('h'),data:data(),tokenFactory:()=> 't'});assert.equal(await finishUtterance({db,roomId:'r',utteranceId:'u1',processingToken:'wrong',status:READY,targetText:'x'}),false);assert.equal(await finishUtterance({db,roomId:'r',utteranceId:'u1',processingToken:'t',status:FAILED,failureCode:'x'}),true);assert.equal(db.docs.get('duo_sessions/r/utterances/u1').status,FAILED);});
+test('translation is outside reserve transaction and context includes processing source', async()=>{const db=new Db();seed(db);db.docs.set('duo_sessions/r/utterances/old',{seq:1,sourceText:'앞 문장',status:PROCESSING});let calls=0;const handler=createInterpretUtteranceHandler({db,apiKey:()=> 'key',fetchImpl:async()=>{assert.equal(db.inTransaction,false);calls++;return {ok:true,json:async()=>({choices:[{message:{content:'hello'}}]})};},tokenFactory:()=> 'tok'});const result=await handler(data('u2','다음'),ctx('h'));assert.equal(result.status,READY);assert.equal(calls,1);assert.match(buildTranslationPrompt({sourceText:'x',sourceLanguage:'ko',targetLanguage:'en',context:[{sourceText:'y',status:PROCESSING}]}),/y/);});
+test('participant and protocol checks reject invalid calls', async()=>{const db=new Db();seed(db);await assert.rejects(()=>reserveUtterance({db,context:ctx('x'),data:data()}),e=>e.code==='permission-denied');db.docs.get('duo_sessions/r').interpreterProtocol='legacy_webrtc_v1';await assert.rejects(()=>reserveUtterance({db,context:ctx('h'),data:data('u3')}),e=>e.code==='failed-precondition');});
