@@ -1512,6 +1512,12 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             expand: false,
             builder: (_, scrollController) => SingleChildScrollView(
               controller: scrollController,
+              // 📐 맨 아래 단추가 제스처 바에 걸렸다. 시트는 화면 끝까지
+              //   올라오므로 시스템이 쓰는 만큼을 직접 비켜 줘야 한다.
+              //   히스토리 쪽 튜터링 시트와 같은 값이다 — 두 시트가 서로
+              //   다르게 앉으면 같은 기능인데 다른 화면처럼 보인다.
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(ctx).padding.bottom + 24),
               child: _buildKeeperTutoringBody(
                 baseText,
                 onClose: () => Navigator.of(ctx).pop(),

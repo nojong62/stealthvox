@@ -246,4 +246,23 @@ void main() {
       expect(keep, isNot(contains('_keeperRecentKoSentences')));
     });
   });
+
+  // ── ⑥ 시트가 제스처 바에 안 걸린다 ───────────────────────
+  group('⑥ Keepers 시트 하단 여백', () {
+    final String keep = _read(_keep);
+
+    test('키퍼 튜터링 시트가 시스템 영역을 비켜 준다', () {
+      final String sheet = _region(keep,
+          'void _showKeeperTutoringPopup(', '.whenComplete(');
+      expect(_flat(sheet),
+          contains('padding: EdgeInsets.only( bottom: MediaQuery.of(ctx).padding.bottom + 24)'),
+          reason: '맨 아래 단추가 제스처 바에 걸렸다');
+    });
+
+    test('히스토리 쪽 시트와 같은 값을 쓴다', () {
+      // 같은 기능인데 둘이 다르게 앉으면 다른 화면처럼 보인다.
+      expect(_flat(_read(_hist)),
+          contains('bottom: MediaQuery.of(ctx).padding.bottom + 24'));
+    });
+  });
 }
