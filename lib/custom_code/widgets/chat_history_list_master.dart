@@ -2292,22 +2292,57 @@ RULES — follow exactly:
                 // 닫기 전에 잡아 두어야 지운 뒤에도 살아 있다.
                 final messenger = ScaffoldMessenger.of(context);
                 Navigator.pop(dialogContext);
-                for (String docId in _selectedDocIds) {
-                  await currentUserReference!
-                      .collection('chat_history')
-                      .doc(docId)
-                      .delete();
+
+                // 🗑️ [BATCH-DELETE] **먼저 베껴 두고 지운다.**
+                //
+                //   예전에는 `_selectedDocIds`를 그대로 순회했다. 그런데
+                //   `delete()`의 `await`마다 이벤트 루프가 돌고, 그 사이
+                //   Firestore 스냅샷이 도착해 StreamBuilder가 다시 그린다.
+                //   거기서 `_selectedDocIds.retainAll(_visibleHistoryDocIds)`가
+                //   방금 지운 id를 **순회 중인 집합에서 빼** 버린다.
+                //   다음 반복에서 ConcurrentModificationError가 나고 루프가
+                //   끊긴다 — 그래서 고른 것 중 한두 개만 지워졌다.
+                //   예외는 async onPressed 안에서 삼켜져 스낵바도 안 떴다.
+                //
+                //   베낀 목록을 돌면 스트림이 무엇을 하든 상관없다. 선택도
+                //   먼저 비워 화면이 곧바로 결과를 보여 준다.
+                final List<String> targets = _selectedDocIds.toList();
+                if (mounted) {
+                  setState(() {
+                    _selectedDocIds.clear();
+                    _rangeAnchorDocId = null;
+                  });
+                }
+
+                // 하나가 실패해도 나머지는 지운다 — 한 줄 때문에 통째로
+                // 멈추면 사용자는 무엇이 남았는지 알 수 없다.
+                int deleted = 0;
+                final List<String> failed = <String>[];
+                for (final String docId in targets) {
+                  try {
+                    await currentUserReference!
+                        .collection('chat_history')
+                        .doc(docId)
+                        .delete();
+                    deleted++;
+                  } catch (e) {
+                    failed.add(docId);
+                    debugPrint(
+                        '[BATCH-DELETE] failed id=$docId (${e.runtimeType})');
+                  }
                 }
                 if (!mounted) return;
-                setState(() {
-                  _selectedDocIds.clear();
-                  _rangeAnchorDocId = null;
-                });
 
-                messenger.showSnackBar(const SnackBar(
-                    content: Text("선택한 기록이 삭제되었습니다.",
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    backgroundColor: Colors.redAccent));
+                // 몇 개를 지웠는지 말한다. 예전 문구는 한 개만 지워져도
+                // 똑같이 "삭제되었습니다"라 어긋난 것을 알 수 없었다.
+                messenger.showSnackBar(SnackBar(
+                    content: Text(
+                        failed.isEmpty
+                            ? "$deleted개의 기록을 삭제했습니다."
+                            : "$deleted개를 삭제했습니다. ${failed.length}개는 실패했습니다.",
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    backgroundColor:
+                        failed.isEmpty ? Colors.redAccent : Colors.orangeAccent));
               },
               child: const Text("삭제",
                   style: TextStyle(
