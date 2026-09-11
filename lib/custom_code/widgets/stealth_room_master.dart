@@ -28,6 +28,7 @@ import 'usage_sheet.dart';
 import 'account_sheet.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
+import '/custom_code/services/dialog_brain_model.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
@@ -514,12 +515,13 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
               'Content-Type': 'application/json; charset=utf-8',
             },
             body: jsonEncode(<String, dynamic>{
-              'model': 'gpt-4o-mini',
-              // 분야가 이미 고정돼 있어 이 온도는 "그 분야 안에서 어떤
-              // 서클이냐"만 흔든다. 분야 자체가 튀는 일은 없다.
-              'temperature': 1.0,
+              // 서클을 고르는 판단이라 대화 두뇌와 같은 모델을 쓴다. 분야는
+              // 시드로 이미 고정돼 있어 모델이 흔들 수 있는 건 "그 분야 안에서
+              // 어떤 서클이냐"뿐이다.
+              'model': kDialogBrainModel,
+              'reasoning_effort': kDialogBrainReasoningEffort,
               'response_format': <String, String>{'type': 'json_object'},
-              'max_tokens': 180,
+              'max_completion_tokens': 180,
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',
@@ -554,9 +556,16 @@ Return ONLY valid JSON: {"name":"..."}.
           .timeout(const Duration(seconds: 15));
 
       if (response.statusCode != 200) {
+        // 폴백 없이 거절 본문을 그대로 남긴다.
+        debugPrint('[AI-HTTP] recommend status=${response.statusCode} '
+            'body=${utf8.decode(response.bodyBytes)}');
         throw http.ClientException('status=${response.statusCode}');
       }
       final envelope = jsonDecode(utf8.decode(response.bodyBytes));
+      debugPrint('[AI-HTTP] recommend status=200 model=$kDialogBrainModel '
+          'reasoning=$kDialogBrainReasoningEffort stream=false '
+          'finish_reason=${envelope['choices']?[0]?['finish_reason']} '
+          'usage=${envelope['usage']}');
       final content = envelope['choices'][0]['message']['content'].toString();
       final recommendation = jsonDecode(content) as Map<String, dynamic>;
       final name = (recommendation['name'] ?? '').toString().trim();
