@@ -1356,8 +1356,10 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     if (mounted) setState(() {});
     try {
       final nativeLang = _nativeLangName();
+      final openerSw = Stopwatch()..start();
       var aiText = await UnifiedBrain.generateOpener(
         apiKey: _openAiKey,
+        onLog: (message) => _log('🧪 [AI-HTTP]', 'opener $message'),
         circleDescription: widget.circleDescription,
         languageName: nativeLang,
       );
@@ -1371,7 +1373,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
         aiText = circle.isEmpty
             ? '요즘 우리 모임에서는 어떤 이야기가 제일 많이 나와요?'
             : '요즘 우리 $circle에서는 어떤 이야기가 제일 많이 나와요?';
-        _log('[OPENER-FALLBACK]', 'gpt-4o-mini 첫 마디 비어 있음');
+        _log('[OPENER-FALLBACK]', '$kDialogBrainModel 첫 마디 비어 있음');
       }
       if (!mounted) return;
       setState(() {
@@ -1394,8 +1396,11 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
       //   눌려, Deepgram이 빈 전사만 돌려줬다. 바지인보다 입력이 먼저다.
       // 보이스·모델 매핑은 어댑터가 정한다 — 여기서 모델명을 쓰지 않는다.
       await _speakSystemLine(aiText);
-      _log('[OPENER]',
-          'model=gpt-4o-mini lang=${_nativeLangCode()} text_only_history=true');
+      _log(
+          '[OPENER]',
+          'model=$kDialogBrainModel reasoning=$kDialogBrainReasoningEffort '
+              'stream=false elapsedMs=${openerSw.elapsedMilliseconds} '
+              'lang=${_nativeLangCode()} text_only_history=true');
     } catch (error) {
       _log('[OPENER-ERR]', 'reason=${error.runtimeType}');
       if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
@@ -3653,7 +3658,8 @@ $kSpokenReplyLengthPolicy
       ]);
       unawaited(_pendingTurnPersistence);
       _saveRecentHistory(userOriginal, aiOriginal);
-      _log('[GPT-HISTORY]', 'turn=$currentTurnId model=gpt-4o-mini tts=true');
+      _log('[GPT-HISTORY]',
+          'turn=$currentTurnId model=$kDialogBrainModel tts=true');
     } catch (error) {
       _log('[PIPE-ERR]', 'turn=$currentTurnId reason=${error.runtimeType}');
       final int aiIndex = _bubbleIndexById(aiBubbleId);
@@ -6123,13 +6129,16 @@ class DeepgramV2VoiceManager {
 // ====================================================================
 class UnifiedBrain {
   // ==================================================================
-  // 📦 [OPENING] 서클 첫 마디 — gpt-4o-mini가 한국어 한 문장으로 만든다.
+  // 📦 [OPENING] 서클 첫 마디 — [kDialogBrainModel]이 한국어 한 문장으로 만든다.
   // ------------------------------------------------------------------
   // Realtime이 만들던 자리다. Realtime은 시크릿 발급이 막히면 첫 마디가
   // 통째로 사라져 대화가 시작조차 안 됐다. 한 줄이라 스트리밍이 필요 없다.
+  //
+  // 실패해도 이전 모델로 다시 묻지 않는다. status와 본문은 [onLog]로 올린다.
   // ==================================================================
   static Future<String> generateOpener({
     required String apiKey,
+    void Function(String message)? onLog,
     required String circleDescription,
     required String languageName,
   }) async {
@@ -6147,9 +6156,9 @@ class UnifiedBrain {
               'Content-Type': 'application/json; charset=utf-8',
             },
             body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.9,
-              'max_tokens': 80,
+              'model': kDialogBrainModel,
+              'reasoning_effort': kDialogBrainReasoningEffort,
+              'max_completion_tokens': 80,
               'messages': [
                 {
                   'role': 'system',
@@ -6179,12 +6188,19 @@ Return only the line itself.'''
             }),
           )
           .timeout(const Duration(seconds: 8));
-      if (response.statusCode != 200) return '';
+      if (response.statusCode != 200) {
+        onLog?.call('status=${response.statusCode} '
+            'body=${utf8.decode(response.bodyBytes)}');
+        return '';
+      }
       final body =
           jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
       final text =
           (body['choices']?[0]?['message']?['content'] as String?)?.trim() ??
               '';
+      onLog?.call('status=200 '
+          'finish_reason=${body['choices']?[0]?['finish_reason'] ?? 'null'} '
+          'usage=${body['usage']}');
       return text.replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
     } catch (_) {
       return '';
@@ -6204,7 +6220,7 @@ Return only the line itself.'''
   ///
   /// 2026-09-12: 모델만 [kDialogBrainModel]로 옮겼다. `temperature`는 뺐고
   /// `max_tokens`는 `max_completion_tokens`로, 추론은 `reasoning_effort`로
-  /// 준다. 이 함수 하나만 새 모델을 본다 — 다른 호출부는 아직 gpt-4o-mini다.
+  /// 준다. 번역·교정 호출부는 그대로 gpt-4o-mini다.
   ///
   /// 실패해도 이전 모델로 다시 묻지 않는다. 400·파싱 오류를 그대로 봐야
   /// 하는 시험 단계라 [onLog]로 status와 본문을 올린다.

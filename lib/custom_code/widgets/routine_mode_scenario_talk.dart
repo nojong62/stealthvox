@@ -59,6 +59,7 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
+import '/custom_code/services/dialog_brain_model.dart';
 import '/custom_code/services/history_finalize.dart';
 // 🔁 [LATE-CONTINUATION] 판정·합치기·말풍선 규칙은 Circle Talk과 **같은
 //   함수**를 쓴다. 여기에 규칙을 다시 구현하면 한쪽만 고쳐지고 다른 쪽은 남는다.
@@ -1214,8 +1215,10 @@ never by itself a reason to ask back.
     if (mounted) setState(() {});
     try {
       final nativeLang = _nativeLangName();
+      final openerSw = Stopwatch()..start();
       var aiKorean = await ScenarioBrain.generateOpener(
         apiKey: _openAiKey,
+        onLog: (message) => _log('🧪 [AI-HTTP]', 'opener $message'),
         situation: _scenarioSituation,
         aiRole: _scenarioPartnerLabel.trim(),
         userRole: _scenarioUserLabel.trim(),
@@ -1227,7 +1230,7 @@ never by itself a reason to ask back.
           return;
         }
         aiKorean = '그래서 지금 어떻게 하실 생각이세요?';
-        _log('[OPENER-FALLBACK]', 'gpt-4o-mini 첫 대사 비어 있음');
+        _log('[OPENER-FALLBACK]', '$kDialogBrainModel 첫 대사 비어 있음');
       }
       if (!mounted || !_isConversationActive) return;
       setState(() {
@@ -1251,7 +1254,9 @@ never by itself a reason to ask back.
         },
       ]);
       _log('[OPENER]',
-          'model=gpt-4o-mini voice=$_aiVoice lang=${_nativeLangCode()}');
+          'model=$kDialogBrainModel reasoning=$kDialogBrainReasoningEffort '
+              'stream=false elapsedMs=${openerSw.elapsedMilliseconds} '
+              'voice=$_aiVoice lang=${_nativeLangCode()}');
     } catch (error) {
       _log('[OPENER-ERR]', 'reason=${error.runtimeType}');
       if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
@@ -2706,12 +2711,18 @@ never by itself a reason to ask back.
       final ttsTurnId =
           'scenario-$turnNumber-${DateTime.now().microsecondsSinceEpoch}';
 
+      // ⏱️ 첫 델타(TTFT)와 생성 전체 시간. 서클톡의 AI_TEXT_FIRST_TOKEN에 해당.
+      final aiGenSw = Stopwatch()..start();
+      int? firstTokenMs;
+
       await for (final chunk in ScenarioBrain.streamKoreanTurn(
         apiKey: _openAiKey,
         instructions: _buildScenarioMemberInstructions(),
         userText: userKorean,
         recentConversation: recentConversation,
+        onLog: (message) => _log('🧪 [AI-HTTP]', 'turn=$turnNumber $message'),
       )) {
+        firstTokenMs ??= aiGenSw.elapsedMilliseconds;
         if (!mounted ||
             !_isConversationActive ||
             generation != _pipelineGeneration ||
@@ -2782,10 +2793,17 @@ never by itself a reason to ask back.
         }
       }
 
+      aiGenSw.stop();
       final aiKorean = responseBuffer
           .toString()
           .trim()
           .replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
+      _log(
+          '⏱️ [AI-GEN]',
+          'turn=$turnNumber model=$kDialogBrainModel '
+              'reasoning=$kDialogBrainReasoningEffort stream=true '
+              'ttftMs=${firstTokenMs ?? -1} '
+              'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiKorean.length}');
       if (aiKorean.isEmpty) {
         throw StateError('Scenario Talk response did not complete.');
       }
@@ -3019,7 +3037,7 @@ never by itself a reason to ask back.
       ]);
       await _pendingTurnPersistence;
       _log('[GPT-HISTORY]',
-          'turn=$turnNumber model=gpt-4o-mini voice=$_aiVoice tts=true');
+          'turn=$turnNumber model=$kDialogBrainModel voice=$_aiVoice tts=true');
     } catch (error) {
       _log('[PIPE-ERR]', 'turn=$turnNumber reason=${error.runtimeType}');
       if (!responseCompleted) {
@@ -5823,10 +5841,12 @@ class HybridTtsPlayer {
 // ====================================================================
 class ScenarioBrain {
   // ==================================================================
-  // 📦 [OPENING] 장면 첫 대사 — gpt-4o-mini가 한국어 한 문장으로 만든다.
+  // 📦 [OPENING] 장면 첫 대사 — [kDialogBrainModel]이 한국어 한 문장으로 만든다.
   // ------------------------------------------------------------------
   // Realtime이 만들던 자리다. Realtime은 시크릿 발급이 막히면 첫 마디가
   // 통째로 사라져 대화가 시작조차 안 됐다. 짧은 한 줄이라 스트리밍도 필요 없다.
+  //
+  // 실패해도 이전 모델로 다시 묻지 않는다. status와 본문은 [onLog]로 올린다.
   // ==================================================================
   static Future<String> generateOpener({
     required String apiKey,
@@ -5834,6 +5854,7 @@ class ScenarioBrain {
     required String aiRole,
     required String userRole,
     required String languageName,
+    void Function(String message)? onLog,
   }) async {
     if (apiKey.isEmpty) return '';
     final client = http.Client();
@@ -5846,9 +5867,9 @@ class ScenarioBrain {
               'Content-Type': 'application/json; charset=utf-8',
             },
             body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.8,
-              'max_tokens': 80,
+              'model': kDialogBrainModel,
+              'reasoning_effort': kDialogBrainReasoningEffort,
+              'max_completion_tokens': 80,
               'messages': [
                 {
                   'role': 'system',
@@ -5870,12 +5891,19 @@ Return only the line itself.'''
             }),
           )
           .timeout(const Duration(seconds: 8));
-      if (response.statusCode != 200) return '';
+      if (response.statusCode != 200) {
+        onLog?.call('status=${response.statusCode} '
+            'body=${utf8.decode(response.bodyBytes)}');
+        return '';
+      }
       final body =
           jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
       final text =
           (body['choices']?[0]?['message']?['content'] as String?)?.trim() ??
               '';
+      onLog?.call('status=200 '
+          'finish_reason=${body['choices']?[0]?['finish_reason'] ?? 'null'} '
+          'usage=${body['usage']}');
       return text.replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
     } catch (_) {
       return '';
@@ -5936,11 +5964,16 @@ Return only the line itself.'''
 
   /// Scenario Talk 운영 경로용 GPT 스트림. 제어 태그 판정과 문장 경계 처리는
   /// 소비부가 담당하며, 여기서는 SSE content delta를 순서대로 전달한다.
+  ///
+  /// 2026-09-12: 모델을 [kDialogBrainModel]로 옮겼다. `temperature`는 뺐고
+  /// `max_tokens`는 `max_completion_tokens`로, 추론은 `reasoning_effort`로
+  /// 준다. 서클톡 정규 턴과 같이 마지막 조각의 usage를 받아 [onLog]로 올린다.
   static Stream<String> streamKoreanTurn({
     required String apiKey,
     required String instructions,
     required String userText,
     required String recentConversation,
+    void Function(String message)? onLog,
   }) async* {
     if (apiKey.isEmpty || userText.trim().isEmpty) return;
     final client = http.Client();
@@ -5954,10 +5987,12 @@ Return only the line itself.'''
         'Content-Type': 'application/json; charset=utf-8',
       });
       request.body = jsonEncode(<String, dynamic>{
-        'model': 'gpt-4o-mini',
+        'model': kDialogBrainModel,
+        'reasoning_effort': kDialogBrainReasoningEffort,
         'stream': true,
-        'temperature': 0.75,
-        'max_tokens': 120,
+        'max_completion_tokens': 120,
+        // 📏 마지막 SSE 조각에 choices가 비고 usage만 실려 온다.
+        'stream_options': <String, dynamic>{'include_usage': true},
         'messages': <Map<String, String>>[
           <String, String>{'role': 'system', 'content': instructions},
           if (recentConversation.trim().isNotEmpty)
@@ -5977,18 +6012,40 @@ Return only the line itself.'''
           await client.send(request).timeout(const Duration(seconds: 12));
       if (response.statusCode != 200) {
         final body = await response.stream.bytesToString();
+        onLog?.call('status=${response.statusCode} body=$body');
         throw StateError(
             'Scenario Talk GPT HTTP ${response.statusCode}: $body');
       }
+      onLog?.call('status=200');
 
+      var usageSeen = false;
+      String? finishReason;
       await for (final line in response.stream
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .timeout(const Duration(seconds: 12))) {
-        if (!line.startsWith('data: ') || line == 'data: [DONE]') continue;
+        if (!line.startsWith('data: ')) continue;
+        if (line == 'data: [DONE]') {
+          onLog?.call('done finish_reason=${finishReason ?? 'null'} '
+              'usage_seen=$usageSeen');
+          continue;
+        }
         try {
           final decoded = jsonDecode(line.substring(6));
-          final delta = decoded['choices']?[0]?['delta']?['content'];
+          // 📏 usage 조각은 choices가 비어 있다. 먼저 걸러낸다.
+          final usage = decoded['usage'];
+          if (usage is Map) {
+            usageSeen = true;
+            onLog?.call('usage prompt_tokens=${usage['prompt_tokens']} '
+                'completion_tokens=${usage['completion_tokens']} '
+                'total_tokens=${usage['total_tokens']}');
+            continue;
+          }
+          final choices = decoded['choices'];
+          if (choices is! List || choices.isEmpty) continue;
+          final first = choices[0] as Map?;
+          finishReason = first?['finish_reason'] as String? ?? finishReason;
+          final delta = first?['delta']?['content'];
           if (delta != null && delta.toString().isNotEmpty) {
             yield delta.toString();
           }
@@ -6257,10 +6314,10 @@ content and gist of the WHOLE conversation.
               'Content-Type': 'application/json; charset=utf-8',
             },
             body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 1.1,
+              'model': kDialogBrainModel,
+              'reasoning_effort': kDialogBrainReasoningEffort,
               'response_format': {'type': 'json_object'},
-              'max_tokens': 150,
+              'max_completion_tokens': 150,
               'messages': [
                 {'role': 'system', 'content': systemPrompt},
                 {
@@ -6273,10 +6330,12 @@ content and gist of the WHOLE conversation.
           .timeout(const Duration(seconds: 15));
 
       if (res.statusCode == 200) {
-        final raw = jsonDecode(utf8.decode(res.bodyBytes))['choices'][0]
-                ['message']['content']
-            .toString()
-            .trim();
+        final body = jsonDecode(utf8.decode(res.bodyBytes));
+        debugPrint('[AI-HTTP] scenario status=200 model=$kDialogBrainModel '
+            'reasoning=$kDialogBrainReasoningEffort stream=false '
+            'finish_reason=${body['choices']?[0]?['finish_reason']} '
+            'usage=${body['usage']}');
+        final raw = body['choices'][0]['message']['content'].toString().trim();
         final parsed = jsonDecode(raw);
         return {
           'situation': parsed['situation']?.toString() ?? '',
@@ -6284,6 +6343,9 @@ content and gist of the WHOLE conversation.
           'user_role': parsed['user_role']?.toString() ?? '',
         };
       }
+      // 폴백 없이 거절 본문을 그대로 남긴다.
+      debugPrint('[AI-HTTP] scenario status=${res.statusCode} '
+          'body=${utf8.decode(res.bodyBytes)}');
     } catch (e) {
       debugPrint('generateDramaticScenario Error: $e');
     } finally {
