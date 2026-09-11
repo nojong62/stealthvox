@@ -55,7 +55,7 @@ void main() {
 
     test('베끼기가 삭제보다 먼저다', () {
       expect(del.indexOf('_selectedDocIds.toList()'),
-          lessThan(del.indexOf('.delete()')));
+          lessThan(del.indexOf('_deleteHistoryRoomDeep(')));
     });
 
     test('선택 비우기가 삭제 루프보다 먼저다 — 스트림과 다툴 것이 없다', () {
@@ -102,6 +102,47 @@ void main() {
           _region(del, 'final List<String> targets', 'int deleted = 0;');
       expect(clearBlock, contains('_selectedDocIds.clear();'));
       expect(clearBlock, contains('_rangeAnchorDocId = null;'));
+    });
+  });
+
+  // ── ⑤ 대사까지 지운다 ────────────────────────────────────────
+  //
+  // Firestore는 문서를 지워도 하위 컬렉션을 안 지운다. `chat_history/{id}`만
+  // 지우면 `messages`가 고아로 남는다 — 목록에서 사라져 지워진 것처럼
+  // 보이지만 용량과 읽기 비용은 그대로 묶여 있고, 부모가 없어 되찾을 길도 없다.
+  group('⑤ 방을 지우면 대사도 같이 간다', () {
+    final String deep = _region(
+        list, 'Future<void> _deleteHistoryRoomDeep(', 'void _showBatchDeleteDialog()');
+
+    test('하위 messages를 훑어 지운다', () {
+      expect(deep, contains("roomRef.collection('messages')"));
+      expect(deep, contains('batch.delete(d.reference)'));
+    });
+
+    test('한 줄씩 왕복하지 않는다 — 배치로 묶는다', () {
+      expect(deep, contains('FirebaseFirestore.instance.batch()'));
+      expect(deep, contains('const int chunk = 300;'),
+          reason: '배치 상한 500보다 여유를 둔다');
+      expect(deep, contains('messages.limit(chunk).get()'));
+    });
+
+    test('다 지울 때까지 돌고 마지막에 방을 지운다', () {
+      expect(deep, contains('while (true)'));
+      expect(deep.indexOf('batch.commit()'), lessThan(deep.indexOf('roomRef.delete()')),
+          reason: '순서가 뒤집히면 부모만 사라지고 대사가 남는다');
+    });
+
+    test('일괄 삭제가 이 길로 간다', () {
+      expect(del, contains('await _deleteHistoryRoomDeep(currentUserReference!'));
+      expect(_flat(del), isNot(contains('.doc(docId) .delete()')),
+          reason: '방 문서만 지우던 길이다');
+    });
+
+    test('단건 삭제도 같은 길로 간다', () {
+      final String menu = _region(list, 'void _showDeleteDialog(', 'void _showStudyRoomManual(');
+      expect(menu, contains('_deleteHistoryRoomDeep(doc.reference)'));
+      expect(menu, isNot(contains('await doc.reference.delete();')),
+          reason: '방 문서만 지우던 길이다');
     });
   });
 }

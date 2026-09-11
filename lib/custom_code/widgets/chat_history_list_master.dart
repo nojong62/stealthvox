@@ -2257,6 +2257,35 @@ RULES — follow exactly:
   //  기존 코드 (변경 없음)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+  /// 🗑️ 방 하나를 **대사까지** 지운다.
+  ///
+  /// Firestore는 문서를 지워도 그 아래 컬렉션을 지우지 않는다.
+  /// `chat_history/{id}`만 지우면 `messages`가 고아로 남는다 — 목록에서
+  /// 사라지니 지워진 것처럼 보이지만 실제로는 계속 쌓이고, 용량과 읽기 비용이
+  /// 거기 묶인다. 되찾을 길도 없다(부모가 없어 경로를 만들 수 없다).
+  ///
+  /// 🚚 **배치로 묶어 보낸다.** 한 줄씩 await하면 200줄짜리 방에서 왕복이
+  ///   200번이라 삭제가 눈에 띄게 느리다. 배치 한 번의 상한은 500이므로
+  ///   여유를 두고 300씩 끊는다.
+  ///
+  /// ⚠️ **대사를 먼저, 방은 마지막에.** 순서가 뒤집히면 중간에 실패했을 때
+  ///   부모만 사라지고 대사가 남아 정확히 고치려던 상태가 된다.
+  Future<void> _deleteHistoryRoomDeep(DocumentReference roomRef) async {
+    const int chunk = 300;
+    final CollectionReference messages = roomRef.collection('messages');
+    while (true) {
+      final QuerySnapshot snap = await messages.limit(chunk).get();
+      if (snap.docs.isEmpty) break;
+      final WriteBatch batch = FirebaseFirestore.instance.batch();
+      for (final QueryDocumentSnapshot d in snap.docs) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+      if (snap.docs.length < chunk) break;
+    }
+    await roomRef.delete();
+  }
+
   void _showBatchDeleteDialog() {
     if (_selectedDocIds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -2320,10 +2349,9 @@ RULES — follow exactly:
                 final List<String> failed = <String>[];
                 for (final String docId in targets) {
                   try {
-                    await currentUserReference!
+                    await _deleteHistoryRoomDeep(currentUserReference!
                         .collection('chat_history')
-                        .doc(docId)
-                        .delete();
+                        .doc(docId));
                     deleted++;
                   } catch (e) {
                     failed.add(docId);
@@ -2456,7 +2484,12 @@ RULES — follow exactly:
           TextButton(
               onPressed: () async {
                 Navigator.pop(context);
-                await doc.reference.delete();
+                // 대사까지 지운다 — 방 문서만 지우면 messages가 고아로 남는다.
+                try {
+                  await _deleteHistoryRoomDeep(doc.reference);
+                } catch (e) {
+                  debugPrint('[DELETE-ROOM] failed (${e.runtimeType})');
+                }
               },
               child: const Text("삭제",
                   style: TextStyle(
