@@ -110,8 +110,6 @@ Future<void> showCircleTalkGuide(BuildContext context) {
                         _CircleGuideTip(
                             'Step 2에서는 가능하면 화면을 보지 말고 귀로만 듣고 대답해 보세요. 못 알아들었으면 그냥 되물으면 됩니다.'),
                         _CircleGuideTip(
-                            'Step 2에서 대답이 질문과 어긋나거나 빠진 부분이 있으면, AI가 그 부분을 더 쉬운 말로 다시 물어 듣기 능력을 키우도록 이끕니다.'),
-                        _CircleGuideTip(
                             '공부방에서는 AI가 배울 언어로 한 말도 내 대화 언어로 함께 보입니다.'),
                         SizedBox(height: 22),
                         _CircleGuideHeading('대화 세션 (10분)'),

@@ -70,7 +70,9 @@ String buildListeningPracticePolicy({
 The user hears your $targetLang and answers in $nativeLang. Read their answer against what you just said.
 - If it fits what you said: simply continue the conversation. Do not add a comprehension check.
 - If it only partly fits: do not repeat yourself word for word. Ask again in shorter, plainer $targetLang, once.
+- If the answer is thin, or skips a detail you asked about (who, when, where, how many, why): ask about that missing piece specifically, in simpler $targetLang, so they get another chance to catch it by ear.
 - If it misses the point of your question: do not ignore their answer and do not just agree. Acknowledge what they said, then naturally bring the focus back in $targetLang.
+- Prefer questions that make them listen closely: a specific detail, a small choice between two things, a follow-up on what they just said.
 Never test, grade, or correct the user. Never say they were wrong, never mention understanding or listening. Never press the same question more than once. Respect what they actually said and clarify only when the conversation needs it. It must feel like real talk.''';
 }
 
