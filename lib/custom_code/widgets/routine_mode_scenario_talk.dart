@@ -64,6 +64,7 @@ import '/custom_code/services/history_finalize.dart';
 // 🔁 [LATE-CONTINUATION] 판정·합치기·말풍선 규칙은 Circle Talk과 **같은
 //   함수**를 쓴다. 여기에 규칙을 다시 구현하면 한쪽만 고쳐지고 다른 쪽은 남는다.
 import '/custom_code/services/late_continuation.dart';
+import '/custom_code/services/listening_practice.dart';
 import '/custom_code/services/circle_correction_intent.dart'
     as correction_intent;
 import '/custom_code/services/conversation_cancel_command.dart';
@@ -122,6 +123,9 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   bool _isConversationActive = false;
   double _fontScale = 1.0;
   bool _showOriginal = true;
+  // 🎧 [LISTENING] Step 1(기본) = AI도 대화 언어. Step 2 = AI만 배울 언어.
+  //   세션 한정 — 방을 나가면 Step 1로 돌아간다.
+  ListeningStep _listeningStep = ListeningStep.step1;
   int _turnCounter = 0;
 
   // 👂 [HEARD-CONFIRM] 전사가 깨졌을 때 "글로 적기 전에" 말로 되묻는다.
@@ -545,12 +549,26 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
     }
   }
 
-  String _buildScenarioMemberInstructions() {
+  /// [step]이 Step 2면 출력 언어·말투·[REPLY] 줄 언어만 배울 언어로 바뀌고
+  /// 청취 연습 규칙이 붙는다. 되묻기([HEARD_CONFIRM])와 [CORRECTION] 줄은
+  /// 유저 발화를 확정하는 절차라 Step 2에서도 대화 언어 그대로다.
+  /// Step 1은 전과 한 글자도 다르지 않다.
+  String _buildScenarioMemberInstructions(
+      {ListeningStep step = ListeningStep.step1}) {
     final nativeLang = _nativeLangName();
-    final registerPolicy = nativeLang == 'Korean'
-        ? kKoreanPoliteSpeechPolicy
-        : 'Use the everyday polite spoken register of $nativeLang unless the established roles clearly require another register.';
+    final bool step2 = step == ListeningStep.step2;
+    final String targetLang = _targetLangName();
+    final registerPolicy = step2
+        ? buildTargetRegisterPolicy(targetLang)
+        : nativeLang == 'Korean'
+            ? kKoreanPoliteSpeechPolicy
+            : 'Use the everyday polite spoken register of $nativeLang unless the established roles clearly require another register.';
     final askBackOutputRule = buildHeardConfirmOutputRule(nativeLang);
+    final String outputLanguagePolicy = step2
+        ? '${buildTargetOutputLanguagePolicy(nativeLang: nativeLang, targetLang: targetLang)}\n\n'
+            '${buildListeningPracticePolicy(nativeLang: nativeLang, targetLang: targetLang)}'
+        : buildNativeOutputLanguagePolicy(_nativeLangName());
+    final String replyLang = step2 ? targetLang : nativeLang;
     return '''
 You are the assigned character inside a live $nativeLang scenario conversation.
 Situation: ${_scenarioSituation.trim()}
@@ -562,7 +580,7 @@ instructions). You already lived through this — stay in character, do not gree
 the user again, do not mention that time passed, and do not recap it to them:
 <earlier>$_rolloverSummary</earlier>
 '''}
-${buildNativeOutputLanguagePolicy(_nativeLangName())}
+$outputLanguagePolicy
 - You are NOT a host, moderator, narrator, facilitator, guide, or coach.
 - Never introduce the scenario, welcome the user to an activity, explain what will happen, or invite the user to begin.
 - Speak only as "${_scenarioPartnerLabel.trim()}" would actually speak to "${_scenarioUserLabel.trim()}" inside this exact situation.
@@ -586,7 +604,7 @@ exactly four lines:
 [CORRECTION]
 <the replacement meaning as one natural standalone line in $nativeLang>
 [REPLY]
-<the brief in-character reply to that replacement meaning in $nativeLang>
+<the brief in-character reply to that replacement meaning in $replyLang>
 
 Remove framing such as "아니", "내 말은", "그게 아니라", "I mean", or
 "what I said was". For reported questions, restore the direct question.
@@ -2685,6 +2703,9 @@ never by itself a reason to ask back.
     var handledContextualCorrection = false;
     var responseCompleted = false;
     TtsUtterance? earlyUtterance;
+    // 🎧 [LISTENING] 이 턴의 Step은 여기서 한 번만 읽는다. 생성 도중 스위치를
+    //   눌러도 이 턴은 끝까지 같은 언어로 가고, 다음 턴부터 바뀐다.
+    final ListeningStep step = _listeningStep;
     final recentConversation = _recentKoreanConversation();
     // 되묻기가 나오면 이 말풍선을 도로 걷어내야 하므로 참조를 들고 간다.
     // 🔁 [LATE-CONTINUATION] id도 같이 박는다. 이어 말하기로 문장이 자라면
@@ -2717,7 +2738,7 @@ never by itself a reason to ask back.
 
       await for (final chunk in ScenarioBrain.streamKoreanTurn(
         apiKey: _openAiKey,
-        instructions: _buildScenarioMemberInstructions(),
+        instructions: _buildScenarioMemberInstructions(step: step),
         userText: userKorean,
         recentConversation: recentConversation,
         onLog: (message) => _log('🧪 [AI-HTTP]', 'turn=$turnNumber $message'),
@@ -2802,11 +2823,17 @@ never by itself a reason to ask back.
           '⏱️ [AI-GEN]',
           'turn=$turnNumber model=$kDialogBrainModel '
               'reasoning=$kDialogBrainReasoningEffort stream=true '
-              'ttftMs=${firstTokenMs ?? -1} '
+              'step=${step.value} ttftMs=${firstTokenMs ?? -1} '
               'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiKorean.length}');
       if (aiKorean.isEmpty) {
         throw StateError('Scenario Talk response did not complete.');
       }
+      // 🎧 [STEP-LANG] 답이 그 Step의 언어로 나왔는지. 제어 태그 답은 뒤에서
+      //   따로 가르므로 여기서는 기록만 남긴다.
+      _log(
+          '🎧 [STEP-LANG]',
+          'turn=$turnNumber step=${step.value} '
+              'ok=${replyMatchesListeningStep(aiKorean, step: step, nativeLang: _nativeLangName(), targetLang: _targetLangName())}');
       if (!mounted ||
           !_isConversationActive ||
           generation != _pipelineGeneration ||
@@ -2868,10 +2895,14 @@ never by itself a reason to ask back.
         final correctedHostLine = <String, dynamic>{
           'role': 'HOST',
           'original_text': contextualCorrection.corrected,
+          ...listeningStepFields(step,
+              isAi: false, targetLang: _targetLangName()),
         };
         final correctedSystemLine = <String, dynamic>{
           'role': 'SYSTEM',
           'original_text': contextualCorrection.reply,
+          ...listeningStepFields(step,
+              isAi: true, targetLang: _targetLangName()),
         };
         _pendingTurnPersistence = Future.wait<void>(<Future<void>>[
           _saveTurnToFirestore(
@@ -3020,13 +3051,17 @@ never by itself a reason to ask back.
         await _speakKoreanLine(aiKoreanFinal);
       }
 
+      // 🎧 [LISTENING] HOST 줄은 언제나 유저의 ORIGIN. Step 2의 AI 줄은 배울
+      //   언어 문장이 그대로 들어가므로 source_lang을 같이 남긴다.
       final hostLine = <String, dynamic>{
         'role': 'HOST',
         'original_text': userKorean,
+        ...listeningStepFields(step, isAi: false, targetLang: _targetLangName()),
       };
       final systemLine = <String, dynamic>{
         'role': 'SYSTEM',
         'original_text': aiKoreanFinal,
+        ...listeningStepFields(step, isAi: true, targetLang: _targetLangName()),
       };
       // 정정 전 기록 삭제와 정정 후 기록 저장이 서로 추월하지 않게 한다.
       // 보통은 GPT 생성·TTS가 진행되는 동안 이미 끝나므로 체감 대기는 없다.
@@ -3037,7 +3072,8 @@ never by itself a reason to ask back.
       ]);
       await _pendingTurnPersistence;
       _log('[GPT-HISTORY]',
-          'turn=$turnNumber model=$kDialogBrainModel voice=$_aiVoice tts=true');
+          'turn=$turnNumber model=$kDialogBrainModel step=${step.value} '
+              'voice=$_aiVoice tts=true');
     } catch (error) {
       _log('[PIPE-ERR]', 'turn=$turnNumber reason=${error.runtimeType}');
       if (!responseCompleted) {
@@ -4106,6 +4142,10 @@ never by itself a reason to ask back.
           // Target은 History 진입 시 gpt-4o-mini로 최초 1회 생성한다.
           'original_text': original,
           if (pcmSeq != null) 'pcm_seq': pcmSeq,
+          // 🎧 [LISTENING] Step 2의 AI 줄은 배울 언어 그대로다. source_lang이
+          //   있어야 History가 유저 원문으로 착각하지 않는다.
+          if (line['source_lang'] != null) 'source_lang': line['source_lang'],
+          if (line['step'] != null) 'step': line['step'],
           'created_at': FieldValue.serverTimestamp(),
         });
         savedIds.add(addedRef.id);
@@ -4535,6 +4575,19 @@ never by itself a reason to ask back.
     );
   }
 
+  /// 🎧 [LISTENING] Step 전환. **상태 하나만 바뀐다** — STT·문맥·TTS 세션·
+  ///   과금·유휴 타이머는 아무것도 재시작하지 않는다. 말하고 있는 AI는 끊지
+  ///   않고, 다음 유저 턴의 응답부터 새 Step을 쓴다(프롬프트는 턴마다 조립).
+  void _setListeningStep(ListeningStep step) {
+    if (step == _listeningStep) return;
+    resetBillingIdle();
+    setState(() => _listeningStep = step);
+    _log(
+        '🎧 [STEP]',
+        'step=${step.value} native=${_nativeLangName()} '
+            'target=${_targetLangName()} applies_from=next_turn');
+  }
+
   Widget _buildControlArea(double bp) {
     return Container(
       padding: EdgeInsets.fromLTRB(24, 4, 24, bp),
@@ -4555,6 +4608,20 @@ never by itself a reason to ask back.
                         color: Colors.white54,
                         fontSize: 20,
                         fontWeight: FontWeight.bold)),
+              ),
+              // 🎧 [LISTENING] Step 1 | Step 2. 배울 언어가 대화 언어와 같으면
+              //   잠근다.
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ListeningStepSwitch(
+                  step: _listeningStep,
+                  enabled: listeningStep2Available(
+                    nativeLang: _nativeLangName(),
+                    targetLang: _targetLangName(),
+                  ),
+                  onChanged: _setListeningStep,
+                  activeColor: const Color(0xFF4ADE80),
+                ),
               ),
               // Start 버튼은 없앴다. 시나리오가 정해지면 AI가 알아서 먼저
               // 말을 건다(_maybeAutoStartScenario). 버튼을 한 번 더 누르게

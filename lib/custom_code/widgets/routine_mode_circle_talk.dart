@@ -60,6 +60,7 @@ import '/custom_code/services/pcm_audio_utils.dart';
 import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/tts_adapter.dart';
 import '/custom_code/services/late_continuation.dart';
+import '/custom_code/services/listening_practice.dart';
 import '/custom_code/services/conversation_cancel_command.dart';
 import '/custom_code/services/circle_correction_intent.dart'
     as correction_intent;
@@ -346,6 +347,9 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   double _fontScale = 1.0;
   // 최종 통신 구조에서는 대화방에 확정된 한국어 문장만 표시한다.
   bool _showOriginal = false;
+  // 🎧 [LISTENING] Step 1(기본) = AI도 대화 언어. Step 2 = AI만 배울 언어.
+  //   세션 한정 — 방을 나가면 Step 1로 돌아간다.
+  ListeningStep _listeningStep = ListeningStep.step1;
 
   /// Circle Talk AI 음성은 로비 설정과 무관하게 tts-1 + shimmer로 고정한다.
   static const String _aiVoice = 'shimmer';
@@ -1415,15 +1419,26 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     }
   }
 
-  String _buildCircleMemberInstructions() {
+  /// [step]이 Step 2면 출력 언어·말투 두 블록만 배울 언어 버전으로 바뀌고
+  /// 청취 연습 규칙이 그 뒤에 붙는다. Step 1은 전과 한 글자도 다르지 않다.
+  String _buildCircleMemberInstructions(
+      {ListeningStep step = ListeningStep.step1}) {
     final circle = widget.circleDescription
         .replaceAll('<', '（')
         .replaceAll('>', '）')
         .replaceAll(RegExp(r'[\r\n]+'), ' ')
         .trim();
-    final koreanRegisterPolicy = _nativeLangName() == 'Korean'
-        ? kKoreanPoliteSpeechPolicy
-        : 'Use the everyday polite spoken register of the selected language unless the user clearly establishes another register.';
+    final bool step2 = step == ListeningStep.step2;
+    final String targetLang = _targetLangName();
+    final koreanRegisterPolicy = step2
+        ? buildTargetRegisterPolicy(targetLang)
+        : _nativeLangName() == 'Korean'
+            ? kKoreanPoliteSpeechPolicy
+            : 'Use the everyday polite spoken register of the selected language unless the user clearly establishes another register.';
+    final String outputLanguagePolicy = step2
+        ? '${buildTargetOutputLanguagePolicy(nativeLang: _nativeLangName(), targetLang: targetLang)}\n\n'
+            '${buildListeningPracticePolicy(nativeLang: _nativeLangName(), targetLang: targetLang)}'
+        : buildNativeOutputLanguagePolicy(_nativeLangName());
     return '''You are ONE real participating member of the circle below, talking
 with ANOTHER member. You have no staff, host, moderator, or organizer role.
 You are well-connected — an 정보통 and 소식통, a bit of a 수다장이 — but that is
@@ -1442,7 +1457,7 @@ do not mention that time passed, and do not summarize it back to them:
 
 ${_voiceCharacterInstruction(_aiVoice)}
 
-${buildNativeOutputLanguagePolicy(_nativeLangName())}
+$outputLanguagePolicy
 
 [YOU ARE A MEMBER, NEVER THE HOST — THIS IS THE WHOLE POINT]
 A host runs the room: welcomes people, invites them to speak, keeps the floor
@@ -3538,7 +3553,10 @@ $kSpokenReplyLengthPolicy
       final aiGenSw = Stopwatch()..start();
       final buffer = StringBuffer();
       var firstTokenSeen = false;
-      final systemPrompt = _buildCircleMemberInstructions();
+      // 🎧 [LISTENING] 이 턴의 Step은 여기서 한 번만 읽는다. 생성 도중 스위치를
+      //   눌러도 이 턴은 끝까지 같은 언어로 가고, 다음 턴부터 바뀐다.
+      final ListeningStep step = _listeningStep;
+      final systemPrompt = _buildCircleMemberInstructions(step: step);
 
       await for (final delta in UnifiedBrain.streamCircleMemberTurn(
         apiKey: _openAiKey,
@@ -3588,10 +3606,17 @@ $kSpokenReplyLengthPolicy
           '⏱️ [AI-GEN]',
           'turn=$currentTurnId model=$kDialogBrainModel '
               'reasoning=$kDialogBrainReasoningEffort stream=true '
+              'step=${step.value} '
               'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiOriginal.length}');
       if (aiOriginal.isEmpty) {
         throw StateError('Circle Talk response did not complete.');
       }
+      // 🎧 [STEP-LANG] 답이 그 Step의 언어로 나왔는지. 글자로 확정될 때만
+      //   어긋남을 잡는다. 다시 묻지 않고 기록만 남긴다.
+      _log(
+          '🎧 [STEP-LANG]',
+          'turn=$currentTurnId step=${step.value} '
+              'ok=${replyMatchesListeningStep(aiOriginal, step: step, nativeLang: _nativeLangName(), targetLang: _targetLangName())}');
       if (!isActivePipelineGeneration(
             expected: expectedPipelineGeneration,
             current: _pipelineGeneration,
@@ -3627,7 +3652,7 @@ $kSpokenReplyLengthPolicy
         _closeContinuationWindow(reason: 'tts_enqueue');
       }
       await _speakSystemLine(aiOriginal,
-          expectedPipelineGeneration: expectedPipelineGeneration);
+          expectedPipelineGeneration: expectedPipelineGeneration, step: step);
 
       // 취소된 답변이 문맥·History에 남으면 안 된다. 재생을 기다리는 사이에
       // 세대가 갈렸는지 저장 직전에 한 번 더 본다.
@@ -3644,13 +3669,17 @@ $kSpokenReplyLengthPolicy
 
       // 대화방에는 한국어 텍스트만 저장한다. TTS 오디오는 재생 후 폐기하고
       // 파일이나 캐시 형태로 대화 기록에 넣지 않는다.
+      // 🎧 [LISTENING] HOST 줄은 언제나 유저의 ORIGIN. Step 2의 AI 줄은 배울
+      //   언어 문장이 그대로 들어가므로 source_lang을 같이 남긴다.
       final hostLine = <String, dynamic>{
         'role': 'HOST',
         'original_text': userOriginal,
+        ...listeningStepFields(step, isAi: false, targetLang: _targetLangName()),
       };
       final systemLine = <String, dynamic>{
         'role': 'SYSTEM',
         'original_text': aiOriginal,
+        ...listeningStepFields(step, isAi: true, targetLang: _targetLangName()),
       };
       _pendingTurnPersistence = Future.wait<void>(<Future<void>>[
         _saveTurnToFirestore([hostLine, systemLine]),
@@ -3659,7 +3688,7 @@ $kSpokenReplyLengthPolicy
       unawaited(_pendingTurnPersistence);
       _saveRecentHistory(userOriginal, aiOriginal);
       _log('[GPT-HISTORY]',
-          'turn=$currentTurnId model=$kDialogBrainModel tts=true');
+          'turn=$currentTurnId model=$kDialogBrainModel step=${step.value} tts=true');
     } catch (error) {
       _log('[PIPE-ERR]', 'turn=$currentTurnId reason=${error.runtimeType}');
       final int aiIndex = _bubbleIndexById(aiBubbleId);
@@ -3923,11 +3952,18 @@ $kSpokenReplyLengthPolicy
   /// 말하기가 이 발화를 밖에서 취소할 수 있게 손잡이를 남긴다.
   Future<void> _speakSystemLine(String text,
       {Duration timeout = const Duration(seconds: 15),
-      int? expectedPipelineGeneration}) async {
+      int? expectedPipelineGeneration,
+      ListeningStep? step}) async {
     if (!mounted || text.trim().isEmpty) return;
     const voice = _aiVoice;
     String spokenText = text.trim();
-    if (!RegExp(r'[가-힣]').hasMatch(spokenText) && _openAiKey.isNotEmpty) {
+    // 🎧 [LISTENING] 아래 한글 가드는 Step 1에서만 돈다. Step 2의 배울 언어
+    //   답변은 한글이 없는 것이 정상이라, 가드가 그것을 한국어로 되돌려
+    //   읽어 버린다. (가드 자체의 한계는 이번 범위 밖 — 손대지 않는다.)
+    final bool nativeGuard = (step ?? _listeningStep) == ListeningStep.step1;
+    if (nativeGuard &&
+        !RegExp(r'[가-힣]').hasMatch(spokenText) &&
+        _openAiKey.isNotEmpty) {
       spokenText = await FreeTalkBrain.generateCleanOriginal(
         apiKey: _openAiKey,
         englishText: spokenText,
@@ -5068,6 +5104,10 @@ $kSpokenReplyLengthPolicy
           // Target은 History가 gpt-4o-mini로 최초 1회 생성해 채운다.
           'original_text': original,
           if (pcmSeq != null) 'pcm_seq': pcmSeq,
+          // 🎧 [LISTENING] Step 2의 AI 줄은 배울 언어 그대로다. source_lang이
+          //   있어야 History가 유저 원문으로 착각하지 않는다.
+          if (line['source_lang'] != null) 'source_lang': line['source_lang'],
+          if (line['step'] != null) 'step': line['step'],
           'created_at': FieldValue.serverTimestamp(),
         });
       }
@@ -5271,6 +5311,19 @@ $kSpokenReplyLengthPolicy
     );
   }
 
+  /// 🎧 [LISTENING] Step 전환. **상태 하나만 바뀐다** — STT·문맥·TTS 세션·
+  ///   과금·유휴 타이머는 아무것도 재시작하지 않는다. 말하고 있는 AI는 끊지
+  ///   않고, 다음 유저 턴의 응답부터 새 Step을 쓴다(프롬프트는 턴마다 조립).
+  void _setListeningStep(ListeningStep step) {
+    if (step == _listeningStep) return;
+    resetBillingIdle();
+    setState(() => _listeningStep = step);
+    _log(
+        '🎧 [STEP]',
+        'step=${step.value} native=${_nativeLangName()} '
+            'target=${_targetLangName()} applies_from=next_turn');
+  }
+
   // ... (_buildTopBar, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
   Widget _buildTopBar() {
     return Padding(
@@ -5452,6 +5505,19 @@ $kSpokenReplyLengthPolicy
                             fontSize: 20,
                             fontWeight: FontWeight.bold)),
                   ],
+                ),
+              ),
+              // 🎧 [LISTENING] Step 1 | Step 2. 배울 언어가 대화 언어와 같으면
+              //   잠근다.
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ListeningStepSwitch(
+                  step: _listeningStep,
+                  enabled: listeningStep2Available(
+                    nativeLang: _nativeLangName(),
+                    targetLang: _targetLangName(),
+                  ),
+                  onChanged: _setListeningStep,
                 ),
               ),
               // 🆕 작동 표시등(패시브). 버튼 아님 - 세션 시작 시 자동 점등.
