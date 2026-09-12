@@ -77,6 +77,7 @@ import '/custom_code/services/origin_restoration_runner.dart';
 import '/custom_code/services/pcm_audio_utils.dart';
 import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/tts_adapter.dart';
+import '/custom_code/services/user_line_fix.dart';
 import 'first_utterance_context_judge.dart'; // 3모드 공통 응답 길이 규칙
 import 'origin_language_recheck_dialog.dart'; // 🌐 [ORIGIN-RECHECK] 언어 확인 창
 
@@ -569,7 +570,9 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
             '${buildListeningPracticePolicy(nativeLang: nativeLang, targetLang: targetLang)}'
         : buildNativeOutputLanguagePolicy(_nativeLangName());
     final String replyLang = step2 ? targetLang : nativeLang;
-    // Step 1은 빈 문자열 — 프롬프트 끝이 전과 같다.
+    // 🩹 유저 줄은 Step과 무관하게 언제나 대화 언어다.
+    final String userFixPolicy = buildUserFixPolicy(nativeLang: nativeLang);
+    // Step 2에서만 붙는 마지막 언어 규칙. Step 1은 빈 문자열이다.
     final String finalLanguageRule = step2
         ? '\n${buildTargetLanguageFinalRule(nativeLang: nativeLang, targetLang: targetLang)}\n'
         : '';
@@ -637,6 +640,8 @@ line supplies what was left out, the turn is complete — fill it in from the
 scene and answer. A bare yes, no, agreement, refusal, or pointing word that
 answers the question you just asked is a whole turn on its own. Being short is
 never by itself a reason to ask back.
+
+$userFixPolicy
 $finalLanguageRule''';
   }
 
@@ -692,8 +697,8 @@ $finalLanguageRule''';
     final leading = text.trimLeft();
     if (leading.isEmpty) return true;
     const signals = _kContextualCorrectionEnabled
-        ? <String>['[HEARD_CONFIRM]', '[CORRECTION]']
-        : <String>['[HEARD_CONFIRM]'];
+        ? <String>['[HEARD_CONFIRM]', '[CORRECTION]', kUserFixTag]
+        : <String>['[HEARD_CONFIRM]', kUserFixTag];
     return signals.any(
         (signal) => signal.startsWith(leading) || leading.startsWith(signal));
   }
@@ -2710,6 +2715,8 @@ $finalLanguageRule''';
     // 🎧 [LISTENING] 이 턴의 Step은 여기서 한 번만 읽는다. 생성 도중 스위치를
     //   눌러도 이 턴은 끝까지 같은 언어로 가고, 다음 턴부터 바뀐다.
     final ListeningStep step = _listeningStep;
+    // 🩹 [USER-FIX] 답변이 유저 줄을 되살렸으면 원 전사를 여기 남긴다.
+    String? sttText;
     final recentConversation = _recentKoreanConversation();
     // 되묻기가 나오면 이 말풍선을 도로 걷어내야 하므로 참조를 들고 간다.
     // 🔁 [LATE-CONTINUATION] id도 같이 박는다. 이어 말하기로 문장이 자라면
@@ -2824,7 +2831,7 @@ $finalLanguageRule''';
       }
 
       aiGenSw.stop();
-      final aiKorean = responseBuffer
+      String aiKorean = responseBuffer
           .toString()
           .trim()
           .replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
@@ -2836,6 +2843,28 @@ $finalLanguageRule''';
               'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiKorean.length}');
       if (aiKorean.isEmpty) {
         throw StateError('Scenario Talk response did not complete.');
+      }
+      // 🩹 [USER-FIX] 답변 앞에 되살린 유저 줄이 붙어 왔으면 직전 유저 말풍선을
+      //   그 문장으로 바꾸고(문맥은 말풍선에서 읽으므로 같이 바뀐다), 답변은
+      //   [REPLY] 뒤만 쓴다. 원 전사는 stt_text로 남긴다.
+      final userFix = parseUserLineFix(aiKorean);
+      if (userFix != null) {
+        aiKorean = userFix.reply;
+        if (userLineFixIsPlausible(
+            original: userKorean, fixed: userFix.userLine)) {
+          _log('🩹 [USER-FIX]',
+              'turn=$turnNumber "$userKorean" → "${userFix.userLine}"');
+          sttText = userKorean;
+          userKorean = userFix.userLine;
+          if (mounted) {
+            setState(() {
+              hostBubble['target'] = userKorean;
+            });
+          }
+        } else {
+          _log('🩹 [USER-FIX-REJECT]',
+              'turn=$turnNumber "$userKorean" ↛ "${userFix.userLine}"');
+        }
       }
       // 🎧 [STEP-LANG] 답이 그 Step의 언어로 나왔는지. 제어 태그 답은 뒤에서
       //   따로 가르므로 여기서는 기록만 남긴다.
@@ -3066,6 +3095,7 @@ $finalLanguageRule''';
         'role': 'HOST',
         'original_text': userKorean,
         ...listeningStepFields(step, isAi: false, targetLang: _targetLangName()),
+        if (sttText != null) ...userLineFixFields(sttText: sttText),
       };
       final systemLine = <String, dynamic>{
         'role': 'SYSTEM',
@@ -4155,6 +4185,9 @@ $finalLanguageRule''';
           //   있어야 History가 유저 원문으로 착각하지 않는다.
           if (line['source_lang'] != null) 'source_lang': line['source_lang'],
           if (line['step'] != null) 'step': line['step'],
+          // 🩹 [USER-FIX] 원 전사. 원문 복원기의 근거이고 화면엔 안 나온다.
+          if (line['stt_text'] != null) 'stt_text': line['stt_text'],
+          if (line['user_fix'] != null) 'user_fix': line['user_fix'],
           'created_at': FieldValue.serverTimestamp(),
         });
         savedIds.add(addedRef.id);
