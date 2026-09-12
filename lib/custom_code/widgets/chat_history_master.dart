@@ -48,6 +48,7 @@ import '/custom_code/services/p2_voice_styles.dart';
 import '/custom_code/services/speech_reconstruction.dart';
 import '/custom_code/services/duo_study_state.dart';
 import '/custom_code/services/history_text_model.dart';
+import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/duo_canonical.dart';
 import '/custom_code/services/study_access.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
@@ -1423,8 +1424,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     // 🎧 [STEP-2] 배울 언어 줄이 원문 자리에 그대로 복사돼 배울글과 똑같이
     //   남은 방(2026-09-12 실기기, 첫 Step 2 방)은 한 번 다시 만든다.
     if (_isListeningStep2AiLine(data) &&
-        (data['target_generated_by'] ?? '').toString() !=
-            'step2_native_render' &&
+        step2AiLineNeedsNativeRender(data) &&
         original == translated) {
       return _targetRepairAttempted.add(docId);
     }
@@ -1437,8 +1437,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   /// 🎧 [STEP-2] AI가 배울 언어로 한 말을 대화 언어로 옮겨 **원문 자리**에 둔다.
   ///
-  /// 배울글 자리에는 AI가 실제로 한 문장이 그대로 들어간다 — 이미 배울 언어라
-  /// 만들 것이 없다. 방·줄 언어가 같으면 호출 없이 복사한다.
+  /// 본체는 `step2_native_render.dart` — 대화방이 나갈 때 먼저 돌린다. 여기는
+  /// 그때 실패했거나 옛 빌드로 나간 방을 위한 두 번째 기회다.
   Future<bool> _renderStep2AiLineToNative(
     DocumentReference messageRef,
     String source,
@@ -1446,87 +1446,18 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     final String targetLanguage = (_sessionTargetLang ?? 'English').trim();
     final String nativeLanguage = (_sessionNativeLang ?? 'Korean').trim();
     try {
-      if (_normLangCode(nativeLanguage) == _normLangCode(targetLanguage)) {
-        await messageRef.update(<String, dynamic>{
-          'translated_text': source,
-          'target_generated_by': 'copy',
-          'target_generated_at': FieldValue.serverTimestamp(),
-        });
-        _clearTargetFailure(messageRef.id);
-        return true;
-      }
-      final String context = _historyRepairContext(messageRef);
-      final String registerRule = nativeLanguage == 'Korean'
-          ? 'Korean must be 해요체 존댓말 (-요/-세요/-네요/-죠), warm and spoken, never -습니다.'
-          : 'Use the everyday polite spoken register of $nativeLanguage.';
-      final response = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: <String, String>{
-              'Authorization': 'Bearer $_apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode(<String, dynamic>{
-              'model': kHistoryRepairModel,
-              'temperature': 0.0,
-              'max_tokens': 220,
-              'response_format': <String, String>{'type': 'json_object'},
-              'messages': <Map<String, String>>[
-                <String, String>{
-                  'role': 'system',
-                  'content':
-                      '''You are preparing ONE line of a saved voice conversation for a language-learning review screen.
-
-During listening practice the AI conversation partner spoke this line in $targetLanguage while the user answered in $nativeLanguage. The review screen shows every line in $nativeLanguage, so render this line into natural spoken $nativeLanguage — what the same partner would have said in $nativeLanguage at that moment.
-- Same meaning, same tone, same viewpoint: the partner speaking is "I", the user being spoken to is "you".
-- Do not add, drop, or explain anything. One line in, one line out.
-- $registerRule
-Reply as JSON: {"native": "<the line in $nativeLanguage>"}''',
-                },
-                <String, String>{
-                  'role': 'user',
-                  'content': context.isEmpty
-                      ? 'LINE: $source'
-                      : 'SURROUNDING CONVERSATION:\n$context\n\nLINE: $source',
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) {
-        debugPrint('[HISTORY-TARGET] step2_native status=${response.statusCode} '
-            'msg=${messageRef.id}');
-        _recordTargetFailure(
-            messageRef.id, _targetFailureKindForStatus(response.statusCode));
+      final ok = await renderStep2MessageToNative(
+        messageRef: messageRef,
+        source: source,
+        apiKey: _apiKey,
+        nativeLang: nativeLanguage,
+        targetLang: targetLanguage,
+        context: _historyRepairContext(messageRef),
+      );
+      if (!ok) {
+        _recordTargetFailure(messageRef.id, 'network');
         return false;
       }
-      final body =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      final choices = body['choices'] as List? ?? const <dynamic>[];
-      final firstChoice =
-          choices.isEmpty ? null : choices.first as Map<String, dynamic>?;
-      final message = firstChoice?['message'] as Map<String, dynamic>?;
-      final content = (message?['content'] ?? '').toString().trim();
-      String nativeText = '';
-      try {
-        final parsed = jsonDecode(content) as Map<String, dynamic>;
-        nativeText = (parsed['native'] ?? '').toString().trim();
-      } catch (_) {
-        nativeText = content;
-      }
-      if (nativeText.isEmpty) {
-        _recordTargetFailure(messageRef.id, 'empty');
-        return false;
-      }
-      await messageRef.update(<String, dynamic>{
-        // 원문 자리 = 대화 언어. AI가 실제로 한 배울 언어 문장은 raw와 배울글에.
-        'original_text': nativeText,
-        'original_text_raw': source,
-        'translated_text': source,
-        'source_lang': nativeLanguage,
-        'target_generated_by': 'step2_native_render',
-        'target_generated_at': FieldValue.serverTimestamp(),
-      });
       debugPrint('[HISTORY-TARGET] generated msg=${messageRef.id} '
           'model=$kHistoryRepairModel step2_native_render '
           'src=$targetLanguage→$nativeLanguage');
@@ -1544,11 +1475,8 @@ Reply as JSON: {"native": "<the line in $nativeLanguage>"}''',
   ///   공부방 대사는 전부 대화 언어여야 하므로(실장님, 2026-09-12) 이 줄은
   ///   번역 방향이 반대다 — 배울 언어 원문을 대화 언어로 옮겨 원문 자리에
   ///   두고, AI가 실제로 한 말은 배울글 자리에 그대로 둔다.
-  bool _isListeningStep2AiLine(Map<String, dynamic>? data) {
-    if (data == null) return false;
-    final role = (data['role'] ?? '').toString().toUpperCase();
-    return role == 'SYSTEM' && data['step'] == 2;
-  }
+  bool _isListeningStep2AiLine(Map<String, dynamic>? data) =>
+      isStep2AiLine(data);
 
   Future<bool> _generateAndCacheHistoryTarget(
     DocumentReference messageRef,

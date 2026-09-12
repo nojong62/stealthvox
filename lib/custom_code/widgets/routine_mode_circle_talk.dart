@@ -59,6 +59,7 @@ import '/custom_code/services/origin_pcm_store.dart';
 import '/custom_code/services/origin_restoration_runner.dart';
 import '/custom_code/services/pcm_audio_utils.dart';
 import '/custom_code/services/session_rollover_summary.dart';
+import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/tts_adapter.dart';
 import '/custom_code/services/user_line_fix.dart';
 import '/custom_code/services/late_continuation.dart';
@@ -5288,6 +5289,15 @@ $userFixPolicy$finalLanguageRule''';
             'partner_label': 'Circle member',
           });
           _log('💾 [HIST-UPD]', 'last_message 저장 (circle_talk, no expand)');
+          // 🎧 [STEP-2 → ORIGIN] AI가 배울 언어로 한 줄을 대화 언어로 옮겨
+          //   원문 자리에 둔다. 공부방 첫 페이지는 확정 전에도 저장된 글자를
+          //   그대로 보여 주므로 여기서 바로 옮긴다. 기다리지 않는다.
+          unawaited(renderRoomStep2LinesToNative(
+            historyRef: _myHistoryRef!,
+            apiKey: _openAiKey,
+            nativeLang: _nativeLangName(),
+            targetLang: _targetLangName(),
+          ));
           // 🗂️ [HISTORY-PREVIEW] 목록의 날짜 밑 한 줄을 마지막 대사 대신
           //   **대화 언어로 쓴 주제 요약**으로 덮어쓴다. 기다리지 않는다.
           unawaited(writeHistoryPreviewSummary(
