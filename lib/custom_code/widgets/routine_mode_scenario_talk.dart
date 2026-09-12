@@ -569,6 +569,10 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
             '${buildListeningPracticePolicy(nativeLang: nativeLang, targetLang: targetLang)}'
         : buildNativeOutputLanguagePolicy(_nativeLangName());
     final String replyLang = step2 ? targetLang : nativeLang;
+    // Step 1은 빈 문자열 — 프롬프트 끝이 전과 같다.
+    final String finalLanguageRule = step2
+        ? '\n${buildTargetLanguageFinalRule(nativeLang: nativeLang, targetLang: targetLang)}\n'
+        : '';
     return '''
 You are the assigned character inside a live $nativeLang scenario conversation.
 Situation: ${_scenarioSituation.trim()}
@@ -633,7 +637,7 @@ line supplies what was left out, the turn is complete — fill it in from the
 scene and answer. A bare yes, no, agreement, refusal, or pointing word that
 answers the question you just asked is a whole turn on its own. Being short is
 never by itself a reason to ask back.
-''';
+$finalLanguageRule''';
   }
 
   String _recentKoreanConversation() {
@@ -2741,6 +2745,11 @@ never by itself a reason to ask back.
         instructions: _buildScenarioMemberInstructions(step: step),
         userText: userKorean,
         recentConversation: recentConversation,
+        // 🎧 [LISTENING] Step 2는 유저 말 바로 앞에 언어 규칙을 한 번 더 둔다.
+        trailingSystemNote: step == ListeningStep.step2
+            ? buildTargetLanguageFinalRule(
+                nativeLang: _nativeLangName(), targetLang: _targetLangName())
+            : null,
         onLog: (message) => _log('🧪 [AI-HTTP]', 'turn=$turnNumber $message'),
       )) {
         firstTokenMs ??= aiGenSw.elapsedMilliseconds;
@@ -6044,6 +6053,9 @@ Return only the line itself.'''
     required String userText,
     required String recentConversation,
     void Function(String message)? onLog,
+    // 🎧 [LISTENING] 유저 메시지 바로 앞에 끼우는 system 한 줄. null이면
+    //   메시지 배열이 전과 같다.
+    String? trailingSystemNote,
   }) async* {
     if (apiKey.isEmpty || userText.trim().isEmpty) return;
     final client = http.Client();
@@ -6071,6 +6083,8 @@ Return only the line itself.'''
               'content':
                   'Recent scene dialogue (continue it consistently):\n$recentConversation',
             },
+          if (trailingSystemNote != null && trailingSystemNote.trim().isNotEmpty)
+            <String, String>{'role': 'system', 'content': trailingSystemNote},
           <String, String>{
             'role': 'user',
             'content': userText.trim(),

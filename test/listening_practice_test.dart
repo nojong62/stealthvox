@@ -55,6 +55,15 @@ void main() {
       expect(rule, contains('Never press the same question more than once'));
     });
 
+    test('마지막 규칙은 배울 언어만 쓰라고 못 박고 이전 답변 언어를 무시하게 한다', () {
+      final rule = buildTargetLanguageFinalRule(
+          nativeLang: 'Korean', targetLang: 'English');
+      expect(rule, startsWith('[FINAL RULE'));
+      expect(rule, contains('ENTIRE reply in English'));
+      expect(rule, contains('Not one Korean word'));
+      expect(rule, contains('earlier lines in this conversation may be in Korean'));
+    });
+
     test('Step 1 정책은 이 기능 이전과 같다 — 배울 언어 금지 문구가 그대로다', () {
       final policy = buildNativeOutputLanguagePolicy('Korean');
       expect(policy, contains('Natural spoken Korean only'));
@@ -177,6 +186,17 @@ void main() {
       test('$name: 턴 시작에 Step을 한 번 읽고 그 턴은 끝까지 같은 Step이다', () {
         expect(source, contains('final ListeningStep step = _listeningStep;'));
         expect(source, contains('Instructions(step: step)'));
+      });
+
+      test('$name: Step 2는 프롬프트 끝과 유저 말 바로 앞에 언어 규칙을 한 번 더 둔다', () {
+        // 프롬프트 끝 — Step 1은 빈 문자열이라 끝이 전과 같다.
+        expect(source, contains('final String finalLanguageRule = step2'));
+        expect(source, contains("        : '';"));
+        expect(source, contains('\$finalLanguageRule\'\'\';'));
+        // 유저 메시지 앞 system 한 줄 — Step 2에서만.
+        expect(source, contains('trailingSystemNote: step == ListeningStep.step2'));
+        expect(source, contains(
+            "if (trailingSystemNote != null && trailingSystemNote.trim().isNotEmpty)"));
       });
 
       test('$name: 전환은 상태 하나만 바꾼다 — 세션·STT·TTS·문맥은 그대로', () {

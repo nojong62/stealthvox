@@ -74,6 +74,23 @@ The user hears your $targetLang and answers in $nativeLang. Read their answer ag
 Never test, grade, or correct the user. Never say they were wrong, never mention understanding or listening. Never press the same question more than once. Respect what they actually said and clarify only when the conversation needs it. It must feel like real talk.''';
 }
 
+/// Step 2의 **마지막 말** — 시스템 프롬프트 맨 끝과, 유저 메시지 바로 앞의
+/// system 메시지 두 자리에 같은 문장을 둔다.
+///
+/// 2026-09-12 실기기: 출력 정책을 프롬프트 가운데 한 번 두었더니 서클톡이
+/// Step 2에서 3턴 모두 한국어로 답했다(`[STEP-LANG] ok=false`). 12,000자
+/// 한국어 예문·규칙과 직전 한국어 답변들이 그 한 블록을 눌러 버린다. 규칙은
+/// **가장 마지막에 읽히는 자리**에 있어야 이긴다.
+String buildTargetLanguageFinalRule({
+  required String nativeLang,
+  required String targetLang,
+}) {
+  return '''[FINAL RULE — LANGUAGE OF YOUR REPLY]
+Write your ENTIRE reply in $targetLang. Not one $nativeLang word, not even a particle or a sentence ending.
+Your earlier lines in this conversation may be in $nativeLang. That was before. From this reply on, $targetLang only.
+The user keeps speaking $nativeLang — understand it, then answer in $targetLang.''';
+}
+
 /// History 줄에 얹는 Step 정보.
 ///
 /// Step 2의 AI 줄은 AI가 실제로 한 배울 언어 문장이 `original_text`로 남는다.
