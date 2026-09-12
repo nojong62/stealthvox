@@ -49,6 +49,7 @@ import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/dialog_brain_model.dart';
 import '/custom_code/services/history_finalize.dart';
+import '/custom_code/services/history_preview_summary.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/origin_language_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
@@ -5287,6 +5288,18 @@ $userFixPolicy$finalLanguageRule''';
             'partner_label': 'Circle member',
           });
           _log('💾 [HIST-UPD]', 'last_message 저장 (circle_talk, no expand)');
+          // 🗂️ [HISTORY-PREVIEW] 목록의 날짜 밑 한 줄을 마지막 대사 대신
+          //   **대화 언어로 쓴 주제 요약**으로 덮어쓴다. 기다리지 않는다.
+          unawaited(writeHistoryPreviewSummary(
+            ref: _myHistoryRef!,
+            apiKey: _openAiKey,
+            nativeLang: _nativeLangName(),
+            lines: _localMessages
+                .where((m) => m['role'] == 'HOST' || m['role'] == 'SYSTEM')
+                .map((m) => (m['target'] ?? '').toString().trim())
+                .where((t) => t.isNotEmpty && t != '...')
+                .toList(growable: false),
+          ));
           // 🔍 [ORIGIN-RESTORE] 대화가 끝났으니 이제 전체 문맥이 있다.
           //   여기서 시작해 두면 공부방이 열릴 때는 대개 끝나 있다.
           //   **기다리지 않는다** — 사용자는 지금 방을 나가는 중이다.
