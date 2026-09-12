@@ -209,7 +209,8 @@ Future<bool> _awaitBothFlushMarks({
     try {
       final snap = await duoSessionRef(roomId).get();
       final data = snap.data();
-      final marks = (data?[kDuoFlushDoneField] as Map?) ?? const <dynamic, dynamic>{};
+      final marks =
+          (data?[kDuoFlushDoneField] as Map?) ?? const <dynamic, dynamic>{};
       // 상대가 애초에 없었던 방(혼자 있다 나감)도 진행할 수 있어야 한다.
       final bool partnerJoined = data?['isPartnerJoined'] == true;
       if (marks.length >= 2 || (!partnerJoined && marks.containsKey(myUid))) {
@@ -236,8 +237,7 @@ Future<bool> _claimCanonical({
 }) async {
   final ref = duoCanonicalRef(roomId);
   try {
-    return await FirebaseFirestore.instance
-        .runTransaction<bool>((tx) async {
+    return await FirebaseFirestore.instance.runTransaction<bool>((tx) async {
       final snap = await tx.get(ref);
       final data = snap.data();
       final String status = (data?['status'] ?? kCanonicalPending).toString();
@@ -320,79 +320,33 @@ List<DuoCanonicalTurn> fallbackCanonical(List<DuoSourceUtterance> source) => [
     ];
 
 const String _canonicalPrompt =
-    '''You are given ONE phone call between two people, already transcribed. Each line came from that speaker's own phone.
+    '''You organize the records of one phone call between two people.
 
-READ THE WHOLE CALL BEFORE YOU DECIDE ANYTHING. Never judge a line on its own. What a line is - a real remark, an echo, a fragment, something the machine invented - only shows against the rest of the conversation.
+THIS PASS DOES NOT TRANSCRIBE OR EDIT SPEECH.
+Every source text is immutable. GPT Transcribe and the later PCM-backed Origin
+Restoration own the words. Never correct, complete, punctuate, translate, normalize
+speech level, or otherwise rewrite a source line. Never return a text field.
 
-Give back that same call as a conversation a person can read again: the two speakers, what they actually said, in the order they actually said it. You are not writing a new conversation and you are not summarising this one.
+Your jobs are structural only:
+- Return every source id exactly once.
+- Put ids in the real conversational order only when question/answer context makes an
+  obvious clock-order error clear. When uncertain, preserve the supplied order.
+- Classify a near-identical cross-speaker pickup as echo only when timing and text both
+  make it clear. Genuine repetition is not echo.
+- Classify an exact same-moment repeat as duplicate only with strong evidence.
+- Keep every other line included. Odd wording is never an artifact.
+- Optionally return a short subject hint only for an explicitly established third person.
+  Never return I/you subject hints and never alter text to agree with a hint.
 
-THE ONE QUESTION, asked of every line:
-  "Does this stand as something a real person actually said in THIS conversation?"
-
-If yes, keep it - however short, ordinary, blunt, or off-topic. Awkward wording is not a reason to remove anything, and neither is changing the subject; people do both all the time.
-
-If no - it connects to nothing, answers nothing, is answered by nothing, and no one in this call would plausibly have said it - then it came from the machine or from the room, and it goes.
-
-States you may assign:
-  included    - a real turn in the conversation. THIS IS THE DEFAULT.
-  merged      - a fragment you joined into a neighbouring turn of the SAME speaker. Only when no real turn by the other speaker sits between them.
-  hesitation  - real voice that only fills that speaker's own pause; no reply, question, reaction or agreement ("음...", "어...").
-  echo        - this speaker's phone picked up the OTHER speaker's voice from the loudspeaker. Requires the other speaker to have a near-identical line at almost the same time. A person genuinely repeating what they heard is NOT echo.
-  duplicate   - the recognizer stored the same moment twice. Matching words alone never justify this.
-  artifact    - not something either speaker said into their own phone. Four kinds:
-                  - words the recognizer invented out of silence ("thank you for watching", "시청해 주셔서 감사합니다")
-                  - a television, a radio, or another person in the room that the microphone caught
-                  - a fragment cut so short that it carries no meaning and joins no neighbouring turn
-                  - a plain mis-recognition that connects to nothing anywhere in the call
-
-Judge every line by its CONVERSATIONAL FUNCTION in context, never by its length or its wording:
-  "Are you going tomorrow?" / "어."  -> agreement. included
-  "Not today, Friday."      / "아."  -> realization. included
-  "What did you say?"       / "어?"  -> asking again. included
-  "I think that..."         / "음... 흠..." while holding your own turn -> hesitation
-
-ORDER: the two lines came from two different phones whose clocks do not agree, so the order you are given can be wrong. Return the turns in the order the two people ACTUALLY spoke them, as the conversation itself shows: a question comes before its answer, an answer before the reply to it. Move a turn ONLY when the conversation makes the true position plain. If you cannot tell, leave it exactly where it is - a slightly odd order costs little; an invented order rewrites the call.
-
-Write the turns you keep as READABLE SENTENCES, not as transcript fragments. The person on the other end heard a sentence; the reader should see one too.
-
-You may:
-- Put a sentence that arrived in pieces back together as that one sentence.
-- Finish a turn that is plainly unfinished, when the call itself already settles how it ends - the reply, or that speaker's own next words.
-- Fix spacing, punctuation, and a mis-heard word that the surrounding turns clearly settle.
-- Put a speech level back where that speaker plainly held it. See SPEECH LEVEL below.
-
-You may NOT:
-- Add a fact, a plan, a reason or a feeling that was never spoken.
-- Decide something the two left undecided, or make an answer more certain than it was.
-- Rewrite a turn that already reads fine, polish someone's style, or make them sound more fluent. (Repairing a broken speech level under SPEECH LEVEL is not polish - it restores what that speaker was saying all along.)
-- Merge different speakers.
-- Summarise, compress, or translate.
-
-SPEECH LEVEL: each speaker holds ONE level toward the other for the whole call - in Korean the choice between 존댓말 and 반말, and the matching distinction in other languages. It follows from their relationship, so it does not wander from line to line.
-
-Read each speaker's own turns together, take the level their clear turns agree on, and repair a lone ending that breaks it. Endings are spoken weakly and trail off, so they are the one part the recognizer fills in by guessing. Against a speaker's settled level, the odd turn out is a misheard ending, not a change of heart:
-  a speaker who is 반말 everywhere else -> "그럴 수 있죠." was heard wrong; write "그럴 수 있지."
-  a speaker who is 존댓말 everywhere else -> "시원해 보여." was heard wrong; write "시원해 보이네요."
-
-Repair the ENDING ONLY. The words, the meaning, the speaker, and what they say all stay exactly as they are. Judge each speaker on their own turns alone - the two may well be on different levels, and often are.
-
-Leave every ending exactly as given when that speaker's own turns do not settle on one level, or when the call itself shows a real switch: one of them asks to drop it, someone says they will speak comfortably, a third person joins. A real switch holds from that point on - it is a single line snapping back that was misheard.
-
-WHO THE TURN IS ABOUT: this call has two people in it, so almost every turn is about one of those two - the one speaking, or the one being spoken to. Those turns need nothing from you here.
-
-A few turns are about somebody else: a person, or people, who are not on this call. The language of the call names them out loud when it first brings them up, because the listener could not follow otherwise, and then keeps leaving the subject out while the topic stays on them.
-
-For those turns ONLY, add a "subject" - a short noun phrase, in the same language as the turn, naming who the turn is about ("그 학생은", "선생님이", "친구들이"). Take it from what the call actually said, and use the same words every time you name that same person, so every turn about them reads alike.
-
-Leave "subject" out entirely for every turn about the speaker or the listener. Do not write "나는" or "너는" - a screen full of those helps nobody. Leave it out too when you cannot tell who a turn is about.
-
-"subject" is a note beside the turn, never part of it. Never put it into "text", and never change "text" to agree with it.
-
-When you cannot tell, keep the line and leave it where it is. A rough line costs little; an invented one costs the whole point of studying your own call.
+Do not merge source ids. One output turn must contain exactly one source id. In
+particular, do not finish fragments, fix names or words, change endings, or normalize
+honorific speech. Origin Restoration can change a short Origin span later, and only
+after that span's PCM supports the change.
 
 Return strict JSON only:
-{"turns":[{"ids":["<source id>"],"role":"HOST","text":"...","state":"included","subject":""}]}
-"ids" lists every source id that became this turn, in order. Return every source id exactly once across all turns. "subject" is optional - include it only on turns about someone who is not on this call.''';
+{"turns":[{"ids":["<one source id>"],"state":"included","subject":""}]}
+Allowed states are included, echo, and duplicate. Return every source id exactly once.
+Do not include role or text.''';
 
 /// GPT-4.1-mini로 한 번 정돈한다. 실패하면 null — 호출부가 폴백을 쓴다.
 Future<List<DuoCanonicalTurn>?> reconcileDuoConversation({
@@ -443,9 +397,7 @@ Future<List<DuoCanonicalTurn>?> reconcileDuoConversation({
     final list = decoded['turns'];
     if (list is! List) return null;
 
-    final byId = <String, DuoSourceUtterance>{
-      for (final u in source) u.id: u
-    };
+    final byId = <String, DuoSourceUtterance>{for (final u in source) u.id: u};
     final seen = <String>{};
     final turns = <DuoCanonicalTurn>[];
     for (final item in list) {
@@ -455,17 +407,22 @@ Future<List<DuoCanonicalTurn>?> reconcileDuoConversation({
           if (byId.containsKey(id.toString())) id.toString()
       ];
       if (ids.isEmpty) continue;
-      final text = (item['text'] ?? '').toString().trim();
-      if (text.isEmpty) continue;
-      seen.addAll(ids);
-      turns.add(DuoCanonicalTurn(
-        role: (item['role'] ?? byId[ids.first]!.role).toString(),
-        text: text,
-        sourceIds: ids,
-        state: _stateFromModel(item['state']),
-        spokenAtMs: byId[ids.first]!.spokenAtMs,
-        subject: (item['subject'] ?? '').toString().trim(),
-      ));
+      // canonical은 글자의 주인이 아니다. 모델이 text를 고치거나 여러
+      // 발화를 합쳐 돌려줘도 무시하고 source의 1차 STT를 그대로 쓴다.
+      // 한 줄에 source id 하나만 남겨 pcm_key와 1:1 대응도 지킨다.
+      for (final id in ids) {
+        if (!seen.add(id)) continue;
+        final original = byId[id]!;
+        final state = _stateFromModel(item['state']);
+        turns.add(DuoCanonicalTurn(
+          role: original.role,
+          text: original.text,
+          sourceIds: <String>[id],
+          state: state == kStudyStateMerged ? kStudyStateIncluded : state,
+          spokenAtMs: original.spokenAtMs,
+          subject: (item['subject'] ?? '').toString().trim(),
+        ));
+      }
     }
 
     // 🧭 [ORDER] **모델이 돌려준 순서를 그대로 쓴다.**
@@ -658,7 +615,8 @@ Future<bool> applyDuoCanonicalToHistory({
 
     final turns = <DuoCanonicalTurn>[
       for (final raw in (data['turns'] as List? ?? const <dynamic>[]))
-        if (DuoCanonicalTurn.fromMap(raw) != null) DuoCanonicalTurn.fromMap(raw)!
+        if (DuoCanonicalTurn.fromMap(raw) != null)
+          DuoCanonicalTurn.fromMap(raw)!
     ];
     if (turns.isEmpty) return false;
 
@@ -676,8 +634,7 @@ Future<bool> applyDuoCanonicalToHistory({
     final userLockedSubject = <String>{};
     for (final doc in msgSnap.docs) {
       final data = doc.data();
-      final String channelId =
-          (data['channel_msg_id'] ?? '').toString().trim();
+      final String channelId = (data['channel_msg_id'] ?? '').toString().trim();
       if (channelId.isEmpty) continue;
       if (!duoCanonicalMayApplyToMessage(data)) userLocked.add(channelId);
       // 🧭 참고 주어를 사용자가 직접 고쳤으면 정돈이 덮지 않는다. 줄 자체를
@@ -688,7 +645,8 @@ Future<bool> applyDuoCanonicalToHistory({
       byChannelId[channelId] = doc.reference;
       final String existingRaw =
           (data[kOriginalRawField] ?? '').toString().trim();
-      final String currentText = (data['original_text'] ?? '').toString().trim();
+      final String currentText =
+          (data['original_text'] ?? '').toString().trim();
       rawTextById[channelId] =
           existingRaw.isNotEmpty ? existingRaw : currentText;
       // 🎯 [TARGET-SYNC] 지금 화면에 있는 글자. 정돈이 이걸 바꾸면 그 줄의

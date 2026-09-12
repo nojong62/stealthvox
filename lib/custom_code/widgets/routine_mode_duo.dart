@@ -18,6 +18,7 @@ import '/auth/firebase_auth/auth_util.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -628,7 +629,6 @@ const int kDuoTrialCallSeconds = 60;
 /// 이 창을 넘어서면 근거 없이 막는 것이 되므로 그냥 통과시킨다.
 const Duration _kEchoWindow = Duration(seconds: 6);
 
-
 /// 한 줄 요약을 만들 때 AI에 보낼 최근 발화 수의 상한.
 /// 긴 통화라고 토큰이 함께 늘면 곤란하다 — 미리보기 한 줄이면 충분하다.
 const int _kSummaryMaxLines = 60;
@@ -945,7 +945,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       !_isDirectMode &&
       _interpStartFailed &&
       _interpRetryTimer == null &&
-      _isPartnerOnline &&
+      _hasConversationPartner &&
       !_isExiting &&
       _useInterpWebrtc &&
       !_interpCaptureLive &&
@@ -976,6 +976,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   /// 상대 발화 재생기. tts-1 PCM을 받는 대로 튼다(mp3 통파일 대기 없음).
   TtsAdapter? _interpTts;
+
   /// 🔊 [INTERP-PLAY] 통역 TTS를 통화 경로로 내보내는 재생기.
   /// 어댑터와 수명을 같이한다 — 계측값을 프리롤 줄에 실으려고 들고 있다.
   DuoInterpPcmPlayer? _interpPcmSink;
@@ -1132,10 +1133,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         app.targetLang == app.nativeLang) {
       app.targetLang = _guestTargetFor(app.nativeLang);
     }
-    _lgDuo('[GUEST-LANG]',
+    _lgDuo(
+        '[GUEST-LANG]',
         'origin=${app.nativeLang} target=${app.targetLang} '
-        'device=${WidgetsBinding.instance.platformDispatcher.locale.languageCode} '
-        'firstTime=$neverChoseNative');
+            'device=${WidgetsBinding.instance.platformDispatcher.locale.languageCode} '
+            'firstTime=$neverChoseNative');
   }
 
   // 🆕 [PTT] Duo 무전기 상태기계
@@ -1152,10 +1154,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // 🆕 [과금정책] 게스트 입장 후에만 과금 시작 (호스트 대기 중 정지)
   bool _billingStarted = false;
   void _startDuoBilling() {
-    // 🤖 [DUO-ROBOT] 로봇과의 시험 통화는 차감하지 않는다. 수십 분씩 붙들고
-    //   STT를 두들기는 자리라, 실제 통화와 같은 자로 재면 티켓만 녹는다.
+    // 🤖 [DUO-ROBOT] 혼자 연습은 차감하지 않는다.
     //   **일반 통화의 과금은 한 줄도 달라지지 않는다** — 이 조건이 켜지는
-    //   것은 디버그 빌드에서 로봇을 켰을 때뿐이다.
+    //   것은 사용자가 Duo Robot을 켰을 때뿐이다.
     if (_robotActive) return;
     // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금
     if (!_amIHost || _isTrialHost) return;
@@ -1437,7 +1438,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   bool get _interpReady =>
       !_isDirectMode &&
       !_isExiting &&
-      _isPartnerOnline &&
+      _hasConversationPartner &&
       (_interpStt?.isConnected ?? false) &&
       // 🎙️ WebRTC 경로는 `_interpCapture`를 안 채운다. 한쪽만 보면 탭이
       //   멀쩡히 도는데도 "준비 안 됨"이 되어 화면에 마이크가 잠긴다.
@@ -1468,7 +1469,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _interpGateReopenTimer?.cancel();
     _interpGateReopenTimer = null;
     if (_isDirectMode || _isExiting || !mounted) return;
-    if (!_isPartnerOnline) return;
+    if (!_hasConversationPartner) return;
     final stt = _interpStt;
     // 🎙️ 두 경로를 다 본다. `_interpCapture`만 보면 WebRTC에서는 여기서
     //   그냥 돌아나가 게이트가 영영 안 열린다 — 탭이 PCM을 올려도 전부
@@ -1589,6 +1590,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   bool _isPartnerOnline = false;
 
+  /// 실제 상대 또는 개발용 로봇이 상대 자리를 채웠는가.
+  ///
+  /// Firebase presence인 [_isPartnerOnline] 자체는 건드리지 않는다. 로봇을
+  /// 그 값으로 가장하면 실제 게스트 입·퇴장 판정이 깨지므로, 마이크와 화면처럼
+  /// 대화 상대가 있는지만 필요한 자리에서 이 값을 쓴다.
+  bool get _hasConversationPartner => _isPartnerOnline || _robotActive;
+
   /// 상대가 쓰는 대화 언어. 만능 통역 화면의 언어쌍 표시에 쓴다.
   ///
   /// 첫 메시지가 오기 전에도 보여줘야 하므로 세션 문서(`hostLang`/`partnerLang`)로
@@ -1648,13 +1656,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   String get _myRole => _amIHost ? 'HOST' : 'GUEST';
 
   // ══════════════════════════════════════════════════════════════════
-  // 🤖 [DUO-ROBOT] 개발 전용 상대. **릴리스에는 없다.**
+  // 🤖 [DUO-ROBOT] 실제 상대 없이 이용하는 혼자 연습 상대.
   // ══════════════════════════════════════════════════════════════════
 
-  /// 로봇을 켰는가. **[kDuoRobotAvailable] 없이는 켜지지 않는다** —
-  /// 릴리스에서는 이 값이 언제나 false이고, 아래 호출부가 통째로 죽은
-  /// 코드가 되어 빌드에서 빠진다. 빌드 판정은 `duo_robot.dart` 한 곳이
-  /// 쥔다(진단 스위치 `_duoDiagOn`과 같은 규칙).
+  /// 로봇을 켰는가. 제공 여부는 `duo_robot.dart` 한 곳에서 정한다.
   bool _robotOn = false;
 
   bool get _robotActive => kDuoRobotAvailable && _robotOn;
@@ -1911,7 +1916,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           // 이미 통화가 시작돼 통로가 박혔으면 **덮지 않는다.** 다음 통화부터다.
           _interpTransportRaw = interpTransport;
         });
-        _lgDuo('[DUO-TRANSPORT]', 'resolved=$_directTransport raw="$transport"');
+        _lgDuo(
+            '[DUO-TRANSPORT]', 'resolved=$_directTransport raw="$transport"');
         _lgDuo(
             '[INTERP-TRANSPORT]',
             'raw="$interpTransport" '
@@ -2097,8 +2103,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   /// 🔎 [LEVEL] dBFS 한 칸을 로그에 적는 서식. **`n/a`와 값을 구별한다** —
   /// 못 잰 것과 0dB은 완전히 다른 뜻인데 둘 다 숫자로 적으면 섞인다.
-  static String _fmtDb(double? v) =>
-      v == null ? 'n/a' : v.toStringAsFixed(1);
+  static String _fmtDb(double? v) => v == null ? 'n/a' : v.toStringAsFixed(1);
 
   /// 직접 대화 전사문 중 버릴 것. 만능 통역 쪽 필터는 건드리지 않는다.
   ///
@@ -2245,8 +2250,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _utteranceRms = DuoUtteranceRmsMeter();
       // 🩺 마이크 건강 계측기도 통로와 무관하게 돈다. 릴레이 경로의 값이
       //    WebRTC 경로를 견줄 기준선이 되므로 두 통로에서 모두 필요하다.
-      _micLiveMeter =
-          DuoMicLiveMeter(speakerRole: _myRole, onLog: _lgDuo);
+      _micLiveMeter = DuoMicLiveMeter(speakerRole: _myRole, onLog: _lgDuo);
 
       // ①② 통화 통로를 연다. **둘 중 하나만 산다.**
       //
@@ -2690,11 +2694,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     session.onTranscript = (result) {
       final String itemId = result.utteranceId;
       final String text = result.text;
-      // 💾 [ORIGIN-PCM] 전사에 올린 바로 그 소리를 창고에 넣는다.
-      //   **내 마이크에서 나온 것만 여기 있다** — 상대 발화는 그 폰이 전사해
-      //   글자만 건너오므로 창고에 들어올 일이 없고, 그래서 복원도 내 말만
-      //   손댄다.
-      _stashDuoPcm(result);
+      // PCM은 아래 수용 판정까지 통과한 뒤에만 보존한다. 버린 환청 때문에
+      // 내용 없는 History가 생기거나 다음 세션의 pending PCM이 섞이면 안 된다.
       final voicedMs = _directVoicedMs.remove(itemId);
       // 옛 Server VAD의 `server`/`local` 두 갈래 중 로컬 폴백과 같은 식이다
       //   (`DuoSttPipeline._voicedMsOf`). 이름을 그대로 둬 로그가 이어진다.
@@ -2784,8 +2785,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         return;
       }
       // 종료 대기가 이 future를 기다린다 — unawaited로 흘려보내면 안 된다.
-      final save =
-          _handleDirectTranscript(generation, text, itemId, voicedMs: voicedMs);
+      final save = _handleDirectTranscript(generation, text, itemId,
+          voicedMs: voicedMs, pcmResult: result);
       _directSaves.add(save);
       unawaited(save.whenComplete(() => _directSaves.remove(save)));
     };
@@ -2820,7 +2821,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 두 사람의 발화를 하나의 대화 순서로 합칠 수 있다.
   Future<void> _handleDirectTranscript(
       int generation, String text, String itemId,
-      {int? voicedMs}) async {
+      {int? voicedMs, DuoSttResult? pcmResult}) async {
     if (!_canSaveDirectTranscript(generation)) {
       _lgDirectSttDecision(
           itemId: itemId,
@@ -2839,10 +2840,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           'noise_gate=$noiseReason item=$itemId len=${trimmed.length} '
               'voicedMs=${voicedMs ?? -1}');
       _lgDirectSttDecision(
-          itemId: itemId,
-          accepted: false,
-          reason: noiseReason,
-          finalText: '');
+          itemId: itemId, accepted: false, reason: noiseReason, finalText: '');
       return;
     }
     // 중복 저장 가드. 같은 item이 두 번 오면(재전달·flush 겹침) 한 번만 남긴다.
@@ -2862,6 +2860,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (_savedDirectItemIds.length > 200) {
       _savedDirectItemIds.remove(_savedDirectItemIds.first);
     }
+    // 💾 [ORIGIN-PCM] 실제 History에 들어갈 것으로 확정된 발화만 남긴다.
+    // GPT Transcribe에 올린 바로 그 PCM이라 이후 주어 재확인의 source of truth다.
+    if (pcmResult != null) _stashDuoPcm(pcmResult);
     final int seq = ++_directSeq;
     final DateTime spokenAt = _directSpeechStartedAt ?? DateTime.now();
     _directSpeechStartedAt = null;
@@ -3137,7 +3138,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
               'mode=${(!kDuoInterpOriginCheck || OriginLanguageSession.instance.settled) ? 'pinned' : 'auto'} '
               'declared=${_myNative()} flag=${kDuoInterpOriginCheck ? 'on' : 'off'}');
       socket.shouldReconnect = () =>
-          !_isExiting && _isConversationActive && generation == _interpGeneration;
+          !_isExiting &&
+          _isConversationActive &&
+          generation == _interpGeneration;
       socket.onSpeechStarted = () {
         if (generation != _interpGeneration) return;
         _interpSpeechStartedAt = DateTime.now();
@@ -3464,7 +3467,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         _lgDuo('[INTERP-RETRY]', 'dropped reason=stale_generation');
         return;
       }
-      if (!_isPartnerOnline) {
+      if (!_hasConversationPartner) {
         _lgDuo('[INTERP-RETRY]', 'dropped reason=partner_offline');
         return;
       }
@@ -3514,7 +3517,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 뜨는 것을 막는다). 상대가 나가면 기록을 풀어 다음 상대에 다시 시도한다.
   void _maybeAutoStartInterpreter(String reason) {
     if (_isDirectMode) return;
-    if (!_isPartnerOnline) return;
+    if (!_hasConversationPartner) return;
     if (!mounted || _isExiting) return;
     if (_interpCaptureLive || _interpStarting) return;
     if (_interpAutoStartAttempted) return;
@@ -3677,8 +3680,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         if (generation != _interpGeneration) return;
         // 문자열을 조립하지 않는다 — 로그를 grep으로 찾는 사람이 소스에서
         // 같은 낱말을 볼 수 있어야 한다.
-        _lgDuo('[INTERP-WEBRTC]',
-            present ? 'connection_ready role=$_myRole' : 'connection_lost role=$_myRole');
+        _lgDuo(
+            '[INTERP-WEBRTC]',
+            present
+                ? 'connection_ready role=$_myRole'
+                : 'connection_lost role=$_myRole');
       },
       onFatal: (r) {
         if (generation != _interpGeneration) return;
@@ -4142,7 +4148,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 이 창 동안 유저가 실제로 한 말은 잘린다. 1차 구현에서는 그것을 감수한다
   /// — 검증되지 않은 barge-in을 새로 만드는 것보다 무한 통역 루프를 확실히
   /// 막는 쪽이 먼저다.
-  Future<void> _speakPartner(String text) async {
+  Future<void> _speakPartner(
+    String text, {
+    void Function()? onPlaybackStart,
+  }) async {
     final String spoken = text.trim();
     if (spoken.isEmpty || _openAiKey.isEmpty) return;
     final adapter = _ensureInterpreterTts();
@@ -4481,7 +4490,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _lgDuo('[INTERP-ORIGIN]',
           'judge=script result=${scriptVerdict.language ?? 'none'}');
     } else {
-      _lgDuo('[INTERP-ORIGIN]',
+      _lgDuo(
+          '[INTERP-ORIGIN]',
           'judge=gpt elapsedMs=${sw.elapsedMilliseconds} '
               'result=${detected ?? 'none'}');
     }
@@ -4537,8 +4547,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 묶여 있으면 안 된다.
     OriginLanguageSession.instance.override(native);
     // 통화를 끊지 않는다. 소켓 언어만 갈아 끼운다.
-    final ok = await _interpStt?.switchLanguage(_mapLanguageToCode(native)) ??
-        false;
+    final ok =
+        await _interpStt?.switchLanguage(_mapLanguageToCode(native)) ?? false;
     // 📚 이미 만들어진 히스토리 방 문서의 언어값도 같이 맞춘다.
     await _syncHistoryRoomLanguages();
     _lgDuo(
@@ -4580,8 +4590,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 재경고가 없는 근거는 `takeNoticeSlot()`이다. 이미 한 번 썼으므로 같은
   /// 세션에서는 두 번째 슬롯이 나오지 않는다.
   void _keepCurrentOrigin() {
-    _lgDuo('[INTERP-ORIGIN]',
-        'keep_current origin=${_myNative()} reask=false');
+    _lgDuo('[INTERP-ORIGIN]', 'keep_current origin=${_myNative()} reask=false');
     if (!mounted) return;
     setState(() => _originMismatchDetected = null);
   }
@@ -4846,11 +4855,18 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 기다리지 않는다 — 통화도 전사도 창고를 기다릴 이유가 없다.
   void _stashDuoPcm(DuoSttResult result) {
     final ref = _myHistoryRef;
-    if (ref == null) return;
+    // 이번 pending 보강은 Direct 전용이다. Interpreter의 기존 저장 시점과
+    // 수명은 이 작업에서 바꾸지 않는다.
+    if (ref == null && !_isDirectMode) return;
     final pcm = result.utterance.pcm;
     if (pcm.isEmpty) return;
-    unawaited(OriginPcmStore.instance
-        .putKeyed(ref.id, result.utteranceId, pcm));
+    final write = OriginPcmStore.instance
+        .putKeyed(ref?.id ?? '', result.utteranceId, pcm);
+    if (ref == null) {
+      _pendingDuoPcmWrite = write;
+    } else {
+      unawaited(write);
+    }
   }
 
   // 🔍 [ORIGIN-RESTORE] **통화가 끝나는 자리에서 시작하지 않는다.**
@@ -4885,6 +4901,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (said.isEmpty) return;
     unawaited(() async {
       final String lang = _robotLanguage();
+      final responseWatch = Stopwatch()..start();
       final String? reply = await robot.reply(
         userText: said,
         language: lang,
@@ -4892,13 +4909,17 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       );
       if (!mounted || _isExiting || !_robotActive) return;
       if (reply == null || reply.trim().isEmpty) {
-        _lgDuo('[DUO-ROBOT]', 'no_reply mode=$_duoMode lang=$lang');
+        _lgDuo(
+            '[DUO-ROBOT]',
+            'no_reply mode=$_duoMode lang=$lang '
+                'responseMs=${responseWatch.elapsedMilliseconds}');
         return;
       }
       _lgDuo(
           '[DUO-ROBOT]',
           'reply mode=$_duoMode lang=$lang turns=${robot.turnCount} '
-              'len=${reply.trim().length}');
+              'len=${reply.trim().length} '
+              'responseMs=${responseWatch.elapsedMilliseconds}');
       // 📥 실제 Peer가 올린 메시지와 같은 자리로 돌려보낸다.
       _incomingQueue.add(DuoRobot.payload(
         text: reply.trim(),
@@ -4932,12 +4953,36 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 재생기로 직접 낸다 — 로봇 하나 때문에 공용 TTS 계층에 PCM 출구를 뚫으면,
   /// 통역이 실제로 쓰는 재생 경로를 시험 코드가 건드리게 된다(실장님 결정,
   /// 2026-09-08). 그래서 이 모드는 상대 오디오 전송을 검증하지 않는다.
+  Future<void> _logRobotAudioState(String point) async {
+    final player = _jitterPlayer;
+    final state = player == null
+        ? <String, dynamic>{'dartStarted': false, 'native': 'not_requested'}
+        : await player.diagnostics();
+    _lgDuo(
+      '[DUO-ROBOT-AUDIO]',
+      'point=$point jitterAlive=${player?.isStarted == true} state=$state',
+    );
+  }
+
   Future<void> _robotSpeak(String text) async {
-    if (!_robotActive || _isExiting || _robotSpeaking) return;
+    _lgDuo(
+      '[DUO-ROBOT-TTS]',
+      'ENTER active=$_robotActive exiting=$_isExiting '
+          'speaking=$_robotSpeaking chars=${text.trim().length}',
+    );
+    if (!_robotActive || _isExiting || _robotSpeaking) {
+      _lgDuo('[DUO-ROBOT-TTS]',
+          'GUARD_SKIP active=$_robotActive exiting=$_isExiting speaking=$_robotSpeaking');
+      return;
+    }
     final adapter = _ensureRobotTts();
-    if (adapter == null) return;
+    if (adapter == null) {
+      _lgDuo('[DUO-ROBOT-TTS]', 'GUARD_SKIP adapter=null');
+      return;
+    }
     _robotSpeaking = true;
     try {
+      await _logRobotAudioState('before_tts_request');
       final utterance = adapter.speak(TtsRequest(
         text: text,
         voiceId: kInterpreterPartnerTtsVoice,
@@ -4948,7 +4993,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         //   않는다. 그 값은 통역의 실기기 숫자를 견주는 기준이라, 시험용
         //   로봇이 같은 자에 끼면 그 비교가 흐려진다. 기본값에 맡긴다.
       ));
-      await utterance.done;
+      unawaited(utterance.firstAudio.then((_) {
+        return _logRobotAudioState('first_audio_player_started');
+      }).catchError((Object error) {
+        _lgDuo('[DUO-ROBOT-TTS]',
+            'FIRST_AUDIO_FAILED reason=${error.runtimeType}');
+      }));
+      final bool ok = await utterance.done;
+      _lgDuo('[DUO-ROBOT-TTS]',
+          'DONE ok=$ok status=${utterance.status.name} jitterAlive=${_jitterPlayer?.isStarted == true}');
     } catch (error) {
       _lgDuo('[DUO-ROBOT]', 'tts_failed=${error.runtimeType}');
     } finally {
@@ -4976,7 +5029,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //
       //   통역이 쓰는 방식과 같다([_closeInterpGate]) — 마이크는 계속 열려
       //   있고, 닫는 것은 STT로 가는 갈래뿐이다.
-      onPlaybackStart: (_) => _closeRobotGate('robot_tts_playing'),
+      onPlaybackStart: (_) {
+        _closeRobotGate('robot_tts_playing');
+        unawaited(_logRobotAudioState('playback_start'));
+      },
     );
     _robotTts = adapter;
     return adapter;
@@ -4997,19 +5053,34 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _directStt?.openAudioGate(reason: 'robot_tts_done');
   }
 
-  /// 🤖 로봇을 켜고 끈다. **디버그 빌드에서만 불린다.**
+  /// 🤖 혼자 연습할 로봇을 켜고 끈다.
   void _setRobot(bool on) {
     if (!kDuoRobotAvailable) return;
     if (_robotOn == on) return;
     setState(() {
       _robotOn = on;
       if (on) {
+        if (!_isDirectMode) {
+          // 통역 로봇의 고정 시험 조합. 나는 영어로 말하고, 상대 자리의
+          // 로봇은 한국어로 답한다. 로비와 History도 같은 값을 보게 한다.
+          FFAppState().nativeLang = 'English';
+          FFAppState().targetLang = 'Korean';
+          _partnerChatLang = 'Korean';
+          // 상대 Peer가 없는 로봇 시험에서는 로컬 record → STT 경로를 쓴다.
+          // WebRTC DataChannel을 열면 접속할 Peer가 없어 시작할 수 없다.
+          _interpTransport = kDuoInterpTransportFirestore;
+          _isConversationActive = true;
+        }
         _robot = DuoRobot(apiKey: _openAiKey, onLog: _lgDuo);
       } else {
         _robot?.reset();
         _robot = null;
+        if (!_isPartnerOnline) _isConversationActive = false;
       }
     });
+    if (on && !_isDirectMode) {
+      unawaited(_syncHistoryRoomLanguages());
+    }
     _lgDuo('[DUO-ROBOT]', on ? 'ON mode=$_duoMode' : 'OFF');
   }
 
@@ -5409,7 +5480,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         _lgDuo(
             '⚠️ [INTERP-TRANSLATE]',
             'failed src=$srcLang to=$myNative rawLen=${raw.trim().length} '
-            '— 재생은 접고 글자만 남긴다');
+                '— 재생은 접고 글자만 남긴다');
         _setInterpPartnerPhase(InterpPartnerPhase.idle);
         await _saveUntranslatedIncoming(data, raw, srcLang, 'translate_failed');
         return;
@@ -5495,7 +5566,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (!_directCallActive) {
       if (_directStarting) return 'Connecting…';
       // 상대가 없으면 기다리는 게 정상이다 — 실패가 아니다.
-      if (!_isPartnerOnline) return 'Waiting…';
+      if (!_hasConversationPartner) return 'Waiting…';
       return 'Reconnecting…';
     }
     if (_directMuted) return 'Muted';
@@ -5511,7 +5582,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 게이트가 실제로 열려 있을 때만 나온다.
   String _interpStatusLabel() {
     if (_isExiting) return '대화를 마치는 중';
-    if (!_isPartnerOnline) {
+    if (!_hasConversationPartner) {
       return _interpMicPhase == InterpMicPhase.ended
           ? '상대방 연결 종료'
           : '상대방을 기다리는 중';
@@ -5576,6 +5647,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         //   배울글·연습 자료가 만들어진다.
         ...historyDraftSeed(),
       });
+      // 첫 발화가 방 문서보다 먼저 끝났다면 pending에 저장돼 있다. 쓰기 완료를
+      // 기다린 뒤 옮겨야 pending 디렉터리 삭제와 파일 쓰기가 경합하지 않는다.
+      await _pendingDuoPcmWrite;
+      await OriginPcmStore.instance.adoptPending(_myHistoryRef!.id);
       BillingTicker.instance.setSessionIdentifiers(
         sessionDocId: _myHistoryRef?.id,
         roomId: _duoSessionRef?.id ?? widget.roomId ?? _pendingJoinRoomId,
@@ -5866,7 +5941,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         final DuoCleanedTurn? out = kept[i];
         final String state = out == null
             ? kStudyStateHiddenArtifact
-            : (out.hesitation ? kStudyStateHiddenHesitation : kStudyStateIncluded);
+            : (out.hesitation
+                ? kStudyStateHiddenHesitation
+                : kStudyStateIncluded);
         final String after = out == null ? '' : out.text;
         _lgDuo(
             '[DIRECT-CLEANUP]',
@@ -6371,7 +6448,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       return false;
     }
     _interpreterProtocol = protocol;
-    if (protocol == kDuoInterpreterProtocolCallablePcV2) {
+    if (protocol == kDuoInterpreterProtocolCallablePcV2 &&
+        !kDuoCallablePcV2InternalTest &&
+        !kDuoCallablePcV2RolloutEnabled) {
       // The room can only choose this after a future rollout enables both
       // capabilities. Refuse it in this release rather than silently running
       // one side on a different transport.
@@ -6903,17 +6982,17 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   // 🖼️ 무대 그림은 `duo_stage.dart`에 있다. Firebase도 앱 상태도 모르는
   //   순수 위젯이라 화면 없이 띄워 눈으로 확인할 수 있다.
-  Widget _buildDirectStage() => _isPartnerOnline
+  Widget _buildDirectStage() => _hasConversationPartner
       ? DuoDirectStage(
           callActive: _directCallActive,
           muted: _directMuted,
-          partnerOnline: _isPartnerOnline,
+          partnerOnline: _hasConversationPartner,
         )
       : _buildWaitingStage('assets/images/duo_direct_call.png');
 
   // 무대 그림도 마이크 등과 같은 값을 본다. 화면 어디를 봐도 "지금 말해도
   // 되는가"에 대한 대답이 하나여야 한다.
-  Widget _buildInterpreterStage() => _isPartnerOnline
+  Widget _buildInterpreterStage() => _hasConversationPartner
       ? DuoInterpreterStage(
           ready: _interpReady,
           partnerSpeaking: _interpPartnerPhase == InterpPartnerPhase.playing,
@@ -6952,9 +7031,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             ),
           ),
         ),
-        // 🤖 [DUO-ROBOT] **디버그 빌드에서만 존재한다.**
-        //   `kDebugMode`는 컴파일 시점 상수라, 릴리스에서는 이 가지가 통째로
-        //   접혀 버튼도 그 아래 호출도 빌드에 들어가지 않는다.
+        // 🤖 [DUO-ROBOT] 실제 상대 없이 연습하는 정식 진입점.
         if (kDuoRobotAvailable) _buildRobotToggle(),
         const SizedBox(height: 20),
       ],
@@ -6976,12 +7053,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
               _setRobot(next);
               if (next) {
                 // 상대를 기다리던 자리다. 켜는 즉시 마이크를 연다.
-                _autoStartAttempted = false;
-                _maybeAutoStartDirectCall('robot_on');
+                if (_isDirectMode) {
+                  _autoStartAttempted = false;
+                  _maybeAutoStartDirectCall('robot_on');
+                } else {
+                  _interpAutoStartAttempted = false;
+                  _maybeAutoStartInterpreter('robot_on');
+                }
               } else {
                 // 끄면 통화도 멈춘다. 안 멈추면 `_directCallActive`가 남아
                 // 다시 켜도 `_maybeAutoStartDirectCall`이 곧바로 돌아간다.
-                unawaited(_stopDirectCall('robot_off'));
+                if (_isDirectMode) {
+                  unawaited(_stopDirectCall('robot_off'));
+                } else {
+                  unawaited(_stopInterpreterCapture('robot_off'));
+                }
               }
             },
             icon: Icon(
@@ -7008,9 +7094,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           ),
           const SizedBox(height: 6),
           Text(
-            _robotOn
-                ? '혼자 말해 보세요 · 과금 없음'
-                : '개발용 · 상대 없이 혼자 시험',
+            'Practice alone without a partner',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.3),
@@ -7634,7 +7718,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   }
 
   Widget _buildPartnerIndicator() {
-    if (!_isPartnerOnline) return const SizedBox.shrink();
+    if (!_hasConversationPartner) return const SizedBox.shrink();
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -7663,26 +7747,19 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 🚪 나가는 문은 **한 화면에 하나다.** 상대를 기다리는 동안은
-              //   아래에 `Cancel Connection`이 크게 서 있어서, 같은 곳으로
-              //   가는 이 화살표를 함께 두면 문이 둘로 보인다. 기다리는
-              //   동안만 접는다 — 상대가 들어오면 아래 버튼이 상태 문구로
-              //   바뀌고 이 자리가 다시 유일한 문이 된다.
-              //
-              //   ⚠️ 접어도 갇히지 않는다. `PopScope`가 시스템 뒤로가기를
-              //   받아 같은 `_handleAutoSaveAndExit()`을 부른다.
-              if (_isPartnerOnline)
-                IconButton(
-                    icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                        color: Colors.white70),
-                    tooltip: '이전 단계',
-                    padding: EdgeInsets.zero,
-                    alignment: Alignment.centerLeft,
-                    // 아이콘 모양은 그대로 두고 오른쪽의 빈 공간까지 눌리게 한다.
-                    // 통화를 마친 뒤 엄지로 누를 때 56dp는 가장자리에서 빗나갔다.
-                    constraints:
-                        const BoxConstraints(minWidth: 72, minHeight: 56),
-                    onPressed: _handleAutoSaveAndExit),
+              // 다른 대화 모드와 같은 자리의 이전 버튼. 상대를 기다리는 중에도
+              // 항상 보인다. 아래 Cancel Connection과 같은 저장·종료 경로다.
+              IconButton(
+                  icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                      color: Colors.white70),
+                  tooltip: '이전 단계',
+                  padding: EdgeInsets.zero,
+                  alignment: Alignment.centerLeft,
+                  // 아이콘 모양은 그대로 두고 오른쪽의 빈 공간까지 눌리게 한다.
+                  // 통화를 마친 뒤 엄지로 누를 때 56dp는 가장자리에서 빗나갔다.
+                  constraints:
+                      const BoxConstraints(minWidth: 56, minHeight: 56),
+                  onPressed: _handleAutoSaveAndExit),
               // 초대는 방을 만든 호스트만 낼 수 있다. 게스트에게는 버튼 자체를
               // 노출하지 않는다 — 눌러서 역할이 뒤집히는 경로를 없앤다.
               //
@@ -7691,7 +7768,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
               //   하는 버튼이라 뒤로가기와 같은 56으로 넓힌다. 어디를 눌러야
               //   하는지 보이도록 옅은 원도 깐다 — 아이콘만 떠 있으면 눌러도
               //   되는 곳인지 알기 어렵다.
-              if (_amIHost)
+              // Once the partner joins, the back button appears in this same
+              // row. Keeping the invite button too overflows narrow phones.
+              // An already connected room does not need another invite action.
+              if (_amIHost && !_hasConversationPartner)
                 IconButton(
                   icon: const Icon(Icons.person_add_alt_1,
                       color: Colors.white, size: 24),
@@ -7828,7 +7908,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   또 적으면 같은 말이 두 번이라, 그 자리를 유일하게 할 수 있는 일에
     //   내준다 — 그만두기. 위 `<`와 같은 곳으로 가지만, 기다리는 화면에서
     //   구석의 화살표는 눈에 잘 안 띈다.
-    if (!_isPartnerOnline) {
+    if (!_hasConversationPartner) {
       return Container(
         padding: EdgeInsets.fromLTRB(24, 8, 24, bottomPadding),
         decoration: const BoxDecoration(color: Color(0xFF121212)),
@@ -7913,8 +7993,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                 minimumSize: const Size(0, 44),
               ),
               child: const Text('다시 시도',
-                  style:
-                      TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
             ),
           ],
           const SizedBox(width: 12),
@@ -8134,49 +8213,48 @@ Return strict JSON only:
     //   그 턴을 통째로 접는다 — 원문 재생 폴백은 제거했다.
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        final Uri uri =
-            Uri.parse('https://api.openai.com/v1/chat/completions');
+        final Uri uri = Uri.parse('https://api.openai.com/v1/chat/completions');
         final String prompt =
-          "You are a translation engine for a live interpreter app.\n"
-          "You are NOT a chat assistant. NEVER reply, comment, answer, or ask "
-          "questions. NEVER continue the conversation.\n\n"
-          "Translate the utterance from $srcLang into natural spoken $toLang.\n"
-          "Preserve tone, intent, names, and numbers exactly. Do not add or "
-          "remove meaning.\n"
-          "WHO THE UTTERANCE IS ABOUT: $srcLang leaves out a subject that is "
-          "already understood; $toLang cannot. Two people are talking, so almost "
-          "every utterance is about one of them. The speaker is \"I\". The one "
-          "being spoken to is \"you\". NEVER call either of them \"he\", \"she\", "
-          "or \"they\".\n"
-          "When the utterance really is about somebody else, $srcLang says so out "
-          "loud, so name that person the way it named them: the teacher, my "
-          "friend, your mom, or their name. Never invent a gender. Use \"he\" or "
-          "\"she\" only when the utterance says which one, and \"they\" only when "
-          "it gives you no such word to reuse.\n"
-          "Always translate whatever words are present — a fragment, a "
-          "single word, or something you are unsure of. Make your best "
-          "attempt and still return a translation.\n"
-          "Return an empty response ONLY if the input contains no words "
-          "at all.\n"
-          "Return ONLY the translated sentence — no quotes, no label, no "
-          "explanation.";
-      final res = await client
-          .post(uri,
-              headers: {
-                'Authorization': 'Bearer $key',
-                'Content-Type': 'application/json; charset=utf-8'
-              },
-              body: jsonEncode({
-                'model': 'gpt-4o-mini',
-                'temperature': 0.2,
-                // 한 문장이면 충분하다. 400은 JSON 두 칸 시절의 값이다.
-                'max_tokens': 200,
-                'messages': [
-                  {'role': 'system', 'content': prompt},
-                  {'role': 'user', 'content': source},
-                ]
-              }))
-          .timeout(const Duration(seconds: 10));
+            "You are a translation engine for a live interpreter app.\n"
+            "You are NOT a chat assistant. NEVER reply, comment, answer, or ask "
+            "questions. NEVER continue the conversation.\n\n"
+            "Translate the utterance from $srcLang into natural spoken $toLang.\n"
+            "Preserve tone, intent, names, and numbers exactly. Do not add or "
+            "remove meaning.\n"
+            "WHO THE UTTERANCE IS ABOUT: $srcLang leaves out a subject that is "
+            "already understood; $toLang cannot. Two people are talking, so almost "
+            "every utterance is about one of them. The speaker is \"I\". The one "
+            "being spoken to is \"you\". NEVER call either of them \"he\", \"she\", "
+            "or \"they\".\n"
+            "When the utterance really is about somebody else, $srcLang says so out "
+            "loud, so name that person the way it named them: the teacher, my "
+            "friend, your mom, or their name. Never invent a gender. Use \"he\" or "
+            "\"she\" only when the utterance says which one, and \"they\" only when "
+            "it gives you no such word to reuse.\n"
+            "Always translate whatever words are present — a fragment, a "
+            "single word, or something you are unsure of. Make your best "
+            "attempt and still return a translation.\n"
+            "Return an empty response ONLY if the input contains no words "
+            "at all.\n"
+            "Return ONLY the translated sentence — no quotes, no label, no "
+            "explanation.";
+        final res = await client
+            .post(uri,
+                headers: {
+                  'Authorization': 'Bearer $key',
+                  'Content-Type': 'application/json; charset=utf-8'
+                },
+                body: jsonEncode({
+                  'model': 'gpt-4o-mini',
+                  'temperature': 0.2,
+                  // 한 문장이면 충분하다. 400은 JSON 두 칸 시절의 값이다.
+                  'max_tokens': 200,
+                  'messages': [
+                    {'role': 'system', 'content': prompt},
+                    {'role': 'user', 'content': source},
+                  ]
+                }))
+            .timeout(const Duration(seconds: 10));
         if (res.statusCode != 200) {
           debugPrint('[Duo][SpeechTranslate] status=${res.statusCode} '
               'attempt=$attempt/$maxAttempts');

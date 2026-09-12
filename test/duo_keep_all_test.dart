@@ -26,7 +26,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 const String _duo = 'lib/custom_code/widgets/routine_mode_duo.dart';
 const String _canon = 'lib/custom_code/services/duo_canonical.dart';
-const String _stt = 'lib/custom_code/services/openai_streaming_transcribe_session.dart';
+const String _stt =
+    'lib/custom_code/services/openai_streaming_transcribe_session.dart';
 const String _cont = 'lib/custom_code/services/late_continuation.dart';
 
 String _read(String path) =>
@@ -59,17 +60,20 @@ void main() {
     });
 
     test('저장한 뒤에 비운다 — 순서가 뒤집히면 아무 소용이 없다', () {
-      final String body = _region(duo,
+      final String body = _region(
+          duo,
           'Future<void> _drainQueueToHistory(String reason) async {',
           'Future<void> _saveUntranslatedIncoming(');
-      final int copy = body.indexOf('List<Map<String, dynamic>>.from(_incomingQueue)');
+      final int copy =
+          body.indexOf('List<Map<String, dynamic>>.from(_incomingQueue)');
       final int clear = body.indexOf('_incomingQueue.clear();\n    _lgDuo');
       expect(copy, greaterThan(-1));
       expect(clear, greaterThan(copy), reason: '먼저 복사하고 나서 비워야 한다');
     });
 
     test('번역도 재생도 하지 않는다 — 방은 이미 끝났다', () {
-      final String body = _region(duo,
+      final String body = _region(
+          duo,
           'Future<void> _drainQueueToHistory(String reason) async {',
           'Future<void> _saveUntranslatedIncoming(');
       for (final String forbidden in <String>[
@@ -83,7 +87,8 @@ void main() {
     });
 
     test('직접 대화는 이 길로 오지 않는다', () {
-      final String body = _region(duo,
+      final String body = _region(
+          duo,
           'Future<void> _drainQueueToHistory(String reason) async {',
           'Future<void> _saveUntranslatedIncoming(');
       expect(body, contains('if (_isDirectMode || _incomingQueue.isEmpty) {'));
@@ -98,15 +103,19 @@ void main() {
   // ── ② 번역이 실패해도 글자는 남긴다 ────────────────────────────────
   group('② 옮기지 못해도 말이 없었던 것으로 하지 않는다', () {
     test('실패 자리에서 저장한다', () {
-      final String body = _region(duo,
+      final String body = _region(
+          duo,
           'if (translated == null || translated.trim().isEmpty) {',
           'spoken = translated.trim();');
-      expect(body,
-          contains("await _saveUntranslatedIncoming(data, raw, srcLang, 'translate_failed');"));
+      expect(
+          body,
+          contains(
+              "await _saveUntranslatedIncoming(data, raw, srcLang, 'translate_failed');"));
     });
 
     test('저장이 return보다 먼저다', () {
-      final String body = _region(duo,
+      final String body = _region(
+          duo,
           'if (translated == null || translated.trim().isEmpty) {',
           'spoken = translated.trim();');
       final int save = body.indexOf('_saveUntranslatedIncoming');
@@ -117,10 +126,12 @@ void main() {
 
     test('재생은 여전히 안 한다 — 틀린 목소리로 읽는 문제는 그대로 막는다', () {
       expect(duo, contains('**원문을 그대로 재생하지 않는다.**'));
-      final String body = _region(duo,
+      final String body = _region(
+          duo,
           'if (translated == null || translated.trim().isEmpty) {',
           'spoken = translated.trim();');
-      expect(body, contains('_setInterpPartnerPhase(InterpPartnerPhase.idle);'));
+      expect(
+          body, contains('_setInterpPartnerPhase(InterpPartnerPhase.idle);'));
       expect(body, isNot(contains('_speakPartner')));
     });
 
@@ -131,12 +142,12 @@ void main() {
   });
 
   group('② 상대 언어를 그대로, 그 언어라고 적어서 남긴다', () {
-    String saver() => _region(duo,
-        'Future<void> _saveUntranslatedIncoming(',
+    String saver() => _region(duo, 'Future<void> _saveUntranslatedIncoming(',
         '/// 📢 상대가 "이 문장을 소리 낸다"고 알려 왔다.');
 
     test('원문 자리에 상대 언어를 넣는다', () {
-      expect(saver(), contains("      '',\n      raw.trim(),\n      'SYSTEM',"));
+      expect(
+          saver(), contains("      '',\n      raw.trim(),\n      'SYSTEM',"));
     });
 
     test('무슨 언어인지 같이 적는다', () {
@@ -176,18 +187,20 @@ void main() {
     });
 
     test("'direct'만 읽던 줄이 사라졌다", () {
-      expect(canon,
-          isNot(contains("if ((data['duoMode'] ?? '').toString() != 'direct') continue;")));
+      expect(
+          canon,
+          isNot(contains(
+              "if ((data['duoMode'] ?? '').toString() != 'direct') continue;")));
     });
 
     test('왜 넓혔는지 적어 뒀다', () {
       expect(canon, contains('통역이야말로 정돈이 필요한 쪽이다'));
     });
 
-    test('정돈 규칙 자체는 안 건드렸다', () {
-      // 읽는 범위만 넓혔다. 무엇을 지울지 정하는 프롬프트는 그대로다.
-      expect(canon, contains('READ THE WHOLE CALL BEFORE YOU DECIDE ANYTHING'));
-      expect(canon, contains("case 'artifact':"));
+    test('통역을 읽어도 canonical은 글자를 수정하지 않는다', () {
+      expect(canon, contains('Every source text is immutable.'));
+      expect(canon, contains('Do not merge source ids.'));
+      expect(canon, contains('text: original.text'));
     });
   });
 
@@ -205,17 +218,15 @@ void main() {
       final endpoint =
           _read('lib/custom_code/services/duo_deepgram_endpoint.dart');
       expect(endpoint, contains('const int kDuoUtteranceEndMs = 1800;'));
-      expect(endpoint,
-          contains(r"'&utterance_end_ms=$kDuoUtteranceEndMs'"));
+      expect(endpoint, contains(r"'&utterance_end_ms=$kDuoUtteranceEndMs'"));
       // 직접 대화와 통역이 같은 파이프라인을 쓰므로 값도 하나다.
-      expect(
-          RegExp(r'DuoSttPipeline\(').allMatches(duo).length,
-          2,
+      expect(RegExp(r'DuoSttPipeline\(').allMatches(duo).length, 2,
           reason: '직접 대화와 통역 둘 다 같은 사람의 같은 말버릇을 듣는다');
     });
 
     test('서클톡·시나리오톡의 기본값은 600 그대로다', () {
-      expect(stt, contains('const int kStreamingSttVadSilenceDurationMs = 600;'));
+      expect(
+          stt, contains('const int kStreamingSttVadSilenceDurationMs = 600;'));
     });
 
     test('그 두 모드는 값을 덮지 않는다', () {
@@ -232,7 +243,10 @@ void main() {
       expect(cont, contains('const int kFreeTalkContinuationWindowMs = 1200;'));
       // 주석으로 언급은 한다(왜 1500인지 설명이 거기 있다). **import**가
       // 없다는 것이 요점이다 — 장치를 안 쓴다.
-      expect(duo, isNot(contains("import '/custom_code/services/late_continuation.dart'")),
+      expect(
+          duo,
+          isNot(contains(
+              "import '/custom_code/services/late_continuation.dart'")),
           reason: '듀오에 그 장치가 없다는 것이 1500을 쓰는 이유다');
     });
 

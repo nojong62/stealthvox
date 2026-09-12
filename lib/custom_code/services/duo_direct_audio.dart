@@ -49,7 +49,8 @@ class DuoPcmJitterPlayer {
     this.onLog,
   });
 
-  static const MethodChannel _channel = MethodChannel('stealthvox/realtime_pcm');
+  static const MethodChannel _channel =
+      MethodChannel('stealthvox/realtime_pcm');
 
   final int sampleRate;
   final int prebufferMs;
@@ -83,6 +84,21 @@ class DuoPcmJitterPlayer {
   int get firstPlayLatencyMs => _firstPlayLatencyMs;
 
   void _lg(String tag, String msg) => onLog?.call(tag, msg);
+  Future<Map<String, dynamic>> diagnostics() async {
+    try {
+      final raw =
+          await _channel.invokeMapMethod<String, dynamic>('diagnostics');
+      return <String, dynamic>{
+        'dartStarted': _started,
+        ...?raw,
+      };
+    } catch (error) {
+      return <String, dynamic>{
+        'dartStarted': _started,
+        'diagnosticsError': error.runtimeType.toString(),
+      };
+    }
+  }
 
   Future<bool> start() async {
     if (_started) return true;
@@ -357,8 +373,8 @@ class DuoMicPcmFanout {
         _levelFrames++;
       } catch (e) {
         _levelErrors++;
-        onLog?.call('⚠️ [DuoSTT]',
-            'level_branch_error=${e.runtimeType} (통화·전사는 계속된다)');
+        onLog?.call(
+            '⚠️ [DuoSTT]', 'level_branch_error=${e.runtimeType} (통화·전사는 계속된다)');
       }
     }
 
@@ -477,8 +493,7 @@ class DuoMicLiveMeter {
       _silentAllZeroFrames++;
       _lifetimeAllZero++;
     }
-    final double frameDbfs =
-        pcm16LinearToDbfs(math.sqrt(frameSum / samples));
+    final double frameDbfs = pcm16LinearToDbfs(math.sqrt(frameSum / samples));
     if (frameDbfs >= kDuoMicVoicedFrameDbfs) {
       _voicedFrames++;
       _lifetimeVoiced++;

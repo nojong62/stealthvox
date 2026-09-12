@@ -954,6 +954,7 @@ class TtsAdapter {
         recoveryCount++;
       }
     }
+
     if (continuing) {
       await _pcmPlayer.setVolume(playbackVolume);
       utterance._settleFirstAudio();
@@ -1001,6 +1002,10 @@ class TtsAdapter {
                 voice: voice,
               ))
               .timeout(TtsAdapterConfig.requestTimeout);
+          _log(
+              '🔊 [TTS-HTTP]',
+              'TTS_HTTP_STATUS turnId=${request.turnId} status=${response.statusCode} '
+                  'attempt=$attempt/$maxAttempts');
           if (response.statusCode != 200) {
             _log('❌ [TTS-API-ERR]',
                 'status=${response.statusCode} attempt=$attempt/$maxAttempts');
@@ -1047,7 +1052,8 @@ class TtsAdapter {
             //   API가 느린 것이고, 작은데 재생이 늦으면 범인은 프리롤이다.
             _log(
               '⏱️ [TTS-PERF]',
-              'TTS_FIRST_CHUNK turnId=${request.turnId} ttfbMs=$firstByteMs',
+              'TTS_FIRST_CHUNK turnId=${request.turnId} ttfbMs=$firstByteMs '
+                  'chunkBytes=${chunk.length}',
             );
           }
 
@@ -1240,8 +1246,10 @@ class TtsAdapter {
         cancelled ? TtsUtteranceStatus.cancelled : TtsUtteranceStatus.failed);
     if (playbackStartNotified) onPlaybackEnd?.call(request, false);
     if (!cancelled) {
-      _log('❌ [TTS-ADAPTER]',
-          'failed turnId=${request.turnId} speaker=${request.speakerType.name}');
+      _log(
+          '❌ [TTS-ADAPTER]',
+          'failed turnId=${request.turnId} speaker=${request.speakerType.name} '
+              'receivedBytes=${historyBuffer.length}');
     }
   }
 }

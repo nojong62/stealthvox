@@ -10,6 +10,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/duo_deepgram_endpoint.dart';
+import 'package:stealth_vox/custom_code/services/duo_stt_pipeline.dart';
 import 'package:stealth_vox/custom_code/services/duo_transcript_context.dart';
 import 'package:stealth_vox/custom_code/services/duo_utterance_capture.dart';
 import 'package:stealth_vox/custom_code/services/openai_streaming_transcribe_session.dart';
@@ -277,6 +278,16 @@ void main() {
     });
   });
 
+  group('🧭 낱말 힌트는 기본이 꺼짐이다', () {
+    test('켜면 소리에 없는 낱말 쪽으로 끌려간다 — 기본은 보내지 않는다', () {
+      expect(kDuoSttContextHint, isFalse);
+    });
+
+    test('링 자체는 살려 둔다 — 껐다 켜며 견주려면 필요하다', () {
+      final ctx = DuoTranscriptContext()..add('민수랑 저녁 먹었어');
+      expect(ctx.buildPrompt(), isNotEmpty);
+    });
+  });
   group('🎯 최종 전사 모델', () {
     test('Duo는 gpt-transcribe를 쓴다', () {
       expect(OpenAiTranscribeService.duoFinalModel, 'gpt-transcribe');

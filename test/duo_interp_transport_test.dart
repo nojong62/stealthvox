@@ -39,7 +39,8 @@ void main() {
   // ==========================================================================
   group('통로를 묻는 자리는 하나뿐이다', () {
     test('두 값만 알아듣는 상수가 있다', () {
-      expect(duo, contains("const String kDuoInterpTransportWebrtc = 'webrtc';"));
+      expect(
+          duo, contains("const String kDuoInterpTransportWebrtc = 'webrtc';"));
       expect(duo,
           contains("const String kDuoInterpTransportFirestore = 'firestore';"));
       expect(
@@ -78,8 +79,7 @@ void main() {
           .where((l) => l.contains('kDuoInterpWebrtc'))
           .toList();
       // 선언 1줄(`const bool kDuoInterpWebrtc =`) + 폴백 게터 1줄.
-      expect(code.length, 2,
-          reason: '상수를 직접 읽는 자리가 늘었다: ${code.join(" | ")}');
+      expect(code.length, 2, reason: '상수를 직접 읽는 자리가 늘었다: ${code.join(" | ")}');
       expect(code.any((l) => l.contains('_fallbackInterpTransport')), isTrue);
     });
   });
@@ -87,8 +87,10 @@ void main() {
   // ==========================================================================
   group('① 캡처와 Firestore 가드가 같은 값을 본다', () {
     test('두 자리가 같은 게터를 쓴다 — 상수를 섞어 쓰지 않는다', () {
-      final String capture = _region(duo,
-          'Future<void> _startInterpreterCapture(', 'Future<bool> _startInterpreterWebrtc(');
+      final String capture = _region(
+          duo,
+          'Future<void> _startInterpreterCapture(',
+          'Future<bool> _startInterpreterWebrtc(');
       final String listen =
           _region(duo, 'void _listenForMessages()', 'void _enqueueIncoming(');
       expect(capture, contains('_useInterpWebrtc'));
@@ -119,8 +121,10 @@ void main() {
     });
 
     test('마이크를 열 때도 박는다 — 리스너보다 먼저 올 수 있다', () {
-      final String capture = _region(duo,
-          'Future<void> _startInterpreterCapture(', 'Future<bool> _startInterpreterWebrtc(');
+      final String capture = _region(
+          duo,
+          'Future<void> _startInterpreterCapture(',
+          'Future<bool> _startInterpreterWebrtc(');
       final int pin = capture.indexOf("_pinInterpTransport('interp_capture')");
       final int branch = capture.indexOf('if (_useInterpWebrtc) {');
       expect(pin, greaterThan(-1));
@@ -139,8 +143,8 @@ void main() {
 
     test('Remote Config 갱신이 박힌 값을 덮지 않는다', () {
       // `_fetchKeys`는 원문만 갈아 둔다. 판단값은 `_interpTransport`다.
-      final String fetch =
-          _region(duo, 'Future<void> _fetchKeys() async {', "  void _lgDuo(String tag, String msg)");
+      final String fetch = _region(duo, 'Future<void> _fetchKeys() async {',
+          "  void _lgDuo(String tag, String msg)");
       expect(fetch, contains('_interpTransportRaw = interpTransport;'));
       expect(fetch, isNot(contains('_interpTransport =')),
           reason: 'Remote Config가 통화 중인 통로를 갈아 끼운다');
@@ -165,8 +169,8 @@ void main() {
     });
 
     test('폴백은 빌드 타임 상수가 정한다', () {
-      final String body = _region(
-          duo, 'String get _fallbackInterpTransport', 'bool get _useInterpWebrtc');
+      final String body = _region(duo, 'String get _fallbackInterpTransport',
+          'bool get _useInterpWebrtc');
       expect(body, contains('kDuoInterpWebrtc'));
       expect(body, contains('kDuoInterpTransportWebrtc'));
       expect(body, contains('kDuoInterpTransportFirestore'));
@@ -186,14 +190,13 @@ void main() {
           _region(duo, 'void _pinInterpTransport(String reason)', '  /// 📚');
       expect(
           body,
-          contains('(raw == kDuoInterpTransportWebrtc || '
-              'raw == kDuoInterpTransportFirestore)'),
+          matches(RegExp(
+              r'raw == kDuoInterpTransportWebrtc\s*\|\|\s*raw == kDuoInterpTransportFirestore')),
           reason: '부분 일치로 고르면 "webrtc2" 같은 오타가 통과한다');
     });
-
     test('Remote Config 원문을 소문자·공백 정리해서 받는다', () {
-      final String fetch =
-          _region(duo, 'Future<void> _fetchKeys() async {', "  void _lgDuo(String tag, String msg)");
+      final String fetch = _region(duo, 'Future<void> _fetchKeys() async {',
+          "  void _lgDuo(String tag, String msg)");
       final int at = fetch.indexOf('kDuoInterpTransportRemoteConfigKey');
       final String tail = fetch.substring(at, at + 120);
       expect(tail, contains('.trim()'));
@@ -212,15 +215,18 @@ void main() {
   // ==========================================================================
   group('직접 대화는 건드리지 않았다', () {
     test('DuoDirectTransport는 그대로다', () {
-      expect(duo,
-          contains("const String kDuoTransportRemoteConfigKey = 'DuoDirectTransport';"));
-      expect(duo, contains('_directTransport = transport == kDuoTransportRelay'));
+      expect(
+          duo,
+          contains(
+              "const String kDuoTransportRemoteConfigKey = 'DuoDirectTransport';"));
+      expect(
+          duo, contains('_directTransport = transport == kDuoTransportRelay'));
     });
 
     test('두 손잡이가 서로 다른 필드를 본다', () {
       expect(duo, contains('bool get _useWebrtcTransport =>'));
-      final String direct =
-          _region(duo, 'bool get _useWebrtcTransport =>', 'String get _directSttSource');
+      final String direct = _region(duo, 'bool get _useWebrtcTransport =>',
+          'String get _directSttSource');
       expect(direct, isNot(contains('_interpTransport')),
           reason: '축이 다르다 — 소리 통로와 글자 통로를 한 값으로 묶으면 안 된다');
     });

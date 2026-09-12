@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
+import android.os.Build
 import android.media.AudioTrack
 import com.android.installreferrer.api.InstallReferrerClient
 import com.android.installreferrer.api.InstallReferrerStateListener
@@ -155,6 +156,27 @@ class MainActivity: FlutterActivity() {
                 "stop" -> {
                     stopPcmStream()
                     result.success(null)
+                }
+                "diagnostics" -> {
+                    val manager =
+                        getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    @Suppress("DEPRECATION")
+                    val speakerphone = manager.isSpeakerphoneOn
+                    val communicationDevice = if (Build.VERSION.SDK_INT >= 31) {
+                        manager.communicationDevice?.type
+                    } else {
+                        null
+                    }
+                    result.success(mapOf(
+                        "mode" to manager.mode,
+                        "speakerphoneOn" to speakerphone,
+                        "communicationDevice" to communicationDevice,
+                        "audioFocusResult" to pcmAudioFocusResult,
+                        "pcmTrackAlive" to (pcmTrack != null),
+                        "pcmVoiceCall" to pcmVoiceCall,
+                        "pcmPlaybackMode" to pcmPlaybackMode,
+                        "pcmPlaying" to pcmPlaying
+                    ))
                 }
                 else -> result.notImplemented()
             }
@@ -413,6 +435,7 @@ class MainActivity: FlutterActivity() {
         val manager = audioManager
         @Suppress("DEPRECATION")
         manager?.abandonAudioFocus(null)
+        pcmAudioFocusResult = AudioManager.AUDIOFOCUS_REQUEST_FAILED
         if (manager != null && pcmVoiceCall) {
             // 통화 모드를 남겨 두면 앱의 다른 소리(TTS·효과음)까지 통화 경로로
             // 나가고 볼륨 키도 통화 볼륨을 잡는다. 반드시 되돌린다.

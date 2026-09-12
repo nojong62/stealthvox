@@ -10,6 +10,8 @@
 // 답변 생성은 네트워크를 타므로 여기서 시험하지 않는다. 그쪽이 실패해도
 // 통화는 이어져야 한다는 규칙은 위젯이 지고 있다.
 
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/duo_robot.dart';
 
@@ -36,13 +38,21 @@ void main() {
     test('자리는 언제나 내 반대편이다', () {
       expect(
         DuoRobot.payload(
-          text: 'x', srcLang: 'Korean', duoMode: 'd', myRole: 'HOST', seq: 1,
+          text: 'x',
+          srcLang: 'Korean',
+          duoMode: 'd',
+          myRole: 'HOST',
+          seq: 1,
         )['senderRole'],
         'GUEST',
       );
       expect(
         DuoRobot.payload(
-          text: 'x', srcLang: 'Korean', duoMode: 'd', myRole: 'GUEST', seq: 1,
+          text: 'x',
+          srcLang: 'Korean',
+          duoMode: 'd',
+          myRole: 'GUEST',
+          seq: 1,
         )['senderRole'],
         'HOST',
       );
@@ -65,6 +75,10 @@ void main() {
   });
 
   group('대화 기억', () {
+    test('릴리스에서도 혼자 연습을 제공한다', () {
+      expect(kDuoRobotAvailable, isTrue);
+    });
+
     test('번호는 1부터 이어진다', () {
       final robot = DuoRobot(apiKey: 'k');
       expect(robot.nextSeq(), 1);
@@ -98,6 +112,53 @@ void main() {
         isNull,
       );
       expect(robot.turnCount, 0);
+    });
+  });
+
+  group('만능 통역 연결', () {
+    final duo = File('lib/custom_code/widgets/routine_mode_duo.dart')
+        .readAsStringSync();
+
+    test('로봇도 통역 상대가 되어 통역 캡처를 시작한다', () {
+      expect(duo, contains('_hasConversationPartner =>'));
+      expect(duo, contains('_isPartnerOnline || _robotActive'));
+      expect(duo, contains('_maybeAutoStartInterpreter'));
+      expect(duo, contains('robot_on'));
+    });
+
+    test('통역 로봇 언어쌍과 로컬 전사 경로를 고정한다', () {
+      expect(duo, contains('nativeLang ='));
+      expect(duo, contains('targetLang ='));
+      expect(duo, contains('_partnerChatLang ='));
+      expect(duo, contains('_syncHistoryRoomLanguages()'));
+      expect(duo, contains('_interpTransport = kDuoInterpTransportFirestore'));
+    });
+  });
+
+  group('무음 진단 계측', () {
+    final duo = File('lib/custom_code/widgets/routine_mode_duo.dart')
+        .readAsStringSync();
+    final tts =
+        File('lib/custom_code/services/tts_adapter.dart').readAsStringSync();
+    final android = File(
+            'android/app/src/main/kotlin/com/example/my_project/MainActivity.kt')
+        .readAsStringSync();
+
+    test('호출·guard·완료 결과를 구분한다', () {
+      expect(duo, contains('ENTER active='));
+      expect(duo, contains('GUARD_SKIP active='));
+      expect(duo, contains('DONE ok='));
+      expect(duo, contains('jitterAlive='));
+    });
+
+    test('HTTP·PCM·player·Android route를 기록한다', () {
+      expect(tts, contains('TTS_HTTP_STATUS'));
+      expect(tts, contains('TTS_FIRST_CHUNK'));
+      expect(tts, contains('chunkBytes='));
+      expect(tts, contains('playback_start speaker='));
+      expect(android, contains('"diagnostics" ->'));
+      expect(android, contains('"audioFocusResult"'));
+      expect(android, contains('"communicationDevice"'));
     });
   });
 }

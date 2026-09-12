@@ -1,5 +1,5 @@
 // ====================================================================
-// 🤖 [DUO-ROBOT] 휴대폰 하나로 통화 시험을 하기 위한 **개발 전용 상대**
+// 🤖 [DUO-ROBOT] 실제 상대 없이 Duo를 연습하기 위한 대화 상대
 // --------------------------------------------------------------------
 // Duo를 시험하려면 폰 두 대와 사람 둘이 필요했다. 그래서 마이크·발화 경계·
 // 전사를 한 번 확인하려 해도 매번 자리를 만들어야 했고, 그 번거로움 때문에
@@ -14,8 +14,8 @@
 //                                                        ↓
 //                              답변 한 줄 → 기존 큐/TTS로 되돌아간다
 //
-// ⚠️ **개발 빌드에서만 산다.** 진입은 `kDebugMode` 안에만 두고, 릴리스에서는
-//    호출부가 통째로 접혀 사라진다.
+// 이제는 Duo의 정식 혼자 연습 상대다. 실제 상대방과 연결하지 않고도 같은
+// 마이크·전사·통역·히스토리 경로를 연습할 수 있다.
 //
 // 🚫 **이 파일이 검증하는 것과 아닌 것**
 //    검증한다  — 실제 마이크, PCM, Deepgram 발화 경계, gpt-transcribe,
@@ -29,22 +29,15 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-/// 로봇을 쓸 수 있는 빌드인가. **여기가 유일한 판단처다.**
-///
-/// 대화방 위젯이 [kDebugMode]를 따로 묻지 않게 하려고 상수로 내보낸다 —
-/// 진단 스위치(`_duoDiagOn`)와 같은 규칙이다. 여기저기서 각자 물으면 나중에
-/// 한쪽만 바뀌어 반쪽만 켜진다.
-///
-/// `const`라서 릴리스에서는 이 값을 보는 가지가 통째로 접힌다.
+/// Duo Robot 혼자 연습을 제공할 것인가. **여기가 유일한 판단처다.**
 ///
 /// 🤖 **2026-09-11: 다시 올렸다.** 만능 통역을 재생 경로까지 손보면서 한 판을
 ///   여러 번 돌려야 하는데, 그때마다 폰 두 대와 사람 둘을 붙이는 것이 검증
 ///   횟수를 줄이고 있었다. 로봇은 통역의 번역·TTS·재생까지 그대로 태우므로
 ///   그 반복에 맞는다(못 보는 것은 파일 머릿말의 두 가지).
 ///
-/// ⚠️ 릴리스에는 여전히 없다 — `kDebugMode`라 그 가지가 빌드에서 빠진다.
-///   다시 내리려면 `false`로 돌리면 된다.
-const bool kDuoRobotAvailable = kDebugMode;
+/// 정식 혼자 연습 기능이므로 디버그·릴리스 모두 제공한다.
+const bool kDuoRobotAvailable = true;
 
 /// 로봇이 쓰는 가짜 발신자 id. 실제 사람의 uid와 절대 겹치지 않는 모양이다.
 const String kDuoRobotSenderUid = 'duo_robot_debug';
@@ -67,7 +60,7 @@ class DuoRobotTurn {
   final String text;
 }
 
-/// 개발자가 말하면 사람처럼 답하는 상대.
+/// 사용자가 말하면 사람처럼 답하는 혼자 연습 상대.
 ///
 /// **대화 상태를 자기가 들고 있는다.** 위젯이 턴마다 문맥을 조립해 넘기게
 /// 하면 그 조립 코드가 Direct와 Interpreter 두 벌로 갈린다.
@@ -132,8 +125,8 @@ class DuoRobot {
           jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
       final choices = body['choices'] as List? ?? const <dynamic>[];
       if (choices.isEmpty) return null;
-      final message =
-          (choices.first as Map<String, dynamic>)['message'] as Map<String, dynamic>?;
+      final message = (choices.first as Map<String, dynamic>)['message']
+          as Map<String, dynamic>?;
       final text = (message?['content'] ?? '').toString().trim();
       if (text.isEmpty) return null;
       _memory.add(DuoRobotTurn(fromUser: false, text: text));

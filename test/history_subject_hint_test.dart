@@ -70,9 +70,9 @@ void main() {
 
   group('🚫 원문에 섞이지 않는다', () {
     test('참고 주어는 text가 아니라 별도 자리에 산다', () {
-      expect(canon,
-          contains('"subject" is a note beside the turn, never part of it'));
-      expect(canon, contains('Never put it into "text"'));
+      expect(canon, contains('Never return a text field.'));
+      expect(canon, contains('never alter text to agree with a hint'));
+      expect(canon, contains('text: original.text'));
     });
 
     test('줄 문서에도 original_text가 아닌 제 자리에 쓴다', () {
@@ -83,17 +83,18 @@ void main() {
 
   group('🙅 나·너에는 안 붙인다', () {
     test('두 사람 얘기인 줄에는 아무것도 안 남긴다', () {
-      expect(canon,
-          contains('Leave "subject" out entirely for every turn about the speaker or the listener'));
-      expect(canon, contains('Do not write "나는" or "너는"'));
+      expect(canon, contains('Never return I/you subject hints'));
     });
 
-    test('누구 얘기인지 모르면 비워 둔다', () {
-      expect(canon, contains('Leave it out too when you cannot tell'));
+    test('명시적으로 확정된 제3자만 참고 주어를 받는다', () {
+      expect(
+          canon, contains('only for an explicitly established third person'));
+      expect(canon, contains('Optionally return a short subject hint'));
     });
 
     test('화면도 빈 값이면 아무것도 그리지 않는다', () {
-      expect(master, contains("if (hint.isEmpty) return const SizedBox.shrink();"));
+      expect(master,
+          contains("if (hint.isEmpty) return const SizedBox.shrink();"));
     });
   });
 
@@ -125,7 +126,8 @@ void main() {
   group('🔒 사용자가 고친 주어는 정돈이 덮지 않는다', () {
     test('따로 잠근다 — 줄을 안 고쳤어도 주어는 고쳤을 수 있다', () {
       expect(canon, contains('userLockedSubject'));
-      expect(canon, contains('if (data[kMessageSubjectHintEditedField] != null)'));
+      expect(
+          canon, contains('if (data[kMessageSubjectHintEditedField] != null)'));
       expect(canon,
           contains('if (!userLockedSubject.contains(turn.sourceIds.first))'));
     });
@@ -138,10 +140,12 @@ void main() {
     });
 
     test('실린 주어는 이미 정해진 것으로 다룬다', () {
-      expect(master,
-          contains('who this line is about has already been settled'));
-      expect(master,
-          contains('do not go hunting through the surrounding lines for someone else'));
+      expect(
+          master, contains('who this line is about has already been settled'));
+      expect(
+          master,
+          contains(
+              'do not go hunting through the surrounding lines for someone else'));
     });
   });
 }

@@ -118,6 +118,19 @@ const Duration kDuoTranscribeTimeout = Duration(seconds: 20);
 /// 어느 History에도 남지 않고, 호출부가 그 사실을 로그로 남긴다.
 const int kDuoFlushWaitMs = 8000;
 
+/// 🧭 직전 발화를 낱말 힌트로 함께 보낼 것인가. **기본은 꺼짐이다.**
+///
+/// 켜면 이름·지명의 철자가 통화 내내 같아지지만, 그 대가로 **모델이 애매한
+/// 소리를 앞서 나온 낱말 쪽으로 읽는다.** 그건 "들은 대로"가 아니다.
+/// 지금 이 앱이 원하는 것은 소리에 충실한 글자이고, 통화가 끝난 뒤의 정돈은
+/// canonical이 따로 한다.
+///
+///   flutter run --dart-define=DUO_STT_CONTEXT_HINT=true
+///
+/// 링 자체는 살려 둔다 — 껐다 켜며 견주는 것이 이 값의 쓸모다.
+const bool kDuoSttContextHint =
+    bool.fromEnvironment('DUO_STT_CONTEXT_HINT', defaultValue: false);
+
 /// 전사 결과 한 벌. 로그와 후단이 같은 값을 본다.
 class DuoSttResult {
   const DuoSttResult({
@@ -513,7 +526,9 @@ class DuoSttPipeline {
     _inFlight++;
     final sw = Stopwatch()..start();
     final String language = originLanguageCode();
-    final String prompt = context.buildPrompt();
+    // 🧭 기본은 힌트 없이 간다([kDuoSttContextHint]). 소리에 없는 낱말로
+    //   끌려가지 않는 것이 먼저다.
+    final String prompt = kDuoSttContextHint ? context.buildPrompt() : '';
     try {
       final String? text = await OpenAiTranscribeService.transcribePcm16(
         apiKey: openAiKey,
@@ -546,7 +561,8 @@ class DuoSttPipeline {
         return;
       }
       _lg('mode=$mode utt=${utterance.utteranceId} transcribe=ok '
-          'lang=$language ctx=${prompt.isEmpty ? 0 : context.length} '
+          'lang=$language hint=${kDuoSttContextHint ? 'on' : 'off'} '
+          'ctx=${prompt.isEmpty ? 0 : context.length} '
           'audioMs=${utterance.durationMs} len=${text.trim().length} '
           'elapsedMs=${sw.elapsedMilliseconds}');
       onTranscript?.call(DuoSttResult(
