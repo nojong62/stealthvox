@@ -89,10 +89,33 @@ Future<void> showCircleTalkGuide(BuildContext context) {
                         _CircleGuideTip(
                             '대화가 이어질수록 AI는 서클의 맥락을 반영해 더욱 자연스럽게 대화합니다.'),
                         SizedBox(height: 22),
+                        _CircleGuideHeading('Step 1 · Step 2'),
+                        SizedBox(height: 10),
+                        Text(
+                          'Step 1은 지금까지의 대화방 그대로입니다. AI도 나와 같은 대화 언어로 말합니다. 방에 들어오면 늘 Step 1로 시작합니다.',
+                          style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                              height: 1.55),
+                        ),
+                        SizedBox(height: 10),
+                        Text(
+                          '대화 중 아래의 Step 1 단추를 누르면 다음 대화부터 Step 2가 됩니다. AI만 로비에서 고른 배울 언어로 말하고, 나는 계속 내 언어로 대답하면 됩니다 — 듣기 훈련입니다. 다시 누르면 Step 1로 돌아오고, 대화 흐름은 그대로 이어집니다.',
+                          style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                              height: 1.55),
+                        ),
+                        SizedBox(height: 10),
+                        _CircleGuideTip(
+                            'Step 2에서는 가능하면 화면을 보지 말고 귀로만 듣고 대답해 보세요. 못 알아들었으면 그냥 되물으면 됩니다.'),
+                        _CircleGuideTip(
+                            '공부방에서는 AI가 배울 언어로 한 말도 내 대화 언어로 함께 보입니다.'),
+                        SizedBox(height: 22),
                         _CircleGuideHeading('대화 세션 (10분)'),
                         SizedBox(height: 10),
                         Text(
-                          '대화방은 10분 단위 세션으로 운영됩니다. 10분이 지나도 대화가 끊기거나 방에서 나가지 않습니다 — 지금까지의 대화가 기록에 저장되고, 같은 화면에서 이어서 계속 대화할 수 있습니다.',
+                          '한 세션은 최대 10분입니다. 10분을 다 채워야 하는 것은 아닙니다 — 하고 싶은 만큼 이야기하고 나가면 그때까지의 대화가 기록에 저장됩니다. 10분이 지나도 대화가 끊기거나 방에서 나가지지 않습니다 — 지금까지의 대화가 저장되고, 같은 화면에서 이어서 계속할 수 있습니다.',
                           style: TextStyle(
                               color: Colors.white70,
                               fontSize: 14,
