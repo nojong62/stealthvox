@@ -65,6 +65,15 @@ class ChatHistoryListMaster extends StatefulWidget {
   _ChatHistoryListMasterState createState() => _ChatHistoryListMasterState();
 }
 
+// ⏳ [TEMP-SELECT-ALL] **임시다. 옛 기록을 지우고 나면 이 상수와 그 사용처를
+//   통째로 걷어낸다.** (2026-09-12, 실장님 요청)
+//
+//   옛 모드로 만든 방은 room_name이 지금 필터(Duo·Circle·Scenario) 어디에도
+//   안 걸려서 전체 목록에서만 보이는데, 전체 목록에는 네모가 없어 지울 길이
+//   없었다. 켜져 있는 동안만 전체 목록에도 네모·선택삭제·전체선택이 붙는다.
+//   false로 되돌리면 전과 한 글자도 다르지 않게 동작한다.
+const bool kHistoryTempSelectAllInAllView = true;
+
 class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     with BillingIdleMixin<ChatHistoryListMaster> {
   String _selectedFilter = 'All';
@@ -748,6 +757,12 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           child: Row(
             children: _selectedFilter == 'All' || _selectedFilter == 'Keepers'
                 ? [
+                    // ⏳ [TEMP-SELECT-ALL] 전체 목록에서만, 켜져 있을 때만.
+                    if (kHistoryTempSelectAllInAllView &&
+                        _selectedFilter == 'All') ...[
+                      _buildDeleteActionChip(),
+                      _buildTempSelectAllChip(),
+                    ],
                     _buildFilterChip('Duo', 'Duo', Icons.people),
                     _buildFilterChip('Circle', 'Circle', Icons.forum),
                     _buildFilterChip('Scenario', 'Scenario', Icons.smart_toy),
@@ -878,6 +893,49 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 ),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// ⏳ [TEMP-SELECT-ALL] 지금 보이는 기록을 한 번에 다 집거나 다 놓는다.
+  ///   [kHistoryTempSelectAllInAllView]와 함께 걷어낸다.
+  Widget _buildTempSelectAllChip() {
+    final bool allSelected = _visibleHistoryDocIds.isNotEmpty &&
+        _visibleHistoryDocIds.every(_selectedDocIds.contains);
+    return GestureDetector(
+      onTap: () => setState(() {
+        if (allSelected) {
+          _selectedDocIds.clear();
+        } else {
+          _selectedDocIds = Set<String>.from(_visibleHistoryDocIds);
+        }
+        _rangeAnchorDocId = null;
+      }),
+      child: Container(
+        margin: const EdgeInsets.only(right: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: allSelected ? const Color(0xFF4A4A4A) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+              color: allSelected ? const Color(0xFF9E9E9E) : Colors.white24,
+              width: 1.5),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(allSelected ? Icons.check_box : Icons.check_box_outline_blank,
+                size: 16,
+                color: allSelected ? const Color(0xFF9E9E9E) : Colors.white54),
+            const SizedBox(width: 6),
+            Text(allSelected ? '전체 해제' : '전체 선택',
+                style: TextStyle(
+                    color:
+                        allSelected ? const Color(0xFF9E9E9E) : Colors.white54,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold)),
           ],
         ),
       ),
@@ -1025,7 +1083,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     final bool isDuoDirect = (data[kDuoModeField] ?? '') == 'direct';
     bool isChecked = _selectedDocIds.contains(doc.id);
     // 전체 목록에서도 현재 화면의 기록을 개별·범위로 선택할 수 있다.
-    bool showCheckbox = _selectedFilter != 'All';
+    bool showCheckbox =
+        _selectedFilter != 'All' || kHistoryTempSelectAllInAllView;
 
     return GestureDetector(
       onTap: () {
