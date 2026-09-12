@@ -1420,6 +1420,14 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     if (original.isEmpty) return false;
     final translated = (data['translated_text'] ?? '').toString().trim();
     if (translated.isEmpty) return true;
+    // 🎧 [STEP-2] 배울 언어 줄이 원문 자리에 그대로 복사돼 배울글과 똑같이
+    //   남은 방(2026-09-12 실기기, 첫 Step 2 방)은 한 번 다시 만든다.
+    if (_isListeningStep2AiLine(data) &&
+        (data['target_generated_by'] ?? '').toString() !=
+            'step2_native_render' &&
+        original == translated) {
+      return _targetRepairAttempted.add(docId);
+    }
     if ((data['duo_mode'] ?? '').toString().trim().isEmpty) return false;
     if (_recordSameLang == true) return false;
     final target = (_sessionTargetLang ?? '').trim();
