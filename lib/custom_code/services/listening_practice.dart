@@ -140,10 +140,9 @@ bool replyMatchesListeningStep(
 
 /// 마이크 표시등 옆의 Step 토글. 두 대화방이 같이 쓴다.
 ///
-/// 숫자 하나가 든 동그라미다 — `1`은 테두리만, `2`는 채워진다. 누르면 다른
-/// Step으로 넘어간다. 두 칸을 나란히 펼쳤더니 제목("Circle Talk")이 세 줄로
-/// 접혔다(2026-09-12 실기기). 표시등과 같은 크기의 아이콘 하나면 큰 글꼴에서도
-/// 제목이 한 줄로 남는다.
+/// 작은 글씨 `Step 1` / `Step 2` 한 칸짜리 알약이다 — 지금 Step만 보이고, 누르면
+/// 다른 Step으로 넘어간다. 두 칸을 나란히 펼쳤더니 제목("Circle Talk")이 세 줄로
+/// 접혔다(2026-09-12 실기기). 한 칸 작은 글씨면 큰 글꼴에서도 제목이 한 줄로 남는다.
 class ListeningStepSwitch extends StatelessWidget {
   const ListeningStepSwitch({
     super.key,
@@ -160,9 +159,9 @@ class ListeningStepSwitch extends StatelessWidget {
   final ValueChanged<ListeningStep> onChanged;
   final Color activeColor;
 
-  /// 아이콘에 적히는 글자. 숫자 하나뿐이다.
+  /// 알약에 적히는 글자.
   static String labelOf(ListeningStep step) =>
-      step == ListeningStep.step1 ? '1' : '2';
+      step == ListeningStep.step1 ? 'Step 1' : 'Step 2';
 
   @override
   Widget build(BuildContext context) {
@@ -174,32 +173,31 @@ class ListeningStepSwitch extends StatelessWidget {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: enabled ? () => onChanged(step.toggled) : null,
-          // 표시등(44)과 같은 터치 영역. 보이는 원은 28이다.
+          // 표시등(44)과 같은 세로 터치 영역. 보이는 알약은 24 높이다.
           child: SizedBox(
-            width: 44,
             height: 44,
             child: Center(
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
-                width: 28,
-                height: 28,
+                height: 24,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  // 2는 채운 원, 1은 테두리만 — 켜져 있음이 한눈에 보인다.
+                  // Step 2는 채운 알약, Step 1은 테두리만 — 켜져 있음이 한눈에 보인다.
                   color: step2 ? activeColor : Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: step2 ? activeColor : Colors.white38,
-                    width: 1.5,
+                    width: 1.2,
                   ),
                 ),
                 child: Text(
                   labelOf(step),
                   style: TextStyle(
                     color: step2 ? Colors.black : Colors.white70,
-                    fontSize: 14,
+                    fontSize: 11,
                     height: 1.0,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),

@@ -304,9 +304,9 @@ void main() {
           ),
         ),
       ));
-      expect(find.text('1'), findsOneWidget);
-      expect(find.text('2'), findsNothing);
-      await tester.tap(find.text('1'));
+      expect(find.text('Step 1'), findsOneWidget);
+      expect(find.text('Step 2'), findsNothing);
+      await tester.tap(find.text('Step 1'));
       expect(changed, ListeningStep.step2);
     });
 
@@ -321,7 +321,7 @@ void main() {
           ),
         ),
       ));
-      await tester.tap(find.text('1'));
+      await tester.tap(find.text('Step 1'));
       expect(changed, isNull);
     });
 
