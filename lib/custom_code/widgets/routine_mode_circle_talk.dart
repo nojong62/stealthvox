@@ -5244,7 +5244,18 @@ $userFixPolicy$finalLanguageRule''';
     }());
   }
 
-  Future<void> _handleAutoSaveAndExit() async {
+  /// 📚 [STUDY-ROOM] 대화방에서 바로 공부방으로. 저장·나가기는 뒤로가기와
+  ///   같고, 그 위에 이 방의 공부방을 연다. 유저 발화가 없는 방은 저장할 게
+  ///   없어(빈 방은 지워진다) 그냥 나간다.
+  Future<void> _handleSaveAndOpenStudyRoom() async {
+    final ref = _myHistoryRef;
+    final bool canOpen = ref != null && _currentRoomHasUserTurn;
+    await _handleAutoSaveAndExit(openStudyRoomRef: canOpen ? ref : null);
+  }
+
+  Future<void> _handleAutoSaveAndExit({
+    DocumentReference? openStudyRoomRef,
+  }) async {
     BillingTicker.instance.pause();
     try {
       if (_myHistoryRef != null) {
@@ -5286,6 +5297,17 @@ $userFixPolicy$finalLanguageRule''';
       _log('❌ [HIST-EXIT-ERR]', '$e');
     } finally {
       if (mounted) {
+        // 📚 [STUDY-ROOM] 방을 닫기 전에 공부방을 그 위에 연다. 닫힌 뒤에는
+        //   이 context가 없다. 공부방 진입은 과금 지점이라 목록과 같은 문을 지난다.
+        if (openStudyRoomRef != null && guardBillingEntry(context)) {
+          context.pushNamed(
+            'ChatDetail',
+            queryParameters: {
+              'historyRef': serializeParam(
+                  openStudyRoomRef, ParamType.DocumentReference),
+            }.withoutNulls,
+          );
+        }
         if (StealthRoomMaster.exitCurrentMode != null) {
           StealthRoomMaster.exitCurrentMode!();
         } else if (Navigator.canPop(context)) {
@@ -5391,6 +5413,16 @@ $userFixPolicy$finalLanguageRule''';
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                // 📚 [STUDY-ROOM] 저장하고 바로 공부방으로.
+                IconButton(
+                  icon: const Icon(Icons.menu_book_rounded,
+                      color: Colors.white70, size: 22),
+                  tooltip: '공부방으로',
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                  onPressed: _handleSaveAndOpenStudyRoom,
+                ),
                 // 사용설명서는 **입장 전 설정 페이지에만** 둔다. 방 안에서는
                 // 대화가 목적이라 상단 자리를 글자 크기·나가기에 내준다.
                 IconButton(
