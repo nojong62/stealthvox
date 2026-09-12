@@ -2840,7 +2840,8 @@ $finalLanguageRule''';
           'turn=$turnNumber model=$kDialogBrainModel '
               'reasoning=$kDialogBrainReasoningEffort stream=true '
               'step=${step.value} ttftMs=${firstTokenMs ?? -1} '
-              'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiKorean.length}');
+              'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiKorean.length} '
+              'text="${aiKorean.replaceAll(RegExp(r'\s+'), ' ')}"');
       if (aiKorean.isEmpty) {
         throw StateError('Scenario Talk response did not complete.');
       }

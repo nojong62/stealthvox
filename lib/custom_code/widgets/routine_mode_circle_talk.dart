@@ -3626,7 +3626,8 @@ $userFixPolicy$finalLanguageRule''';
           'turn=$currentTurnId model=$kDialogBrainModel '
               'reasoning=$kDialogBrainReasoningEffort stream=true '
               'step=${step.value} '
-              'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiOriginal.length}');
+              'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiOriginal.length} '
+              'text="${aiOriginal.replaceAll(RegExp(r'\s+'), ' ')}"');
       if (aiOriginal.isEmpty) {
         throw StateError('Circle Talk response did not complete.');
       }
