@@ -4600,14 +4600,17 @@ never by itself a reason to ask back.
               // 📏 폰 글꼴을 키워 둔 기기에서 이 제목이 커지면서 Start 버튼을
               //   밀어내 줄 오른쪽이 잘렸다. 버튼 자리를 먼저 주고 제목은
               //   남는 폭에 맞춰 줄어들게 한다.
-              const Flexible(
-                child: Text("Scenario Talk",
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: Colors.white54,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold)),
+              const Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text("Scenario Talk",
+                      maxLines: 1,
+                      style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold)),
+                ),
               ),
               // 🎧 [LISTENING] Step 1 | Step 2. 배울 언어가 대화 언어와 같으면
               //   잠근다.

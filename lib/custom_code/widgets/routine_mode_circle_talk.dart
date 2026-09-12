@@ -5493,18 +5493,19 @@ $kSpokenReplyLengthPolicy
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    // 서클 이름은 _buildCircleTitle로 상단에 올렸다. 여기에
-                    // 두 번 쓰면 같은 글자가 화면 위아래에 겹친다.
-                    Text("Circle Talk",
-                        style: TextStyle(
-                            color: Colors.white54,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold)),
-                  ],
+              // 서클 이름은 _buildCircleTitle로 상단에 올렸다. 여기에
+              // 두 번 쓰면 같은 글자가 화면 위아래에 겹친다.
+              // 📏 큰 글꼴에서 제목이 접히지 않게 남는 폭에 맞춰 줄인다.
+              const Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text("Circle Talk",
+                      maxLines: 1,
+                      style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold)),
                 ),
               ),
               // 🎧 [LISTENING] Step 1 | Step 2. 배울 언어가 대화 언어와 같으면

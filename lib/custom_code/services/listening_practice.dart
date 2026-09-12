@@ -121,7 +121,11 @@ bool replyMatchesListeningStep(
   return true;
 }
 
-/// 마이크 표시등 옆의 `Step 1 | Step 2` 스위치. 두 대화방이 같이 쓴다.
+/// 마이크 표시등 옆의 Step 토글. 두 대화방이 같이 쓴다.
+///
+/// 지금 Step 하나만 보여 주는 알약이다 — 누르면 다른 Step으로 넘어간다.
+/// 두 칸을 나란히 펼쳤더니 제목("Circle Talk")이 세 줄로 접혔다(2026-09-12
+/// 실기기). 한 칸이면 큰 글꼴에서도 제목이 한 줄로 남는다.
 class ListeningStepSwitch extends StatelessWidget {
   const ListeningStepSwitch({
     super.key,
@@ -138,48 +142,35 @@ class ListeningStepSwitch extends StatelessWidget {
   final ValueChanged<ListeningStep> onChanged;
   final Color activeColor;
 
+  static String labelOf(ListeningStep step) =>
+      step == ListeningStep.step1 ? 'Step 1' : 'Step 2';
+
   @override
   Widget build(BuildContext context) {
+    final bool step2 = step == ListeningStep.step2;
     return Opacity(
       opacity: enabled ? 1.0 : 0.35,
-      child: Container(
-        height: 32,
-        padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          color: const Color(0xFF2C2C2E),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white12),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            _segment(ListeningStep.step1, 'Step 1'),
-            _segment(ListeningStep.step2, 'Step 2'),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _segment(ListeningStep value, String label) {
-    final bool active = step == value;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: !enabled || active ? null : () => onChanged(value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: active ? activeColor : Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: active ? Colors.black : Colors.white70,
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: enabled ? () => onChanged(step.toggled) : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            // Step 2는 채운 알약, Step 1은 테두리만 — 켜져 있음이 한눈에 보인다.
+            color: step2 ? activeColor : const Color(0xFF2C2C2E),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: step2 ? activeColor : Colors.white24),
+          ),
+          child: Text(
+            labelOf(step),
+            style: TextStyle(
+              color: step2 ? Colors.black : Colors.white70,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
       ),

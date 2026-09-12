@@ -273,7 +273,7 @@ void main() {
   });
 
   group('ListeningStepSwitch', () {
-    testWidgets('탭하면 다른 Step으로 바뀐다. 같은 칸을 눌러도 아무 일 없다', (tester) async {
+    testWidgets('지금 Step 하나만 보이고, 누르면 다른 Step으로 넘어간다', (tester) async {
       ListeningStep? changed;
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
@@ -284,9 +284,9 @@ void main() {
           ),
         ),
       ));
+      expect(find.text('Step 1'), findsOneWidget);
+      expect(find.text('Step 2'), findsNothing);
       await tester.tap(find.text('Step 1'));
-      expect(changed, isNull);
-      await tester.tap(find.text('Step 2'));
       expect(changed, ListeningStep.step2);
     });
 
@@ -301,7 +301,7 @@ void main() {
           ),
         ),
       ));
-      await tester.tap(find.text('Step 2'));
+      await tester.tap(find.text('Step 1'));
       expect(changed, isNull);
     });
 
@@ -323,9 +323,11 @@ void main() {
         ListeningStep.step1,
         ListeningStep.step2,
       ]) {
-        await tester.tap(find.text(expected == ListeningStep.step2 ? 'Step 2' : 'Step 1'));
+        // 알약에는 지금 Step만 적혀 있다. 그걸 누르면 반대편으로 간다.
+        await tester.tap(find.text(ListeningStepSwitch.labelOf(expected.toggled)));
         await tester.pump();
         expect(step, expected);
+        expect(find.text(ListeningStepSwitch.labelOf(expected)), findsOneWidget);
       }
     });
   });
