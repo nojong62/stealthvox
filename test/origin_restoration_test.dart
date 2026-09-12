@@ -114,13 +114,11 @@ void main() {
     });
 
     test('둘 다 들리면 알 수 없다', () {
-      expect(judgeAcoustic('내가 네가 헷갈려', '네가', '내가'),
-          AcousticVerdict.unclear);
+      expect(judgeAcoustic('내가 네가 헷갈려', '네가', '내가'), AcousticVerdict.unclear);
     });
 
     test('둘 다 없으면 알 수 없다', () {
-      expect(judgeAcoustic('어제 병원에 갔어', '네가', '내가'),
-          AcousticVerdict.unclear);
+      expect(judgeAcoustic('어제 병원에 갔어', '네가', '내가'), AcousticVerdict.unclear);
     });
 
     test('들은 것이 없으면 소리가 없는 것이다', () {
@@ -168,8 +166,7 @@ void main() {
 
     test('소리가 없거나 불분명하면 medium', () {
       expect(
-        resolveConfidence(
-            AcousticVerdict.unavailable, SuspectConfidence.high),
+        resolveConfidence(AcousticVerdict.unavailable, SuspectConfidence.high),
         SuspectConfidence.medium,
       );
       expect(
@@ -211,13 +208,12 @@ void main() {
     });
 
     test('빈 배열은 정상이다', () {
-      expect(parseOriginSuspects('{"suspects":[]}', knownTurnIds: known),
-          isEmpty);
+      expect(
+          parseOriginSuspects('{"suspects":[]}', knownTurnIds: known), isEmpty);
     });
 
     test('깨진 JSON은 빈 목록이다', () {
-      expect(parseOriginSuspects('이건 JSON이 아니다', knownTurnIds: known),
-          isEmpty);
+      expect(parseOriginSuspects('이건 JSON이 아니다', knownTurnIds: known), isEmpty);
       expect(parseOriginSuspects('', knownTurnIds: known), isEmpty);
     });
 
@@ -254,8 +250,8 @@ void main() {
       const body = '{"suspects":[{"turn_id":"t1","origin_span":"네가",'
           '"candidate_origin":"내가","issue":"subject_conflict"}]}';
       expect(
-        parseOriginSuspects(body, knownTurnIds: known,
-            requireTargetEvidence: true),
+        parseOriginSuspects(body,
+            knownTurnIds: known, requireTargetEvidence: true),
         isEmpty,
       );
       expect(
@@ -326,9 +322,8 @@ void main() {
     test('소리가 원문을 지지하면 고치지 않는다', () async {
       final out = await run(
         [user('t1', '네가 그렇게 생각했는데 별일 아니었어.', seq: 1)],
-        detect: detector([
-          suspect('t1', '네가', '내가', confidence: SuspectConfidence.high)
-        ]),
+        detect: detector(
+            [suspect('t1', '네가', '내가', confidence: SuspectConfidence.high)]),
         heard: ears({1: '네가 그렇게 생각했는데 별일 아니었어'}),
       );
       expect(out.corrections, isEmpty);
@@ -339,9 +334,8 @@ void main() {
       // AI 줄이거나 상한에 걸려 못 쓴 줄이다.
       final out = await run(
         [user('t1', '네가 어제 갔잖아')],
-        detect: detector([
-          suspect('t1', '네가', '내가', confidence: SuspectConfidence.high)
-        ]),
+        detect: detector(
+            [suspect('t1', '네가', '내가', confidence: SuspectConfidence.high)]),
         heard: ears(const {}),
       );
       expect(out.corrections, isEmpty);
@@ -517,8 +511,17 @@ void main() {
   // ══════════════════════════════════════════════════════════════════
   group('지시문', () {
     final origin = buildOriginSuspectInstructions(sourceName: 'Korean');
+    final duoOrigin = buildOriginSuspectInstructions(
+      sourceName: 'Korean',
+      excludeProperNouns: true,
+    );
     final target = buildTargetValidationInstructions(
         sourceName: 'Korean', targetLanguage: 'English');
+    final duoTarget = buildTargetValidationInstructions(
+      sourceName: 'Korean',
+      targetLanguage: 'English',
+      subjectOnly: true,
+    );
 
     test('전체를 다시 쓰지 말라고 못 박는다', () {
       expect(origin, contains('You are NOT editing, rewriting'));
@@ -527,29 +530,54 @@ void main() {
     });
 
     test('어색함은 근거가 아니라고 적는다', () {
-      expect(origin, contains('Awkward grammar. Real speech is often ungrammatical'));
+      expect(origin,
+          contains('Awkward grammar. Real speech is often ungrammatical'));
       expect(origin, contains('it is not a suspect'));
       expect(target, contains('Awkward is not wrong.'));
     });
 
     test('3자를 두 사람으로 뭉개지 않는다', () {
-      expect(origin, contains('Do not assume every subject is one of the two speakers'));
+      expect(origin,
+          contains('Do not assume every subject is one of the two speakers'));
       expect(origin, contains('more than one'));
     });
 
     test('Target은 고치는 자리가 아니라고 적는다', () {
       expect(target, contains('YOU ARE A DETECTOR, NOT AN EDITOR.'));
-      expect(target, contains('You never fix the English.'));
-      expect(target, contains('audio decides what was said'));
+      expect(target, contains('You never fix the English'));
+      expect(target, contains('original PCM decides'));
+      expect(target, contains('never translate it back into Korean'));
     });
 
     test('Target 근거를 요구한다', () {
       expect(target, contains('"target_evidence" is required.'));
     });
 
+    test('Duo Origin 검사도 고유명사를 해결 대상으로 삼지 않는다', () {
+      expect(duoOrigin,
+          contains('Do not report names, places, companies, or products'));
+      expect(duoOrigin, isNot(contains('properNounConflict')));
+      expect(origin, contains('properNounConflict'),
+          reason: '다른 모드의 기존 검사 범위는 바꾸지 않는다');
+    });
+
+    test('Duo 임시 Target은 주어·행위자만 검사하고 폐기한다', () {
+      expect(duoTarget, contains('This Duo Direct pass checks ONLY'));
+      expect(duoTarget, contains('"I" and "you"'));
+      expect(duoTarget, contains('third person'));
+      expect(duoTarget, contains('never output it, never save it'));
+      expect(duoTarget, contains('never use it as the final Target'));
+      expect(duoTarget, contains('Do not report names'));
+      expect(duoTarget, contains('numbers, time, tense, negation'));
+      expect(duoTarget, isNot(contains('properNounConflict')));
+      expect(duoTarget, isNot(contains('numberConflict')));
+    });
+
     test('없으면 없다고 답하게 한다', () {
-      expect(origin, contains('Return {"suspects": []} when nothing contradicts'));
-      expect(target, contains('Return {"suspects": []} when nothing contradicts'));
+      expect(
+          origin, contains('Return {"suspects": []} when nothing contradicts'));
+      expect(
+          target, contains('Return {"suspects": []} when nothing contradicts'));
     });
   });
 

@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/ai_style.dart';
 
-/// NATURAL & POLISHED(저장 칸은 `native_english`) 지시문을 고정한다.
+/// NATURAL & SHARP(저장 칸은 `native_english`) 지시문을 고정한다.
 ///
-/// **2026-09-08 두 축이 갈렸다.** 화자(AC Speaker)는 생각을 푸는 방식·리듬·
+/// **2026-09-09 두 축이 갈렸다.** Trevor Noah reference는 생각을 푸는 방식·리듬·
 /// 흐름만 지배하고, 어휘·철자·지역 어투는 로비 AI STYLE이 쥔다. 예전에는 이
 /// 프롬프트에 `aiStyleInstruction('Native')`가 하드코딩돼 있어서, 유저가
 /// British를 골라도 "미국식으로 다시 짜라"가 들어갔다. 그 하드코딩을 걷어낸
@@ -55,12 +55,13 @@ void main() {
     });
 
     test('인물은 dialect를 강제하지 않는다', () {
-      // Anderson Cooper는 speaking-pattern reference이지 미국 어투의 근거가
+      // Trevor Noah는 thought-organization reference이지 미국 어투의 근거가
       // 아니다. British를 고른 유저는 British 어휘 그대로 이 패턴을 탄다.
-      expect(prompt, contains('SPEAKING-PATTERN reference'));
+      expect(prompt, contains('Use Trevor Noah only as a reference'));
       expect(
         prompt,
-        contains('It does NOT govern vocabulary, regional wording, spelling, or dialect.'),
+        contains(
+            'It does not govern dialect, spelling, regional vocabulary, or regional wording.'),
       );
       expect(prompt, contains('If the active style is British, stay British'));
       expect(prompt, isNot(contains('Use everyday US spoken English')));
@@ -74,36 +75,52 @@ void main() {
           buildNativeEnglishSpeechInstructions(targetLang: 'Japanese');
       expect(noStyle, isNot(contains('[ENGLISH STYLE')));
       expect(noStyle, isNot(contains('ENGLISH STYLE section')));
-      expect(noStyle, isNot(contains('while preserving the active ENGLISH STYLE')));
+      expect(noStyle,
+          isNot(contains('while preserving the active ENGLISH STYLE')));
       // 화자 정체성 자체는 그대로 선다.
-      expect(noStyle, contains('SPEAKER IDENTITY — AC Speaker'));
+      expect(noStyle, contains('SPEAKER IDENTITY — NATURAL & SHARP'));
     });
 
     test('화자 안내가 앞 문장에 달라붙지 않는다', () {
       // `'''` 바로 뒤의 개행은 Dart가 먹는다. 그대로 두면 "…and paced.It
       // does NOT…"이 되어 두 문장이 한 줄로 뭉친다.
-      expect(prompt, isNot(contains('paced.It does NOT')));
-      expect(prompt, contains('paced.\nIt does NOT'));
+      expect(prompt, isNot(contains('moves.If the active style')));
+      expect(prompt, contains('moves.\nIf the active style'));
     });
   });
 
-  group('고정 화자', () {
-    test('일회성 문체가 아니라 영구 정체성이다', () {
+  group('생각의 연결과 맥락', () {
+    test('상황에서 의미와 연결을 거쳐 자연스럽게 결론에 닿는다', () {
       expect(
         prompt,
-        contains('Treat this as a permanent speaking persona, not a temporary writing style.'),
+        contains('Start from the concrete situation.'),
       );
       expect(
         prompt,
-        contains('Maintain this speaking persona consistently across all topics and all sessions.'),
+        contains('Let the listener understand why it matters.'),
+      );
+      expect(prompt, contains('Look for the natural connection'));
+      expect(prompt, contains('This is a guide, not a fixed formula.'));
+      expect(
+        prompt,
+        contains('What is really happening here, why does it matter to me'),
       );
     });
 
     test('인물 이름을 부르지 않는다', () {
-      expect(prompt, contains('Never mention Anderson Cooper.'));
+      expect(prompt, contains('Never mention Trevor Noah.'));
       expect(
         prompt,
-        contains('Never reproduce his quotations, signature phrases, or uniquely identifiable wording.'),
+        contains(
+            'Never reproduce his quotations, jokes, catchphrases, or uniquely identifiable wording.'),
+      );
+    });
+
+    test('억지 유머와 과장된 성격을 만들지 않는다', () {
+      expect(prompt, contains('do not invent a joke or force humor'));
+      expect(
+        prompt,
+        contains('Do not make the user funnier, smarter, more dramatic'),
       );
     });
 
@@ -111,11 +128,12 @@ void main() {
       // Clear & Easy와의 차이가 어휘라면 두 카드의 구분이 무너진다.
       expect(
         prompt,
-        contains("Do not increase the user's vocabulary level unless natural spoken English truly requires it."),
+        contains('Keep the vocabulary familiar and easy to say aloud.'),
       );
       expect(
         prompt,
-        contains('The words stay just as easy as they were.'),
+        contains(
+            'Sophistication should come from the relationship between ideas'),
       );
     });
 
@@ -123,11 +141,13 @@ void main() {
       expect(prompt, contains('THIS IS NOT A CONDENSED VERSION'));
       expect(
         prompt,
-        contains('Never shorten the speech, never summarize it, and never drop material to sound more refined.'),
+        contains(
+            'Never shorten the speech, never summarize it, and never drop material to sound more refined.'),
       );
       expect(
         prompt,
-        contains('Never make the speech shorter or thinner than what you were given.'),
+        contains(
+            'Never make the speech shorter or thinner than what you were given.'),
       );
     });
   });
@@ -173,7 +193,8 @@ void main() {
       );
       expect(
         prompt,
-        contains('Which vocabulary and which regional wording to use is decided by the ENGLISH STYLE'),
+        contains(
+            'Which vocabulary and which regional wording to use is decided by the ENGLISH STYLE'),
       );
     });
 
@@ -182,7 +203,7 @@ void main() {
     });
 
     test('설명·라벨·따옴표 없이 발화만 낸다', () {
-      expect(prompt, contains('Output only the Natural & Polished speech.'));
+      expect(prompt, contains('Output only the Natural & Sharp speech.'));
       expect(prompt, contains('No explanation. No labels.'));
     });
   });

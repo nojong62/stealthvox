@@ -391,7 +391,8 @@ String? applySpanPatch(String raw, String span, String candidate) {
 /// 판정은 **글자 비교**다. 재전사문에 후보가 들어 있고 원문 조각이 없으면
 /// 후보를 지지한 것이고, 그 반대면 원문을 지킨 것이다. 둘 다 있거나 둘 다
 /// 없으면 알 수 없다 — 그때는 고치지 않는다.
-AcousticVerdict judgeAcoustic(String? rechecked, String span, String candidate) {
+AcousticVerdict judgeAcoustic(
+    String? rechecked, String span, String candidate) {
   final heard = (rechecked ?? '').replaceAll(RegExp(r'\s+'), '');
   if (heard.isEmpty) return AcousticVerdict.unavailable;
   final from = span.replaceAll(RegExp(r'\s+'), '');
@@ -499,8 +500,9 @@ List<OriginSuspect> parseOriginSuspects(
     if (turnId.isEmpty || span.isEmpty || candidate.isEmpty) continue;
     if (!knownTurnIds.contains(turnId)) continue;
     if (span == candidate) continue;
-    final evidence =
-        (raw['target_evidence'] ?? raw['evidence_target'] ?? '').toString().trim();
+    final evidence = (raw['target_evidence'] ?? raw['evidence_target'] ?? '')
+        .toString()
+        .trim();
     // Target 검사에서 온 것은 근거가 있어야 한다. 없으면 모델이 번역을
     // 건너뛰고 원문만 보고 답한 것이라, Target 관점의 의심이 아니다.
     if (requireTargetEvidence && evidence.isEmpty) continue;
@@ -524,7 +526,10 @@ List<OriginSuspect> parseOriginSuspects(
 // ══════════════════════════════════════════════════════════════════════
 
 /// 전사 원문을 시간순으로 훑어 **의심점만** 되돌려 받는 지시문.
-String buildOriginSuspectInstructions({required String sourceName}) =>
+String buildOriginSuspectInstructions({
+  required String sourceName,
+  bool excludeProperNouns = false,
+}) =>
     '''You are auditing a speech-recognition transcript of a real conversation.
 
 Your ONLY job is to point at words that speech recognition probably got wrong.
@@ -538,7 +543,7 @@ A word or short phrase that contradicts what the conversation itself establishes
 - A number, time, date, amount, or unit fights information given elsewhere.
 - A negation is flipped: the turn says the opposite of what follows from the conversation.
 - A tense puts events in an impossible order.
-- A name, place, company, or product becomes a different one.
+${excludeProperNouns ? '- Do not report names, places, companies, or products in this pass.' : '- A name, place, company, or product becomes a different one.'}
 - A word that sounds like another word and only the other one makes sense here.
 
 WHAT IS NOT A SUSPECT
@@ -559,7 +564,7 @@ Return JSON only: {"suspects": [...]}. Each entry:
   "turn_id"    the id exactly as given
   "span"       the exact substring from that line, copied character for character
   "candidate"  what you believe was actually said, same length in words
-  "reason"     one of: speakerConflict, pronounConflict, numberConflict, properNounConflict, negationConflict, tenseConflict, possessionConflict, soundAlike
+  "reason"     one of: speakerConflict, pronounConflict, numberConflict, ${excludeProperNouns ? '' : 'properNounConflict, '}negationConflict, tenseConflict, possessionConflict, soundAlike
   "confidence" high | medium | low
 Rules for "span" and "candidate": both must be short — a word or two. Never return a
 whole sentence. The span must appear in that line exactly once; if the word you suspect
@@ -575,39 +580,50 @@ often the correct one.''';
 String buildTargetValidationInstructions({
   required String sourceName,
   required String targetLanguage,
-}) =>
-    '''You are checking a $sourceName transcript for recognition errors that only become visible in $targetLanguage.
-
-Silently render each line into natural $targetLanguage in your head. Do not output the
-translation. $sourceName leaves out subjects and objects; $targetLanguage cannot. That is
-exactly why this pass exists — when you are forced to name who did what, a misheard
-subject stops making sense.
-
-REPORT A LINE WHEN, IN $targetLanguage:
+  bool subjectOnly = false,
+}) {
+  final focus = subjectOnly
+      ? '''This Duo Direct pass checks ONLY conversational context and subject identity:
+- "I" and "you" come out swapped relative to what the conversation establishes.
+- A third person becomes I/you or is attached to the wrong person.
+- The actor or possessor contradicts the surrounding turns.
+Do not report names, wording, fluency, numbers, time, tense, negation, or general
+translation quality in this pass.'''
+      : '''REPORT A LINE WHEN, IN $targetLanguage:
 - "I" and "you" come out swapped relative to what the conversation establishes.
 - A third person gets attached to the wrong someone, or becomes "I" or "you".
 - The actor of the sentence contradicts the surrounding turns.
 - Possession moves to the wrong person.
 - A negation is inverted.
 - A number, time, or date fights other lines.
-- A tense reverses the order events must have happened in.
+- A tense reverses the order events must have happened in.''';
+  final issues = subjectOnly
+      ? 'speakerConflict, pronounConflict, possessionConflict'
+      : 'speakerConflict, pronounConflict, numberConflict, properNounConflict, negationConflict, tenseConflict, possessionConflict';
+  return '''You are checking a $sourceName transcript for recognition errors that only become visible in $targetLanguage.
+
+Silently render each line into natural $targetLanguage in your head. The rendering is
+temporary: never output it, never save it, and never use it as the final Target. It exists
+only to expose subject relations that $sourceName may leave implicit.
+
+$focus
 
 YOU ARE A DETECTOR, NOT AN EDITOR.
-You never fix the $targetLanguage. You never hand back a corrected translation. You point
-at the $sourceName span that should be listened to again, and nothing else. The original
-audio decides what was said — not you, and not the translation.
+You never fix the $targetLanguage and you never translate it back into $sourceName. Point
+only at the $sourceName span that should be listened to again. The original PCM decides
+what was said — not you and not the temporary translation.
 
-Do not report a line for reading awkwardly in $targetLanguage. Awkward is not wrong.
+Do not report a line merely because it reads awkwardly. Awkward is not wrong.
 
 OUTPUT
 Return JSON only: {"suspects": [...]}. Each entry:
   "turn_id"          the id exactly as given
-  "origin_span"      the exact $sourceName substring to re-examine, appearing once in that line
-  "candidate_origin" the $sourceName wording you believe was actually said
-  "target_evidence"  the short $targetLanguage phrase that shows the problem
-  "issue"            one of: speakerConflict, pronounConflict, numberConflict, properNounConflict, negationConflict, tenseConflict, possessionConflict
-"target_evidence" is required. It is how we know you actually read this in $targetLanguage.
-Return {"suspects": []} when nothing contradicts anything.''';
+  "origin_span"      the exact $sourceName substring to re-examine, appearing once
+  "candidate_origin" the short $sourceName wording that may have been spoken
+  "target_evidence"  the short $targetLanguage phrase that exposed the subject problem
+  "issue"            one of: $issues
+"target_evidence" is required. Return {"suspects": []} when nothing contradicts anything.''';
+}
 
 /// 모델에게 보여 줄 대화록 한 벌.
 ///
@@ -673,7 +689,10 @@ class OriginRestorationEngine {
       log?.call('[ORIGIN-RESTORE] detect_failed reason=${error.runtimeType}');
       _emit(stats);
       return RestorationOutcome(
-          turns: turns, corrections: corrections, stats: stats, abandoned: true);
+          turns: turns,
+          corrections: corrections,
+          stats: stats,
+          abandoned: true);
     }
     stats = stats.copyWith(suspects: first.length);
 
@@ -684,7 +703,10 @@ class OriginRestorationEngine {
       stats = stats.copyWith(overflow: true, rejected: first.length);
       _emit(stats);
       return RestorationOutcome(
-          turns: turns, corrections: corrections, stats: stats, abandoned: true);
+          turns: turns,
+          corrections: corrections,
+          stats: stats,
+          abandoned: true);
     }
 
     stats = await _applyAll(first, turns, corrections, acoustic, stats,

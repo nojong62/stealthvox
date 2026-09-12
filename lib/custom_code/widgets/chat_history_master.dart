@@ -5917,6 +5917,10 @@ RULES — follow exactly:
   Timer? _p3ReturnTimer;
   static const Duration _kP3ReturnDelay = Duration(seconds: 3);
 
+  /// 자동 읽기 스크롤의 마지막 여백. 버튼 하단을 화면 끝에 딱 붙이면 시스템
+  /// 영역과 손가락에 가려지므로, 마지막 대사 몇 줄과 버튼이 함께 보이게 한다.
+  static const double _kP3ReadEndClearance = 32.0;
+
   /// 문장을 갈아 끼우는 동안만 참. 없는 문장은 여기서 만들어 오느라 몇 초가
   /// 걸리는데, 그 사이 두 번째 탭이 들어오면 두 벌이 겹쳐 돈다.
   bool _p3VariantSwitching = false;
@@ -6008,7 +6012,9 @@ RULES — follow exactly:
     if (controlsBox != null && controlsBox.hasSize) {
       final double controlsBottom =
           viewport.getOffsetToReveal(controlsBox, 1.0).offset;
-      if (controlsBottom > bottom) bottom = controlsBottom;
+      final double clearedControlsBottom =
+          controlsBottom + _kP3ReadEndClearance;
+      if (clearedControlsBottom > bottom) bottom = clearedControlsBottom;
     }
     // 본문과 버튼이 통째로 한 화면에 들어오면 `bottom <= top`이라 여기서
     // 멈춘다 — 짧은 문장은 예전처럼 한 번도 움직이지 않는다.
@@ -6371,6 +6377,7 @@ RULES — follow exactly:
             _p3Stage = P3Stage.compare;
             _p3UserSpeaking = false;
           });
+          _p3ScrollReadingTo(1);
           _scheduleP3ReturnToMenu();
           return;
         }
@@ -6381,6 +6388,7 @@ RULES — follow exactly:
           _p3Stage = P3Stage.compare;
           _p3UserSpeaking = false;
         });
+        _p3ScrollReadingTo(1);
         _scheduleP3ReturnToMenu();
       },
     );
@@ -6429,6 +6437,7 @@ RULES — follow exactly:
       _p3Stage = P3Stage.compare;
       _p3UserSpeaking = false;
     });
+    _p3ScrollReadingTo(1);
     _scheduleP3ReturnToMenu();
   }
 

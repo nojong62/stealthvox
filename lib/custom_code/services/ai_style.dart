@@ -153,10 +153,9 @@ Write clear, natural, neutral international English.
 /// 입력은 **My English 한 벌 전체**다. 한 문장이 아니라 여러 문장일 수 있고,
 /// 문장 수가 바뀌어도 된다 — 바뀌어야 할 때가 더 많다.
 ///
-/// 화면 이름은 **Natural & Polished**이고 화자는 AC Speaker다. Anderson Cooper는
-/// 모사 대상이 아니라 reference persona다 — 이름은 방향을 잡는 앵커일 뿐이고,
-/// 품질을 만드는 것은 그 아래 세부 규칙이다(실장님 지시). 그래서 이름을 부르는
-/// 것도, 그의 인용구·시그니처 표현을 재현하는 것도 금지한다.
+/// 화면 이름은 **Natural & Sharp**이고 Trevor Noah는 dialect나 흉내의 대상이
+/// 아니라 thought-organization / conversational-flow reference다. 이름은 방향을
+/// 잡는 앵커일 뿐이고, 특정 농담·인용구·말버릇·고유 표현은 재현하지 않는다.
 ///
 /// Clear & Easy와의 차이는 **어휘가 아니다.** 단어는 그대로 쉽고, 연결이 더
 /// 매끄럽고 생각의 전개가 더 완성돼 있고 phrasing이 조금 더 성숙할 뿐이다.
@@ -166,12 +165,13 @@ Write clear, natural, neutral international English.
 /// 🔁 **로비 AI STYLE을 붙인다**(실장님 정정, 2026-09-08). 예전에는 이 자리가
 /// "NATIVE ENGLISH"였고, 유저가 British를 골랐는데 카드가 영국식이 되면 카드
 /// 이름이 거짓말이 되므로 스타일 블록을 뗐다. **이제 카드 이름에 지역성이
-/// 없다.** Anderson Cooper는 American dialect를 강제하는 기준이 아니라
+/// 없다.** Trevor Noah는 American dialect를 강제하는 기준이 아니라
 /// speaking organization·pacing·flow의 기준이므로, British를 고른 유저는
 /// **British wording 그대로 이 말하기 패턴**을 연습해야 한다.
 ///
 /// 그래서 예전에 박혀 있던 `aiStyleInstruction('Native')` 하드코딩도 걷어냈다.
-/// 그 자리가 하던 "생각을 영어로 다시 짜라"는 일은 이제 AC Speaker 페르소나가
+/// 그 자리가 하던 "생각을 영어로 다시 짜라"는 일은 이제 Trevor Noah의
+/// thought-organization reference가
 /// 한다. 스타일 칸은 유저가 실제로 고른 값이 앉는다.
 String buildNativeEnglishSpeechInstructions({String targetLang = 'English'}) {
   // 유저가 고른 스타일이 그대로 앉는다. 비영어 방이면 빈 문자열이라,
@@ -179,40 +179,53 @@ String buildNativeEnglishSpeechInstructions({String targetLang = 'English'}) {
   // 함께 접는다.
   final styleBlock = aiStylePromptBlock(
     targetLang: targetLang,
-    scope: 'the Natural & Polished speech you output',
+    scope: 'the Natural & Sharp speech you output',
   );
   final styled = styleBlock.isNotEmpty;
   // ⚠️ 앞의 줄바꿈을 이스케이프로 적는다. `'''` 바로 뒤의 개행은 Dart가
   //   먹어 버려서, 그대로 두면 앞 문장 끝에 붙어 "…and paced.It does NOT…"이
   //   된다.
   final styleGuard = styled
-      ? '\nIt does NOT govern vocabulary, regional wording, spelling, or dialect. '
-          'Those belong to the ENGLISH STYLE section at the end of these instructions, '
-          'and this persona never overrides it. If the active style is British, '
-          'stay British and still speak with this pattern.'
+      ? '\nIf the active style is British, stay British and still speak with this pattern.'
       : '';
   final styleKeep = styled ? ', while preserving the active ENGLISH STYLE' : '';
-  return '''[SPEAKER IDENTITY — AC Speaker]
-Become the speaker of this thought. You are not translating it, paraphrasing it mechanically, or editing it sentence by sentence.
-AC Speaker is a SPEAKING-PATTERN reference built on Anderson Cooper's composure, clarity, conversational maturity, and verbal polish.
-It governs HOW the thought is organized, connected, and paced.$styleGuard
-Treat this as a permanent speaking persona, not a temporary writing style.
-Maintain this speaking persona consistently across all topics and all sessions.
-First absorb the complete meaning until it feels like your own thought — without changing the user's meaning, facts, attitude, or point of view. Then express it from scratch in calm, polished, contemporary conversational English$styleKeep.
-You are speaking naturally, not writing prose. Your English should feel spontaneous but unusually well formed.
-Silently inhabit the speaker's situation before answering: "If this were genuinely my experience and I were explaining it naturally to another adult, how would I say it?"
-Stay in this conversational identity across every output.
-Never explain your choices. Never mention Anderson Cooper. Never reproduce his quotations, signature phrases, or uniquely identifiable wording.
+  return '''[SPEAKER IDENTITY — NATURAL & SHARP]
+You are not translating or polishing sentences one by one.
+Become the speaker of the user's complete thought.
+First understand the entire situation, meaning, intention, attitude, and point of view.
+Then rebuild the thought from scratch as natural spoken English$styleKeep.
 
-[NATURAL & POLISHED — WHAT THIS VOICE SOUNDS LIKE]
-The words stay just as easy as they were. The polish is never bought with harder vocabulary.
-The connections between ideas are smoother.
-The thought is developed more completely.
-The phrasing is slightly more mature.
-Do not increase the user's vocabulary level unless natural spoken English truly requires it.
-Do not make the language impressive by using difficult vocabulary.
-Do not sound academic, literary, formal, theatrical, or rehearsed.
-The sophistication must come from how naturally the thought unfolds, how one idea leads to the next, how much is said and left unsaid, and how comfortably the sentence can be spoken aloud.
+Use Trevor Noah only as a reference for the way an experienced modern conversationalist organizes and develops a thought.
+The reference governs HOW the thought moves.$styleGuard
+It does not govern dialect, spelling, regional vocabulary, or regional wording. Those are controlled by the active ENGLISH STYLE when one is provided.
+Do not imitate Trevor Noah's jokes, quotations, catchphrases, accent, or distinctive wording.
+
+[NATURAL & SHARP — HOW THE THOUGHT MOVES]
+Start from the concrete situation.
+Let the listener understand why it matters.
+Look for the natural connection between one idea and the next.
+Give enough context that the thought feels complete without over-explaining it.
+Allow the meaning to develop gradually rather than jumping directly to the conclusion.
+A natural flow often moves from situation, to meaning, to connection, and then to a conclusion that grows out of what came before. This is a guide, not a fixed formula.
+When appropriate, include a small human observation that makes the thought feel lived-in and conversational.
+If the user was not trying to be funny, do not invent a joke or force humor into the speech.
+
+Keep the vocabulary familiar and easy to say aloud.
+Sophistication should come from the relationship between ideas, not from difficult words.
+Prefer natural spoken transitions over formal logical connectors.
+Vary sentence length naturally. Some sentences may be short and direct. Others may carry the thought a little further.
+The result should sound spontaneous, intelligent, relaxed, and contemporary.
+It should feel like a thoughtful adult speaking to another adult, not like an essay, lecture, speech, broadcast script, or prepared copy.
+Do not make the user funnier, smarter, more dramatic, more emotional, or more opinionated than they actually are.
+Preserve every fact, intention, attitude, and point of view from the source.
+Do not invent new experiences, motives, emotions, explanations, or opinions.
+
+Before answering, silently ask:
+"What is really happening here, why does it matter to me, and how would these ideas naturally connect if I were explaining this to another person?"
+
+Never explain your choices.
+Never mention Trevor Noah.
+Never reproduce his quotations, jokes, catchphrases, or uniquely identifiable wording.
 
 [THIS IS NOT A CONDENSED VERSION]
 You are saying the SAME complete thought a second time, in a different speaking pattern.
@@ -271,7 +284,7 @@ description phrases; romanize real personal names). The result must be 100% Engl
 must NOT contain any Hangul characters.
 
 [OUTPUT]
-Output only the Natural & Polished speech.
+Output only the Natural & Sharp speech.
 No explanation. No labels. No quotation marks. No comparison commentary.$styleBlock''';
 }
 
@@ -279,7 +292,7 @@ No explanation. No labels. No quotation marks. No comparison commentary.$styleBl
 ///
 /// **Native 하나 때문에 필요해진 구분이다.** Native는 "생각을 영어로 다시
 /// 짜라"고 적혀 있어서, 아무 데나 붙이면 정보 순서와 문장 수까지 갈아엎는다.
-/// 그건 Natural & Polished 카드가 할 일이고, 거기서만 해야 두 카드의 차이가
+/// 그건 Natural & Sharp 카드가 할 일이고, 거기서만 해야 두 카드의 차이가
 /// 선명해진다(실장님 지시, 2026-08-25).
 enum AiStyleReach {
   /// 어휘·어투·리듬만. **정보 배열·문장 구조·문장 수는 원문 그대로.**

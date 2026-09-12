@@ -72,11 +72,11 @@ void main() {
     final history = File('lib/custom_code/widgets/chat_history_master.dart')
         .readAsStringSync();
 
-    test('유저에게 보이는 이름은 PRACTICE · Clear & Easy · Natural & Polished다', () {
+    test('유저에게 보이는 이름은 PRACTICE · Clear & Easy · Natural & Sharp다', () {
       // 2026-09-08 뒤 두 카드가 화자 라벨을 쓴다. 저장 칸(`my_speech` /
       // `native_english`)은 그대로이고 화면 이름만 바뀌었다.
       expect(history, contains('"Clear & Easy"'));
-      expect(history, contains('"Natural & Polished"'));
+      expect(history, contains('"Natural & Sharp"'));
       expect(history, contains('"Practice"'));
     });
 
@@ -84,8 +84,13 @@ void main() {
       expect(history, contains('Larry King–style Plain Spoken English'));
       expect(
         history,
-        contains('Anderson Cooper–style Polished Conversational English'),
+        contains('Trevor Noah–style Natural Conversational English'),
       );
+    });
+
+    test('옛 Anderson 결과를 Trevor 기준 결과로 다시 만든다', () {
+      expect(history, contains('natural_sharp_trevor_v1'));
+      expect(history, contains('native_english_schema_version'));
     });
 
     test('British를 고른 방에서는 인물 이름을 감춘다', () {

@@ -18,7 +18,7 @@ import 'dart:typed_data';
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '/auth/firebase_auth/auth_util.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:audioplayers/audioplayers.dart' hide Source;
 import 'package:http/http.dart' as http;
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:record/record.dart';
@@ -196,6 +196,14 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   // waiting으로 되돌아가며 깜빡인다. 한 번 만들어 계속 쓴다.
   Stream<QuerySnapshot>? _keepersStream;
 
+  // Keep one history stream across rebuilds as well. The visible-id update below
+  // deliberately rebuilds once, which must not replace an in-flight snapshot.
+  Stream<QuerySnapshot>? _historyStream;
+  Timer? _historyFallbackTimer;
+  List<QueryDocumentSnapshot>? _historyFallbackDocs;
+  bool _historyFallbackLoading = false;
+  String? _historyLoadError;
+
   @override
   void initState() {
     super.initState();
@@ -223,6 +231,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     clearBillingIdle();
     BillingTicker.instance.pause();
     _keepersScrollController.dispose();
+    _historyFallbackTimer?.cancel();
     _keeperAudioPlayer?.dispose();
     _keeperCorrectionPlayer?.dispose();
     if (_keeperIsRecording) {
@@ -230,6 +239,58 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     }
     _keeperRecorder?.dispose();
     super.dispose();
+  }
+
+  Query _historyQuery() => currentUserReference!
+      .collection('chat_history')
+      .orderBy('is_pinned', descending: true)
+      .orderBy('created_at', descending: true);
+
+  void _ensureHistoryStream() {
+    _historyStream ??= _historyQuery().snapshots();
+    _historyFallbackTimer ??= Timer(const Duration(seconds: 2), () {
+      unawaited(_loadHistoryFallback());
+    });
+  }
+
+  Future<void> _loadHistoryFallback() async {
+    if (!mounted || _historyFallbackLoading || _historyFallbackDocs != null) {
+      return;
+    }
+    _historyFallbackLoading = true;
+    try {
+      QuerySnapshot result = await _historyQuery()
+          .get(const GetOptions(source: Source.cache))
+          .timeout(const Duration(seconds: 2));
+      if (result.docs.isEmpty) {
+        result = await _historyQuery()
+            .get(const GetOptions(source: Source.server))
+            .timeout(const Duration(seconds: 10));
+      }
+      if (!mounted) return;
+      setState(() {
+        _historyFallbackDocs = result.docs;
+        _historyLoadError = null;
+      });
+      debugPrint(
+          '[HISTORY-LIST-STREAM] fallback loaded=${result.docs.length}');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _historyLoadError = e.toString());
+      debugPrint('[HISTORY-LIST-STREAM] fallback error=$e');
+    } finally {
+      _historyFallbackLoading = false;
+    }
+  }
+
+  void _retryHistoryLoad() {
+    _historyFallbackTimer?.cancel();
+    setState(() {
+      _historyStream = null;
+      _historyFallbackTimer = null;
+      _historyFallbackDocs = null;
+      _historyLoadError = null;
+    });
   }
 
   Future<void> _fetchApiKey() async {
@@ -424,19 +485,42 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   //  기존 히스토리 바디 (변경 없음)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Widget _buildHistoryBody() {
+    _ensureHistoryStream();
     return StreamBuilder<QuerySnapshot>(
-      stream: currentUserReference!
-          .collection('chat_history')
-          .orderBy('is_pinned', descending: true)
-          .orderBy('created_at', descending: true)
-          .snapshots(),
+      stream: _historyStream,
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.hasData) {
+          _historyFallbackTimer?.cancel();
+          _historyFallbackTimer = null;
+          _historyLoadError = null;
+        }
+
+        final allDocs = snapshot.data?.docs ?? _historyFallbackDocs;
+        if (allDocs == null) {
+          final error = snapshot.error?.toString() ?? _historyLoadError;
+          if (error != null) {
+            debugPrint('[HISTORY-LIST-STREAM] stream error=$error');
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error_outline_rounded,
+                      size: 48, color: Colors.redAccent),
+                  const SizedBox(height: 16),
+                  Text('히스토리를 불러오지 못했습니다.',
+                      style: GoogleFonts.notoSans(color: Colors.white70)),
+                  const SizedBox(height: 12),
+                  OutlinedButton(
+                    onPressed: _retryHistoryLoad,
+                    child: const Text('다시 시도'),
+                  ),
+                ],
+              ),
+            );
+          }
           return const Center(
               child: CircularProgressIndicator(color: Colors.amber));
         }
-
-        final allDocs = snapshot.data!.docs;
 
         final filteredDocs = allDocs.where((doc) {
           Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
@@ -2625,9 +2709,9 @@ AI에게 교정과 피드백을 받습니다.
 🔄 Practice — 역할 교환 대화 연습
 AI와 역할을 바꿔가며 실제 대화처럼 연습합니다.
 
-✨ Clear & Easy · Natural & Polished — 심화 훈련
+✨ Clear & Easy · Natural & Sharp — 심화 훈련
 대화 소재로 지은 말하기 연습문을 쉽고 직접적인 영어로 들려주는
-Clear & Easy와, 같은 생각을 더 다듬어 말하는 Natural & Polished를
+Clear & Easy와, 같은 생각을 맥락과 연결로 풀어내는 Natural & Sharp를
 의미 단위(Chunk)별로 끊어 에코잉·쉐도잉으로 연습합니다.
 
 🔊 볼륨 — 소리를 줄이고 쉐도잉하세요
