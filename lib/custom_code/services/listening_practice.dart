@@ -61,19 +61,28 @@ String buildTargetRegisterPolicy(String targetLang) {
   return 'Use the everyday polite spoken register of $targetLang. Keep it warm and spoken, never stiff or written.';
 }
 
-/// Step 2의 이해 확인 규칙. 시험이 아니라 대화 안에서 자연스럽게 되묻는다.
+/// Step 2의 되묻기 규칙. 목적은 **타겟 언어 듣기 + 대화 확장**이다.
+///
+/// Step 1은 보통 유저가 묻고 AI가 답한다. Step 2는 반대로 AI의 질문이든
+/// 대답이든 그것을 귀로 받아 유저가 답하는 자리다 — 유저가 정확히 못
+/// 답했거나 일부만 답한 그 지점이 더 정교한 대화를 배울 자리다.
+///
+/// "틀렸으면 교정"이 아니라 "부족하면 한 단계 더 끌어낸다" — 답을 대신
+/// 완성해 주지 않고, 놓친 핵심 하나만 짧은 보충 질문이나 한마디로 되짚어
+/// 유저가 스스로 더 구체적으로 말하게 한다. 충분히 답했으면 아무것도
+/// 덧붙이지 않는다.
 String buildListeningPracticePolicy({
   required String nativeLang,
   required String targetLang,
 }) {
-  return '''[LISTENING PRACTICE — CHECK UNDERSTANDING INSIDE THE CONVERSATION]
-The user hears your $targetLang and answers in $nativeLang. Read their answer against what you just said.
-- If it fits what you said: simply continue the conversation. Do not add a comprehension check.
-- If it only partly fits: do not repeat yourself word for word. Ask again in shorter, plainer $targetLang, once.
-- If the answer is thin, or skips a detail you asked about (who, when, where, how many, why): ask about that missing piece specifically, in simpler $targetLang, so they get another chance to catch it by ear.
-- If it misses the point of your question: do not ignore their answer and do not just agree. Acknowledge what they said, then naturally bring the focus back in $targetLang.
-- Prefer questions that make them listen closely: a specific detail, a small choice between two things, a follow-up on what they just said.
-Never test, grade, or correct the user. Never say they were wrong, never mention understanding or listening. Never press the same question more than once. Respect what they actually said and clarify only when the conversation needs it. It must feel like real talk.''';
+  return '''[LISTENING PRACTICE — DRAW THE ANSWER OUT, DO NOT GRADE IT]
+You speak $targetLang; the user answers in $nativeLang. Here you lead — they take in your $targetLang question or remark by ear and respond to it. Step 2 trains two things at once: catching that $targetLang, and saying more than a first thin answer.
+- When their response only partly meets what you said, or skips something you asked about: do not move on to a new topic yet. Lead them once more, naturally, to fill in what is missing. That gap is where the better conversation gets learned.
+- Never complete the answer for them.
+- Take the one key thing they missed and come back to it once — a single short follow-up question, or a short remark of your own that invites them to go on — in plainer $targetLang than before.
+- Where it helps, offer a choice between two things, name a concrete situation, or ask for a reason or an example, so they say one step more specifically.
+- If they already answered enough, add no extra question and let the conversation move on.
+Never test, grade, or correct the user. Never say they were wrong, never mention understanding or listening. Never press the same question twice. The goal is not checking answers — it is growing an incomplete answer into a more precise, more concrete conversation. It must feel like real talk.''';
 }
 
 /// Step 2의 **마지막 말** — 시스템 프롬프트 맨 끝과, 유저 메시지 바로 앞의

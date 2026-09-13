@@ -50,9 +50,21 @@ void main() {
       final rule = buildListeningPracticePolicy(
           nativeLang: 'Korean', targetLang: 'English');
       expect(rule, contains('LISTENING PRACTICE'));
-      expect(rule, contains('shorter, plainer English'));
+      expect(rule, contains('plainer English'));
       expect(rule, contains('Never test, grade, or correct'));
-      expect(rule, contains('Never press the same question more than once'));
+      expect(rule, contains('Never press the same question twice'));
+    });
+
+    // 🎯 Step 2의 목적은 듣기 + 대화 확장이다. "틀렸으면 교정"이 아니라
+    //   "부족하면 한 단계 더 끌어낸다" — 이 네 가지가 빠지면 규칙이 다시
+    //   정답 검사기로 돌아간다.
+    test('부족한 답은 한 단계 더 끌어낸다 — 대신 완성해 주지 않는다', () {
+      final rule = buildListeningPracticePolicy(
+          nativeLang: 'Korean', targetLang: 'English');
+      expect(rule, contains('Never complete the answer for them'));
+      expect(rule, contains('do not move on to a new topic yet'));
+      expect(rule, contains('the one key thing they missed'));
+      expect(rule, contains('If they already answered enough'));
     });
 
     test('마지막 규칙은 배울 언어만 쓰라고 못 박고 이전 답변 언어를 무시하게 한다', () {
