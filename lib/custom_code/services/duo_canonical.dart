@@ -4,8 +4,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'duo_origin_corrector.dart';
 import 'duo_study_state.dart';
 import 'history_finalize.dart';
+import 'history_text_model.dart';
+import 'origin_restoration.dart' show kMessagePcmKeyField;
 
 // ====================================================================
 // 🧩 [DUO-CANONICAL] 한 통화 = 하나의 대화 기록.
@@ -98,6 +101,7 @@ class DuoCanonicalTurn {
     required this.state,
     this.spokenAtMs,
     this.subject = '',
+    this.rawText = '',
   });
 
   /// 말한 사람. 채널에 실린 `senderRole` 그대로(HOST/GUEST).
@@ -125,6 +129,26 @@ class DuoCanonicalTurn {
   /// 거기 섞이면 학습 자료에 괄호가 따라 들어간다.
   final String subject;
 
+  /// 🩺 [ORIGIN-CORRECT] 문맥 교정이 [text]를 갈아 끼우기 **전**의 전사 원문.
+  ///
+  /// **고쳐진 줄에만 값이 있다.** 비어 있으면 이 줄은 gpt-transcribe가 적은
+  /// 그대로라는 뜻이고, 옛 canonical 문서도 여기가 비어 있다.
+  final String rawText;
+
+  /// 문맥 교정이 손댄 줄인가.
+  bool get wasCorrected => rawText.trim().isNotEmpty && rawText.trim() != text.trim();
+
+  /// 같은 줄에 교정 전 글자만 얹는다.
+  DuoCanonicalTurn withRawText(String raw) => DuoCanonicalTurn(
+        role: role,
+        text: text,
+        sourceIds: sourceIds,
+        state: state,
+        spokenAtMs: spokenAtMs,
+        subject: subject,
+        rawText: raw,
+      );
+
   Map<String, dynamic> toMap() => <String, dynamic>{
         'role': role,
         'text': text,
@@ -132,6 +156,8 @@ class DuoCanonicalTurn {
         'state': state,
         if (spokenAtMs != null) 'spoken_at_ms': spokenAtMs,
         if (subject.isNotEmpty) 'subject': subject,
+        // 고친 줄에만 싣는다. 옛 문서에는 이 칸이 없고, 없어도 정상이다.
+        if (rawText.isNotEmpty) 'raw_text': rawText,
       };
 
   static DuoCanonicalTurn? fromMap(Object? raw) {
@@ -148,6 +174,8 @@ class DuoCanonicalTurn {
       state: (raw['state'] ?? kStudyStateIncluded).toString(),
       spokenAtMs: (raw['spoken_at_ms'] as num?)?.toInt(),
       subject: (raw['subject'] ?? '').toString().trim(),
+      // 옛 canonical 문서에는 없다. 없으면 "교정 안 된 줄"과 같은 뜻이다.
+      rawText: (raw['raw_text'] ?? '').toString().trim(),
     );
   }
 }
@@ -169,6 +197,96 @@ class DuoSourceUtterance {
   final int spokenAtMs;
   final int seq;
   final String srcLang;
+
+  /// 글자만 갈아 끼운 같은 줄. 문맥 교정이 쓴다.
+  DuoSourceUtterance withText(String next) => DuoSourceUtterance(
+        id: id,
+        role: role,
+        text: next,
+        spokenAtMs: spokenAtMs,
+        seq: seq,
+        srcLang: srcLang,
+      );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 🩺 문맥 교정 다리 — canonical과 [duo_origin_corrector] 사이
+// ══════════════════════════════════════════════════════════════════════
+
+/// 교정기에게 줄 대화. **화자는 A/B로만 준다**(`DuoOriginLine.speaker` 참고).
+///
+/// HOST/GUEST 두 값만 오지만, 옛 방·로봇 판에서 빈 role이 올 수 있다. 그때는
+/// **처음 나온 순서대로** 글자를 매긴다 — 누가 누구인지는 몰라도 두 사람이
+/// 번갈아 말한다는 사실만 있으면 된다.
+List<DuoOriginLine> duoOriginLinesOf(List<DuoSourceUtterance> source) {
+  final labels = <String, String>{};
+  const alphabet = <String>['A', 'B', 'C', 'D'];
+  final out = <DuoOriginLine>[];
+  for (final u in source) {
+    final String key = u.role.trim().toUpperCase();
+    final String label = labels.putIfAbsent(
+      key,
+      () => labels.length < alphabet.length ? alphabet[labels.length] : 'X',
+    );
+    out.add(DuoOriginLine(id: u.id, speaker: label, text: u.text));
+  }
+  return out;
+}
+
+/// 이 통화에서 가장 많이 쓰인 언어 이름. 없으면 빈 문자열이다.
+///
+/// 직접 대화는 줄마다 언어가 다를 수 있어 하나로 못 박지 않는다 — 프롬프트가
+/// 이 값을 "대개 이 언어다"로만 쓴다.
+String duoDominantSourceLanguage(List<DuoSourceUtterance> source) {
+  final counts = <String, int>{};
+  for (final u in source) {
+    final String lang = u.srcLang.trim();
+    if (lang.isEmpty) continue;
+    counts[lang] = (counts[lang] ?? 0) + 1;
+  }
+  if (counts.isEmpty) return '';
+  var best = '';
+  var bestCount = 0;
+  counts.forEach((lang, seen) {
+    if (seen > bestCount) {
+      best = lang;
+      bestCount = seen;
+    }
+  });
+  return best;
+}
+
+/// 채택된 교정을 원본 타임라인에 얹는다. **원본 목록은 그대로 둔다.**
+List<DuoSourceUtterance> applyDuoOriginCorrectionsToSource(
+  List<DuoSourceUtterance> source,
+  Map<String, String> corrections,
+) {
+  if (corrections.isEmpty) return source;
+  return <DuoSourceUtterance>[
+    for (final u in source)
+      corrections.containsKey(u.id) && corrections[u.id]!.trim().isNotEmpty
+          ? u.withText(corrections[u.id]!.trim())
+          : u
+  ];
+}
+
+/// 고쳐진 줄에 **교정 전 글자**를 얹는다.
+///
+/// canonical 한 줄은 source id 하나와 1:1이므로(`reconcileDuoConversation`),
+/// 첫 id로 원본을 찾으면 된다.
+List<DuoCanonicalTurn> attachDuoOriginRawTexts(
+  List<DuoCanonicalTurn> turns,
+  List<DuoSourceUtterance> original,
+  Map<String, String> corrections,
+) {
+  if (corrections.isEmpty) return turns;
+  final rawById = <String, String>{for (final u in original) u.id: u.text};
+  return <DuoCanonicalTurn>[
+    for (final t in turns)
+      (t.sourceIds.isNotEmpty && corrections.containsKey(t.sourceIds.first))
+          ? t.withRawText(rawById[t.sourceIds.first] ?? '')
+          : t
+  ];
 }
 
 /// 세션 문서.
@@ -516,6 +634,9 @@ Future<void> buildDuoCanonical({
   required bool isHost,
   required String apiKey,
   required String model,
+  // 🩺 문맥 교정기. 호출부는 이 값을 넘기지 않는다 — 구조 판정 모델과 다른
+  //   축이고, 되돌릴 때도 이 한 줄만 보면 된다.
+  String correctorModel = kDuoOriginCorrectorModel,
 }) async {
   if (roomId.isEmpty || uid.isEmpty) return;
   try {
@@ -539,12 +660,39 @@ Future<void> buildDuoCanonical({
       }, SetOptions(merge: true));
       return;
     }
+    // 🩺 [ORIGIN-CORRECT] **구조 판정보다 먼저 글자를 본다.**
+    //
+    //   전사는 발화 하나를 그 자리에서 옮겼고, 지금은 통화 전체가 있다.
+    //   잘못 들린 낱말을 여기서 되살려 두면 그 뒤의 판단이 전부 고쳐진 글
+    //   위에서 돈다 — 구조 판정도, 개인 방의 원문도, PCM 재검증의 대상도.
+    //
+    //   실패는 전부 "원 전사 유지"다. 교정이 안 되는 것과 대화가 안 만들어
+    //   지는 것은 전혀 다른 무게라, 이 호출이 canonical을 무너뜨리지 않는다.
+    final correction = await correctDuoOriginTexts(
+      apiKey: apiKey,
+      model: correctorModel,
+      sourceName: duoDominantSourceLanguage(source),
+      lines: duoOriginLinesOf(source),
+    ).catchError((Object e) {
+      debugPrint('[DUO-ORIGIN-CORRECT] failed=${e.runtimeType}');
+      return const DuoOriginCorrectionResult.none();
+    });
+    final effective =
+        applyDuoOriginCorrectionsToSource(source, correction.corrections);
+
     final reconciled = await reconcileDuoConversation(
       apiKey: apiKey,
       model: model,
-      source: source,
+      // 교정된 글로 구조를 본다. 되먹임·중복 판정도 같은 글 위에서 돈다.
+      source: effective,
     );
-    final turns = reconciled ?? fallbackCanonical(source);
+    // 🔤 교정 전 글자를 canonical에 함께 싣는다. 개인 방이 이 값을
+    //   `original_text_raw`로 옮겨, 무엇이 어떻게 들렸는지가 남는다.
+    final turns = attachDuoOriginRawTexts(
+      reconciled ?? fallbackCanonical(effective),
+      source,
+      correction.corrections,
+    );
     final int version = DateTime.now().millisecondsSinceEpoch;
     await duoCanonicalRef(roomId).set(<String, dynamic>{
       'status': kCanonicalReady,
@@ -553,6 +701,11 @@ Future<void> buildDuoCanonical({
       'source_count': source.length,
       'shown_count': turns.where((t) => isStudyVisible(t.state)).length,
       'model': reconciled == null ? 'fallback_merge' : model,
+      // 🩺 고친 줄이 하나라도 있을 때만 적는다. 개인 방이 이 값을 그 줄의
+      //   `origin_correction_model`로 옮긴다 — 옛 판과 섞이지 않게.
+      if (correction.corrections.isNotEmpty) 'corrector_model': correctorModel,
+      'corrected_count': correction.corrections.length,
+      'corrector_overflow': correction.overflow,
       'both_flush_marks': bothDone,
       'turns': <Map<String, dynamic>>[for (final t in turns) t.toMap()],
       'updated_at': FieldValue.serverTimestamp(),
@@ -561,6 +714,8 @@ Future<void> buildDuoCanonical({
         'turns=${turns.length} '
         'shown=${turns.where((t) => isStudyVisible(t.state)).length} '
         'model=${reconciled == null ? 'fallback_merge' : model} '
+        'corrected=${correction.corrections.length} '
+        'correctorOverflow=${correction.overflow} '
         'bothMarks=$bothDone');
   } catch (e) {
     debugPrint('[DUO-CANON] build_failed=${e.runtimeType}');
@@ -619,6 +774,10 @@ Future<bool> applyDuoCanonicalToHistory({
           DuoCanonicalTurn.fromMap(raw)!
     ];
     if (turns.isEmpty) return false;
+    // 어느 모델이 고쳤는지는 **그 판을 만든 쪽**이 적어 둔다. 읽는 폰의
+    // 상수를 찍으면, 두 폰의 앱 판이 다를 때 없는 사실이 기록된다.
+    final String correctorModel =
+        (data['corrector_model'] ?? kDuoOriginCorrectorModel).toString();
 
     // 내 방의 줄을 채널 문서 id로 찾을 수 있어야 옮길 수 있다.
     final msgSnap = await historyRef.collection('messages').get();
@@ -628,6 +787,9 @@ Future<bool> applyDuoCanonicalToHistory({
     // 갈아 끼우기 **직전**의 글자. `rawTextById`와 다르다 — 그쪽은 맨 처음
     // 원문이라 두 번째 정돈에서는 지금 글자와 다를 수 있다.
     final curTextById = <String, String>{};
+    // 🎧 이 폰에 그 발화의 소리가 있는가. 문맥 교정이 PCM 재검증을 받을 수
+    //   있는 줄인지가 여기서 갈린다 — Duo는 내 마이크 소리만 내 창고에 있다.
+    final hasPcmById = <String, bool>{};
     // 🛡️ 사용자가 손댄 줄. 확정 전이라도 정돈이 덮지 못한다.
     final userLocked = <String>{};
     // 참고 주어만 따로 잠근다. 줄을 안 고쳤어도 주어는 고쳤을 수 있다.
@@ -652,6 +814,8 @@ Future<bool> applyDuoCanonicalToHistory({
       // 🎯 [TARGET-SYNC] 지금 화면에 있는 글자. 정돈이 이걸 바꾸면 그 줄의
       //   배울글은 더 이상 그 줄의 번역이 아니다.
       curTextById[channelId] = currentText;
+      hasPcmById[channelId] =
+          (data[kMessagePcmKeyField] ?? '').toString().trim().isNotEmpty;
     }
     if (byChannelId.isEmpty) return false;
 
@@ -677,11 +841,26 @@ Future<bool> applyDuoCanonicalToHistory({
         //   다른 문장을 가리킨 채 남는다.
         final String curText = curTextById[turn.sourceIds.first] ?? '';
         final bool textChanged = curText.isNotEmpty && curText != turn.text;
+        // 🩺 [ORIGIN-CORRECT] 문맥 교정이 손댄 줄에만 자취를 남긴다.
+        //
+        //   `context_verified_candidate` — 이 폰에 소리가 있다. 이어지는
+        //     원문 복원이 같은 소리를 다시 듣고 뒤집을 수 있는 **후보**다.
+        //   `context_unverified` — 이 폰에는 소리가 없다(상대 발화). 문맥만
+        //     보고 선 교정이라, 여기서는 되짚을 길이 없다.
+        //
+        //   안 고친 줄에는 아무것도 찍지 않는다 — 찍으면 "무엇이 교정된
+        //   줄인가"를 데이터로 셀 수 없게 된다.
+        final bool corrected = turn.wasCorrected;
+        final String stage = (hasPcmById[turn.sourceIds.first] ?? false)
+            ? kOriginCorrectionVerifiable
+            : kOriginCorrectionUnverified;
         batch.update(head, <String, dynamic>{
           'original_text': turn.text,
           if (headRaw.isNotEmpty && headRaw != turn.text)
             kOriginalRawField: headRaw,
           if (textChanged) 'translated_text': '',
+          if (corrected) kOriginCorrectionModelField: correctorModel,
+          if (corrected) kOriginCorrectionStageField: stage,
           // 🧭 [SUBJECT-HINT] 3자가 나오는 줄에만 값이 있다. 없으면 빈 문자열을
           //   써서 **지난 판의 값을 지운다** — 정돈이 다시 돌아 "이 줄은 3자
           //   얘기가 아니었다"고 판단했는데 옛 주어가 남아 있으면, 화면이

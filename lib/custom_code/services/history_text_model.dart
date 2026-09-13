@@ -10,6 +10,10 @@
 //
 //   ② 통화 정돈     [kDuoCanonicalModel]
 //      양쪽 전사를 한 시간축으로 합쳐 조각을 잇고 되먹임·중복을 가른다.
+//      **글자는 고치지 않는다.**
+//
+//   ②-a 원문 문맥 교정 [kDuoOriginCorrectorModel]
+//      통화 전체 문맥으로 잘못 들린 낱말 하나를 되살린다. ②의 앞에 선다.
 //
 //   ③ 공부방 교정   [kHistoryRepairModel]
 //      잘못 들은 낱말을 문맥으로 되살리고 배울글을 만든다.
@@ -22,6 +26,16 @@
 ///
 /// 2026-08-28: `gpt-4o-mini` → `gpt-4.1-mini` 시험 중.
 const String kDuoCanonicalModel = 'gpt-4.1-mini';
+
+/// ②-a 통화 원문 문맥 교정(Duo Direct).
+///
+/// **①의 결과를 고치는 층이고, ②의 구조 판정과 다른 일이다.** 통화가 끝나
+/// 전체 문맥이 생긴 뒤에 잘못 들린 낱말 하나를 되살린다. 대사를 만드는
+/// [kDialogBrainModel]과도, 구조만 보는 [kDuoCanonicalModel]과도 합치지
+/// 않는다 — 셋 중 하나를 바꿨을 때 무엇이 달라졌는지 갈라 볼 수 있어야 한다.
+///
+/// 2026-09-13: 문맥 교정층 신설과 함께 `gpt-5.6-luna`로 시작한다.
+const String kDuoOriginCorrectorModel = 'gpt-5.6-luna';
 
 /// ③ 공부방 원문 교정 + 배울글.
 ///

@@ -6,8 +6,11 @@ import 'package:stealth_vox/custom_code/services/duo_study_state.dart';
 
 /// 정돈 프롬프트는 private이라 소스를 읽어 규칙의 존재를 붙잡는다.
 /// (`duo_keep_all_test.dart`와 같은 방식이다.)
-String _canonSource() =>
-    File('lib/custom_code/services/duo_canonical.dart').readAsStringSync();
+/// 줄바꿈은 맞춰 읽는다 — 작업 트리는 CRLF인데 규칙 문장은 여러 줄에 걸쳐 있다
+/// (`origin_restoration_runner_lifecycle_test.dart`와 같은 방식이다).
+String _canonSource() => File('lib/custom_code/services/duo_canonical.dart')
+    .readAsStringSync()
+    .replaceAll('\r\n', '\n');
 
 DuoSourceUtterance u(String id, String role, String text, int ms) =>
     DuoSourceUtterance(
