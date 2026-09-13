@@ -171,5 +171,19 @@ void main() {
       expect(guard, greaterThan(cleanup));
       expect(remove, greaterThan(guard));
     });
+
+    // 🎧 재청취가 실통화보다 나쁜 조건으로 돌면, 고칠 수 있었던 낱말이
+    //   `supportsOriginal`로 기각된다. 두 인자가 빠지는 순간이 그 상태다.
+    test('재청취는 언어를 못 박고 앞 무음을 깎지 않는다', () {
+      final recheck = runner.indexOf('Future<String?> _recheck(');
+      expect(recheck, greaterThanOrEqualTo(0));
+      final body = runner.substring(recheck);
+      expect(body, contains('language: language.isEmpty ? null : language'));
+      expect(body, contains('trimLeadingSilence: false'));
+    });
+
+    test('재청취 언어는 sourceName에서 온다', () {
+      expect(runner, contains('language: restorationLanguageCode(sourceName)'));
+    });
   });
 }

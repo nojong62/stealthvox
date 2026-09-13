@@ -289,6 +289,9 @@ class OriginRestorationRunner {
           apiKey: apiKey,
           roomId: roomId,
           pcmKey: pcmKey,
+          // 🎧 실통화가 못 박았던 그 언어. 표에 없으면 빈 문자열이고,
+          //   그때는 예전처럼 언어 없이 부른다.
+          language: restorationLanguageCode(sourceName),
         ),
         log: debugPrint,
       );
@@ -435,18 +438,33 @@ class OriginRestorationRunner {
   }
 
   /// 그 발화의 소리만 다시 듣는다. **전체 대화를 다시 전사하지 않는다.**
+  ///
+  /// 🎧 **실통화와 같은 조건으로 부른다.** 예전에는 언어를 안 넘기고 앞
+  ///   무음까지 깎아서(`trimLeadingSilence` 기본값 true), 같은 모델·같은
+  ///   소리인데 1차 전사보다 나쁜 조건으로 다시 듣고 있었다. 판정이
+  ///   `supportsOriginal`로 기울면 고칠 수 있었던 낱말이 그냥 기각된다.
+  ///
+  ///   · language          실통화는 로비 Origin을 못 박는다
+  ///   · trimLeadingSilence 캡처가 앞 600ms를 **일부러** 담아 둔다
+  ///     (`DuoUtteranceCapture`). 여기서 깎으면 첫 음절이 날아간다.
   Future<String?> _recheck({
     required String apiKey,
     required String roomId,
     required String pcmKey,
+    String language = '',
   }) async {
     final pcm = await OriginPcmStore.instance.readKeyed(roomId, pcmKey);
     if (pcm == null || pcm.isEmpty) return null;
+    debugPrint('[ORIGIN-RESTORE] recheck room=$roomId '
+        'lang=${language.isEmpty ? '-' : language} trimLead=false '
+        'bytes=${pcm.lengthInBytes}');
     return OpenAiTranscribeService.transcribePcm16(
       apiKey: apiKey,
       pcm: pcm,
       sampleRate: kStealthVoxSttSampleRate,
       model: OpenAiTranscribeService.model,
+      language: language.isEmpty ? null : language,
+      trimLeadingSilence: false,
       timeout: _timeout,
     );
   }

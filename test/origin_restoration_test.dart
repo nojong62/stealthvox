@@ -53,6 +53,26 @@ AcousticRechecker ears(Map<int, String?> heard) =>
 
 void main() {
   // ══════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════
+  group('재청취 언어 — 실통화와 같은 조건으로 다시 듣는다', () {
+    test('아는 언어 이름은 코드로 못 박는다', () {
+      expect(restorationLanguageCode('Korean'), 'ko');
+      expect(restorationLanguageCode('English'), 'en');
+      expect(restorationLanguageCode('Japanese'), 'ja');
+    });
+
+    test('대소문자와 공백은 흡수한다', () {
+      expect(restorationLanguageCode('  korean '), 'ko');
+      expect(restorationLanguageCode('KOREAN'), 'ko');
+    });
+
+    test('표에 없는 이름은 빈 문자열이다 — 틀린 언어를 못 박느니 안 박는다', () {
+      expect(restorationLanguageCode('Klingon'), '');
+      expect(restorationLanguageCode(''), '');
+      expect(restorationLanguageCode('   '), '');
+    });
+  });
+
   group('최소 수정 — 낱말 하나를 되살린다', () {
     test('한 낱말을 바꾼다', () {
       expect(

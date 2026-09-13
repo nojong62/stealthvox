@@ -405,6 +405,34 @@ AcousticVerdict judgeAcoustic(
   return AcousticVerdict.unclear;
 }
 
+/// 🎧 [RECHECK-LANG] 다시 들을 때 못 박을 언어 코드. **모르면 빈 문자열이다.**
+///
+/// 실통화 전사는 로비에서 정한 Origin을 언제나 지정하고 부른다
+/// (`duo_stt_pipeline._transcribe`). 재청취만 언어 없이 부르면 같은 소리를
+/// 더 나쁜 조건으로 다시 듣는 셈이라, 원문을 지지하는 쪽으로 기울어 고칠 수
+/// 있었던 낱말이 기각된다.
+///
+/// ⚠️ **`deepgramLanguageCode`를 쓰지 않는다.** 그쪽은 모르는 이름을 `en`으로
+/// 떨어뜨리는데, 여기서 틀린 언어를 못 박는 것은 아예 안 박느니만 못하다.
+/// 표에 없으면 빈 문자열을 돌려주고 호출부가 언어를 넘기지 않는다.
+String restorationLanguageCode(String sourceName) =>
+    _kRestorationLanguageCodes[sourceName.trim().toLowerCase()] ?? '';
+
+const Map<String, String> _kRestorationLanguageCodes = <String, String>{
+  'korean': 'ko',
+  'english': 'en',
+  'japanese': 'ja',
+  'chinese': 'zh',
+  'spanish': 'es',
+  'french': 'fr',
+  'german': 'de',
+  'italian': 'it',
+  'portuguese': 'pt',
+  'russian': 'ru',
+  'hindi': 'hi',
+  'dutch': 'nl',
+};
+
 /// 소리와 문맥을 합쳐 최종 등급을 낸다.
 ///
 /// **[SuspectConfidence.high]는 소리가 후보를 지지할 때만 나온다.** 문맥이
