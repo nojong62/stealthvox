@@ -56,6 +56,65 @@ const int kOriginPcmGlobalMaxBytes = 200 * 1024 * 1024;
 /// 이만큼 지난 방 폴더는 주인이 없다고 본다.
 const Duration kOriginPcmMaxAge = Duration(hours: 24);
 
+/// 📌 [TRANSCRIBE-STATE] 방 하나의 전사가 어디까지 갔는가.
+///
+/// **아직 아무도 쓰지 않는다.** 통화 후 일괄 전사(다음 판)가 쓸 자리를 미리
+/// 이름만 정해 두는 것이고, 지금 이 판에서 상태 기계를 세우지 않는다.
+///
+/// 이 값이 필요한 이유는 하나다 — 그 구조에서는 PCM이 **원본**이라, 전사가
+/// 끝나기 전에 소리가 사라지면 그 발화의 글자가 영영 안 생긴다. 그때
+/// "이 방은 아직 전사를 기다리는 중"이라고 말할 칸이 있어야 청소기도
+/// 화면도 그 사실을 알 수 있다.
+const String kRoomTranscriptionStateField = 'duo_transcription_state';
+
+/// 소리는 모았고 글자는 아직이다. **이 방의 PCM을 지우면 안 된다.**
+const String kRoomTranscriptionPending = 'pending';
+
+/// 모든 발화가 글자를 가졌다. 이제 소리를 지워도 된다.
+const String kRoomTranscriptionComplete = 'complete';
+
+/// 일부 발화가 끝내 글자를 못 가졌다(용량 초과·파일 소실·전사 실패).
+/// **완료와 갈라 둔다** — 지우는 판단이 둘을 같게 보면 안 된다.
+const String kRoomTranscriptionIncomplete = 'incomplete';
+
+/// 보존한 발화 수와 글자를 가진 발화 수로 방의 상태를 읽는다.
+///
+/// 순수 함수다. 다음 판이 실제 숫자를 넣어 부르면 되고, 지금은 이름과
+/// 규칙만 굳혀 둔다. [lost]는 보존 자체를 못 한 발화 수다(용량 초과 등).
+String resolveRoomTranscriptionState({
+  required int captured,
+  required int transcribed,
+  required int lost,
+}) {
+  if (captured <= 0 && lost <= 0) return kRoomTranscriptionComplete;
+  if (transcribed < captured) return kRoomTranscriptionPending;
+  // 소리를 못 남긴 발화가 있으면 **다 전사해도 완료가 아니다.**
+  return lost > 0 ? kRoomTranscriptionIncomplete : kRoomTranscriptionComplete;
+}
+
+/// 저장이 실패한 까닭.
+class OriginPcmStoreFailure {
+  const OriginPcmStoreFailure({
+    required this.roomId,
+    required this.pcmKey,
+    required this.reason,
+    required this.bytes,
+  });
+
+  final String roomId;
+
+  /// 못 담은 발화의 열쇠. Duo에서는 발화 id(`duo_direct_utt_7`)다.
+  final String pcmKey;
+
+  /// `capacity` — 방 상한을 넘었다. `write_failed` — 디스크·권한 문제다.
+  final String reason;
+  final int bytes;
+}
+
+/// 상한 초과 사유. 로그와 콜백이 같은 글자를 쓴다.
+const String kOriginPcmFailCapacity = 'capacity';
+const String kOriginPcmFailWrite = 'write_failed';
+
 /// 발화 열쇠를 **파일 이름으로 안전한 글자**만 남긴다.
 ///
 /// 이 값이 곧 파일 이름이 되므로, 경로 구분자나 상위 폴더 표기가 섞이면
@@ -182,6 +241,25 @@ class OriginPcmStore {
   /// 상한에 부딪힌 횟수. 실측 로그로 나간다.
   final Map<String, int> _limitHits = <String, int>{};
 
+  /// 🔔 [STORE-FAIL] 발화 하나를 못 담았다. **동기 콜백이다** — 여기서
+  /// 기다리는 일을 하면 그 지연이 통화 오디오 경로에 실린다([_noteFailure]).
+  ///
+  /// 붙이지 않아도 창고는 그대로 돈다. 로그는 콜백과 무관하게 언제나 남는다.
+  void Function(OriginPcmStoreFailure failure)? onStoreFailed;
+
+  /// 이 방에서 **끝내 못 담은** 발화들. 통화가 끝난 뒤에 읽는다.
+  ///
+  /// 매니페스트의 `dropped`와 같은 값이고, 그쪽은 앱이 죽어도 남는다
+  /// ([OriginPcmManifest.dropped]). 통화 중에 굳이 파일을 읽을 이유가 없어
+  /// 메모리 쪽을 먼저 본다.
+  List<String> droppedKeysOf(String roomId) {
+    final key = roomId.trim().isEmpty ? kOriginPcmPendingDir : roomId.trim();
+    return List<String>.unmodifiable(_dropped[key] ?? const <String>[]);
+  }
+
+  /// 이 방의 소리가 **온전한가.** 거짓이면 못 담은 발화가 있다.
+  bool isRoomPcmComplete(String roomId) => droppedKeysOf(roomId).isEmpty;
+
   // ══════════════════════════════════════════════════════════════════
   // 쓰기
   // ══════════════════════════════════════════════════════════════════
@@ -228,6 +306,12 @@ class OriginPcmStore {
               'used=${_mb(used)}MB cap=${_mb(kOriginPcmSessionMaxBytes)}MB '
               '- 이후 발화는 보존하지 않는다');
         }
+        // 🔔 [STORE-FAIL] **발화마다 남긴다.** 예전에는 방마다 첫 한 줄만
+        //   나가서, 두 번째 이후로 못 담은 발화가 무엇이었는지 로그에 없었다.
+        //   지금은 재검증을 못 하는 정도지만, 통화 후 일괄 전사로 가면 이
+        //   발화들은 **글자 자체가 안 생긴다.** 그때 어느 발화였는지 모르면
+        //   무엇이 사라졌는지도 모른다.
+        _noteFailure(key, pcmKey, kOriginPcmFailCapacity, wav);
         await _writeManifest(key);
         return;
       }
@@ -241,6 +325,33 @@ class OriginPcmStore {
     } catch (error) {
       debugPrint('[ORIGIN-PCM] put_failed room=$key key=$pcmKey '
           'reason=${error.runtimeType}');
+      // 디스크가 가득 찼거나 권한이 없다. 상한과 **같은 무게의 손실**이므로
+      // 같은 자리에 남긴다 — 이 발화도 소리를 잃었다.
+      (_dropped[key] ??= <String>[]).add(pcmKey);
+      _noteFailure(key, pcmKey, kOriginPcmFailWrite, wavBytes.lengthInBytes);
+    }
+  }
+
+  /// 🔔 [STORE-FAIL] 못 담았다는 사실을 **기다리게 하지 않고** 알린다.
+  ///
+  /// ⚠️ **여기서 무엇도 await하지 않는다.** 이 경로는 통화 중 마이크 갈래가
+  /// `unawaited`로 부르는 자리라(`putKeyed`의 계약), 알림이 한 번이라도
+  /// 기다리는 순간 그 지연이 오디오 경로에 실린다. 알리는 쪽이 늦으면
+  /// 늦었지, 통화가 늦으면 안 된다.
+  void _noteFailure(String key, String pcmKey, String reason, int bytes) {
+    debugPrint('[DUO-PCM] store_failed room=$key utterance=$pcmKey '
+        'reason=$reason bytes=$bytes');
+    final sink = onStoreFailed;
+    if (sink == null) return;
+    try {
+      sink(OriginPcmStoreFailure(
+        roomId: key,
+        pcmKey: pcmKey,
+        reason: reason,
+        bytes: bytes,
+      ));
+    } catch (_) {
+      // 듣는 쪽이 터져도 창고는 계속 돈다.
     }
   }
 
