@@ -363,16 +363,6 @@ const String kInterpDataKindSpoke = 'spoke';
 ///   있어서 올릴 이유가 없고, 올리면 AI 응답만 늦어진다.
 const int kDuoVadSilenceDurationMs = 1500;
 
-/// ⏳ [PREPARE-GUARD] 상대를 기다리며 마이크만 돌고 있을 수 있는 최대 시간.
-///
-/// **UX 정책이 아니라 안전망이다.** 정상 종료는 방을 나가거나 앱이 뒤로 갈 때
-/// 즉시 일어난다(`didChangeAppLifecycleState`). 이 값은 그 둘이 다 안 일어나는
-/// 경우 — 방 화면을 켜 둔 채 놓아둔 경우 — 만 잡는다.
-///
-/// 그래서 짧게 잡을 이유가 없다. 짧으면 상대를 정말 기다리는 사람의 마이크를
-/// 끄게 되고, 그때 들어온 상대의 첫 마디가 또 사라진다.
-const Duration kDuoInterpPrepareMaxWait = Duration(minutes: 10);
-
 const String kDuoInterpTransportWebrtc = 'webrtc';
 const String kDuoInterpTransportFirestore = 'firestore';
 
@@ -672,53 +662,8 @@ const Duration _kEmptyIdDedupeWindow = Duration(seconds: 2);
 /// `_duoState` 문자열 하나가 두 축을 겸했는데, 마이크가 세션 내내 열려 있는
 /// 지금은 "나는 듣는 중이면서 동시에 상대 말을 재생 중"이 정상 상태라
 /// 한 변수로는 표현이 안 된다(둘 중 하나가 반드시 지워진다).
-/// 🔄 [INTERP-LIFECYCLE] 만능 통역 마이크가 지금 어느 단계인가.
-///
-/// **화면용 [InterpMicPhase]와 다른 축이다.** 그쪽은 유저에게 무엇을 보일지,
-/// 이쪽은 무엇을 이미 세웠고 무엇을 아직 안 세웠는지다.
-///
-/// 전이는 **한 방향**이다. `prepared`에서 `preparing`으로 되돌아가지 않는다 —
-/// 되돌아가면 같은 단계가 두 번 돌아 로그와 상태가 꼬인다. 재시도는 **실패한
-/// 단계에서만** 다시 시작한다.
-///
-///   idle → preparing → prepared → signaling → active → closing → idle
-///            │           │           │          │
-///            └─ 실패 ────┴───────────┴──────────┴──→ 그 단계만 재시도
-enum InterpLifecycle {
-  /// 아무것도 안 세웠다.
-  idle,
-
-  /// 통로를 세우는 중이다. **상대는 아직 없어도 된다.**
-  ///
-  /// PeerConnection · getUserMedia · addTrack · MicTap **그리고 SDP까지** 한다.
-  /// SDP를 빼면 안 되는 이유가 실기기로 나왔다 — libwebrtc의 ADM은 송신
-  /// 트랙이 실제로 활성화돼야 AudioRecord를 시작한다. `addTrack`만으로는
-  /// 녹음이 시작되지 않아 탭에 PCM이 한 조각도 안 왔다
-  /// (2026-09-14: `[DUO-MIC-TAP] stopped frames=0 bytes=0`).
-  preparing,
-
-  /// 통로가 섰고 **소리가 실제로 흐른다.**
-  ///
-  /// 함수 반환이 아니라 **첫 PCM 조각이 들어온 시점**이다. 예전에 `frames=0`
-  /// 으로 조용히 죽은 적이 있어 함수 성공만으로는 준비됐다고 하지 않는다.
-  transportReady,
-
-  /// 소리는 받고 있지만 **STT·번역·상대 전송은 막혀 있다.** 상대만 기다린다.
-  ///
-  /// `transportReady`와 갈라 두는 이유는 화면과 종료 정리가 "지금 기다리는
-  /// 중인가"를 물어야 해서다. 둘을 합치면 그 질문에 답할 수가 없다.
-  waitingPartner,
-
-  /// 상대가 들어왔다. 전사·번역·전달이 전부 돈다.
-  active,
-
-  /// 접는 중이다.
-  closing,
-}
-
 enum InterpMicPhase {
-  /// 상대가 아직 없다. **마이크는 이미 돌고 있을 수 있다** — 소리를 고리에만
-  /// 쌓고 전사로는 안 보내는 단계다([InterpLifecycle.transportReady]).
+  /// 상대가 아직 없다. 마이크를 열지 않는다.
   waitingPartner,
 
   /// 상대는 들어왔고 소켓·캡처를 준비하는 중이다.
@@ -1018,19 +963,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 게이트를 다시 열 예정인 타이머. 재생이 연달아 오면 앞선 예약은 버린다.
   Timer? _interpGateReopenTimer;
 
-  /// ⏳ [PREPARE-GUARD] 상대를 끝내 안 기다려 주는 마지막 안전장치.
-  ///
-  /// **1순위는 화면이다** — 방을 나가거나 앱이 뒤로 가면 즉시 접는다
-  /// (`didChangeAppLifecycleState`). 이 시계는 그 둘 중 어느 것도 일어나지
-  /// 않는 경우, 즉 **방 화면을 켜 둔 채 방치된 경우**만 잡는다.
-  ///
-  /// 그대로 두면 마이크와 PeerConnection이 조용히 계속 돈다. 과금은 안 되지만
-  /// (게스트 입장 기준) 배터리와 마이크 점유는 남는다.
-  ///
-  /// ⚠️ **통화가 선 뒤에는 절대 안 걸린다.** `preparing`·`prepared`에서만
-  ///   돌고, `signaling`으로 넘어가는 순간 접는다.
-  Timer? _interpPrepareGuard;
-
   /// 내 발화 일련번호와 발화 시작 시각. History 순서 복원용이다
   /// (직접 대화의 `_directSeq`/`_directSpeechStartedAt`과 같은 목적).
   int _interpSeq = 0;
@@ -1042,38 +974,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 없어서 origin probe도, 통화 후 재전사도 설 자리가 없었다.
   /// **소켓으로 도는 통화에서만 만든다.**
   DuoSocketPcmCapture? _interpSocketPcm;
-
-  /// 🔄 [INTERP-LIFECYCLE] 지금 어느 단계인가. 전이는 [_toInterpLifecycle]
-  /// 하나로만 한다 — 여러 곳에서 직접 대입하면 되돌아가는 전이가 섞인다.
-  InterpLifecycle _interpLife = InterpLifecycle.idle;
-
-  /// 마이크가 실제로 돌고 있는가(`prepared` 이상). 화면과 종료 정리가 본다.
-  bool get _interpMicRunning =>
-      _interpLife == InterpLifecycle.transportReady ||
-      _interpLife == InterpLifecycle.waitingPartner ||
-      _interpLife == InterpLifecycle.active;
-
-  /// 🔄 단계를 옮긴다. **되돌아가는 전이는 여기서 막는다.**
-  ///
-  /// 돌려주는 값은 실제로 옮겼는가다. 거짓이면 호출부는 아무것도 하지 않아야
-  /// 한다 — 이미 지난 단계를 다시 밟으려 한 것이다.
-  bool _toInterpLifecycle(InterpLifecycle next, String reason) {
-    final InterpLifecycle prev = _interpLife;
-    if (prev == next) return false;
-    // closing·idle은 어디서든 갈 수 있다(방을 나가는 길은 하나여야 한다).
-    final bool forward = next == InterpLifecycle.closing ||
-        next == InterpLifecycle.idle ||
-        next.index > prev.index;
-    if (!forward) {
-      _lgDuo('[INTERP-LIFECYCLE]',
-          'rejected ${prev.name}->${next.name} reason=$reason');
-      return false;
-    }
-    _interpLife = next;
-    _lgDuo('[INTERP-LIFECYCLE]',
-        '${prev.name}->${next.name} reason=$reason role=$_myRole');
-    return true;
-  }
 
   /// 🌐 [INTERP-ORIGIN] 로비값이 맞는지 **한 번 더 들어 볼** 소리.
   ///
@@ -1984,25 +1884,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 🎙️ [PREPARE] **상대를 기다리는 동안** 앱이 뒤로 가면 마이크를 놓는다.
-    //   이 구간은 통화가 아니라 준비라, 붙들고 있을 이유가 없다. 통화가
-    //   이미 선 뒤(`active`)에는 건드리지 않는다 — 그쪽은 기존 동작이다.
-    if (!_isDirectMode &&
-        (state == AppLifecycleState.paused ||
-            state == AppLifecycleState.hidden) &&
-        (_interpLife == InterpLifecycle.preparing ||
-            _interpLife == InterpLifecycle.transportReady ||
-            _interpLife == InterpLifecycle.waitingPartner)) {
-      _lgDuo('[INTERP-LIVE]', 'prepare_released reason=app_${state.name}');
-      unawaited(_stopInterpreterCapture('app_${state.name}'));
-    } else if (!_isDirectMode &&
-        state == AppLifecycleState.resumed &&
-        !_isExiting &&
-        mounted &&
-        _interpLife == InterpLifecycle.idle) {
-      // 돌아왔다. 아직 방에 있으면 다시 준비한다.
-      _maybePrepareInterpreter('app_resumed');
-    }
     if (_isTrialHost && _trialCallStarted) {
       if (state == AppLifecycleState.paused ||
           state == AppLifecycleState.hidden ||
@@ -2084,8 +1965,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         //   상대가 이미 들어와 있는데 키가 없어서 마이크를 못 열었다면
         //   (`start_blocked reason=no_api_key`) 다시 시도할 계기가 여기뿐이다
         //   — 게스트에게는 그 뒤로 아무 스냅샷도 떨어지지 않는다.
-        // 🎙️ [PREPARE] 키가 왔다. **상대를 기다리지 않고** 마이크부터 세운다.
-        _maybePrepareInterpreter('keys_ready');
         _maybeAutoStartInterpreter('keys_ready');
       }
     } catch (e) {}
@@ -3261,10 +3140,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       await existing.dispose();
       _interpStt = null;
     }
-    // 🔢 [GENERATION] **여기서 올리지 않는다.** 세대의 주인은 마이크 세션을
-    //   여는 `_startInterpreterCapture`다. 여기서 올리면 그 앞에서 묶인
-    //   MicTap·WebRTC 콜백이 전부 남의 세대가 되어 소리가 한 조각도 안 들어온다.
-    final int generation = _interpGeneration;
+    final int generation = ++_interpGeneration;
     // 🔀 [INTERP-STT-KIND] **소켓 한 벌이 경계와 글자를 같이 맡는다.**
     //   09-06 이전으로 되돌린 갈래다. 마이크 경로(`DuoWebrtcMicTap` →
     //   `_feedInterpreterPcm`)와 게이트는 한 글자도 다르지 않고, PCM을 먹는
@@ -3681,77 +3557,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         _lgDuo('[INTERP-RETRY]', 'dropped reason=partner_offline');
         return;
       }
-      if (_interpStarting) {
-        _lgDuo('[INTERP-RETRY]', 'dropped reason=already_starting');
+      if (_interpCaptureLive || _interpStarting) {
+        _lgDuo('[INTERP-RETRY]', 'dropped reason=already_live');
         return;
       }
-      // 🔄 [INTERP-LIFECYCLE] **실패한 단계에서만 다시 시작한다.**
-      //
-      //   마이크가 이미 서 있는데 처음부터 다시 하면 멀쩡한 캡처를 버리고
-      //   새로 연다. 반대로 activate가 실패했는데 prepare만 다시 부르면
-      //   `already_live`로 떨어져 영영 안 붙는다 — 마이크는 살아 있으니까.
-      switch (_interpLife) {
-        case InterpLifecycle.idle:
-          _lgDuo('[INTERP-RETRY]', 'firing attempt=$attempt stage=prepare');
-          unawaited(_startInterpreterCapture('retry_$attempt'));
-          return;
-        case InterpLifecycle.transportReady:
-        case InterpLifecycle.waitingPartner:
-          // 통로는 섰고 그다음이 안 붙은 것이다. 거기부터 다시 한다.
-          _lgDuo('[INTERP-RETRY]', 'firing attempt=$attempt stage=activate');
-          _interpLife = InterpLifecycle.waitingPartner; // active를 되감는다
-          unawaited(_activateInterpreter('retry_$attempt'));
-          return;
-        case InterpLifecycle.preparing:
-        case InterpLifecycle.active:
-        case InterpLifecycle.closing:
-          _lgDuo('[INTERP-RETRY]',
-              'dropped reason=stage_${_interpLife.name}');
-          return;
-      }
+      _lgDuo('[INTERP-RETRY]', 'firing attempt=$attempt');
+      unawaited(_startInterpreterCapture('retry_$attempt'));
     });
     if (mounted) setState(() {});
-  }
-
-  /// ⏳ [PREPARE-GUARD] 상대를 기다리는 시계를 건다.
-  ///
-  /// **마지막 안전장치다.** 방 이탈·백그라운드가 1순위이고, 이 시계는 그 둘이
-  /// 다 안 일어난 채 방치된 경우만 잡는다.
-  void _armInterpPrepareGuard(String reason) {
-    _interpPrepareGuard?.cancel();
-    if (_isDirectMode || _isExiting || !mounted) return;
-    // 이미 상대가 있으면 걸 이유가 없다 — 곧 activate로 간다.
-    if (_hasConversationPartner) return;
-    final int generation = _interpGeneration;
-    _lgDuo('[PREPARE-GUARD]',
-        'armed reason=$reason inMin=${kDuoInterpPrepareMaxWait.inMinutes}');
-    _interpPrepareGuard = Timer(kDuoInterpPrepareMaxWait, () {
-      _interpPrepareGuard = null;
-      if (!mounted || _isExiting) return;
-      if (generation != _interpGeneration) return;
-      // ⚠️ **통화가 선 뒤에는 아무것도 하지 않는다.** 준비 중일 때만이다.
-      if (_interpLife != InterpLifecycle.preparing &&
-          _interpLife != InterpLifecycle.transportReady &&
-          _interpLife != InterpLifecycle.waitingPartner) {
-        _lgDuo('[PREPARE-GUARD]', 'skipped stage=${_interpLife.name}');
-        return;
-      }
-      if (_hasConversationPartner) {
-        _lgDuo('[PREPARE-GUARD]', 'skipped reason=partner_online');
-        return;
-      }
-      _lgDuo('[PREPARE-GUARD]',
-          'fired — ${kDuoInterpPrepareMaxWait.inMinutes}분간 상대가 없었다. 마이크를 접는다');
-      unawaited(_stopInterpreterCapture('prepare_guard'));
-    });
-  }
-
-  void _cancelInterpPrepareGuard(String reason) {
-    final Timer? timer = _interpPrepareGuard;
-    if (timer == null) return;
-    timer.cancel();
-    _interpPrepareGuard = null;
-    _lgDuo('[PREPARE-GUARD]', 'cancelled reason=$reason');
   }
 
   /// 예약을 접는다. 붙었을 때·방을 나갈 때·상대가 나갔을 때 부른다.
@@ -3779,13 +3592,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _interpRetry.reset();
     _lgDuo('[INTERP-RETRY]', 'manual role=$_myRole gen=$_interpGeneration');
     if (mounted) setState(() => _interpStartFailed = false);
-    // 🔄 자동 재시도와 같은 규칙이다 — 실패한 단계에서만 다시 시작한다.
-    if (_interpLife == InterpLifecycle.transportReady ||
-        _interpLife == InterpLifecycle.waitingPartner) {
-      _interpLife = InterpLifecycle.waitingPartner;
-      unawaited(_activateInterpreter('manual_retry'));
-      return;
-    }
     unawaited(_startInterpreterCapture('manual_retry'));
   }
 
@@ -3795,43 +3601,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 동안에는 열지 않고(들을 사람이 없는데 STT로 PCM을 보낼 이유가 없다),
   /// 자동 시도는 상대 한 명당 한 번으로 묶는다(실패 후 권한 창이 반복해서
   /// 뜨는 것을 막는다). 상대가 나가면 기록을 풀어 다음 상대에 다시 시도한다.
-  /// 🎙️ [PREPARE] **상대를 기다리지 않고** 로컬 마이크를 세운다.
-  ///
-  /// 게스트가 들어오자마자 호스트가 말하는 일은 흔하다. 예전에는 마이크가
-  /// 상대 입장 **뒤에** 켜져서, 그 순간에 한 말은 소리 자체가 존재하지 않았다 —
-  /// 앞 여유 고리를 아무리 길게 잡아도 담을 것이 없었다.
-  ///
-  /// 여기서 세우는 것은 마이크뿐이다. **밖으로는 아무것도 안 나간다** —
-  /// signaling도, STT 소켓도, 번역도, 상대 전송도 [_activateInterpreter]의
-  /// 몫이다. 소리는 고리에만 쌓인다.
-  ///
-  /// 🚫 **과금은 여기서 시작하지 않는다.** 과금은 게스트 입장이 기준이고
-  ///   (`_startDuoBilling`), 이 구간은 무료 준비다.
-  void _maybePrepareInterpreter(String reason) {
-    if (_isDirectMode) return;
-    if (!mounted || _isExiting) return;
-    if (_openAiKey.isEmpty) return; // 키는 Remote Config가 늦게 물어다 준다
-    if (_interpLife != InterpLifecycle.idle) return;
-    if (_interpCaptureLive || _interpStarting) return;
-    _lgDuo('[INTERP-LIVE]', 'prepare reason=$reason role=$_myRole');
-    unawaited(_startInterpreterCapture(reason));
-  }
-
-  /// 📞 [ACTIVATE] 상대가 들어왔다. 신호·전사·문을 여기서 연다.
-  ///
-  /// **마이크는 이미 돌고 있어야 한다**([_maybePrepareInterpreter]). 준비가
-  /// 아직이면 준비부터 시킨다 — 키가 늦게 와서 prepare를 못 탄 경우다.
   void _maybeAutoStartInterpreter(String reason) {
     if (_isDirectMode) return;
     if (!_hasConversationPartner) return;
     if (!mounted || _isExiting) return;
+    if (_interpCaptureLive || _interpStarting) return;
     if (_interpAutoStartAttempted) return;
-    // 아직 마이크가 안 섰으면 준비부터. 준비가 끝나면 그 끝에서 다시 부른다.
-    if (_interpLife == InterpLifecycle.idle) {
-      _maybePrepareInterpreter('partner_before_prepare:$reason');
-      return;
-    }
-    if (_interpLife != InterpLifecycle.waitingPartner) return;
     _interpAutoStartAttempted = true;
     // 🌐 [INTERP-ORIGIN] 이 방의 판정을 새로 시작한다. **반드시 소켓을 열기
     //   전이어야 한다** — `_ensureInterpreterStt`가 `settled`를 보고 언어를
@@ -3842,7 +3617,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   기능이 남의 상태를 비우고 다니면 안 된다.
     if (kDuoInterpOriginCheck) OriginLanguageSession.instance.begin();
     _lgDuo('[INTERP-LIVE]', 'auto_start reason=$reason role=$_myRole');
-    unawaited(_activateInterpreter(reason));
+    unawaited(_startInterpreterCapture(reason));
   }
 
   /// 🔵 [INTERP-LIVE] 마이크를 **한 번** 연다. 세션이 끝날 때까지 유지한다.
@@ -3874,37 +3649,25 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _pinInterpTransport('interp_capture');
 
     _interpStarting = true;
-    if (!_toInterpLifecycle(InterpLifecycle.preparing, reason)) {
-      _interpStarting = false;
-      return;
-    }
-    // 🔢 [GENERATION] **세대는 여기서 올린다 — 한 마이크 세션의 시작점이다.**
-    //
-    //   예전에는 `_ensureInterpreterStt` 안에서 올렸다. 그때는 STT가 한
-    //   통화의 첫 걸음이라 그 자리가 맞았는데, 지금은 마이크가 먼저 선다.
-    //   그대로 두면 **prepare에서 묶은 콜백이 activate에서 통째로 죽는다** —
-    //   MicTap의 `onPcm`도, WebRTC의 `onData`도 prepare 시점 세대를 들고
-    //   있어서, activate가 세대를 올리는 순간 전부 남의 세대가 된다.
-    //   마이크는 도는데 한 조각도 안 들어오고 화면의 라이브가 안 산다
-    //   (2026-09-14 실기기에서 그랬다).
-    final int generation = ++_interpGeneration;
     // 🔉 세기 계측기는 **진단 여부와 무관하게** 만든다. 게이트가 이 값을 본다.
     //   직통화와 같은 물건이고, 두 모드는 동시에 돌지 않는다.
     _utteranceRms = DuoUtteranceRmsMeter();
-    // 🎙️ [SOCKET-PCM] **STT보다 먼저 만든다.** 준비 구간의 소리도 담아야
-    //   상대 입장 직전에 시작한 말이 남는다. 소켓 갈래의 보존층이다 —
-    //   Deepgram 갈래는 `DuoSttPipeline` 안에 자기 것이 따로 있다.
-    if (kDuoInterpUseSocketStt) {
-      _interpSocketPcm ??= DuoSocketPcmCapture(
-        idPrefix: 'duo_interp',
-        onLog: _lgDuo,
-      )
-        // 준비 구간에는 문이 닫혀 있다. 고리를 늘려 그 사이 소리를 들고 있는다.
-        ..onGateClosed();
-    }
     if (mounted) setState(() => _interpStartFailed = false);
     _setInterpMicPhase(InterpMicPhase.preparing);
+    BillingTicker.instance.resumeFromActivity('duo_mic_start');
     try {
+      final bool sttReady = await _ensureInterpreterStt();
+      if (!sttReady) {
+        _lgDuo('⚠️ [INTERP-LIVE]', 'start_failed reason=no_stt_session');
+        if (mounted) setState(() => _interpStartFailed = true);
+        _setInterpMicPhase(InterpMicPhase.preparing);
+        return;
+      }
+      // ⚠️ 세대값은 `_ensureInterpreterStt` **뒤에** 읽는다. 그 안에서 소켓을
+      //   새로 만들면 세대가 올라가므로, 먼저 읽으면 방금 만든 세션을 남의
+      //   세대로 오인해 캡처를 곧바로 버린다.
+      final int generation = _interpGeneration;
+
       // 📡 [INTERP-WEBRTC] 새 경로는 여기서 갈린다. 마이크를 여는 주체가
       //   `record`에서 WebRTC로 바뀌고, 그 뒤 처리는 그대로다.
       if (_useInterpWebrtc) {
@@ -3946,11 +3709,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         onError: (Object e) =>
             _lgDuo('[INTERP-STT]', 'capture_error=${e.runtimeType}'),
       );
-      // 🚪 **문은 여기서 열지 않는다.** 상대가 들어와야 연다.
+      // 마지막 줄에서 연다. 이 줄이 곧 화면이 밝아지는 순간이다.
+      _openInterpGate('capture_started');
+      _noteInterpStartSucceeded();
       _lgDuo(
           '[INTERP-LIVE]',
-          'mic_prepared reason=$reason gen=$generation role=$_myRole '
-              'ready=$_interpReady transport=firestore');
+          'capture_started reason=$reason gen=$generation role=$_myRole '
+              'ready=$_interpReady');
     } catch (e) {
       _lgDuo('⚠️ [INTERP-LIVE]', 'mic_start_failed=${e.runtimeType}');
       await _stopInterpreterCapture('mic_start_failed');
@@ -4014,21 +3779,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     );
     _interpCall = call;
     _lgDuo('[INTERP-WEBRTC]',
-        'local_media_starting room=$roomId role=$_myRole offerer=$_amIHost');
+        'connection_started room=$roomId role=$_myRole offerer=$_amIHost');
 
-    // 🎙️ [PREPARE] 로컬 마이크를 세운다. 신호는 바로 아래에서 이어 간다.
-    //
-    //   ⚠️ **`addTrack`만으로는 마이크가 안 돈다.** 처음에는 트랙만 얹으면
-    //   ADM이 깨어난다고 봤는데, 실기기에서 탭에 PCM이 한 조각도 안 왔다
-    //   (`[DUO-MIC-TAP] stopped frames=0 bytes=0`, 앱 PID에 AudioRecord 흔적
-    //   자체가 없었다). libwebrtc의 ADM은 **송신 트랙이 실제로 활성화돼야**
-    //   녹음을 시작하고, 그러려면 로컬 SDP까지 가야 한다.
-    //
-    //   그래서 prepare의 뜻을 바꿨다 — "로컬 미디어만"이 아니라
-    //   **"송신 경로를 실제로 세우되 사용자 음성을 서비스 로직으로는 아직
-    //   안 쓰는 단계"**다. 나가는 것은 SDP·ICE뿐이고, 전사·번역·상대 전송은
-    //   여전히 상대가 들어온 뒤다([_activateInterpreter]).
-    final ok = await call.prepareLocalMedia();
+    final ok = await call.connect();
     if (generation != _interpGeneration || _isExiting || !mounted) {
       await call.dispose();
       return false;
@@ -4072,70 +3825,16 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         'local_pcm source=$kDuoSttPcmSourceWebrtcMic rate=$kDuoMicTapSampleRate '
             'aec=requested ns=requested agc=requested '
             '(※ 실제 적용 여부는 플랫폼이 정하며 보고하지 않는다)');
-    // 📞 [SIGNALING] **여기서 신호를 태운다. 기다리지 않는다.**
-    //
-    //   호스트는 offer를 미리 올려 두고, 게스트는 들어오자마자 그것을 읽어
-    //   답한다 — 예전보다 오히려 빨리 붙는다. 신호 문서를 지우는 곳은
-    //   호스트의 `reset()` 하나뿐이고 그건 offer를 올리기 직전이라,
-    //   미리 올린 offer가 게스트 입장까지 살아남는다.
-    //
-    //   ⏳ `startSignaling`은 연결이 설 때까지 돌아오지 않는다(게스트를
-    //   기다린다). 그래서 await하지 않는다 — 기다리면 prepare가 상대 입장
-    //   전까지 안 끝난다. 우리가 필요한 것은 그 안의 `setLocalDescription`
-    //   이고, 그건 곧바로 일어나 ADM을 깨운다.
-    unawaited(call.startSignaling().catchError((Object e) {
-      _lgDuo('⚠️ [INTERP-WEBRTC]', 'signaling_error=${e.runtimeType}');
-      return false;
-    }));
-
-    // 🚪 **문은 여기서 열지 않는다.** 상대가 들어와 STT가 선 뒤에
-    //   `_activateInterpreter`가 연다. 지금은 소리를 고리에 쌓기만 한다.
+    // 마지막 줄에서 연다 — 직접 경로와 같은 순서다.
+    _openInterpGate('capture_started');
+    // 🔁 붙었다. 예약된 재시도가 뒤늦게 울려 두 번째 시작을 얹지 않게 접는다.
+    _noteInterpStartSucceeded();
     _lgDuo(
         '[INTERP-LIVE]',
-        'mic_prepared reason=$reason gen=$generation role=$_myRole '
+        'capture_started reason=$reason gen=$generation role=$_myRole '
             'ready=$_interpReady transport=webrtc');
     if (mounted) setState(() => _micActive = true);
     return true;
-  }
-
-  /// 📞 [ACTIVATE] 상대가 들어왔다. **여기서 처음 밖으로 나간다.**
-  ///
-  /// 마이크는 이미 돌고 있고 소리도 쌓이고 있다. 남은 것은 셋이다 —
-  /// 신호를 주고받고, 전사 소켓을 열고, 문을 여는 것.
-  ///
-  /// 순서가 중요하다. **문이 마지막이다** — 문이 열리는 순간이 곧 "지금
-  /// 말하면 들어간다"이고, 그 앞의 것들이 안 서 있으면 그 말이 갈 곳이 없다.
-  Future<void> _activateInterpreter(String reason) async {
-    if (_isDirectMode || _isExiting || !mounted) return;
-    if (!_toInterpLifecycle(InterpLifecycle.active, reason)) return;
-    // ⏳ 상대가 왔다. 기다리는 시계는 더 필요 없다 — 통화에는 안 걸린다.
-    _cancelInterpPrepareGuard('activating');
-    try {
-      // 📡 **신호는 여기서 안 한다.** 준비 단계가 이미 태웠다 — 호스트는
-      //   offer를 미리 올려 뒀고 게스트는 그것을 읽어 답하는 중이다.
-      //   여기서 다시 부르면 방금 올린 신호를 덮는다.
-
-      // 🎧 전사 소켓은 **여기서 연다.** 준비 단계에서 열어 두면 상대를
-      //   기다리는 내내 무음이 올라가고 요금만 나간다.
-      final bool sttReady = await _ensureInterpreterStt();
-      if (!sttReady) {
-        _lgDuo('⚠️ [INTERP-LIVE]', 'activate_failed reason=no_stt_session');
-        if (mounted) setState(() => _interpStartFailed = true);
-        _setInterpMicPhase(InterpMicPhase.preparing);
-        return;
-      }
-      if (_isExiting || !mounted) return;
-
-      // 🚪 마지막 줄에서 연다. 이 줄이 곧 화면이 밝아지는 순간이다.
-      _openInterpGate('capture_started');
-      _lgDuo(
-          '[INTERP-LIVE]',
-          'activated reason=$reason role=$_myRole '
-              'transport=${_useInterpWebrtc ? 'webrtc' : 'firestore'}');
-    } catch (e) {
-      _lgDuo('⚠️ [INTERP-LIVE]', 'activate_error=${e.runtimeType}');
-      if (mounted) setState(() => _interpStartFailed = true);
-    }
   }
 
   /// 🔊 [INTERP-WEBRTC] 번역 음성이 나갈 곳을 정한다. **통역 경로 전용이다.**
@@ -4232,25 +3931,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 견줄 때 "마이크만 바뀌었다"가 참이 된다.
   void _feedInterpreterPcm(Uint8List bytes, int generation) {
     if (bytes.isEmpty || generation != _interpGeneration) return;
-    // 🔄 [INTERP-LIFECYCLE] **준비 완료는 첫 조각이 실제로 들어온 이 순간이다.**
-    //   함수가 성공했다고 마이크가 도는 것은 아니다 — 2026-09-04 실기기에서
-    //   통역이 `frames=0 bytes=0`으로 조용히 죽은 적이 있다. 그때도 시작
-    //   함수는 참을 돌려줬다.
-    if (_interpLife == InterpLifecycle.preparing) {
-      // 🔄 소리가 실제로 흐른다. 통로가 선 것이다.
-      _toInterpLifecycle(InterpLifecycle.transportReady, 'first_frame');
-      // 🔄 그리고 곧바로 "상대만 기다리는 중"으로 간다 — 소리는 받지만
-      //   STT·번역·전송은 막혀 있는 상태다. 두 단계를 갈라 두는 이유는
-      //   화면과 종료 정리가 "지금 기다리는 중인가"를 물어야 해서다.
-      _toInterpLifecycle(InterpLifecycle.waitingPartner, 'first_frame');
-      _setInterpMicPhase(InterpMicPhase.waitingPartner);
-      _noteInterpStartSucceeded();
-      _armInterpPrepareGuard('first_frame');
-      // 그 사이 상대가 들어와 있었으면 여기서 이어 간다.
-      if (_hasConversationPartner) {
-        _maybeAutoStartInterpreter('transport_ready_partner_waiting');
-      }
-    }
     final stt = _interpStt;
     // 🎙️ [SOCKET-PCM] **문보다 앞에 선다.** 소켓 갈래는 PCM을 앱에 안 남기므로
     //   여기서 담지 않으면 그 발화의 소리가 어디에도 없다. 문이 닫혀 있어도
@@ -4284,9 +3964,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 🔁 마이크를 접는 자리다. 예약된 재시도가 살아 있으면 닫은 통역을 다시
     //   열려 든다.
     _cancelInterpRetry(reason);
-    _cancelInterpPrepareGuard(reason);
-    // 🔄 접는 중이라고 먼저 적는다. 이 뒤로는 어떤 단계도 새로 시작하지 않는다.
-    _toInterpLifecycle(InterpLifecycle.closing, reason);
     // 📮 못 보낸 말도 여기서 버린다. 다음 통화로 넘어가면 안 된다.
     _clearInterpPendingSends(reason);
     _interpGateReopenTimer?.cancel();
@@ -4337,15 +4014,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         _interpSttReconnecting = false;
       }
     }
-    // 🎙️ [SOCKET-PCM] 통화 한 통짜리다. 다음 통화가 이전 소리를 물려받으면
-    //   안 된다.
-    _interpSocketPcm?.reset();
-    _interpSocketPcm = null;
-    // 🔄 다 접었다. 다시 준비할 수 있는 상태로 돌린다 — 방에 남아 있는데
-    //   상대만 나간 경우, 다음 상대를 위해 다시 prepare를 탈 수 있어야 한다.
-    _interpAutoStartAttempted = false;
-    _interpLife = InterpLifecycle.idle;
-    _lgDuo('[INTERP-LIFECYCLE]', 'closing->idle reason=$reason');
     if (!_isDirectMode) _setInterpMicPhase(InterpMicPhase.ended);
   }
 
@@ -7290,8 +6958,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   버려진 항목의 세대와 어긋나 보인다.
     _clearInterpPendingSends('generation_changed');
     ++_interpGeneration;
+    // 🎙️ [SOCKET-PCM] 통화 한 통짜리다. 다음 통화가 이전 소리를 물려받으면
+    //   안 된다.
+    _interpSocketPcm?.reset();
+    _interpSocketPcm = null;
     // 🎧 안내 창이 떠 있는 채로 나가면 판정용 소리가 남는다. 여기서 놓는다.
-    //   소켓 캡처는 `_stopInterpreterCapture`가 접는다 — 주인은 한 곳이다.
     _releaseOriginProbe('room_exit');
     await _stopInterpreterCapture('room_exit');
     final interpStt = _interpStt;

@@ -107,19 +107,12 @@ void main() {
       expect(duo, contains('void _scheduleInterpRetry(int generation)'));
     });
 
-    // 🔄 2026-09-14에 접는 자리가 하나로 모였다. 예전에는 record·WebRTC
-    //   두 시작 경로가 각자 접었는데, 이제 **마이크 첫 프레임**이라는 공통
-    //   지점이 생겼다 — 두 경로 다 그리로 모인다. 함수 반환이 아니라 실제로
-    //   소리가 흐르는 순간이라 오히려 더 정확하다.
-    test('마이크가 실제로 돌면 예약을 접는다', () {
+    test('두 시작 경로 모두 성공하면 예약을 접는다', () {
+      // record 경로와 WebRTC 경로 둘 다. 한쪽만 접으면 늦게 울린 시계가
+      // 이미 도는 통역 위에 두 번째 시작을 얹는다.
       expect(RegExp(r'_noteInterpStartSucceeded\(\)').allMatches(duo).length,
-          greaterThanOrEqualTo(2),
-          reason: '선언 1 + 호출 1 미만이면 예약이 안 접힌다');
-      // 접는 자리가 첫 프레임 자리여야 한다.
-      final String feed = _region(duo, 'void _feedInterpreterPcm(',
-          '마이크를 닫는다. **소켓은 그대로 둔다.**');
-      expect(feed, contains('_noteInterpStartSucceeded()'),
-          reason: '함수 반환만 보고 접으면 frames=0으로 죽은 마이크도 성공이 된다');
+          greaterThanOrEqualTo(3),
+          reason: '선언 1 + 호출 2 미만이면 한쪽 경로가 예약을 안 접는다');
       final String body =
           _region(duo, 'void _noteInterpStartSucceeded()', 'void _retryInterpreterNow()');
       expect(body, contains("_cancelInterpRetry('started')"));
@@ -171,19 +164,9 @@ void main() {
       expect(timer, contains('partner_offline'));
     });
 
-    // 🔄 2026-09-14에 규칙이 갈렸다. 마이크가 상대보다 먼저 서면서
-    //   "이미 돌고 있다"가 곧 "다 됐다"가 아니게 됐다 — 마이크는 살아 있는데
-    //   activate가 안 붙은 상태가 정상 상태로 생겼다. 그때 통째로 버리면
-    //   영영 안 붙는다. 그래서 **실패한 단계에서만** 다시 시작한다.
     test('이미 돌고 있으면 버린다 — 두 개가 겹치지 않는다', () {
-      expect(timer, contains('if (_interpStarting)'),
-          reason: '시작이 이미 도는 중이면 두 번째를 얹으면 안 된다');
-      expect(timer, contains('already_starting'));
-      // 단계별로 갈라 다시 시작한다.
-      expect(timer, contains('stage=prepare'));
-      expect(timer, contains('stage=activate'));
-      // 도는 통화·접는 중에는 아무것도 하지 않는다.
-      expect(timer, contains('stage_\${_interpLife.name}'));
+      expect(timer, contains('if (_interpCaptureLive || _interpStarting)'));
+      expect(timer, contains('already_live'));
     });
 
     test('살아 있는지 판단이 두 경로를 모두 본다', () {

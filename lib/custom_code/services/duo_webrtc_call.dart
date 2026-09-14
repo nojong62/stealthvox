@@ -167,19 +167,6 @@ class DuoWebrtcCall {
   bool _dataChannelOpen = false;
   MediaStream? _localStream;
   MediaStreamTrack? _localAudioTrack;
-
-  /// 로컬 마이크가 섰는가([prepareLocalMedia]). 신호는 아직 안 갔을 수 있다.
-  bool _prepared = false;
-
-  /// 신호를 시작했는가([startSignaling]). 두 번 시작하지 않기 위한 빗장이다.
-  bool _signalingStarted = false;
-
-  /// 신호 단계가 끝난 결과. null이면 아직 돌고 있다.
-  bool? _signalingResult;
-
-  /// 🎙️ 로컬 마이크만 선 상태인가. 상대를 기다리는 동안 참이다.
-  bool get isLocalMediaReady => _prepared;
-  bool get isSignalingStarted => _signalingStarted;
   DuoWebrtcSignaling? _signaling;
   DuoIceConfig? _ice;
 
@@ -276,32 +263,9 @@ class DuoWebrtcCall {
   }
 
   /// 통화를 연다. false면 호출부는 이 경로를 포기한다.
-  /// 통화를 연다. **외부에서 보는 뜻은 예전과 한 글자도 같다.**
-  ///
-  /// 안에서 두 단계로 갈렸을 뿐이다 — 로컬 마이크를 세우는 일과 상대와
-  /// 신호를 주고받는 일이다. 직접 대화는 이 함수 하나만 부르고, 두 단계가
-  /// 예전과 같은 순서로 이어 돈다.
   Future<bool> connect() async {
-    if (!await prepareLocalMedia()) return false;
-    return startSignaling();
-  }
-
-  /// 🎙️ [PREPARE] **상대와 무관한 절반.** 여기까지는 아무것도 밖으로 안 나간다.
-  ///
-  /// ICE 설정 조회 · 오디오 모드 · PeerConnection · getUserMedia · addTrack ·
-  /// DataChannel 준비까지다. offer도 ICE 후보도 여기서는 만들어지지 않는다 —
-  /// ICE 수집은 `setLocalDescription`에서 시작하고 그건 [startSignaling] 몫이다.
-  ///
-  /// **`addTrack`이 여기 있는 이유**가 이 분리의 전부다. libwebrtc의 ADM은
-  /// PeerConnection에 얹힌 오디오 트랙이 있어야 AudioRecord를 시작한다. 그래서
-  /// "마이크만 먼저 돌린다"는 트랙을 얹는 것까지 포함한다(같은 파일
-  /// `mic_ready sendAudio=false` 주석 참고).
-  ///
-  /// 두 번 불러도 한 번만 돈다.
-  Future<bool> prepareLocalMedia() async {
     if (_disposed) return false;
-    if (_prepared) return true;
-    _startedAt ??= DateTime.now();
+    _startedAt = DateTime.now();
 
     try {
       _ice = await loadDuoIceConfig(onLog: onLog);
@@ -453,41 +417,6 @@ class DuoWebrtcCall {
 
       _wireConnectionState(pc);
 
-      _prepared = true;
-      _lg('🎙️ [DUO-RTC]', 'local_media_ready room=$roomId role=$role');
-      return true;
-    } catch (e) {
-      _lg('❌ [DUO-RTC]', 'prepare_failed(${e.runtimeType})');
-      return false;
-    }
-  }
-
-  /// 📞 [SIGNALING] **상대와 주고받는 절반.** 여기부터 밖으로 나간다.
-  ///
-  /// [prepareLocalMedia]가 먼저 성공해 있어야 한다. 두 번 불러도 한 번만 돈다.
-  Future<bool> startSignaling() async {
-    if (_disposed) return false;
-    if (!_prepared) {
-      _lg('❌ [DUO-RTC]', 'signaling_without_prepare — 로컬 마이크가 없다');
-      return false;
-    }
-    // 두 번째 호출은 첫 판의 결과를 그대로 돌려준다. 다시 offer를 만들면
-    // 방금 올린 신호를 덮어쓴다.
-    final prior = _signalingResult;
-    if (prior != null) return prior;
-    if (_signalingStarted) return false;
-    _signalingStarted = true;
-    // ⏱️ 연결에 걸린 시간은 **신호를 시작한 순간부터** 잰다. 준비만 해 두고
-    //   상대를 기다린 시간이 연결 지연으로 잡히면 안 된다.
-    _startedAt = DateTime.now();
-
-    try {
-      final pc = _pc;
-      if (pc == null) {
-        _lg('❌ [DUO-RTC]', 'signaling_without_pc');
-        return false;
-      }
-
       // 🆔 세션 id의 주인은 호스트다. 게스트는 `offerSessionId`를 주지 않고,
       //   문서에 적힌 값을 채택한다(`_adoptSession`).
       final signaling = DuoWebrtcSignaling(
@@ -569,7 +498,7 @@ class DuoWebrtcCall {
               '${_ice?.describe() ?? ''}');
       return true;
     } catch (e) {
-      _lg('❌ [DUO-RTC]', 'signaling_failed(${e.runtimeType})');
+      _lg('❌ [DUO-RTC]', 'connect_failed(${e.runtimeType})');
       return false;
     }
   }
