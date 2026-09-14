@@ -260,4 +260,44 @@ void main() {
       expect(body, contains("_startInterpreterCapture('manual_retry')"));
     });
   });
+
+  // ⏳ [PREPARE-GUARD] 방을 켜 둔 채 방치된 경우만 잡는 마지막 안전장치.
+  //   방 이탈·백그라운드 즉시 종료가 1순위이고, 이건 그 둘이 다 안 일어난
+  //   경우만이다. **통화가 선 뒤에는 절대 안 걸린다.**
+  group('⏳ 준비 상태 안전망', () {
+    final String guard =
+        _region(duo, 'void _armInterpPrepareGuard(String reason)', 'void _cancelInterpPrepareGuard(');
+
+    test('준비 단계에서만 작동한다', () {
+      expect(guard, contains('InterpLifecycle.preparing'));
+      expect(guard, contains('InterpLifecycle.prepared'));
+      // 통화 중에 마이크를 접으면 대화가 끊긴다.
+      expect(guard, contains("_lgDuo('[PREPARE-GUARD]', 'skipped stage="),
+          reason: '다른 단계에서 불려도 아무것도 안 해야 한다');
+    });
+
+    test('상대가 있으면 안 건다 · 붙은 뒤엔 안 쏜다', () {
+      expect(guard, contains('if (_hasConversationPartner) return;'),
+          reason: '상대가 이미 있으면 곧 activate로 간다');
+      expect(guard, contains("skipped reason=partner_online"),
+          reason: '시계가 울릴 때 상대가 와 있으면 접어야 한다');
+    });
+
+    test('activate로 넘어가면 시계를 접는다', () {
+      final String act = _region(duo,
+          'Future<void> _activateInterpreter(String reason) async {', '/// 🔊 [INTERP-WEBRTC] 번역 음성이');
+      expect(act, contains("_cancelInterpPrepareGuard('activating')"));
+    });
+
+    test('정리에서도 접는다', () {
+      final String stop = _region(duo,
+          'Future<void> _stopInterpreterCapture(String reason) async {', '/// 🔵 [INTERP-LIVE] 상대가 사라졌다.');
+      expect(stop, contains('_cancelInterpPrepareGuard(reason)'));
+    });
+
+    test('10분은 UX가 아니라 안전망이라고 적어 뒀다', () {
+      expect(duo, contains('const Duration kDuoInterpPrepareMaxWait = Duration(minutes: 10);'));
+      expect(duo, contains('UX 정책이 아니라 안전망이다'));
+    });
+  });
 }

@@ -363,6 +363,16 @@ const String kInterpDataKindSpoke = 'spoke';
 ///   있어서 올릴 이유가 없고, 올리면 AI 응답만 늦어진다.
 const int kDuoVadSilenceDurationMs = 1500;
 
+/// ⏳ [PREPARE-GUARD] 상대를 기다리며 마이크만 돌고 있을 수 있는 최대 시간.
+///
+/// **UX 정책이 아니라 안전망이다.** 정상 종료는 방을 나가거나 앱이 뒤로 갈 때
+/// 즉시 일어난다(`didChangeAppLifecycleState`). 이 값은 그 둘이 다 안 일어나는
+/// 경우 — 방 화면을 켜 둔 채 놓아둔 경우 — 만 잡는다.
+///
+/// 그래서 짧게 잡을 이유가 없다. 짧으면 상대를 정말 기다리는 사람의 마이크를
+/// 끄게 되고, 그때 들어온 상대의 첫 마디가 또 사라진다.
+const Duration kDuoInterpPrepareMaxWait = Duration(minutes: 10);
+
 const String kDuoInterpTransportWebrtc = 'webrtc';
 const String kDuoInterpTransportFirestore = 'firestore';
 
@@ -997,6 +1007,19 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   /// 게이트를 다시 열 예정인 타이머. 재생이 연달아 오면 앞선 예약은 버린다.
   Timer? _interpGateReopenTimer;
+
+  /// ⏳ [PREPARE-GUARD] 상대를 끝내 안 기다려 주는 마지막 안전장치.
+  ///
+  /// **1순위는 화면이다** — 방을 나가거나 앱이 뒤로 가면 즉시 접는다
+  /// (`didChangeAppLifecycleState`). 이 시계는 그 둘 중 어느 것도 일어나지
+  /// 않는 경우, 즉 **방 화면을 켜 둔 채 방치된 경우**만 잡는다.
+  ///
+  /// 그대로 두면 마이크와 PeerConnection이 조용히 계속 돈다. 과금은 안 되지만
+  /// (게스트 입장 기준) 배터리와 마이크 점유는 남는다.
+  ///
+  /// ⚠️ **통화가 선 뒤에는 절대 안 걸린다.** `preparing`·`prepared`에서만
+  ///   돌고, `signaling`으로 넘어가는 순간 접는다.
+  Timer? _interpPrepareGuard;
 
   /// 내 발화 일련번호와 발화 시작 시각. History 순서 복원용이다
   /// (직접 대화의 `_directSeq`/`_directSpeechStartedAt`과 같은 목적).
@@ -3679,6 +3702,46 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (mounted) setState(() {});
   }
 
+  /// ⏳ [PREPARE-GUARD] 상대를 기다리는 시계를 건다.
+  ///
+  /// **마지막 안전장치다.** 방 이탈·백그라운드가 1순위이고, 이 시계는 그 둘이
+  /// 다 안 일어난 채 방치된 경우만 잡는다.
+  void _armInterpPrepareGuard(String reason) {
+    _interpPrepareGuard?.cancel();
+    if (_isDirectMode || _isExiting || !mounted) return;
+    // 이미 상대가 있으면 걸 이유가 없다 — 곧 activate로 간다.
+    if (_hasConversationPartner) return;
+    final int generation = _interpGeneration;
+    _lgDuo('[PREPARE-GUARD]',
+        'armed reason=$reason inMin=${kDuoInterpPrepareMaxWait.inMinutes}');
+    _interpPrepareGuard = Timer(kDuoInterpPrepareMaxWait, () {
+      _interpPrepareGuard = null;
+      if (!mounted || _isExiting) return;
+      if (generation != _interpGeneration) return;
+      // ⚠️ **통화가 선 뒤에는 아무것도 하지 않는다.** 준비 중일 때만이다.
+      if (_interpLife != InterpLifecycle.preparing &&
+          _interpLife != InterpLifecycle.prepared) {
+        _lgDuo('[PREPARE-GUARD]', 'skipped stage=${_interpLife.name}');
+        return;
+      }
+      if (_hasConversationPartner) {
+        _lgDuo('[PREPARE-GUARD]', 'skipped reason=partner_online');
+        return;
+      }
+      _lgDuo('[PREPARE-GUARD]',
+          'fired — ${kDuoInterpPrepareMaxWait.inMinutes}분간 상대가 없었다. 마이크를 접는다');
+      unawaited(_stopInterpreterCapture('prepare_guard'));
+    });
+  }
+
+  void _cancelInterpPrepareGuard(String reason) {
+    final Timer? timer = _interpPrepareGuard;
+    if (timer == null) return;
+    timer.cancel();
+    _interpPrepareGuard = null;
+    _lgDuo('[PREPARE-GUARD]', 'cancelled reason=$reason');
+  }
+
   /// 예약을 접는다. 붙었을 때·방을 나갈 때·상대가 나갔을 때 부른다.
   void _cancelInterpRetry(String reason) {
     final Timer? timer = _interpRetryTimer;
@@ -4032,6 +4095,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   Future<void> _activateInterpreter(String reason) async {
     if (_isDirectMode || _isExiting || !mounted) return;
     if (!_toInterpLifecycle(InterpLifecycle.signaling, reason)) return;
+    // ⏳ 상대가 왔다. 기다리는 시계는 더 필요 없다 — 통화에는 안 걸린다.
+    _cancelInterpPrepareGuard('activating');
     try {
       // 📡 통로를 세운다. 준비 단계에서 만든 PeerConnection에 신호를 태운다.
       if (_useInterpWebrtc) {
@@ -4171,6 +4236,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _toInterpLifecycle(InterpLifecycle.prepared, 'first_frame');
       _setInterpMicPhase(InterpMicPhase.waitingPartner);
       _noteInterpStartSucceeded();
+      _armInterpPrepareGuard('first_frame');
       // 준비가 끝났다. 그 사이 상대가 들어와 있었으면 여기서 이어 간다.
       if (_hasConversationPartner) {
         _maybeAutoStartInterpreter('prepared_partner_waiting');
@@ -4209,6 +4275,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 🔁 마이크를 접는 자리다. 예약된 재시도가 살아 있으면 닫은 통역을 다시
     //   열려 든다.
     _cancelInterpRetry(reason);
+    _cancelInterpPrepareGuard(reason);
     // 🔄 접는 중이라고 먼저 적는다. 이 뒤로는 어떤 단계도 새로 시작하지 않는다.
     _toInterpLifecycle(InterpLifecycle.closing, reason);
     // 📮 못 보낸 말도 여기서 버린다. 다음 통화로 넘어가면 안 된다.
