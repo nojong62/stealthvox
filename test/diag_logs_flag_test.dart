@@ -33,6 +33,16 @@ void main() {
     expect(main.contains('if (!kDebugMode) {\n    debugPrint ='), isFalse);
   });
 
+  test('문이 열렸으면 스스로 한 줄 남긴다', () {
+    // 시작 화면에서는 앱이 원래 아무것도 안 찍는다. 그래서 로그가 막힌
+    // 것인지 찍을 게 없는 것인지 구별이 안 됐다. 이 줄이 그 답이다.
+    expect(main, contains('🔬 [DIAG-LOGS] enabled'));
+    // 비우는 문보다 **뒤에** 있어야 한다. 앞이면 비워지기 전이라 언제나 찍힌다.
+    expect(main.indexOf('[DIAG-LOGS] enabled'),
+        greaterThan(main.indexOf('debugPrint = (String? message')),
+        reason: '문보다 앞에 있으면 릴리스에서도 찍힌다');
+  });
+
   test('debugPrint를 비우는 자리는 한 곳뿐이다', () {
     final int places =
         RegExp(r'debugPrint = \(String\? message').allMatches(main).length;

@@ -104,6 +104,15 @@ void main() async {
   if (!kDebugMode && !kDiagLogs) {
     debugPrint = (String? message, {int? wrapWidth}) {};
   }
+  // 🔬 [DIAG-LOGS] **문이 열렸다는 것을 스스로 말한다.**
+  //   이 줄이 안 보이면 진단 빌드가 아니다. 실기기에서 "로그가 왜 안 나오나"를
+  //   앱 화면을 뒤지며 확인하던 시간을 없애려고 둔다 — 시작 화면에서는 원래
+  //   아무것도 안 찍혀서, 로그가 막힌 것인지 찍을 게 없는 것인지 구별이
+  //   안 됐다(2026-09-14).
+  if (kDiagLogs || kDebugMode) {
+    debugPrint('🔬 [DIAG-LOGS] enabled — 진단 로그가 열려 있다 '
+        '(diagFlag=$kDiagLogs debugMode=$kDebugMode)');
+  }
   _installOverflowScanner();
   GoRouter.optionURLReflectsImperativeAPIs = true;
   usePathUrlStrategy();
