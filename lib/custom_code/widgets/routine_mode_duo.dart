@@ -3135,20 +3135,38 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       final socket = OpenAiStreamingTranscribeSession(
         apiKey: _openAiKey,
         vadSilenceDurationMs: kDuoVadSilenceDurationMs,
-        languageCode:
-            (!kDuoInterpOriginCheck || OriginLanguageSession.instance.settled)
-                ? _mapLanguageToCode(_myNative())
-                : '',
+        // 🌐 [INTERP-ORIGIN] **첫 발화부터 로비 언어를 박는다.** Deepgram
+        //   갈래와 같은 규칙이다(`_startInterpreterCapture`의
+        //   `originLanguageCode`).
+        //
+        //   예전에는 판정이 끝날 때까지 비워 두었다(자동 감지). 로비값이
+        //   틀렸을 때 음차가 돌아와 불일치가 안 보인다는 이유였는데, 그
+        //   대가로 **로비값이 맞는 흔한 경우에도** 첫 발화가 자동 감지로
+        //   나갔고, 감지가 흔들리면 유저가 한 말이 다른 언어 문장으로 적혀
+        //   기록에도 남고 상대에게도 건너갔다(2026-09-14 실기기).
+        //
+        //   ⚠️ **이 갈래에서는 그 대가를 되돌려 받을 방법이 아직 없다.**
+        //   Deepgram 갈래는 같은 소리를 자동 감지로 한 번 더 들어 판정하는데
+        //   (`_interpOriginProbe`), 소켓 갈래는 **원문 PCM을 앱에 안 남긴다** —
+        //   서버가 잘라 간 덩이라 되들을 소리가 없다. 그래서 여기서는
+        //   `_settleInterpreterOrigin`이 박힌 글자로 판정하게 되고, 음차는
+        //   언제나 "로비값 맞음"으로 읽힌다(로그의 `judgeSource=pinned`).
+        //
+        //   그건 **이 판에서 받아들인 임시 상태**다. 기록이 틀리는 쪽이
+        //   불일치를 못 잡는 쪽보다 나쁘다. 소켓 갈래에 캡처를 붙이면
+        //   (다음 판) probe가 살아나고 판정도 함께 돌아온다.
+        languageCode: _mapLanguageToCode(_myNative()),
         onLog: (tag, msg) => _lgDuo('[INTERP-STT]$tag', msg),
       );
       _lgDuo(
           '[INTERP-STT-KIND]',
           'kind=socket vadSilenceMs=$kDuoVadSilenceDurationMs '
               'declared=${_myNative()}');
+      // 🌐 소켓 갈래는 언제나 `pinned`다. `probe=none`이 "되들을 소리가 없어
+      //   판정이 반쪽"이라는 뜻이고, 이 갈래에 캡처가 붙으면 그때 바뀐다.
       _lgDuo(
           '[INTERP-ORIGIN]',
-          'stt_open '
-              'mode=${(!kDuoInterpOriginCheck || OriginLanguageSession.instance.settled) ? 'pinned' : 'auto'} '
+          'stt_open kind=socket mode=pinned probe=none '
               'declared=${_myNative()} flag=${kDuoInterpOriginCheck ? 'on' : 'off'}');
       socket.shouldReconnect = () =>
           !_isExiting &&

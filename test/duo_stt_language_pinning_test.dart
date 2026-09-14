@@ -127,18 +127,43 @@ void main() {
   //
   //   판정하려고 들어보는 일과 그 결과를 기록으로 삼는 일은 별개다.
   group('🌐 플래그 ON — 기록은 로비 언어, 판정은 따로 한 번 더 듣는다', () {
-    test('첫 발화부터 로비 언어를 박는다', () {
+    // ⚠️ **들여쓰기로 단언하지 않는다.** 2026-09-14에 그렇게 썼다가 소켓
+    //   갈래를 통째로 놓쳤다 — 같은 조건문이 들여쓰기만 다르게 두 곳에
+    //   있었고, 단언은 한 곳만 짚었다. 실제로 도는 갈래(기본값 socket)가
+    //   안 고쳐진 채로 "고쳤다"고 보고했다.
+    //
+    //   그래서 여기서는 **공백을 지운 뒤 의미로** 본다.
+    String squashed(String s) => s.replaceAll(RegExp(r'\s+'), ' ');
+
+    test('두 STT 갈래 **모두** 첫 발화부터 로비 언어를 박는다', () {
+      final String flat = squashed(duo);
+
+      // ① Deepgram 갈래 — DuoSttPipeline
+      expect(flat,
+          contains('originLanguageCode: () => _mapLanguageToCode(_myNative())'),
+          reason: 'Deepgram 갈래에 로비 언어가 안 박힌다');
+
+      // ② 소켓 갈래 — OpenAiStreamingTranscribeSession (기본값)
+      expect(flat, contains('languageCode: _mapLanguageToCode(_myNative())'),
+          reason: '소켓 갈래에 로비 언어가 안 박힌다');
+
+      // ③ 판정 상태로 언어를 가르던 조건이 **어느 갈래에도** 남으면 안 된다.
+      //    공백을 지웠으므로 들여쓰기가 어떻든 걸린다.
       expect(
-          duo,
-          contains(
-              'originLanguageCode: () => _mapLanguageToCode(_myNative())'),
-          reason: '통역 전사에 로비 언어가 안 박힌다');
-      // 판정 상태에 따라 언어가 갈리던 갈래가 되살아나면 안 된다.
+          flat,
+          isNot(contains(
+              "OriginLanguageSession.instance.settled) ? _mapLanguageToCode(_myNative()) : ''")),
+          reason: '첫 발화가 다시 자동 감지로 나가는 갈래가 남아 있다');
+    });
+
+    test('소켓 갈래는 되들을 소리가 없다는 사실을 남긴다', () {
+      // 이 갈래의 origin-check는 지금 반쪽이다. 그 사실이 로그로 보여야
+      // 실기기에서 "판정이 왜 항상 맞다고 나오나"를 물을 수 있다.
+      expect(duo, contains('kind=socket mode=pinned probe=none'));
       expect(
-          duo,
-          isNot(contains("? _mapLanguageToCode(_myNative())\n"
-              "              : ''")),
-          reason: '첫 발화가 다시 자동 감지로 나간다');
+          squashed(duo),
+          contains('원문 PCM은 남기지 않는다'),
+          reason: '소켓 갈래가 PCM을 안 남긴다는 근거 주석이 사라졌다');
     });
 
     test('판정은 같은 소리를 언어 없이 다시 들어서 한다', () {
