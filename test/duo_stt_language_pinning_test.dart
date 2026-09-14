@@ -24,13 +24,18 @@ void main() {
   final String circle = read(_circle);
   final String scenario = read(_scenario);
 
-  // ⚠️ **Duo 두 모드의 정책이 다르다.** 2026-09-03에 만능 통역만 첫 발화
-  //   언어 판정을 받았고, 직접 대화는 예전 그대로 로비값을 박는다.
-  //   같이 바꾸지 않은 이유는 그때 직접 대화가 WebRTC 검증 중이어서다 —
-  //   두 변수를 섞으면 실기기 실패의 원인을 가를 수 없다.
+  // ✅ **이제 Duo 두 모드가 같은 규칙을 쓴다**(2026-09-14).
   //
-  //   그래서 아래 두 그룹은 **서로 다른 것을 지킨다.** 나중에 직접 대화까지
-  //   넓히면 첫 그룹을 옮기고 이 주석을 고칠 것.
+  //   2026-09-03에는 만능 통역만 첫 발화를 자동 감지로 열었다. 그때는 그것이
+  //   "로비값이 틀렸는지 알아내는" 유일한 방법이었는데, 그 대가로 **첫 발화의
+  //   글자 자체가 판정에 희생됐다** — 감지가 흔들리면 유저가 한 말이 다른
+  //   언어 문장으로 기록되고 상대에게도 그대로 건너갔다.
+  //
+  //   지금은 기록·전달과 판정을 갈라 두 모드 다 로비값을 박는다. 판정은
+  //   같은 소리를 언어 없이 한 번 더 들어서 따로 한다.
+  //
+  //   아래 두 그룹은 그래서 **같은 것을 지킨다** — 전사에 들어가는 language는
+  //   언제나 유저가 확정한 ORIGIN이다.
 
   group('직접 대화는 로비값을 그대로 박는다 (무변경)', () {
     /// `_startDirectStt` 안만 본다 — 만능 통역 쪽 코드에 걸리면 안 된다.
@@ -115,22 +120,81 @@ void main() {
     });
   });
 
-  group('🌐 플래그 ON — 첫 발화 판정 전까지 자동 감지로 연다', () {
-    test('판정 전에는 빈 languageCode(=자동 감지)로 연다', () {
-      // 로비값을 박아 두면 그 언어로 **음차된** 글자가 돌아와 불일치가
-      // 보이지 않는다(한국어로 박힌 채 영어를 말하면 한글 음차).
-      expect(duo, contains('OriginLanguageSession.instance.settled'));
+  // 🔄 2026-09-14에 뒤집혔다. 예전에는 첫 발화를 **판정용으로 쓰느라**
+  //   자동 감지로 열었고, 그 글자가 그대로 기록과 상대 전달에 쓰였다.
+  //   감지가 흔들리면 유저가 한 말이 다른 언어 문장으로 적혔다(실기기: 호스트
+  //   첫 문장만 타겟 언어로 기록, 2번째부터 정상).
+  //
+  //   판정하려고 들어보는 일과 그 결과를 기록으로 삼는 일은 별개다.
+  group('🌐 플래그 ON — 기록은 로비 언어, 판정은 따로 한 번 더 듣는다', () {
+    test('첫 발화부터 로비 언어를 박는다', () {
       expect(
           duo,
-          contains("? _mapLanguageToCode(_myNative())\n"
-              "              : ''"),
-          reason: '판정 전 자동 감지 갈래가 사라졌다');
+          contains(
+              'originLanguageCode: () => _mapLanguageToCode(_myNative())'),
+          reason: '통역 전사에 로비 언어가 안 박힌다');
+      // 판정 상태에 따라 언어가 갈리던 갈래가 되살아나면 안 된다.
+      expect(
+          duo,
+          isNot(contains("? _mapLanguageToCode(_myNative())\n"
+              "              : ''")),
+          reason: '첫 발화가 다시 자동 감지로 나간다');
     });
 
-    test('판정이 끝나면 소켓 언어를 갈아 끼운다', () {
-      // 자동 감지로 계속 두면 짧은 발화에서 언어가 흔들려 전사가 나빠진다.
-      expect(duo, contains('switchLanguage('));
+    test('판정은 같은 소리를 언어 없이 다시 들어서 한다', () {
+      expect(duo, contains('OriginLanguageSession.instance.settled'));
+      expect(duo, contains('_interpOriginProbe'),
+          reason: '판정용 소리를 들고 있는 자리가 없다');
+      expect(duo, contains("probe=auto"),
+          reason: '판정용 자동 감지 전사가 없다');
+    });
+
+    test('판정용 글자는 어디에도 저장하지 않는다', () {
+      final int start = duo.indexOf('Future<void> _settleInterpreterOrigin(');
+      final int end = duo.indexOf('Future<void> _applyOriginChange(');
+      expect(start, greaterThan(0));
+      final String region = duo.substring(start, end);
+      // 판정 영역이 기록·전달 경로를 부르면 안 된다.
+      for (final gone in <String>[
+        '_saveHistoryMessage(',
+        '_uploadMyMessage(',
+        '_processRelayPipeline(',
+      ]) {
+        expect(region, isNot(contains(gone)),
+            reason: '판정 글자가 $gone 로 새어 나간다');
+      }
+    });
+
+    test('판정이 끝났다고 소켓을 다시 열지 않는다', () {
+      // 이미 로비 언어로 열려 있다. 같은 언어로 끊었다 다시 열면 그 사이에
+      // 한 말이 경계를 못 받는다. 언어가 실제로 바뀌는 자리는 Apply뿐이다.
+      final int start = duo.indexOf('Future<void> _settleInterpreterOrigin(');
+      final int end = duo.indexOf('Future<void> _applyOriginChange(');
+      final String region = duo.substring(start, end);
+      expect(region, isNot(contains('switchLanguage(')));
       expect(duo, contains('_settleInterpreterOrigin'));
+      // Apply 쪽에는 그대로 남아 있어야 한다.
+      expect(duo, contains('switchLanguage(_mapLanguageToCode(native))'));
+    });
+
+    test('로비값이 틀렸으면 첫 발화를 새 언어로 다시 전사한다', () {
+      expect(duo, contains('_retranscribeOriginProbe('),
+          reason: '언어를 바꿔도 첫 발화가 틀린 언어로 남는다');
+      expect(duo, contains('retranscribe_applied'));
+      // 빈 글자로 덮으면 그 줄이 사라진다.
+      expect(duo, contains('retranscribe_failed'));
+    });
+
+    test('판정용 소리를 계속 들고 있지 않는다', () {
+      // 발화 하나가 최대 1.4MB다.
+      for (final reason in <String>[
+        'no_mismatch',
+        'keep_current',
+        'room_exit',
+      ]) {
+        expect(duo, contains("_releaseOriginProbe('$reason')"),
+            reason: '$reason 경로에서 소리를 안 놓는다');
+      }
     });
 
     test('방마다 판정을 새로 시작한다', () {

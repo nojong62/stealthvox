@@ -42,6 +42,8 @@ import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/duo_transcript_gate.dart';
 import '/custom_code/services/duo_stt_ab_probe.dart';
 import '/custom_code/services/duo_stt_pipeline.dart';
+import '/custom_code/services/duo_utterance_capture.dart';
+import '/custom_code/services/openai_transcribe_service.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate;
 import '/custom_code/services/duo_interp_pcm_player.dart';
@@ -964,6 +966,17 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// (직접 대화의 `_directSeq`/`_directSpeechStartedAt`과 같은 목적).
   int _interpSeq = 0;
   DateTime? _interpSpeechStartedAt;
+
+  /// 🌐 [INTERP-ORIGIN] 로비값이 맞는지 **한 번 더 들어 볼** 소리.
+  ///
+  /// 기록에 쓰는 전사는 로비 언어로 박고 나가므로, 그 글자로는 로비값이
+  /// 틀렸는지 알 수 없다(틀렸으면 음차로 돌아온다). 판정은 같은 소리를
+  /// 자동 감지로 다시 들어서 한다. 판정이 끝나면 버린다.
+  DuoCapturedUtterance? _interpOriginProbe;
+
+  /// 그 소리가 어느 발화였나. 유저가 안내 창에서 언어를 바꾸면 이 발화를
+  /// 새 언어로 다시 전사해 기록을 고친다.
+  String _interpOriginProbeUttId = '';
 
   /// item_id 없이 도착한 마지막 전사문과 그 시각. 중복 판정용이다
   /// ([_isDuplicateEmptyIdTranscript] 참고).
@@ -3221,21 +3234,28 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       deepgramKey: _deepgramKey,
       idPrefix: 'duo_interp',
       mode: 'interpreter',
-      // 🌐 [INTERP-ORIGIN] **판정 전까지는 언어를 박지 않는다.**
-      //   박아 두면 로비값이 틀렸을 때 그 언어로 음차된 글자가 돌아와
-      //   (한국어로 박힌 채 영어를 말하면 한글 음차) 불일치가 보이지 않는다.
-      //   판정이 끝나면 `_settleInterpreterOrigin`이 곧바로 박는다.
+      // 🌐 [INTERP-ORIGIN] **첫 발화부터 로비 언어를 박는다.**
       //
-      //   ⚠️ **발화를 확정하는 순간 읽는다.** 옛 경로는 소켓을 열 때 한 번
-      //   굳혔지만, 여기서는 매 발화가 그 시점의 판정 상태를 본다 — 판정이
-      //   끝난 다음 발화부터 곧바로 확정된 Origin으로 전사된다.
+      //   예전에는 판정이 끝날 때까지 언어를 비워 두었다(자동 감지). 로비값이
+      //   틀렸을 때 음차된 글자가 돌아와 불일치가 안 보인다는 이유였는데,
+      //   그 대가가 너무 컸다 — **로비값이 맞는 흔한 경우에도** 첫 발화가
+      //   자동 감지로 나갔고, 감지가 흔들리면 유저가 한 말이 **다른 언어
+      //   문장으로 적혀** 기록에도 남고 상대에게도 그대로 건너갔다
+      //   (2026-09-14 실기기, 호스트 첫 문장만 타겟 언어로 기록).
       //
-      //   ⚠️ 직접 대화(`_startDirectStt`)는 어느 경우에도 로비값을 박는다 —
-      //   이 갈래는 만능 통역 전용이다.
-      originLanguageCode: () =>
-          (!kDuoInterpOriginCheck || OriginLanguageSession.instance.settled)
-              ? _mapLanguageToCode(_myNative())
-              : '',
+      //   판정하려고 들어보는 일과 그 결과를 기록으로 삼는 일은 별개다.
+      //   이제 **기록·전달은 로비 언어로 박은 전사**가 맡고, 로비값 검증은
+      //   같은 소리를 자동 감지로 한 번 더 들어서 따로 한다
+      //   (`_settleInterpreterOrigin`). 그쪽은 통화 한 통에 한 번뿐이고
+      //   상대에게 가는 길 밖에 있어 지연에 얹히지 않는다.
+      //
+      //   🎧 소켓도 첫 발화부터 실제 언어로 열린다. 자동 감지(`multi`)로
+      //   열던 동안에는 단어 확정이 흔들려 UtteranceEnd 경계까지 함께
+      //   불안정했다.
+      //
+      //   ⚠️ 직접 대화(`_startDirectStt`)도 같은 규칙이다 — 두 모드가 이제
+      //   한 가지로 움직인다.
+      originLanguageCode: () => _mapLanguageToCode(_myNative()),
       onLog: (tag, msg) => _lgDuo('[INTERP-STT]$tag', msg),
     )..roleLabel = _myRole;
     _lgDuo('[INTERP-STT-KIND]', 'kind=deepgram declared=${_myNative()}');
@@ -3308,6 +3328,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       if (generation != _interpGeneration) return;
       // 💾 [ORIGIN-PCM] 직접 대화와 같은 자리, 같은 규칙이다.
       _stashDuoPcm(result);
+      // 🌐 [INTERP-ORIGIN] 판정이 아직이면 **이 소리를 들고 있는다.** 로비
+      //   언어로 박아 전사한 글자로는 로비값이 틀렸는지 알 수 없어서
+      //   (틀렸으면 음차로 돌아온다), 같은 소리를 자동 감지로 한 번 더
+      //   들어야 한다. 창고를 다시 읽지 않고 방금 그 바이트를 그대로 쓴다 —
+      //   파일 쓰기는 `unawaited`라 아직 안 끝났을 수 있다.
+      if (kDuoInterpOriginCheck && !OriginLanguageSession.instance.settled) {
+        _interpOriginProbe = result.utterance;
+        _interpOriginProbeUttId = result.utteranceId;
+      }
       unawaited(_onInterpreterTranscript(
           generation, result.utteranceId, result.text));
     };
@@ -4465,16 +4494,57 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (session.settled) return;
 
     final String lobbyOrigin = _myNative();
-    final String text = transcript.trim();
+    final String pinned = transcript.trim();
 
     // 📏 짧은 말·고유명사·코드스위칭으로는 판정하지 않는다. 위 게이트를
     //   통과한 글자만 여기 오지만, 그래도 한두 낱말짜리는 근거가 못 된다.
     //   같은 문턱을 상대 발화 판정에도 쓴다(`kDuoSrcLangOverrideMinChars`).
-    if (text.length < kDuoSrcLangOverrideMinChars) {
+    if (pinned.length < kDuoSrcLangOverrideMinChars) {
       _lgDuo('[INTERP-ORIGIN]',
-          'skipped reason=insufficient textLen=${text.length}');
+          'skipped reason=insufficient textLen=${pinned.length}');
       return;
     }
+
+    // 🎧 [ORIGIN-PROBE] **판정은 로비 언어로 박은 글자로 하지 않는다.**
+    //
+    //   로비값이 틀렸으면 그 글자는 음차로 돌아온다(한국어로 박힌 채 영어를
+    //   말하면 한글 음차). 그걸 보고 판정하면 언제나 "로비값이 맞다"가 나와
+    //   이 기능이 통째로 꺼진 것과 같아진다. 그래서 **같은 소리를 언어 없이
+    //   한 번 더** 듣고, 그 글자로 판정한다.
+    //
+    //   ⚠️ 이 글자는 **판정에만 쓰고 어디에도 저장하지 않는다.** 기록과 상대
+    //   전달은 이미 로비 언어로 박은 전사가 맡았다.
+    //
+    //   소리가 없으면(창고 쓰기 전 세대가 바뀌는 등) 예전처럼 박힌 글자로
+    //   판정한다 — 판정을 아예 건너뛰면 로비값이 틀린 통화를 못 잡는다.
+    String judged = pinned;
+    String judgeSource = 'pinned';
+    final DuoCapturedUtterance? probe = _interpOriginProbe;
+    if (probe != null && probe.pcm.isNotEmpty) {
+      final probeWatch = Stopwatch()..start();
+      final String? auto = await OpenAiTranscribeService.transcribePcm16(
+        apiKey: _openAiKey,
+        pcm: probe.pcm,
+        sampleRate: probe.sampleRate,
+        // 🌐 **언어를 넘기지 않는다.** 이 호출의 존재 이유가 그것이다.
+        language: null,
+        model: OpenAiTranscribeService.duoFinalModel,
+        timeout: kDuoTranscribeTimeout,
+        trimLeadingSilence: false,
+        onLog: (tag, msg) => _lgDuo('[INTERP-ORIGIN]$tag', msg),
+      );
+      probeWatch.stop();
+      _lgDuo(
+          '[INTERP-ORIGIN]',
+          'probe=auto utt=$_interpOriginProbeUttId '
+              'audioMs=${probe.durationMs} len=${auto?.trim().length ?? -1} '
+              'elapsedMs=${probeWatch.elapsedMilliseconds}');
+      if (auto != null && auto.trim().length >= kDuoSrcLangOverrideMinChars) {
+        judged = auto.trim();
+        judgeSource = 'auto';
+      }
+    }
+    final String text = judged;
 
     // 스크립트만으로 끝나는지, GPT까지 가는지 로그로 가른다.
     final scriptVerdict = detectOriginScript(text);
@@ -4487,12 +4557,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     );
     sw.stop();
     if (scriptVerdict.decisive) {
-      _lgDuo('[INTERP-ORIGIN]',
-          'judge=script result=${scriptVerdict.language ?? 'none'}');
+      _lgDuo(
+          '[INTERP-ORIGIN]',
+          'judge=script source=$judgeSource '
+              'result=${scriptVerdict.language ?? 'none'}');
     } else {
       _lgDuo(
           '[INTERP-ORIGIN]',
-          'judge=gpt elapsedMs=${sw.elapsedMilliseconds} '
+          'judge=gpt source=$judgeSource elapsedMs=${sw.elapsedMilliseconds} '
               'result=${detected ?? 'none'}');
     }
 
@@ -4500,16 +4572,22 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 여기서 ORIGIN이 바뀌지는 않는다. 판정값을 적어 둘 뿐이다.
     session.adopt(detected);
 
-    // 판정이 끝났으니 소켓에 언어를 박는다. 여기까지는 자동 감지였다.
-    // 자동 감지로 계속 두면 짧은 발화("네", "그렇죠")에서 언어가 흔들린다.
+    // 🎧 소리를 언제까지 들고 있을 것인가.
     //
-    // 🎯 박는 값은 **판정값이 아니라 유저가 확정한 ORIGIN**이다. 판정값을
-    //   박으면 통역의 번역 방향(`_myNative`)과 전사 언어가 어긋난다 —
-    //   유저가 창에서 바꾸겠다고 하면 `_applyOriginChange`가 그때 다시 박는다.
-    unawaited(_interpStt?.switchLanguage(_mapLanguageToCode(_myNative())) ??
-        Future<bool>.value(false));
+    //   불일치가 없으면(흔한 경우) 여기서 곧바로 놓는다 — 30초짜리 발화가
+    //   1.4MB이고 더 쓸 데가 없다. 불일치가 있으면 안내 창이 뜨고, 유저가
+    //   "바꾸기"를 누르면 이 소리를 새 언어로 다시 들어야 하므로 그 창이
+    //   닫힐 때까지 들고 있는다(`_releaseOriginProbe`).
+
+    // 🔇 **여기서 `switchLanguage`를 부르지 않는다.** 소켓은 첫 발화부터
+    //   이미 로비 언어로 열려 있다(`originLanguageCode`). 예전에는 자동
+    //   감지로 열었다가 여기서 갈아 끼웠는데, 지금 그 호출은 같은 언어로
+    //   Deepgram 소켓을 끊었다 다시 여는 일밖에 하지 않는다 — 그 사이에 한
+    //   말은 경계를 못 받는다. 언어가 실제로 바뀌는 자리는
+    //   `_applyOriginChange` 하나뿐이다.
 
     if (detected == null) {
+      _releaseOriginProbe('no_mismatch');
       _lgDuo('[INTERP-ORIGIN]',
           'detected=$lobbyOrigin declared=$lobbyOrigin mismatch=false');
       return; // 로비값과 같거나 근거가 약하다
@@ -4521,6 +4599,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
     // 안내는 세션당 한 번. `takeNoticeSlot`이 그 빗장이다.
     if (!session.takeNoticeSlot()) {
+      _releaseOriginProbe('notice_already_used');
       _lgDuo('[INTERP-ORIGIN]', 'suppressed reason=notice_already_used');
       return;
     }
@@ -4551,6 +4630,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         await _interpStt?.switchLanguage(_mapLanguageToCode(native)) ?? false;
     // 📚 이미 만들어진 히스토리 방 문서의 언어값도 같이 맞춘다.
     await _syncHistoryRoomLanguages();
+    // 🎧 [ORIGIN-PROBE] 로비값이 틀렸다는 것이 지금 확정됐다. 그러면 **첫
+    //   발화는 틀린 언어로 박아 전사된 글자**다(음차). 그 소리를 새 언어로
+    //   다시 들어 기록을 고친다 — 이 창을 띄운 뜻이 그것이다.
+    unawaited(_retranscribeOriginProbe(native));
     _lgDuo(
         '[INTERP-ORIGIN]',
         'apply origin=$previous->$native '
@@ -4558,6 +4641,82 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             'switchLanguage=$ok persisted=true');
     if (!mounted) return;
     setState(() => _originMismatchDetected = null);
+  }
+
+  /// 🎧 [ORIGIN-PROBE] 첫 발화를 **확정된 언어로 다시 전사해** 기록을 고친다.
+  ///
+  /// 유저가 안내 창에서 "바꾸기"를 눌렀을 때만 돈다. 그 순간 비로소 첫 발화가
+  /// 틀린 언어로 적혔다는 것이 확정되기 때문이다.
+  ///
+  /// ⚠️ **고치는 것은 내 기록뿐이다.** 상대는 그 말을 이미 들었고, 상대 폰의
+  /// 기록도 통화 중에 만들어졌다. 뒤늦게 글자를 고쳐도 들린 소리는 되돌릴 수
+  /// 없으므로, 여기서 채널 문서까지 쫓아가 고치지는 않는다.
+  ///
+  /// ⚠️ **못 고쳐도 통화는 그대로다.** 소리가 없거나 전사가 실패하면 원래
+  /// 글자가 남는다 — 빈 글자로 덮지 않는다.
+  Future<void> _retranscribeOriginProbe(String native) async {
+    final DuoCapturedUtterance? probe = _interpOriginProbe;
+    final String uttId = _interpOriginProbeUttId;
+    final ref = _myHistoryRef;
+    if (probe == null || probe.pcm.isEmpty || uttId.isEmpty || ref == null) {
+      _lgDuo(
+          '[INTERP-ORIGIN]',
+          'retranscribe_skipped reason=no_audio '
+              'utt=${uttId.isEmpty ? '-' : uttId}');
+      return;
+    }
+    try {
+      final String? fixed = await OpenAiTranscribeService.transcribePcm16(
+        apiKey: _openAiKey,
+        pcm: probe.pcm,
+        sampleRate: probe.sampleRate,
+        language: _mapLanguageToCode(native),
+        model: OpenAiTranscribeService.duoFinalModel,
+        timeout: kDuoTranscribeTimeout,
+        trimLeadingSilence: false,
+        onLog: (tag, msg) => _lgDuo('[INTERP-ORIGIN]$tag', msg),
+      );
+      final String next = (fixed ?? '').trim();
+      if (next.isEmpty) {
+        _lgDuo('[INTERP-ORIGIN]',
+            'retranscribe_failed utt=$uttId reason=empty_text');
+        return;
+      }
+      // 그 발화의 줄은 소리 열쇠로 찾는다. 통역도 직접 대화와 같은 규칙으로
+      // `pcm_key`를 적어 두므로 한 줄로 집힌다.
+      final snap = await ref
+          .collection('messages')
+          .where(kMessagePcmKeyField, isEqualTo: uttId)
+          .limit(1)
+          .get();
+      if (snap.docs.isEmpty) {
+        _lgDuo('[INTERP-ORIGIN]', 'retranscribe_no_row utt=$uttId');
+        return;
+      }
+      final doc = snap.docs.first;
+      final String before =
+          (doc.data()['original_text'] ?? '').toString().trim();
+      if (before == next) {
+        _lgDuo('[INTERP-ORIGIN]', 'retranscribe_same utt=$uttId');
+        return;
+      }
+      await doc.reference.update(<String, dynamic>{
+        'original_text': next,
+        // 🔤 처음 들린 글자를 남긴다. 무엇이 어떻게 들렸는지가 사라지면
+        //   안 된다 — canonical 경로가 쓰는 칸과 같은 자리다.
+        if (before.isNotEmpty) kOriginalRawField: before,
+        'source_lang': native,
+      });
+      _lgDuo(
+          '[INTERP-ORIGIN]',
+          'retranscribe_applied utt=$uttId lang=$native '
+              'beforeLen=${before.length} afterLen=${next.length}');
+    } catch (e) {
+      _lgDuo('[INTERP-ORIGIN]', 'retranscribe_error=${e.runtimeType}');
+    } finally {
+      _interpOriginProbe = null;
+      _interpOriginProbeUttId = '';
+    }
   }
 
   /// 📚 [HISTORY-LANG] 이미 만들어진 히스토리 방 문서의 언어값을 지금 설정에
@@ -4590,9 +4749,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 재경고가 없는 근거는 `takeNoticeSlot()`이다. 이미 한 번 썼으므로 같은
   /// 세션에서는 두 번째 슬롯이 나오지 않는다.
   void _keepCurrentOrigin() {
+    // 🎧 로비값을 그대로 두기로 했다. 첫 발화도 그 언어로 박아 전사돼 있으므로
+    //   다시 들을 이유가 없다.
+    _releaseOriginProbe('keep_current');
     _lgDuo('[INTERP-ORIGIN]', 'keep_current origin=${_myNative()} reask=false');
     if (!mounted) return;
     setState(() => _originMismatchDetected = null);
+  }
+
+  /// 🎧 [ORIGIN-PROBE] 들고 있던 소리를 놓는다. 발화 하나가 최대 1.4MB다.
+  void _releaseOriginProbe(String reason) {
+    if (_interpOriginProbe == null && _interpOriginProbeUttId.isEmpty) return;
+    _lgDuo('[INTERP-ORIGIN]',
+        'probe_released reason=$reason utt=${_interpOriginProbeUttId.isEmpty ? '-' : _interpOriginProbeUttId}');
+    _interpOriginProbe = null;
+    _interpOriginProbeUttId = '';
   }
 
   TtsAdapter? _ensureInterpreterTts() {
@@ -6726,6 +6897,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   버려진 항목의 세대와 어긋나 보인다.
     _clearInterpPendingSends('generation_changed');
     ++_interpGeneration;
+    // 🎧 안내 창이 떠 있는 채로 나가면 판정용 소리가 남는다. 여기서 놓는다.
+    _releaseOriginProbe('room_exit');
     await _stopInterpreterCapture('room_exit');
     final interpStt = _interpStt;
     _interpStt = null;
