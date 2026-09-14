@@ -89,8 +89,17 @@ void main() {
   });
 
   group('Duo Interpreter lifecycle wiring', () {
+    // ⚠️ **줄바꿈을 맞춰 읽는다.** 아래 단언들은 `\n`이 든 여러 줄 문자열을
+    //   그대로 찾는데, 이 저장소는 blob이 LF이고 `core.autocrlf` 때문에 작업
+    //   트리가 CRLF가 되는 순간이 있다(`git stash`·`checkout` 직후). 그때
+    //   이 파일만 정규화를 안 해서 **코드는 멀쩡한데 테스트가 깨졌다**
+    //   (2026-09-14, 원인 찾는 데 한참 걸렸다).
+    //
+    //   다른 소스 기반 테스트들은 이미 같은 방식을 쓴다
+    //   (`duo_canonical_test.dart`·`origin_restoration_runner_lifecycle_test.dart`).
     final duo = File('lib/custom_code/widgets/routine_mode_duo.dart')
-        .readAsStringSync();
+        .readAsStringSync()
+        .replaceAll('\r\n', '\n');
 
     test('host capability is included in the initial room create write', () {
       final create = _region(
