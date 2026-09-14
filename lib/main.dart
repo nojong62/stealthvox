@@ -75,6 +75,22 @@ void _installOverflowScanner() {
 ///    더 큰 배율을 확인하려면 잠시 이 숫자를 올리고 돌려 봐야 한다.
 const double kMaxTextScale = 1.5;
 
+/// 🔬 [DIAG-LOGS] 진단 빌드에서 로그를 **열어 둔다.**
+///
+/// 기본은 꺼짐이라 릴리스 동작은 한 글자도 안 바뀐다. 켜면 `debugPrint`를
+/// 비우지 않으므로 `[Duo]`·`[INTERP-*]` 같은 줄이 logcat으로 나간다.
+///
+///     flutter build apk --profile --dart-define=DIAG_LOGS=true
+///
+/// **왜 필요한가** — 진단이 필요한 순간은 대개 실기기이고, 실기기에서 재는
+/// 것은 대개 순서와 시각이다(마이크가 언제 섰나, 문이 언제 열렸나). 그런데
+/// debug 빌드는 JIT라 그 숫자가 왜곡된다. profile은 릴리스에 가까운 속도인데
+/// `kDebugMode`가 거짓이라 여태 로그가 같이 닫혔다 — 그래서 profile로 올려도
+/// 아무것도 못 보고 코드로 되짚어야 했다(2026-09-14).
+///
+/// 🚫 **릴리스에 켜서 내보내지 말 것.** 로그가 대화록이 되면 안 된다.
+const bool kDiagLogs = bool.fromEnvironment('DIAG_LOGS', defaultValue: false);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 🔇 **릴리스에서는 진단 로그를 내보내지 않는다.**
@@ -83,7 +99,9 @@ void main() async {
   //   ⚠️ 맨 `print()`는 이 교체가 잡지 못한다 — 그래서 남아 있던 것들을
   //     `debugPrint`로 옮겨 이 문 아래로 들여놓았다. 새로 쓸 때도 `print`가
   //     아니라 `debugPrint`를 쓸 것.
-  if (!kDebugMode) {
+  //   🔬 [DIAG-LOGS] 진단 빌드는 예외다([kDiagLogs]). 기본값이 꺼짐이라
+  //     플래그를 안 주면 예전과 완전히 같다.
+  if (!kDebugMode && !kDiagLogs) {
     debugPrint = (String? message, {int? wrapWidth}) {};
   }
   _installOverflowScanner();
