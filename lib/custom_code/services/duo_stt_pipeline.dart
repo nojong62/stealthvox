@@ -237,7 +237,11 @@ class DuoSttPipeline {
   void openAudioGate({String reason = ''}) {
     if (_gateOpen) return;
     _gateOpen = true;
-    _lg('mode=$mode audio_gate=open reason=$reason');
+    // 🚪 늘려 뒀던 고리를 평소 길이로 되돌린다. 안 되돌리면 다음 발화 앞에
+    //   몇 초짜리 앞소리가 붙는다.
+    _capture.onGateOpened();
+    _lg('mode=$mode audio_gate=open reason=$reason '
+        'preRollBufferedMs=${_capture.preRollBufferedMs}');
   }
 
   /// 소리를 더 들이지 않는다. 담던 발화는 **버린다** — 문이 닫힌 뒤의 반쪽
@@ -245,7 +249,13 @@ class DuoSttPipeline {
   void closeAudioGate({String reason = ''}) {
     if (!_gateOpen) return;
     _gateOpen = false;
+    // 🚪 **버리는 것은 "진행 중 발화"뿐이다.** `abort()`는 담고 있던 발화
+    //   객체만 비우고 과거 소리를 담은 고리는 건드리지 않는다 — 그 둘이
+    //   갈려 있는 것이 이 구조의 핵심이다(`DuoUtteranceCapture.abort`).
     _capture.abort();
+    // 🚪 문이 닫힌 동안은 고리를 늘려 둔다. 그 사이에 한 말도 소리는 남아야
+    //   통화가 끝난 뒤 다시 들을 수 있다.
+    _capture.onGateClosed();
     // 🚪 [GATE-SYNC] **앱만 버리면 안 된다.** 문이 닫히면 소리가 Deepgram으로도
     //   안 가므로, 저쪽에 열린 채 남은 발화는 단어를 못 받아 영영 안 닫힌다.
     //   그 껍데기가 다음 구간으로 넘어가 실제 말과 경계가 어긋났다.
@@ -398,20 +408,36 @@ class DuoSttPipeline {
     }
   }
 
-  /// 마이크 조각 하나. **두 갈래로 똑같이 보낸다.**
+  /// 마이크 조각 하나. **두 갈래는 문을 서로 다르게 본다.**
+  ///
+  ///   보존(`_capture`)  → 문과 무관하게 **언제나** 담는다
+  ///   전사(`_sensor`)   → 문이 열려 있을 때만 Deepgram으로 나간다
+  ///
+  /// 예전에는 문이 닫히면 이 함수가 맨 앞에서 돌아섰다. 그래서 **고리에도
+  /// 아무것도 안 쌓였고**, 문이 열리는 순간 그 직전 소리가 통째로 없었다.
+  /// 통화가 붙기 전에 한 말도, 상대 목소리가 재생되는 동안 한 말도 그렇게
+  /// 사라졌다 — 소리 자체가 존재하지 않으니 통화가 끝난 뒤에도 되살릴 길이
+  /// 없었다.
+  ///
+  /// 이제 문이 정하는 것은 **"전사로 보낼 것인가"** 하나다. 소리를 보존할
+  /// 것인가는 문이 정하지 않는다.
+  ///
+  /// ⚠️ **`_sensor`를 문 밖으로 내보내면 안 된다.** 그쪽은 소켓으로 바이트를
+  ///   쏘는 자리라, 상대 목소리가 재생되는 동안 보내면 그 에코가 내 발화로
+  ///   잡힌다. 문이 있는 이유가 그것이다.
   void addPcm(Uint8List pcm) {
-    if (_stopped || !_gateOpen || pcm.isEmpty) {
-      // 🔎 [계측] 게이트가 닫혀 버려진 몫. 동작은 예전과 같다.
-      if (!_stopped && !_gateOpen && pcm.isNotEmpty) {
-        _gateDroppedFrames++;
-        _gateDroppedBytes += pcm.lengthInBytes;
-      }
+    if (_stopped || pcm.isEmpty) return;
+    // 💾 보존은 문보다 앞에 선다.
+    _capture.addPcm(pcm);
+    if (!_gateOpen) {
+      // 🔎 [계측] 전사로 못 간 몫. **버려진 것이 아니라 담겨는 있다.**
+      _gateDroppedFrames++;
+      _gateDroppedBytes += pcm.lengthInBytes;
       return;
     }
     // 🔎 [계측] **STT가 실제로 먹는 그 바이트**를 여기서 잰다.
     _inProbe.note(pcm);
     if (_inProbe.due) _logSttInput('periodic');
-    _capture.addPcm(pcm);
     _sensor?.addPcm(pcm);
   }
 

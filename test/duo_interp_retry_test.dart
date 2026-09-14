@@ -107,12 +107,19 @@ void main() {
       expect(duo, contains('void _scheduleInterpRetry(int generation)'));
     });
 
-    test('두 시작 경로 모두 성공하면 예약을 접는다', () {
-      // record 경로와 WebRTC 경로 둘 다. 한쪽만 접으면 늦게 울린 시계가
-      // 이미 도는 통역 위에 두 번째 시작을 얹는다.
+    // 🔄 2026-09-14에 접는 자리가 하나로 모였다. 예전에는 record·WebRTC
+    //   두 시작 경로가 각자 접었는데, 이제 **마이크 첫 프레임**이라는 공통
+    //   지점이 생겼다 — 두 경로 다 그리로 모인다. 함수 반환이 아니라 실제로
+    //   소리가 흐르는 순간이라 오히려 더 정확하다.
+    test('마이크가 실제로 돌면 예약을 접는다', () {
       expect(RegExp(r'_noteInterpStartSucceeded\(\)').allMatches(duo).length,
-          greaterThanOrEqualTo(3),
-          reason: '선언 1 + 호출 2 미만이면 한쪽 경로가 예약을 안 접는다');
+          greaterThanOrEqualTo(2),
+          reason: '선언 1 + 호출 1 미만이면 예약이 안 접힌다');
+      // 접는 자리가 첫 프레임 자리여야 한다.
+      final String feed = _region(duo, 'void _feedInterpreterPcm(',
+          '마이크를 닫는다. **소켓은 그대로 둔다.**');
+      expect(feed, contains('_noteInterpStartSucceeded()'),
+          reason: '함수 반환만 보고 접으면 frames=0으로 죽은 마이크도 성공이 된다');
       final String body =
           _region(duo, 'void _noteInterpStartSucceeded()', 'void _retryInterpreterNow()');
       expect(body, contains("_cancelInterpRetry('started')"));

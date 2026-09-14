@@ -10,9 +10,14 @@
 // 이것이 없으면 "안녕하세요"의 첫 `안`이 전사 쪽에서만 사라진다.
 //
 //   평소        → 최근 [preRollMs]만 고리에 유지 (그 앞은 흘려보낸다)
+//   문 닫힘     → 고리를 [kDuoCaptureGateClosedRingMs]까지 늘린다
 //   begin()     → 고리를 통째로 발화 앞에 붙이고 수집 시작
 //   수집 중     → 들어오는 조각을 그대로 쌓는다
 //   commit()    → 지금까지 모인 것을 한 덩이 PCM으로 확정
+//
+// 🚪 **전사로 가는 문(gate)은 여기를 막지 않는다.** 문이 닫혀 있어도 소리는
+//   계속 담는다 — 문이 정하는 것은 "Deepgram으로 보낼 것인가"이지 "소리를
+//   보존할 것인가"가 아니다(`DuoSttPipeline.addPcm`).
 //
 // ⚠️ **speech/non-speech를 여기서 판정하지 않는다.** 이 클래스는 귀가 아니라
 //   손이다. 무엇이 말이고 무엇이 아닌지는 바깥(Deepgram)이 정하고, 여기는
@@ -43,6 +48,25 @@ import 'pcm_audio_utils.dart';
 /// 값을 키워도 메모리는 발화당 29KB → 48KB뿐이다(24kHz·16bit·mono).
 /// 앞을 더 담는 대가는 이 정도이고, 잘린 첫 음절은 되돌릴 방법이 없다.
 const int kDuoCapturePreRollMs = 1000;
+
+/// 🚪 [GATE-CLOSED RING] 전사로 가는 문이 닫혀 있는 동안 고리를 얼마까지
+/// 늘릴 것인가.
+///
+/// 평소 고리는 [kDuoCapturePreRollMs]면 충분하다 — 시작 신호가 소리보다 늦게
+/// 오는 그 지연만 덮으면 되기 때문이다. 그런데 문이 닫히는 구간은 그보다 길다.
+///
+///   마이크 기동 ~ 문 열림   수백 ms   → 1000ms로 덮인다
+///   상대 목소리 재생 중      수 초     → **안 덮인다**
+///
+/// 재생 중에 한 말은 문이 닫혀 있어 Deepgram으로 안 가고, 그래서 경계도 안
+/// 잡힌다. 그건 에코 방어의 대가라 이 판에서 바꾸지 않는다. 다만 **소리까지
+/// 잃을 이유는 없다** — 통화가 끝난 뒤 다시 들을 수 있어야 한다.
+///
+/// 그래서 문이 닫혀 있는 동안만 고리를 늘리고, 열리는 순간 평소 길이로
+/// 돌아간다. 24kHz·16bit 기준 10초는 480KB다.
+///
+/// ⚠️ **무한 가변이 아니다.** 문이 오래 닫혀 있어도 여기서 멈춘다.
+const int kDuoCaptureGateClosedRingMs = 10000;
 
 /// 한 발화의 상한. 이보다 길면 앞쪽을 버린다.
 ///
@@ -90,6 +114,7 @@ class DuoUtteranceCapture {
     this.sampleRate = kStealthVoxSttSampleRate,
     this.preRollMs = kDuoCapturePreRollMs,
     this.maxUtteranceMs = kDuoCaptureMaxUtteranceMs,
+    this.gateClosedRingMs = kDuoCaptureGateClosedRingMs,
   });
 
   /// 발급하는 id의 머리말. 모드를 구별해 로그에서 바로 읽히게 한다
@@ -98,6 +123,9 @@ class DuoUtteranceCapture {
   final int sampleRate;
   final int preRollMs;
   final int maxUtteranceMs;
+
+  /// 문이 닫혀 있는 동안의 고리 상한([kDuoCaptureGateClosedRingMs]).
+  final int gateClosedRingMs;
 
   int get _bytesPerMs => sampleRate * 2 ~/ 1000;
 
@@ -112,6 +140,11 @@ class DuoUtteranceCapture {
   int _openingPreRollBytes = 0;
 
   bool _capturing = false;
+
+  /// 🚪 전사로 가는 문이 닫혀 있는가. **고리 길이만 가른다** — 담고 안 담고는
+  ///   여기서 정하지 않는다(이 클래스는 언제나 담는다).
+  bool _gateClosed = false;
+
   String? _currentId;
   int _seq = 0;
 
@@ -162,11 +195,37 @@ class DuoUtteranceCapture {
 
     _preRoll.add(pcm);
     _preRollBytes += pcm.length;
-    final int maxPreRoll = preRollMs * _bytesPerMs;
+    final int maxPreRoll = _ringMs * _bytesPerMs;
     while (_preRollBytes > maxPreRoll && _preRoll.length > 1) {
       _preRollBytes -= _preRoll.removeAt(0).length;
     }
   }
+
+  /// 🚪 전사로 가는 문이 닫혔다. 고리를 [gateClosedRingMs]까지 늘린다.
+  ///
+  /// **소리를 더 들고 있을 뿐 아무것도 판정하지 않는다.** 문이 닫힌 동안의
+  /// 소리도 통화가 끝난 뒤에는 다시 들을 수 있어야 한다.
+  void onGateClosed() {
+    if (_gateClosed) return;
+    _gateClosed = true;
+  }
+
+  /// 🚪 문이 열렸다. **평소 길이로 곧바로 돌아간다.**
+  ///
+  /// 늘어난 고리를 그대로 두면 다음 발화 앞에 몇 초짜리 앞소리가 붙는다.
+  /// 여기서 줄이되, 줄이는 것은 **가장 오래된 쪽**이다 — 문이 열리기 직전
+  /// 소리가 다음 발화의 첫 음절일 수 있다.
+  void onGateOpened() {
+    if (!_gateClosed) return;
+    _gateClosed = false;
+    final int maxPreRoll = _ringMs * _bytesPerMs;
+    while (_preRollBytes > maxPreRoll && _preRoll.length > 1) {
+      _preRollBytes -= _preRoll.removeAt(0).length;
+    }
+  }
+
+  /// 지금 고리가 들고 있어야 할 길이.
+  int get _ringMs => _gateClosed ? gateClosedRingMs : preRollMs;
 
   /// 말이 시작됐다. 고리에 담아 둔 앞소리를 발화 앞에 붙이고 담기 시작한다.
   ///
@@ -235,6 +294,7 @@ class DuoUtteranceCapture {
     _preRoll.clear();
     _preRollBytes = 0;
     _lastFrameAt = null;
+    _gateClosed = false;
   }
 
   void _clearCurrent() {

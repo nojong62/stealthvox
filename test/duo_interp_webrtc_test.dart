@@ -319,8 +319,13 @@ void main() {
     });
 
     test('게이트·세기 계측·AEC 프로브가 그 안에 그대로 있다', () {
+      // ⚠️ 고정 길이로 자르지 않는다. 함수가 길어지면 단언이 조용히
+      //   비켜간다(2026-09-14에 실제로 그랬다). 다음 선언까지를 본다.
       final int at = duo.indexOf('void _feedInterpreterPcm(');
-      final String body = duo.substring(at, at + 1400);
+      final int end = duo.indexOf('마이크를 닫는다. **소켓은 그대로 둔다.**', at);
+      expect(at, greaterThan(-1));
+      expect(end, greaterThan(at));
+      final String body = duo.substring(at, end);
       expect(body, contains('stt.audioGateOpen'));
       expect(body, contains('_utteranceRms?.addPcm(bytes)'));
       expect(body, contains('_aecProbe.addIdle(bytes)'));
@@ -439,7 +444,11 @@ void main() {
 
     test('한 통화를 되짚을 최소 줄이 다 있다', () {
       for (final String line in <String>[
-        'connection_started',
+        // 🔄 마이크가 상대보다 먼저 서면서 한 통화가 두 단계로 갈렸다.
+        //   그래서 되짚을 줄도 둘로 늘었다(2026-09-14).
+        'local_media_starting', // prepare 시작
+        'mic_prepared', // 마이크가 실제로 돈다
+        'activated', // 상대가 들어와 신호·전사·문이 섰다
         'connection_ready',
         'connection_closed',
         'local_pcm',

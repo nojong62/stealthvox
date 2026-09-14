@@ -91,11 +91,32 @@ void main() {
   });
 
   group('건드리지 않은 것', () {
-    test('게이트를 여는 자리는 여전히 캡처 시작의 마지막 줄이다', () {
-      final int open = duo.indexOf("_openInterpGate('capture_started');\n"
-          '    // 🔁 붙었다.');
-      expect(open, greaterThan(-1),
-          reason: '순서가 바뀌면 "등이 밝다 = 지금 말하면 들어간다"가 깨진다');
+    // 🔄 2026-09-14에 자리가 옮겨졌다. 마이크는 상대보다 **먼저** 서고
+    //   (prepare), 문은 상대가 들어온 뒤 activate의 마지막 줄에서 열린다.
+    //   규칙 자체는 그대로다 — 문이 열리는 순간이 곧 "지금 말하면 들어간다"다.
+    test('게이트를 여는 자리는 activate의 마지막 줄이다', () {
+      final int act = duo.indexOf(
+          'Future<void> _activateInterpreter(String reason) async {');
+      expect(act, greaterThan(-1));
+      final int gate = duo.indexOf("_openInterpGate('capture_started')", act);
+      final int stt = duo.indexOf('_ensureInterpreterStt()', act);
+      final int signaling = duo.indexOf('_activateInterpreterWebrtc(', act);
+      expect(gate, greaterThan(-1),
+          reason: '문을 여는 자리가 activate에 없다');
+      expect(gate, greaterThan(stt),
+          reason: '전사 소켓보다 문이 먼저 열리면 그 사이 말이 갈 곳이 없다');
+      expect(gate, greaterThan(signaling),
+          reason: '신호보다 문이 먼저 열리면 상대에게 보낼 통로가 없다');
+    });
+
+    test('prepare 단계에서는 문을 열지 않는다', () {
+      final int prep = duo.indexOf(
+          'Future<void> _startInterpreterCapture(String reason) async {');
+      final int end =
+          duo.indexOf('Future<bool> _startInterpreterWebrtc(', prep);
+      expect(prep, greaterThan(-1));
+      expect(duo.substring(prep, end).contains('_openInterpGate('), isFalse,
+          reason: '상대가 없는데 문이 열리면 무음이 전사로 올라간다');
     });
 
     test('탭과 게이트의 역할 분담은 그대로다', () {
