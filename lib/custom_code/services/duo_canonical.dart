@@ -189,6 +189,9 @@ class DuoSourceUtterance {
     required this.spokenAtMs,
     required this.seq,
     required this.srcLang,
+    this.senderUid = '',
+    this.sttSource = '',
+    this.duoMode = '',
   });
 
   final String id;
@@ -198,11 +201,26 @@ class DuoSourceUtterance {
   final int seq;
   final String srcLang;
 
+  /// 말한 사람의 uid. **개인 방에서 내 줄인지 상대 줄인지를 이 값이 가른다.**
+  ///
+  /// 기본값을 두는 이유는 이 자료형이 테스트와 순수 함수에서 직접 만들어지기
+  /// 때문이다. 채널 문서에 없으면 빈 값이고, 그때는 [role]로도 가를 수 있다.
+  final String senderUid;
+
+  /// 이 글자를 만든 PCM의 출처. 개인 방 줄의 `stt_source`가 된다.
+  final String sttSource;
+
+  /// `direct` / `interpreter`. **신규 줄 생성은 direct만 한다.**
+  final String duoMode;
+
   /// 글자만 갈아 끼운 같은 줄. 문맥 교정이 쓴다.
   DuoSourceUtterance withText(String next) => DuoSourceUtterance(
         id: id,
         role: role,
         text: next,
+        senderUid: senderUid,
+        sttSource: sttSource,
+        duoMode: duoMode,
         spokenAtMs: spokenAtMs,
         seq: seq,
         srcLang: srcLang,
@@ -413,6 +431,12 @@ Future<List<DuoSourceUtterance>> readDuoSourceTimeline(String roomId) async {
           0,
       seq: (data['seq'] as num?)?.toInt() ?? 0,
       srcLang: (data['srcLang'] ?? '').toString(),
+      // 🆕 여태 읽고 버리던 값들이다. 개인 방에 **없는 줄을 새로 만들려면**
+      //   이 셋이 있어야 한다 — 누구 줄인지(senderUid), 소리가 어디서 왔는지
+      //   (sttSource), 어느 방식의 통화인지(duoMode).
+      senderUid: (data['senderUid'] ?? '').toString(),
+      sttSource: (data['sttSource'] ?? '').toString(),
+      duoMode: mode,
     ));
   }
   list.sort((a, b) {
@@ -729,6 +753,253 @@ Future<void> buildDuoCanonical({
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// 🧱 개인 방에 옮길 줄을 **미리 세운다** — 판정은 전부 여기 순수 함수에 있다
+// ══════════════════════════════════════════════════════════════════════
+
+/// 개인 방의 줄 하나를 어떻게 할 것인가.
+///
+/// **이 객체는 Firestore를 모른다.** 무엇을 만들고 무엇을 고칠지는 여기서
+/// 다 정해지고, [applyDuoCanonicalToHistory]는 그대로 실행만 한다.
+@immutable
+class DuoCanonicalRowPlan {
+  const DuoCanonicalRowPlan({
+    required this.sourceId,
+    required this.turn,
+    required this.isHead,
+    required this.studyState,
+    required this.createdAtMs,
+    required this.create,
+  });
+
+  /// 채널 원본 문서 id. **개인 방 문서 id이자 `channel_msg_id`다.**
+  final String sourceId;
+  final DuoCanonicalTurn turn;
+
+  /// 이 줄이 turn의 대표인가. 아니면 흡수된 조각이다.
+  final bool isHead;
+
+  /// 대표는 turn의 상태를, 흡수된 조각은 언제나 [kStudyStateMerged]를 갖는다.
+  final String studyState;
+
+  /// 단조 증가로 확정된 시각. **canonical 순서가 이 값을 정한다.**
+  final int createdAtMs;
+
+  /// 참이면 개인 방에 없던 줄이라 새로 만든다. 거짓이면 기존 줄을 고친다.
+  final bool create;
+}
+
+/// ⏱️ canonical 순서를 **시각으로 옮겨 적는다.**
+///
+/// 공부방은 `created_at` 오름차순으로만 읽는다. 그런데 canonical의 순서는
+/// 시각순이 아니다 — 두 폰의 시계가 어긋나 뒤엉킨 자리를 모델이 맥락으로
+/// 바로잡은 결과이고, 그 재정렬은 [reconcileDuoConversation]에서 **일부러
+/// 되살린 동작**이다(🧭 [ORDER]). 여기서 `spokenAtMs`를 그대로 쓰면 그
+/// 수정이 마지막 단계에서 통째로 지워진다.
+///
+/// 그래서 **시간 기준은 spokenAt이되, 정렬 권한은 canonical 순서가 갖는다.**
+///
+///   후보가 null·0이거나 앞 줄 이하 → 앞 줄 +1ms
+///   그 외                          → 실제 spokenAtMs 그대로
+///
+/// 시계가 정상인 구간은 진짜 발화 시각이 남고, 어긋난 구간에서만 canonical
+/// 순서가 이긴다. 같은 입력이면 언제나 같은 결과라 재적용에도 안전하다.
+///
+/// ⚠️ **`spokenAtMs`가 없는 옛 canonical turn을 0으로 쓰면 안 된다.** 1970년이
+/// 되어 대화 맨 위에 박힌다. 위 규칙이 그 값을 앞 줄 +1ms로 흡수한다.
+///
+/// 흡수된 조각(`sourceIds.skip(1)`)은 언제나 대표 바로 뒤에 선다 — 화면에는
+/// 안 뜨지만 기록의 자리는 대표 옆이다.
+///
+/// ⚠️ **1970년을 만들지 않는다.** 시각을 모르는 줄에 0이나 1을 적으면 그 줄은
+/// 1970-01-01이 되어 대화 맨 위에 박힌다 — 순서만 맞고 시각은 거짓인 기록이다.
+/// 모르는 줄은 **가장 가까운 진짜 시각 옆에** 세운다:
+///
+///   ① `turn.spokenAtMs` — 대표 줄의 시각
+///   ② `source.spokenAtMs` — 채널 원본의 시각. 옛 canonical 문서에는 ①이
+///      없지만 원본에는 `createdAt` 폴백이 있어서, 여기서 진짜 시각을 얻는다
+///   ③ 앞 줄 +1ms — 기준축이 이미 잡힌 뒤의 빈칸
+///   ④ **기준축보다 앞에 있는 빈칸은 뒤에서 앞으로 −1ms씩** 메운다
+///   ⑤ 통화 전체에 진짜 시각이 하나도 없으면 [fallbackBaseMs]에서 펼친다
+///
+/// [fallbackBaseMs]는 호출부가 주는 현실적인 기준이다(내 방 줄의 `created_at`,
+/// 없으면 지금 시각). 이 값이 0이어도 여기서 0을 쓰지는 않는다.
+Map<String, int> assignDuoCanonicalCreatedAtMs(
+  List<DuoCanonicalTurn> turns, {
+  required int fallbackBaseMs,
+  Map<String, DuoSourceUtterance> sourceById =
+      const <String, DuoSourceUtterance>{},
+}) {
+  // ① canonical 순서 그대로 펴고, 줄마다 후보 시각을 모은다.
+  final ids = <String>[];
+  final candidates = <int?>[];
+  final seen = <String>{};
+  for (final turn in turns) {
+    for (var i = 0; i < turn.sourceIds.length; i++) {
+      final String id = turn.sourceIds[i];
+      if (id.isEmpty || !seen.add(id)) continue;
+      int? c = i == 0 ? turn.spokenAtMs : null;
+      // 대표 줄의 시각이 없으면 원본의 시각을 본다. 흡수된 조각도 자기
+      // 시각이 있으면 그것을 쓴다 — 대표 +1ms보다 진짜에 가깝다.
+      if (c == null || c <= 0) c = sourceById[id]?.spokenAtMs;
+      ids.add(id);
+      candidates.add((c == null || c <= 0) ? null : c);
+    }
+  }
+  if (ids.isEmpty) return <String, int>{};
+
+  // ②③ 앞에서 뒤로. 기준축이 잡히기 전까지는 비워 둔다.
+  final at = List<int?>.filled(ids.length, null);
+  int? prev;
+  for (var i = 0; i < ids.length; i++) {
+    final int? c = candidates[i];
+    if (c != null && (prev == null || c > prev)) {
+      at[i] = c;
+    } else if (prev != null) {
+      at[i] = prev + 1;
+    }
+    if (at[i] != null) prev = at[i];
+  }
+
+  final int firstKnown = at.indexWhere((v) => v != null);
+  // ⑤ 진짜 시각이 하나도 없는 옛 문서. 호출부가 준 기준에서 펼친다.
+  if (firstKnown < 0) {
+    final int base = fallbackBaseMs > 0
+        ? fallbackBaseMs
+        : DateTime.now().millisecondsSinceEpoch;
+    return <String, int>{for (var i = 0; i < ids.length; i++) ids[i]: base + i};
+  }
+  // ④ 기준축 앞의 빈칸을 뒤에서 앞으로 메운다. 첫 발화 **직전**에 서게 된다.
+  for (var i = firstKnown - 1; i >= 0; i--) {
+    at[i] = at[i + 1]! - 1;
+  }
+  // 기준축이 비정상으로 작아 1970 근처로 내려갔으면 통째로 기준을 바꾼다.
+  if (at.first! <= 0) {
+    final int base = fallbackBaseMs > 0
+        ? fallbackBaseMs
+        : DateTime.now().millisecondsSinceEpoch;
+    return <String, int>{for (var i = 0; i < ids.length; i++) ids[i]: base + i};
+  }
+  return <String, int>{for (var i = 0; i < ids.length; i++) ids[i]: at[i]!};
+}
+
+/// 🧱 무엇을 만들고 무엇을 고칠 것인가.
+///
+/// [existingIds]는 개인 방에 이미 있는 `channel_msg_id`들이고,
+/// [userLockedIds]는 사용자가 손댄 줄이다. [myUid]는 개인 방 주인이다.
+///
+/// **없는 줄을 만드는 조건은 셋이다.**
+///   ① source 원본이 손에 있다 — 없으면 채울 칸을 모른다
+///   ② `duoMode == 'direct'` — 통역 기록의 본문은 내가 **들은** 번역문이라,
+///      상대 원문을 새 줄로 만들면 그 정책이 깨진다
+///   ③ `senderUid`가 있다 — 없으면 내 줄인지 상대 줄인지 가릴 수 없고,
+///      틀리면 상대가 한 말이 내 말로 남는다. **모르면 안 만든다.**
+///
+/// 기존 줄을 고치는 쪽은 예전 그대로다 — 두 모드 다 지나간다.
+List<DuoCanonicalRowPlan> planDuoCanonicalRows({
+  required List<DuoCanonicalTurn> turns,
+  required Map<String, DuoSourceUtterance> sourceById,
+  required Set<String> existingIds,
+  required Set<String> userLockedIds,
+  required String myUid,
+  required int fallbackBaseMs,
+}) {
+  // 시각은 **거르기 전에** 배정한다. 잠긴 줄 하나 때문에 나머지 줄의 시각이
+  // 흔들리면 재적용마다 방의 순서가 조금씩 달라진다.
+  final createdAt = assignDuoCanonicalCreatedAtMs(
+    turns,
+    fallbackBaseMs: fallbackBaseMs,
+    sourceById: sourceById,
+  );
+  final plans = <DuoCanonicalRowPlan>[];
+  final seen = <String>{};
+  for (final turn in turns) {
+    if (turn.sourceIds.isEmpty) continue;
+    for (var i = 0; i < turn.sourceIds.length; i++) {
+      final String id = turn.sourceIds[i];
+      if (id.isEmpty || !seen.add(id)) continue;
+      // 사용자가 손댄 줄은 확정 전이라도 덮지 않는다. 예전과 같다.
+      if (userLockedIds.contains(id)) continue;
+      final bool exists = existingIds.contains(id);
+      final DuoSourceUtterance? src = sourceById[id];
+      if (!exists) {
+        if (src == null) continue;
+        if (src.duoMode != 'direct') continue;
+        if (src.senderUid.trim().isEmpty) continue;
+      }
+      plans.add(DuoCanonicalRowPlan(
+        sourceId: id,
+        turn: turn,
+        isHead: i == 0,
+        studyState: i == 0 ? turn.state : kStudyStateMerged,
+        createdAtMs: createdAt[id] ?? 0,
+        create: !exists,
+      ));
+    }
+  }
+  return plans;
+}
+
+/// 🧱 새로 만드는 줄 하나의 내용.
+///
+/// **기존 `_saveHistoryMessage`가 쓰는 칸과 같은 뜻을 유지한다.** 화면과
+/// 공부방이 두 종류의 줄을 구별하지 못해야 한다.
+///
+/// 🚫 **`pcm_key`를 만들지 않는다.** 이 칸은 "이 폰에 그 소리가 있다"는
+/// 표시이고, 그 표시가 곧 원문 복원이 다시 들어도 되는 줄이라는 뜻이다.
+/// 상대 발화는 상대 폰 마이크에서 나왔으므로 내 창고에 없다 — 여기에 열쇠를
+/// 적으면 복원이 **없는 소리를 재검증할 수 있다고 오판한다.**
+///
+/// ⚠️ **내 발화라도 여기서는 못 적는다. 값이 없어서다.**
+/// 창고의 열쇠는 발화 id(`duo_direct_utt_7`)인데, 채널 문서는 그 값을 싣지
+/// 않는다(`_uploadMyMessage`가 올리는 칸에 없다). [plan]의 `sourceId`는
+/// Firestore 자동 id라 둘을 잇는 고리가 없고, `speaker_seq`로 유추하는 길도
+/// 막혀 있다 — 수용된 전사마다 오르는 번호와 발화마다 오르는 번호는 버려진
+/// 발화가 하나만 있어도 어긋난다. **없는 근거로 열쇠를 지어내지 않는다.**
+///
+/// 잃는 것은 없다. 내 발화는 통화 중에 이미 줄이 생기며 열쇠가 박히고, 그
+/// 줄은 이 함수가 아니라 update 경로로 간다(거기서는 예전처럼
+/// `context_verified_candidate`가 찍힌다). 여기로 오는 내 발화는 "업로드는
+/// 됐는데 로컬 저장이 실패한" 줄뿐이고, 그때는 애초에 소리가 어느 줄에도
+/// 묶여 있지 않았다.
+Map<String, dynamic> buildDuoCanonicalNewRowData({
+  required DuoCanonicalRowPlan plan,
+  required DuoSourceUtterance source,
+  required String myUid,
+  required int canonicalVersion,
+  required String correctorModel,
+}) {
+  final DuoCanonicalTurn turn = plan.turn;
+  final String text = plan.isHead ? turn.text : source.text;
+  final String raw = plan.isHead ? turn.rawText.trim() : '';
+  final bool corrected = plan.isHead && turn.wasCorrected;
+  return <String, dynamic>{
+    // 내 말이면 HOST, 상대 말이면 SYSTEM. 개인 기록마다 값이 다른 칸이다.
+    'role': source.senderUid == myUid ? 'HOST' : 'SYSTEM',
+    'original_text': text,
+    // 직접 대화의 배울글은 공부방이 나중에 만든다. 여기서는 비운다.
+    'translated_text': '',
+    'created_at': Timestamp.fromMillisecondsSinceEpoch(plan.createdAtMs),
+    'channel_msg_id': plan.sourceId,
+    if (source.duoMode.isNotEmpty) kDuoModeField: source.duoMode,
+    if (source.seq != 0) 'speaker_seq': source.seq,
+    if (source.spokenAtMs != 0) 'spoken_at_ms': source.spokenAtMs,
+    if (source.senderUid.isNotEmpty) 'speaker_uid': source.senderUid,
+    if (source.role.isNotEmpty) 'speaker_role': source.role,
+    if (source.sttSource.isNotEmpty) 'stt_source': source.sttSource,
+    if (source.srcLang.isNotEmpty) 'source_lang': source.srcLang,
+    // 🔤 교정 전 전사 원문. 고쳐진 줄에만 값이 있다.
+    if (raw.isNotEmpty && raw != text) kOriginalRawField: raw,
+    // 🩺 이 폰에 소리가 없으므로 되짚을 길이 없는 선 교정이다.
+    if (corrected) kOriginCorrectionModelField: correctorModel,
+    if (corrected) kOriginCorrectionStageField: kOriginCorrectionUnverified,
+    if (plan.isHead && turn.subject.isNotEmpty)
+      kMessageSubjectHintField: turn.subject,
+    kStudyStateField: plan.studyState,
+    'canonical_version': canonicalVersion,
+  };
+}
+
 /// 공유 결과를 내 공부방에 옮긴다.
 ///
 /// 같은 판(`canonical_version`)을 두 번 옮기지 않는다. 통화가 끝나는 순간에
@@ -779,6 +1050,20 @@ Future<bool> applyDuoCanonicalToHistory({
     final String correctorModel =
         (data['corrector_model'] ?? kDuoOriginCorrectorModel).toString();
 
+    // 🧱 [ROW-CREATE] 채널 원본을 한 번 더 읽는다. **canonical 문서 스키마를
+    //   늘리지 않기 위해서다** — 두 폰의 앱 판이 다를 수 있으므로 공유 문서에
+    //   칸을 더하는 쪽보다, 이미 있는 컬렉션을 읽는 쪽이 옛 판과 안전하다.
+    //   개인 방에 없는 줄을 만들려면 senderUid·sttSource·duoMode가 필요하다.
+    final sourceById = <String, DuoSourceUtterance>{};
+    try {
+      for (final u in await readDuoSourceTimeline(roomId)) {
+        sourceById[u.id] = u;
+      }
+    } catch (e) {
+      // 못 읽어도 **고치는 일은 예전대로 돈다.** 만드는 일만 못 할 뿐이다.
+      debugPrint('[DUO-CANON] source_read_failed room=$roomId ${e.runtimeType}');
+    }
+
     // 내 방의 줄을 채널 문서 id로 찾을 수 있어야 옮길 수 있다.
     final msgSnap = await historyRef.collection('messages').get();
     final byChannelId = <String, DocumentReference<Map<String, dynamic>>>{};
@@ -792,6 +1077,9 @@ Future<bool> applyDuoCanonicalToHistory({
     final hasPcmById = <String, bool>{};
     // 🛡️ 사용자가 손댄 줄. 확정 전이라도 정돈이 덮지 못한다.
     final userLocked = <String>{};
+    // ⏱️ 시각을 하나도 못 찾았을 때 쓸 현실적인 기준. 내 방 줄의 `created_at`
+    //   중 가장 늦은 값이고, 그것도 없으면 지금 시각이다. **0은 쓰지 않는다.**
+    var fallbackBaseMs = 0;
     // 참고 주어만 따로 잠근다. 줄을 안 고쳤어도 주어는 고쳤을 수 있다.
     final userLockedSubject = <String>{};
     for (final doc in msgSnap.docs) {
@@ -816,15 +1104,40 @@ Future<bool> applyDuoCanonicalToHistory({
       curTextById[channelId] = currentText;
       hasPcmById[channelId] =
           (data[kMessagePcmKeyField] ?? '').toString().trim().isNotEmpty;
+      // ⏱️ 시각을 모르는 옛 줄이 1970년으로 가지 않도록, 이 방이 실제로
+      //   존재했던 시각을 모아 둔다.
+      final Object? createdAt = data['created_at'];
+      if (createdAt is Timestamp) {
+        final int ms = createdAt.millisecondsSinceEpoch;
+        if (ms > fallbackBaseMs) fallbackBaseMs = ms;
+      }
     }
-    if (byChannelId.isEmpty) return false;
+    // 🧱 [ROW-CREATE] **비어 있어도 돌아간다.** 예전에는 여기서 곧장 물러났고,
+    //   그래서 개인 방에 줄이 하나도 없으면 canonical이 아무것도 못 옮겼다.
+    //   통화 중에 줄을 만들지 않는 구조로 가려면 이 문이 열려 있어야 한다.
+    final String myUid = historyRef.parent.parent?.id ?? '';
+    final plans = planDuoCanonicalRows(
+      turns: turns,
+      sourceById: sourceById,
+      existingIds: byChannelId.keys.toSet(),
+      userLockedIds: userLocked,
+      myUid: myUid,
+      fallbackBaseMs: fallbackBaseMs > 0
+          ? fallbackBaseMs
+          : DateTime.now().millisecondsSinceEpoch,
+    );
+    final planById = <String, DuoCanonicalRowPlan>{
+      for (final p in plans) p.sourceId: p
+    };
 
     final batch = FirebaseFirestore.instance.batch();
     var applied = 0;
+    var created = 0;
     for (final turn in turns) {
       if (turn.sourceIds.isEmpty) continue;
       // 이은 줄은 첫 조각이 대표가 되고, 나머지는 그 줄에 흡수됐다고 적는다.
-      final head = userLocked.contains(turn.sourceIds.first)
+      final headPlan = planById[turn.sourceIds.first];
+      final head = headPlan == null || headPlan.create
           ? null
           : byChannelId[turn.sourceIds.first];
       if (head != null) {
@@ -869,21 +1182,52 @@ Future<bool> applyDuoCanonicalToHistory({
             kMessageSubjectHintField: turn.subject,
           kStudyStateField: turn.state,
           'canonical_version': version,
+          // ⏱️ [ORDER] 기존 줄도 canonical 순서 기준으로 맞춘다. 신규 줄만
+          //   맞추면 두 종류가 섞여 순서가 다시 깨진다 —
+          //   기존 줄의 `created_at`은 "전사가 끝난 시각"이라 말한 시각보다
+          //   뒤에 있고, 신규 줄은 말한 시각에 서기 때문이다.
+          if (headPlan != null)
+            'created_at':
+                Timestamp.fromMillisecondsSinceEpoch(headPlan.createdAtMs),
         });
         applied++;
       }
       for (final id in turn.sourceIds.skip(1)) {
         // 흡수 표시도 덮어쓰기다 — 사용자가 남기기로 한 줄을 감추게 된다.
-        if (userLocked.contains(id)) continue;
+        final plan = planById[id];
+        if (plan == null || plan.create) continue;
         final ref = byChannelId[id];
         if (ref == null) continue;
         batch.update(ref, <String, dynamic>{
           kStudyStateField: kStudyStateMerged,
           'canonical_version': version,
+          'created_at': Timestamp.fromMillisecondsSinceEpoch(plan.createdAtMs),
         });
       }
     }
-    if (applied == 0) return false;
+
+    // 🧱 [ROW-CREATE] 개인 방에 없던 줄을 만든다. **문서 id가 곧 sourceId다** —
+    //   같은 채널 원본에서 나온 줄은 개인 방에도 하나뿐임이 구조로 보장되고,
+    //   canonical이 여러 번 돌아도 같은 문서에 덮어쓰기로 끝난다.
+    for (final plan in plans) {
+      if (!plan.create) continue;
+      final DuoSourceUtterance? src = sourceById[plan.sourceId];
+      if (src == null) continue;
+      batch.set(
+        historyRef.collection('messages').doc(plan.sourceId),
+        buildDuoCanonicalNewRowData(
+          plan: plan,
+          source: src,
+          myUid: myUid,
+          canonicalVersion: version,
+          correctorModel: correctorModel,
+        ),
+        SetOptions(merge: true),
+      );
+      created++;
+    }
+
+    if (applied == 0 && created == 0) return false;
     await batch.commit();
     await historyRef.update(<String, dynamic>{
       kDuoCanonicalVersionField: version,
@@ -891,7 +1235,8 @@ Future<bool> applyDuoCanonicalToHistory({
       'msg_count': turns.where((t) => isStudyVisible(t.state)).length,
     });
     debugPrint('[DUO-CANON] applied room=$roomId version=$version '
-        'turns=${turns.length} applied=$applied');
+        'turns=${turns.length} applied=$applied created=$created '
+        'source=${sourceById.length} existing=${byChannelId.length}');
     return true;
   } catch (e) {
     debugPrint('[DUO-CANON] apply_failed=${e.runtimeType}');

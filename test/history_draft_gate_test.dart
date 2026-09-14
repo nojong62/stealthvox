@@ -128,10 +128,14 @@ void main() {
           canon,
           contains(
               'if (!duoCanonicalMayApplyToMessage(data)) userLocked.add(channelId);'));
-      expect(canon,
-          contains('final head = userLocked.contains(turn.sourceIds.first)'));
+      // 가드는 이제 **계획 단계 한 곳**에 있다(`planDuoCanonicalRows`).
+      // 대표 줄과 흡수 줄이 같은 문을 지나므로 한쪽만 새는 일이 없다.
+      expect(canon, contains('required Set<String> userLockedIds,'));
+      expect(canon, contains('if (userLockedIds.contains(id)) continue;'));
       // 흡수(merged) 표시도 덮어쓰기다 — 사용자가 남긴 줄을 감추면 안 된다.
-      expect(canon, contains('if (userLocked.contains(id)) continue;'));
+      expect(canon, contains('if (plan == null || plan.create) continue;'));
+      // 잠긴 줄은 **만들지도 못한다.** 생성 갈래도 같은 계획을 따른다.
+      expect(canon, contains('if (!plan.create) continue;'));
     });
 
     test('공유 원본 messages는 여전히 지우지 않는다', () {
