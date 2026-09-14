@@ -199,4 +199,65 @@ void main() {
       expect(duo, contains('마이크는 이미 돌고 있을 수 있다'));
     });
   });
+
+  // 🔢 [GENERATION] 2026-09-14 실기기 회귀. 마이크가 상대보다 먼저 서면서
+  //   세대의 주인이 바뀌어야 했는데 그대로 뒀다. `_ensureInterpreterStt`가
+  //   activate에서 세대를 올리는 바람에, prepare에서 묶인 MicTap·WebRTC
+  //   콜백이 전부 남의 세대가 됐다 — 마이크는 도는데 한 조각도 안 들어오고
+  //   화면의 라이브가 안 살았다. 직접통화는 이 경로를 안 타서 멀쩡했다.
+  group('🔢 세대의 주인은 prepare다', () {
+    test('세대를 올리는 자리는 마이크 세션 시작 한 곳뿐이다', () {
+      final int bumps = RegExp(r'\+\+_interpGeneration').allMatches(duo).length;
+      // prepare 1 + 정리 2(dispose · _finalizeDuoSession). 그 이상이면
+      // 통화 도중에 또 올리는 자리가 생긴 것이다.
+      expect(bumps, lessThanOrEqualTo(3),
+          reason: '세대를 여러 곳에서 올리면 앞에서 묶은 콜백이 죽는다');
+      // 올리는 자리가 전부 "세션을 열거나 닫는" 자리여야 한다.
+      for (final inside in <String>[
+        'Future<bool> _ensureInterpreterStt',
+        'Future<void> _activateInterpreter',
+      ]) {
+        final int at = duo.indexOf(inside);
+        final int next = duo.indexOf('\n  ///', at + inside.length);
+        final int end = next > at ? next : duo.length;
+        expect(duo.substring(at, end).contains('++_interpGeneration'), isFalse,
+            reason: '\$inside 안에서 세대를 올린다 — 마이크가 죽는다');
+      }
+    });
+
+    test('prepare가 세대를 올린다', () {
+      final String body = _region(duo,
+          'Future<void> _startInterpreterCapture(String reason) async {',
+          'Future<bool> _startInterpreterWebrtc(');
+      expect(body, contains('final int generation = ++_interpGeneration;'));
+    });
+
+    test('_ensureInterpreterStt는 읽기만 한다', () {
+      final String body = _region(
+          duo, 'Future<bool> _ensureInterpreterStt() async {', 'if (kDuoInterpUseSocketStt) {');
+      expect(body, contains('final int generation = _interpGeneration;'));
+      expect(body.contains('++_interpGeneration'), isFalse,
+          reason: 'activate에서 세대를 올리면 prepare의 마이크가 죽는다');
+    });
+  });
+
+  group('🔁 재시도는 실패한 단계에서만 다시 시작한다', () {
+    test('마이크가 이미 섰으면 activate부터 다시 한다', () {
+      final String body = _region(duo,
+          'void _scheduleInterpRetry(int generation)', '/// 예약을 접는다.');
+      expect(body, contains('stage=activate'));
+      expect(body, contains("_activateInterpreter('retry_"));
+      expect(body, contains('stage=prepare'));
+      // 예전 가드를 그대로 두면 activate 실패 뒤 영영 안 붙는다.
+      expect(body.contains("dropped reason=already_live"), isFalse,
+          reason: '마이크가 살아 있다는 이유로 재시도를 통째로 버린다');
+    });
+
+    test('수동 재시도도 같은 규칙이다', () {
+      final String body =
+          _region(duo, 'void _retryInterpreterNow()', '/// 🔵 [INTERP-LIVE] 상대가 방에 있으면');
+      expect(body, contains("_activateInterpreter('manual_retry')"));
+      expect(body, contains("_startInterpreterCapture('manual_retry')"));
+    });
+  });
 }

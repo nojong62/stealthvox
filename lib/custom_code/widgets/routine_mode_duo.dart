@@ -3227,7 +3227,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       await existing.dispose();
       _interpStt = null;
     }
-    final int generation = ++_interpGeneration;
+    // 🔢 [GENERATION] **여기서 올리지 않는다.** 세대의 주인은 마이크 세션을
+    //   여는 `_startInterpreterCapture`다. 여기서 올리면 그 앞에서 묶인
+    //   MicTap·WebRTC 콜백이 전부 남의 세대가 되어 소리가 한 조각도 안 들어온다.
+    final int generation = _interpGeneration;
     // 🔀 [INTERP-STT-KIND] **소켓 한 벌이 경계와 글자를 같이 맡는다.**
     //   09-06 이전으로 되돌린 갈래다. 마이크 경로(`DuoWebrtcMicTap` →
     //   `_feedInterpreterPcm`)와 게이트는 한 글자도 다르지 않고, PCM을 먹는
@@ -3644,12 +3647,34 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         _lgDuo('[INTERP-RETRY]', 'dropped reason=partner_offline');
         return;
       }
-      if (_interpCaptureLive || _interpStarting) {
-        _lgDuo('[INTERP-RETRY]', 'dropped reason=already_live');
+      if (_interpStarting) {
+        _lgDuo('[INTERP-RETRY]', 'dropped reason=already_starting');
         return;
       }
-      _lgDuo('[INTERP-RETRY]', 'firing attempt=$attempt');
-      unawaited(_startInterpreterCapture('retry_$attempt'));
+      // 🔄 [INTERP-LIFECYCLE] **실패한 단계에서만 다시 시작한다.**
+      //
+      //   마이크가 이미 서 있는데 처음부터 다시 하면 멀쩡한 캡처를 버리고
+      //   새로 연다. 반대로 activate가 실패했는데 prepare만 다시 부르면
+      //   `already_live`로 떨어져 영영 안 붙는다 — 마이크는 살아 있으니까.
+      switch (_interpLife) {
+        case InterpLifecycle.idle:
+          _lgDuo('[INTERP-RETRY]', 'firing attempt=$attempt stage=prepare');
+          unawaited(_startInterpreterCapture('retry_$attempt'));
+          return;
+        case InterpLifecycle.prepared:
+        case InterpLifecycle.signaling:
+          // 마이크는 섰고 그다음이 안 붙은 것이다. 거기부터 다시 한다.
+          _lgDuo('[INTERP-RETRY]', 'firing attempt=$attempt stage=activate');
+          _interpLife = InterpLifecycle.prepared; // signaling을 되감는다
+          unawaited(_activateInterpreter('retry_$attempt'));
+          return;
+        case InterpLifecycle.preparing:
+        case InterpLifecycle.active:
+        case InterpLifecycle.closing:
+          _lgDuo('[INTERP-RETRY]',
+              'dropped reason=stage_${_interpLife.name}');
+          return;
+      }
     });
     if (mounted) setState(() {});
   }
@@ -3679,6 +3704,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _interpRetry.reset();
     _lgDuo('[INTERP-RETRY]', 'manual role=$_myRole gen=$_interpGeneration');
     if (mounted) setState(() => _interpStartFailed = false);
+    // 🔄 자동 재시도와 같은 규칙이다 — 실패한 단계에서만 다시 시작한다.
+    if (_interpLife == InterpLifecycle.prepared ||
+        _interpLife == InterpLifecycle.signaling) {
+      _interpLife = InterpLifecycle.prepared;
+      unawaited(_activateInterpreter('manual_retry'));
+      return;
+    }
     unawaited(_startInterpreterCapture('manual_retry'));
   }
 
@@ -3771,6 +3803,16 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _interpStarting = false;
       return;
     }
+    // 🔢 [GENERATION] **세대는 여기서 올린다 — 한 마이크 세션의 시작점이다.**
+    //
+    //   예전에는 `_ensureInterpreterStt` 안에서 올렸다. 그때는 STT가 한
+    //   통화의 첫 걸음이라 그 자리가 맞았는데, 지금은 마이크가 먼저 선다.
+    //   그대로 두면 **prepare에서 묶은 콜백이 activate에서 통째로 죽는다** —
+    //   MicTap의 `onPcm`도, WebRTC의 `onData`도 prepare 시점 세대를 들고
+    //   있어서, activate가 세대를 올리는 순간 전부 남의 세대가 된다.
+    //   마이크는 도는데 한 조각도 안 들어오고 화면의 라이브가 안 산다
+    //   (2026-09-14 실기기에서 그랬다).
+    final int generation = ++_interpGeneration;
     // 🔉 세기 계측기는 **진단 여부와 무관하게** 만든다. 게이트가 이 값을 본다.
     //   직통화와 같은 물건이고, 두 모드는 동시에 돌지 않는다.
     _utteranceRms = DuoUtteranceRmsMeter();
@@ -3788,10 +3830,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (mounted) setState(() => _interpStartFailed = false);
     _setInterpMicPhase(InterpMicPhase.preparing);
     try {
-      // ⚠️ 세대값을 여기서 읽는다. 예전에는 `_ensureInterpreterStt` 뒤였는데,
-      //   그 호출이 이제 activate로 갔다.
-      final int generation = _interpGeneration;
-
       // 📡 [INTERP-WEBRTC] 새 경로는 여기서 갈린다. 마이크를 여는 주체가
       //   `record`에서 WebRTC로 바뀌고, 그 뒤 처리는 그대로다.
       if (_useInterpWebrtc) {
