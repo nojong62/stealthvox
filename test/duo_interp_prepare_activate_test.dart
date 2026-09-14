@@ -6,15 +6,24 @@
 //
 // 이 판이 가르는 것은 둘이다.
 //
-//   prepare   로컬 마이크만 세운다. **밖으로 아무것도 안 나간다**
-//   activate  상대가 들어왔다. 신호·전사·문을 연다
+//   prepare   송신 경로를 **실제로 세운다**(PC·트랙·MicTap·SDP까지)
+//   activate  상대가 들어왔다. 전사·번역·문을 연다
 //
-// 실기기 성공 기준(2026-09-14 확정):
-//   ① first_frame_bytes < partner_joined
-//   ② 상대 입장 전에는 STT·번역·상대 전송이 없다
-//   ③ 상대 입장 후에만 signaling + STT socket + gate open
-//   ④ 상대 없이 나가거나 background로 가면 MicTap·PC·오디오 모드가 정리된다
-//   ⑤ 과금은 prepare 구간에서 시작하지 않는다
+// 🔄 2026-09-14 실기기에서 원칙이 한 번 바뀌었다. 처음에는 prepare를 "로컬
+//   미디어만"으로 잡고 SDP를 activate로 미뤘는데, **그러면 마이크가 안 돈다** —
+//   libwebrtc의 ADM은 송신 트랙이 실제로 활성화돼야 AudioRecord를 시작한다
+//   (`[DUO-MIC-TAP] stopped frames=0 bytes=0`). 그래서 prepare의 뜻을 바꿨다.
+//
+//   > 상대 입장 전에도 SDP·ICE 같은 연결 정보는 만들어질 수 있다.
+//   > 하지만 사용자 음성은 STT·번역·상대 서비스 로직으로 절대 흘리지 않는다.
+//
+// 실기기 성공 기준(2026-09-14 개정):
+//   ① first_frame_bytes < partner_joined   (필수)
+//   ② offer_sent < partner_joined          (이제 허용된다)
+//   ③ STT socket open > partner_joined     (필수)
+//   ④ audio_gate=open > partner_joined     (필수)
+//   ⑤ 상대 미입장 이탈 시 offer·ICE·PC·MicTap 전부 정리
+//   ⑥ 과금은 prepare 구간에서 시작하지 않는다
 
 import 'dart:io';
 
@@ -70,12 +79,16 @@ void main() {
       }
     });
 
-    test('WebRTC prepare는 신호를 보내지 않는다', () {
+    test('WebRTC prepare는 SDP까지 세운다 — 그래야 마이크가 돈다', () {
       final String body = _region(duo,
-          'Future<bool> _startInterpreterWebrtc(', 'Future<bool> _activateInterpreterWebrtc(');
+          'Future<bool> _startInterpreterWebrtc(', '/// 📞 [ACTIVATE] 상대가 들어왔다.');
       expect(body, contains('call.prepareLocalMedia()'));
-      expect(body.contains('startSignaling()'), isFalse,
-          reason: 'prepare가 offer/ICE를 내보낸다');
+      expect(body, contains('call.startSignaling()'),
+          reason: 'SDP가 없으면 ADM이 녹음을 시작하지 않는다(frames=0)');
+      // 다만 기다리지 않는다 — 기다리면 상대 입장 전까지 prepare가 안 끝난다.
+      expect(body, contains('unawaited(call.startSignaling()'),
+          reason: 'await하면 prepare가 상대를 기다리게 된다');
+      // 문은 여전히 안 연다.
       expect(body.contains('_openInterpGate('), isFalse);
     });
   });
@@ -84,10 +97,14 @@ void main() {
     final String activate = _region(
         duo, 'Future<void> _activateInterpreter(String reason) async {', '/// 🔊 [INTERP-WEBRTC] 번역 음성이');
 
-    test('셋이 모두 여기 있다', () {
-      expect(activate, contains('_activateInterpreterWebrtc('));
+    test('전사와 문이 여기 있다', () {
       expect(activate, contains('_ensureInterpreterStt()'));
       expect(activate, contains("_openInterpGate('capture_started')"));
+    });
+
+    test('신호는 여기서 다시 하지 않는다', () {
+      // 준비 단계가 이미 태웠다. 여기서 또 부르면 방금 올린 신호를 덮는다.
+      expect(activate.contains('startSignaling()'), isFalse);
     });
 
     test('문이 마지막이다', () {
@@ -130,7 +147,7 @@ void main() {
       final String life = _region(duo,
           'void didChangeAppLifecycleState(AppLifecycleState state)', 'Future<void> _fetchKeys()');
       expect(life, contains('InterpLifecycle.preparing'));
-      expect(life, contains('InterpLifecycle.prepared'));
+      expect(life, contains('InterpLifecycle.transportReady'));
       expect(life, contains('_stopInterpreterCapture('));
       // 이미 선 통화는 건드리지 않는다.
       expect(life.contains('InterpLifecycle.active'), isFalse,
@@ -189,7 +206,7 @@ void main() {
       final String feed = _region(duo,
           'void _feedInterpreterPcm(Uint8List bytes, int generation)',
           '마이크를 닫는다. **소켓은 그대로 둔다.**');
-      expect(feed, contains("_toInterpLifecycle(InterpLifecycle.prepared, 'first_frame')"),
+      expect(feed, contains("_toInterpLifecycle(InterpLifecycle.transportReady, 'first_frame')"),
           reason: '함수 성공만 보면 frames=0으로 죽은 마이크를 준비됐다고 한다');
       expect(feed, contains('InterpMicPhase.waitingPartner'),
           reason: '화면 상태가 내부 상태와 따로 논다');
@@ -270,7 +287,7 @@ void main() {
 
     test('준비 단계에서만 작동한다', () {
       expect(guard, contains('InterpLifecycle.preparing'));
-      expect(guard, contains('InterpLifecycle.prepared'));
+      expect(guard, contains('InterpLifecycle.transportReady'));
       // 통화 중에 마이크를 접으면 대화가 끊긴다.
       expect(guard, contains("_lgDuo('[PREPARE-GUARD]', 'skipped stage="),
           reason: '다른 단계에서 불려도 아무것도 안 해야 한다');
