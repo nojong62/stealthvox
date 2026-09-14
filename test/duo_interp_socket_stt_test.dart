@@ -101,15 +101,36 @@ void main() {
     });
   });
 
-  group('통역은 원문 복원을 타지 않는다', () {
-    test('소켓 갈래는 PCM을 창고에 넣지 않는다', () {
+  // 🔄 2026-09-14에 뒤집혔다. 예전에는 "서버가 잘라 간 덩이라 앱에 없다"가
+  //   전제였고, 그래서 이 갈래에는 PCM이 하나도 안 남았다. 그 대가로
+  //   로비값 재확인(origin probe)도, 통화 후 History 재전사도 설 자리가
+  //   없었다. 이제 `DuoSocketPcmCapture`가 서버 경계에 맞춰 그 덩이를 만든다.
+  group('소켓 갈래도 발화 소리를 남긴다', () {
+    String socketBranch() {
       final branch = duo.indexOf('if (kDuoInterpUseSocketStt) {');
       final end = duo.indexOf('final session = DuoSttPipeline(', branch);
-      final body = duo.substring(branch, end);
-      expect(body.contains('_stashDuoPcm'), isFalse,
-          reason: '서버가 잘라 간 덩이라 앱에 없다. 통역은 3단계 복원을 안 쓴다');
+      expect(branch, greaterThan(0));
+      expect(end, greaterThan(branch));
+      return duo.substring(branch, end);
+    }
+
+    test('item_id가 정해지는 자리에서 소리를 확정해 창고에 넣는다', () {
+      final body = socketBranch();
+      expect(body, contains('_interpSocketPcm?.commitSpeech(itemId)'),
+          reason: 'item_id 자리에서 안 확정하면 창고 열쇠가 어긋난다');
+      expect(body, contains('_stashDuoPcm'),
+          reason: '소리를 담아 놓고 창고에 안 넣으면 통화가 끝나면 사라진다');
       expect(body, contains('_onInterpreterTranscript'),
           reason: '전사 뒤 번역·TTS·History는 그대로 탄다');
+    });
+
+    test('경계는 여전히 서버가 준다 — 앱이 새로 판정하지 않는다', () {
+      final body = socketBranch();
+      // 담기 시작·확정이 서버 콜백 안에서만 일어나야 한다.
+      expect(body, contains('socket.onSpeechStarted'));
+      expect(body, contains('socket.onUtteranceCommitted'));
+      // 앱이 스스로 발화를 열고 닫는 길이 생기면 판정기가 둘이 된다.
+      expect(body.contains('VoiceActivityDetector'), isFalse);
     });
   });
 }

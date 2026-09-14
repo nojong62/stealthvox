@@ -156,14 +156,27 @@ void main() {
           reason: '첫 발화가 다시 자동 감지로 나가는 갈래가 남아 있다');
     });
 
-    test('소켓 갈래는 되들을 소리가 없다는 사실을 남긴다', () {
-      // 이 갈래의 origin-check는 지금 반쪽이다. 그 사실이 로그로 보여야
-      // 실기기에서 "판정이 왜 항상 맞다고 나오나"를 물을 수 있다.
-      expect(duo, contains('kind=socket mode=pinned probe=none'));
-      expect(
-          squashed(duo),
-          contains('원문 PCM은 남기지 않는다'),
-          reason: '소켓 갈래가 PCM을 안 남긴다는 근거 주석이 사라졌다');
+    test('소켓 갈래에도 되들을 소리가 있다', () {
+      // 서버가 잘라 간 덩이를 앱이 따로 만든다(`DuoSocketPcmCapture`).
+      // 이게 없으면 origin-check가 반쪽이 되고 통화 후 재전사도 설 자리가 없다.
+      expect(duo, contains('kind=socket mode=pinned probe=capture'));
+      expect(duo, contains('DuoSocketPcmCapture('),
+          reason: '소켓 갈래에 발화 소리를 담는 자리가 없다');
+      expect(duo, contains('_interpSocketPcm?.commitSpeech(itemId)'),
+          reason: 'item_id가 정해지는 자리에서 소리를 확정하지 않는다');
+    });
+
+    test('소켓 갈래의 소리도 문보다 앞에서 담는다', () {
+      // `_feedInterpreterPcm`이 게이트 **뒤에서** 전사기에 넘기므로, 담는 일이
+      // 그 뒤에 있으면 문이 닫힌 동안의 소리가 통째로 사라진다.
+      final int start = duo.indexOf('void _feedInterpreterPcm(');
+      expect(start, greaterThan(0));
+      final int fed = duo.indexOf('_interpSocketPcm?.addPcm(bytes)', start);
+      final int gate = duo.indexOf('stt.appendAudio(bytes)', start);
+      expect(fed, greaterThan(0), reason: '소켓 갈래에 소리를 안 담는다');
+      expect(gate, greaterThan(0), reason: '전사기로 넘기는 자리를 못 찾았다');
+      expect(fed, lessThan(gate),
+          reason: '담는 일이 문 뒤에 있다 — 문이 닫히면 소리를 잃는다');
     });
 
     test('판정은 같은 소리를 언어 없이 다시 들어서 한다', () {

@@ -41,6 +41,7 @@ import '/custom_code/services/duo_interpreter_callable.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/duo_transcript_gate.dart';
 import '/custom_code/services/duo_stt_ab_probe.dart';
+import '/custom_code/services/duo_socket_pcm_capture.dart';
 import '/custom_code/services/duo_stt_pipeline.dart';
 import '/custom_code/services/duo_utterance_capture.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
@@ -967,6 +968,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   int _interpSeq = 0;
   DateTime? _interpSpeechStartedAt;
 
+  /// 🎙️ [SOCKET-PCM] 소켓 갈래에서 발화 소리를 담는 자리.
+  ///
+  /// Deepgram 갈래는 `DuoSttPipeline` 안에 같은 것이 이미 있다. 소켓 갈래에만
+  /// 없어서 origin probe도, 통화 후 재전사도 설 자리가 없었다.
+  /// **소켓으로 도는 통화에서만 만든다.**
+  DuoSocketPcmCapture? _interpSocketPcm;
+
   /// 🌐 [INTERP-ORIGIN] 로비값이 맞는지 **한 번 더 들어 볼** 소리.
   ///
   /// 기록에 쓰는 전사는 로비 언어로 박고 나가므로, 그 글자로는 로비값이
@@ -1489,6 +1497,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   버려지고 화면은 `preparing`에 멈춘다. (2026-09-04 실기기에서 그랬다)
     if (stt == null || !stt.isConnected || !_interpCaptureLive) return;
     stt.openAudioGate(reason: reason);
+    // 🎙️ [SOCKET-PCM] 늘려 뒀던 고리를 평소 길이로 되돌린다.
+    _interpSocketPcm?.onGateOpened();
     // 닫을 때 진행 중이던 발화는 확정시켰으므로, 여는 순간은 언제나 "듣는
     // 중"에서 시작한다. 다음 `speech_started`가 오면 그때 발화 중으로 간다.
     _setInterpMicPhase(InterpMicPhase.listening);
@@ -1533,6 +1543,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       }));
     }
     stt.closeAudioGate(reason: reason);
+    // 🎙️ [SOCKET-PCM] 담던 발화는 버리되 **고리는 유지한다.** 문이 닫힌
+    //   동안의 소리도 통화가 끝난 뒤에는 다시 들을 수 있어야 한다.
+    _interpSocketPcm?.abortSpeech(reason);
+    _interpSocketPcm?.onGateClosed();
     if (!_isDirectMode && _interpCaptureLive) {
       _setInterpMicPhase(InterpMicPhase.gated);
     }
@@ -3145,16 +3159,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         //   나갔고, 감지가 흔들리면 유저가 한 말이 다른 언어 문장으로 적혀
         //   기록에도 남고 상대에게도 건너갔다(2026-09-14 실기기).
         //
-        //   ⚠️ **이 갈래에서는 그 대가를 되돌려 받을 방법이 아직 없다.**
-        //   Deepgram 갈래는 같은 소리를 자동 감지로 한 번 더 들어 판정하는데
-        //   (`_interpOriginProbe`), 소켓 갈래는 **원문 PCM을 앱에 안 남긴다** —
-        //   서버가 잘라 간 덩이라 되들을 소리가 없다. 그래서 여기서는
-        //   `_settleInterpreterOrigin`이 박힌 글자로 판정하게 되고, 음차는
-        //   언제나 "로비값 맞음"으로 읽힌다(로그의 `judgeSource=pinned`).
-        //
-        //   그건 **이 판에서 받아들인 임시 상태**다. 기록이 틀리는 쪽이
-        //   불일치를 못 잡는 쪽보다 나쁘다. 소켓 갈래에 캡처를 붙이면
-        //   (다음 판) probe가 살아나고 판정도 함께 돌아온다.
+        //   🎙️ 판정은 **같은 소리를 언어 없이 한 번 더** 들어서 한다. 소켓
+        //   갈래는 원래 원문 PCM을 앱에 안 남겼는데(서버가 잘라 간 덩이라),
+        //   `DuoSocketPcmCapture`가 서버 경계에 맞춰 그 덩이를 만든다. 그래서
+        //   Deepgram 갈래와 같은 규칙으로 판정이 돈다.
         languageCode: _mapLanguageToCode(_myNative()),
         onLog: (tag, msg) => _lgDuo('[INTERP-STT]$tag', msg),
       );
@@ -3162,20 +3170,29 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           '[INTERP-STT-KIND]',
           'kind=socket vadSilenceMs=$kDuoVadSilenceDurationMs '
               'declared=${_myNative()}');
-      // 🌐 소켓 갈래는 언제나 `pinned`다. `probe=none`이 "되들을 소리가 없어
-      //   판정이 반쪽"이라는 뜻이고, 이 갈래에 캡처가 붙으면 그때 바뀐다.
+      // 🌐 소켓 갈래는 언제나 `pinned`다. `probe=capture`는 같은 소리를 한 번
+      //   더 들어 로비값을 따질 수 있다는 뜻이다(`DuoSocketPcmCapture`).
       _lgDuo(
           '[INTERP-ORIGIN]',
-          'stt_open kind=socket mode=pinned probe=none '
+          'stt_open kind=socket mode=pinned probe=capture '
               'declared=${_myNative()} flag=${kDuoInterpOriginCheck ? 'on' : 'off'}');
       socket.shouldReconnect = () =>
           !_isExiting &&
           _isConversationActive &&
           generation == _interpGeneration;
+      // 🎙️ [SOCKET-PCM] 이 갈래에도 발화 소리를 담는다. 경계는 여전히 서버가
+      //   준다 — 여기서 판정하는 것은 하나도 없다.
+      _interpSocketPcm = DuoSocketPcmCapture(
+        idPrefix: 'duo_interp',
+        onLog: _lgDuo,
+      );
       socket.onSpeechStarted = () {
         if (generation != _interpGeneration) return;
         _interpSpeechStartedAt = DateTime.now();
         _utteranceRms?.beginUtterance();
+        // 🎧 서버의 speech_started는 왕복을 거쳐 **소리보다 늦게** 온다.
+        //   고리에 담아 둔 앞 여유가 그 사이 첫 음절을 되살린다.
+        _interpSocketPcm?.beginSpeech();
         if (_interpStt?.audioGateOpen ?? false) {
           _setInterpMicPhase(InterpMicPhase.speaking);
         }
@@ -3184,6 +3201,28 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       socket.onUtteranceCommitted = (itemId, voicedMs, voicedSource) {
         if (generation != _interpGeneration) return;
         _utteranceRms?.commitUtterance(itemId);
+        // 🎙️ [SOCKET-PCM] **item_id가 정해지는 유일한 자리다.** 여기서 소리를
+        //   확정해야 히스토리의 `pcm_key`·창고 열쇠와 같은 이름이 붙는다.
+        final DuoCapturedUtterance? spoken =
+            _interpSocketPcm?.commitSpeech(itemId);
+        if (spoken != null) {
+          _stashDuoPcm(DuoSttResult(
+            utteranceId: spoken.utteranceId,
+            // 글자는 아직 없다. 창고는 소리만 본다.
+            text: '',
+            utterance: spoken,
+            languageCode: _mapLanguageToCode(_myNative()),
+            elapsedMs: 0,
+            usedContext: false,
+          ));
+          // 🌐 [INTERP-ORIGIN] 판정이 아직이면 이 소리를 들고 있는다. 이제
+          //   소켓 갈래에도 되들을 소리가 생겼다.
+          if (kDuoInterpOriginCheck &&
+              !OriginLanguageSession.instance.settled) {
+            _interpOriginProbe = spoken;
+            _interpOriginProbeUttId = spoken.utteranceId;
+          }
+        }
         if (_incomingQueue.isNotEmpty) {
           _lgDuo('[INTERP-YIELD]',
               'resume queued=${_incomingQueue.length} reason=utterance_committed');
@@ -3893,6 +3932,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   void _feedInterpreterPcm(Uint8List bytes, int generation) {
     if (bytes.isEmpty || generation != _interpGeneration) return;
     final stt = _interpStt;
+    // 🎙️ [SOCKET-PCM] **문보다 앞에 선다.** 소켓 갈래는 PCM을 앱에 안 남기므로
+    //   여기서 담지 않으면 그 발화의 소리가 어디에도 없다. 문이 닫혀 있어도
+    //   담는다 — 문이 정하는 것은 "소켓으로 보낼 것인가"뿐이다.
+    _interpSocketPcm?.addPcm(bytes);
     // 게이트가 닫혀 있으면 조각을 그냥 버린다. **캡처는 계속 돈다** —
     // 이것이 always-on과 "마이크를 껐다 켠다"의 차이다.
     final bool gateOpen = stt != null && stt.audioGateOpen;
@@ -6915,6 +6958,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   버려진 항목의 세대와 어긋나 보인다.
     _clearInterpPendingSends('generation_changed');
     ++_interpGeneration;
+    // 🎙️ [SOCKET-PCM] 통화 한 통짜리다. 다음 통화가 이전 소리를 물려받으면
+    //   안 된다.
+    _interpSocketPcm?.reset();
+    _interpSocketPcm = null;
     // 🎧 안내 창이 떠 있는 채로 나가면 판정용 소리가 남는다. 여기서 놓는다.
     _releaseOriginProbe('room_exit');
     await _stopInterpreterCapture('room_exit');
