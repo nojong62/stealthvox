@@ -41,6 +41,7 @@ import '/custom_code/services/duo_interpreter_callable.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/duo_transcript_gate.dart';
 import '/custom_code/services/duo_stt_ab_probe.dart';
+import '/custom_code/services/duo_final_transcription_runner.dart';
 import '/custom_code/services/duo_socket_pcm_capture.dart';
 import '/custom_code/services/duo_stt_pipeline.dart';
 import '/custom_code/services/duo_utterance_capture.dart';
@@ -6968,6 +6969,22 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final interpStt = _interpStt;
     _interpStt = null;
     await interpStt?.dispose();
+
+    // 🎧 [DUO-FINAL] 통화가 끝났다. 보존해 둔 소리로 원문을 다시 확정한다.
+    //
+    //   **기다리지 않는다.** 화면은 이미 나가는 중이고 이 일은 발화 수만큼
+    //   걸린다. 러너는 싱글턴이라 이 위젯이 사라져도 계속 돈다.
+    //
+    //   ⚠️ **통역 전용이다.** 직접 대화는 canonical이 개인 기록을 갈아 끼우므로
+    //   (`buildDuoCanonical`) 여기서 걸면 곧 덮일 글을 고치게 된다 — 그쪽은
+    //   canonical이 적용된 뒤에 자리를 잡아야 하고, 이번 판 범위가 아니다.
+    if (!_isDirectMode && _myHistoryRef != null && _openAiKey.isNotEmpty) {
+      DuoFinalTranscriptionRunner.instance.start(
+        historyRef: _myHistoryRef!,
+        apiKey: _openAiKey,
+        caller: 'room_exit',
+      );
+    }
 
     _cancelAudio();
     if (mounted) setState(() => _isConversationActive = false);
