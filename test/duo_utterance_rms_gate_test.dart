@@ -456,4 +456,51 @@ void main() {
       expect(belowLevelGate(-46.0, minDbfs: kDuoMinUtteranceRmsDbfs), isTrue);
     });
   });
+
+  group('🔉 [LEVEL-SCOPE] 세기 게이트는 2초 안쪽 발화에만 개입한다', () {
+    const int m = kDuoLevelGateMaxVoicedMs;
+
+    test('상한은 2000ms다 — 2500이면 오늘의 2.1초 발화를 다시 버린다', () {
+      expect(m, 2000);
+    });
+
+    test('2026-08-30 환청 10건(1.3~2.0초)은 전부 게이트 안이다', () {
+      for (final ms in [1300, 1428, 1460, 1500, 1700, 1800, 1900, 2000]) {
+        expect(levelGateApplies(ms, maxVoicedMs: m), isTrue, reason: '$ms');
+      }
+    });
+
+    test('2026-09-16 실제 발화 5건(2.1~28초)은 전부 게이트 밖이다', () {
+      // 호스트 utt_5 2080 / utt_2 6320 / utt_6 4120, 게스트 utt_3 2640 /
+      // utt_1 5120 / utt_2 28200 — 전부 GPT가 글자를 만든 사람 말이었다.
+      for (final ms in [2080, 2640, 4120, 5120, 6320, 28200]) {
+        expect(levelGateApplies(ms, maxVoicedMs: m), isFalse, reason: '$ms');
+      }
+    });
+
+    test('경계: 2000은 안, 2001은 밖', () {
+      expect(levelGateApplies(2000, maxVoicedMs: m), isTrue);
+      expect(levelGateApplies(2001, maxVoicedMs: m), isFalse);
+    });
+
+    test('길이를 못 잰 발화(null)는 아주 짧은 조각이라 게이트 안이다', () {
+      // bodyMs가 종료 침묵보다 짧아 voicedMs가 음수 → null. 게스트 utt_4가
+      // 그랬다(bodyMs=560). 환청이 나는 자리라 예전처럼 세기로 가른다.
+      expect(levelGateApplies(null, maxVoicedMs: m), isTrue);
+    });
+
+    test('세기 게이트와 합치면: 긴 발화는 조용해도 산다, 짧은 조각은 죽는다', () {
+      bool dropped(int? voicedMs, double rms) =>
+          levelGateApplies(voicedMs, maxVoicedMs: m) &&
+          belowLevelGate(rms, minDbfs: kDuoMinUtteranceRmsDbfs);
+      // 게스트 utt_2: 28.2초 −50.9 → 예전엔 폐기, 이제 통과
+      expect(dropped(28200, -50.9), isFalse);
+      // 호스트 utt_6: 4.1초 −42.0 → 통과
+      expect(dropped(4120, -42.0), isFalse);
+      // 08-30 환청 모양: 1.5초 −47.6 → 여전히 폐기
+      expect(dropped(1500, -47.6), isTrue);
+      // 짧지만 충분히 큰 소리는 예전처럼 통과
+      expect(dropped(1500, -30.0), isFalse);
+    });
+  });
 }

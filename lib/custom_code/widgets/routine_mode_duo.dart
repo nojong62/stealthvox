@@ -2839,7 +2839,27 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //   세기를 못 잰 발화(null)는 통과시킨다 — 모르는 것으로 사람 말을
       //   버리지 않는다.
       final double? rmsDbfs = _utteranceRms?.rmsDbfsOf(itemId);
-      if (belowLevelGate(rmsDbfs, minDbfs: kDuoMinUtteranceRmsDbfs)) {
+      // 🔉 [LEVEL-SCOPE] 2초를 넘긴 발화에는 세기 게이트를 대지 않는다.
+      //   2026-09-16 실기기에서 이 게이트가 버린 것은 전부 2.1초 이상의
+      //   사람 말이었고(게스트 3/3, 호스트 2/7), 환청은 하나도 없었다.
+      //   문턱은 그대로다 — 게이트가 볼 수 있는 영역만 좁힌다.
+      //   `[DIRECT-LEVEL]` 줄은 위에서 이미 남았으므로 세기는 계속 쌓인다.
+      final bool levelScoped = levelGateApplies(voicedMs,
+          maxVoicedMs: kDuoLevelGateMaxVoicedMs);
+      if (!levelScoped &&
+          belowLevelGate(rmsDbfs, minDbfs: kDuoMinUtteranceRmsDbfs)) {
+        // 🔎 [계측] 예전 같으면 버렸을 발화. 이 줄이 환청을 통과시키는지
+        //   실기기에서 세어야 2000ms가 맞는 자리인지 안다.
+        _lgDuo(
+            '[DUO-LEVEL-BYPASS]',
+            'speaker=$_myRole item=$itemId '
+                'rmsDbfs=${rmsDbfs!.toStringAsFixed(1)} '
+                'threshold=${kDuoMinUtteranceRmsDbfs.toStringAsFixed(1)} '
+                'voicedMs=${voicedMs ?? -1} '
+                'maxVoicedMs=$kDuoLevelGateMaxVoicedMs len=${text.trim().length}');
+      }
+      if (levelScoped &&
+          belowLevelGate(rmsDbfs, minDbfs: kDuoMinUtteranceRmsDbfs)) {
         // release에도 남긴다. **전사문은 싣지 않는다** — 숫자만으로 충분하고,
         // 문턱을 다시 잡을 근거는 이 숫자다.
         _lgDuo(
