@@ -908,7 +908,25 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
             'draft=$_historyIsDraft '
             'shouldRestore=${shouldRunRestoration(probeAfterCanonical)}');
 
+        // 🚫 [DUO-FINAL] 재전사가 이미 원문을 확정했으면 **복원 단계에 들어가지
+        //   않는다.** `shouldRunRestoration`은 이 우회를 모른다 — 복원이 한
+        //   번도 안 돌았으니 `origin_restore_state`가 비어 있고, 그 눈에는
+        //   "아직 할 일이 남은 방"으로 보인다.
+        //
+        //   그대로 들어가면 러너는 우회로 안 돌고(`reason=duo_final_applied`),
+        //   화면은 아무도 쓰지 않을 종료 상태를 3분간 기다린다. 첫 진입이
+        //   통째로 뱅글이 된다(2026-09-15 실기기, 호스트·게스트 양쪽).
+        final bool duoFinalDone = freshData is Map<String, dynamic> &&
+            duoFinalSupersedesRestoration(freshData);
+        if (duoFinalDone) {
+          debugPrint('[HISTORY-RESTORE-WAIT] restoring skipped '
+              'history=$_historyId instance=$_instanceId '
+              'reason=duo_final_applied '
+              'success=${freshData is Map<String, dynamic> ? freshData[kDuoFinalRoomSuccessField] : null}');
+        }
+
         if (_historyIsDraft &&
+            !duoFinalDone &&
             freshData is Map<String, dynamic> &&
             shouldRunRestoration(freshData)) {
           if (_apiKey.isEmpty) {

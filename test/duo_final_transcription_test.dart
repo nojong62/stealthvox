@@ -305,6 +305,51 @@ void main() {
     });
   });
 
+  group('🌀 우회한 방은 복원 단계에 들어가지 않는다', () {
+    // 🩺 2026-09-15 실기기, 호스트·게스트 양쪽에서 첫 진입이 뱅글이었다.
+    //
+    //   [HISTORY-PREP-STATE] restoreState=null shouldRestore=true
+    //   [HISTORY-RESTORE-WAIT] recover skipped reason=duo_final_applied success=5
+    //   [HISTORY-PREP] stage=restoring
+    //   [ORIGIN-RUNNER-WAIT] not_running
+    //   → ready가 영영 오지 않는다
+    //
+    //   `shouldRunRestoration`은 복원 상태만 본다. 우회하면 복원이 한 번도
+    //   안 도니 그 칸이 비어 있고, 그 눈에는 "할 일이 남은 방"이다. 들어가면
+    //   아무도 쓰지 않을 종료 상태를 대기 상한까지 기다린다.
+    //
+    //   막는 자리는 러너 안이 아니라 **화면이 단계를 올리기 전**이어야 한다.
+    final String history =
+        _codeOnly(_read('lib/custom_code/widgets/chat_history_master.dart'));
+
+    test('restoring 단계로 올리기 전에 우회를 먼저 본다', () {
+      final int bypass = history.indexOf('duoFinalSupersedesRestoration(');
+      final int gate = history.indexOf('shouldRunRestoration(freshData)', bypass);
+      final int stage = history.indexOf(
+          '_HistoryPreparationStage.restoring', bypass);
+      expect(bypass, greaterThan(0));
+      expect(gate, greaterThan(bypass));
+      expect(stage, greaterThan(bypass),
+          reason: '단계를 올린 뒤에 막으면 이미 대기에 들어간 뒤다');
+    });
+
+    test('우회한 방은 복원 조건을 아예 통과하지 못한다', () {
+      // `shouldRunRestoration`이 true여도 우회가 이기도록 && 로 묶여야 한다.
+      final int gate = history.indexOf('shouldRunRestoration(freshData)');
+      final int open = history.lastIndexOf('if (', gate);
+      expect(open, greaterThan(0));
+      expect(history.substring(open, gate).contains('!duoFinalDone'), isTrue,
+          reason: '우회 여부가 조건에 안 들어가면 그대로 복원 대기로 빠진다');
+    });
+
+    test('복원 종료 상태를 기다리는 자리는 그 조건 안에만 있다', () {
+      // 우회한 방에서는 이 대기에 닿으면 안 된다 — 쓰는 사람이 없다.
+      final int gate = history.indexOf('shouldRunRestoration(freshData)');
+      final int wait = history.indexOf('_awaitDuoRestorationTerminal()', gate);
+      expect(wait, greaterThan(gate));
+    });
+  });
+
   group('🔁 끝난 방을 두 번 돌지 않는다', () {
     // 🩺 2026-09-15 실기기. 공부방에 **두 번째로** 들어가자 이렇게 됐다.
     //
