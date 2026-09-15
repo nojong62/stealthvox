@@ -305,6 +305,47 @@ void main() {
     });
   });
 
+  group('🎧 창고에서 꺼낸 것은 이미 PCM16이다', () {
+    // 🩺 2026-09-15 실기기에서 잡혔다. 러너가 `readKeyed`의 결과를 WAV로 알고
+    //   머리말을 **한 번 더** 벗겼다 — RIFF가 없으니 null이 나왔고, 한 판이
+    //   통째로 `wav_unreadable`로 떨어졌다(`failed=2 retranscribed=0`).
+    //
+    //   창고의 계약은 하나다: **파일에는 WAV로 쓰고, 꺼낼 때 PCM16으로 준다.**
+    //   벗기는 일은 창고가 한다. 꺼내 쓰는 쪽은 그대로 전사기에 올린다.
+    final String store =
+        _codeOnly(_read('lib/custom_code/services/origin_pcm_store.dart'));
+    final String runner = _codeOnly(
+        _read('lib/custom_code/services/duo_final_transcription_runner.dart'));
+
+    test('readKeyed가 머리말을 벗겨서 돌려준다', () {
+      final int read = store.indexOf('Future<Uint8List?> readKeyed(');
+      final int unwrap = store.indexOf('wavToPcm16(', read);
+      final int close = store.indexOf('Future<OriginPcmManifest> manifest(', read);
+      expect(read, greaterThan(0));
+      expect(unwrap, greaterThan(read));
+      expect(unwrap, lessThan(close),
+          reason: '창고가 안 벗기면 꺼내 쓰는 쪽마다 벗겨야 한다');
+    });
+
+    test('재전사 러너는 두 번 벗기지 않는다', () {
+      expect(runner.contains('wavToPcm16('), isFalse,
+          reason: 'readKeyed가 이미 PCM16을 준다 — 또 벗기면 전량 실패한다');
+    });
+
+    test('기존 원문 복원과 같은 방식으로 전사기에 올린다', () {
+      final String restore = _codeOnly(
+          _read('lib/custom_code/services/origin_restoration_runner.dart'));
+      // 먼저 선 쪽이 계약이다. 새 러너가 그 모양을 따라가야 한다.
+      expect(restore.contains('wavToPcm16('), isFalse);
+      for (final String code in <String>[restore, runner]) {
+        final int r = code.indexOf('readKeyed(');
+        final int t = code.indexOf('transcribePcm16(', r);
+        expect(r, greaterThan(0));
+        expect(t, greaterThan(r));
+      }
+    });
+  });
+
   group('💾 직접통화 PCM은 게이트 앞에서 담는다', () {
     final String duo =
         _codeOnly(_read('lib/custom_code/widgets/routine_mode_duo.dart'));

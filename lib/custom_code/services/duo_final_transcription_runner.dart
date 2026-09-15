@@ -152,7 +152,7 @@ class DuoFinalTranscriptionRunner {
 
         final String? finalText = await _transcribe(
           apiKey: apiKey,
-          wav: pcm,
+          pcm: pcm,
           languageCode: plan.languageCode,
           utteranceId: plan.pcmKey,
         );
@@ -225,18 +225,22 @@ class DuoFinalTranscriptionRunner {
     }
   }
 
-  /// 창고에서 꺼낸 것은 **WAV**다(`OriginPcmStore`가 그렇게 써 둔다).
-  /// 전사 서비스는 PCM16을 받으므로 머리말을 벗겨서 넘긴다.
+  /// 창고는 파일에 **WAV로 쓰지만 꺼낼 때는 PCM16으로 준다** —
+  /// 머리말을 벗기는 일은 `readKeyed`가 이미 끝냈다.
+  ///
+  /// ⚠️ 여기서 `wavToPcm16`을 또 부르면 **한 판이 통째로 실패한다.**
+  ///   RIFF가 없는 바이트라 null이 나오고, 모든 줄이 실시간 원문에 머문다
+  ///   (2026-09-15 실기기: `wav_unreadable` ×2, `retranscribed=0`).
+  ///   먼저 선 `OriginRestorationRunner`도 꺼낸 것을 그대로 올린다.
   Future<String?> _transcribe({
     required String apiKey,
-    required Uint8List wav,
+    required Uint8List pcm,
     required String languageCode,
     required String utteranceId,
   }) async {
     try {
-      final Uint8List? pcm = wavToPcm16(wav);
-      if (pcm == null || pcm.isEmpty) {
-        debugPrint('[DUO-FINAL] wav_unreadable utt=$utteranceId');
+      if (pcm.isEmpty) {
+        debugPrint('[DUO-FINAL] empty_audio utt=$utteranceId');
         return null;
       }
       return await OpenAiTranscribeService.transcribePcm16(
