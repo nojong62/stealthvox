@@ -41,6 +41,21 @@ const String kDuoFinalRoomSuccessField = 'duo_final_success_count';
 /// 소리를 들었는데 글자를 못 만든 줄 수. 그 줄은 실시간 원문이 남아 있다.
 const String kDuoFinalRoomFailField = 'duo_final_fail_count';
 
+/// 🔁 이 방은 **이미 한 판을 끝까지 돌렸는가.**
+///
+/// 끝까지 돈 판은 마지막에 그 방의 소리를 지운다. 그러니 두 번째 판은 무엇도
+/// 더 할 수 없다 — 모든 줄이 `alreadyFinal`이라 `retranscribed=0`이 나오고,
+/// 그 0이 방 표시를 덮어쓰면 **한 번 얻은 우회가 풀린다.**
+///
+/// 실기기에서 그대로 나왔다(2026-09-15). 공부방에 두 번째로 들어가자
+/// `success=2`가 `success=0`으로 내려앉았고, 소리가 없는 채로 원문 복원이
+/// 다시 돌아 3.3초를 헛되이 썼다.
+///
+/// 표시가 있으면 판을 열지 않는다. 표시가 없다는 것은 지난 판이 중간에
+/// 끊겼다는 뜻이고(그때는 소리도 남아 있다), 그 방은 다시 시도할 값이 있다.
+bool duoFinalRoomAlreadyDone(Map<String, dynamic>? room) =>
+    room != null && room[kDuoFinalRoomCompletedField] != null;
+
 /// 🧭 이 방에서 **원문 복원(`origin_restoration`)을 건너뛸 것인가.**
 ///
 /// 새 경로가 한 줄이라도 글자를 확정했으면 건너뛴다. 그 줄들은 이미 원본

@@ -115,6 +115,18 @@ class DuoFinalTranscriptionRunner {
     final sw = Stopwatch()..start();
     var stats = const DuoFinalStats();
     try {
+      // 🔁 이미 끝까지 돈 방은 열지 않는다. 그 판이 소리를 지우고 나갔으므로
+      //   두 번째 판은 `retranscribed=0`만 찍고, 그 0이 방 표시를 덮어써서
+      //   **한 번 얻은 복원 우회를 스스로 풀어 버린다**(2026-09-15 실기기).
+      final Object? roomData = (await historyRef.get()).data();
+      if (roomData is Map<String, dynamic> &&
+          duoFinalRoomAlreadyDone(roomData)) {
+        debugPrint('[DUO-FINAL] run_skip room=$roomId caller=$caller '
+            'reason=already_done '
+            'success=${roomData[kDuoFinalRoomSuccessField]}');
+        return;
+      }
+
       final snap = await historyRef.collection('messages').get();
       stats = stats.copyWith(rows: snap.docs.length);
 

@@ -305,6 +305,58 @@ void main() {
     });
   });
 
+  group('🔁 끝난 방을 두 번 돌지 않는다', () {
+    // 🩺 2026-09-15 실기기. 공부방에 **두 번째로** 들어가자 이렇게 됐다.
+    //
+    //   1회차: retranscribed=2 → recover skipped reason=duo_final_applied success=2
+    //   2회차: retranscribed=0 skippedOther=2 → 그 0이 방 표시를 덮어썼다
+    //          → 우회가 풀리고, 소리도 없는데 원문 복원이 3.3초 헛돌았다
+    //
+    //   끝까지 돈 판은 마지막에 소리를 지운다. 두 번째 판은 더 할 일이 없다.
+    final String runner = _codeOnly(
+        _read('lib/custom_code/services/duo_final_transcription_runner.dart'));
+
+    test('완료 표시가 있으면 끝난 방이다', () {
+      expect(duoFinalRoomAlreadyDone(<String, dynamic>{
+        kDuoFinalRoomCompletedField: 'ts',
+        kDuoFinalRoomSuccessField: 2,
+      }), isTrue);
+    });
+
+    test('성공이 0줄이어도 끝난 판은 끝난 것이다', () {
+      // 소리는 이미 지워졌다. 다시 열어 봐야 같은 0이 나온다.
+      expect(duoFinalRoomAlreadyDone(<String, dynamic>{
+        kDuoFinalRoomCompletedField: 'ts',
+        kDuoFinalRoomSuccessField: 0,
+      }), isTrue);
+    });
+
+    test('중간에 끊긴 판은 다시 시도할 값이 있다', () {
+      // 표시가 없다 = 소리도 남아 있다.
+      expect(duoFinalRoomAlreadyDone(<String, dynamic>{}), isFalse);
+      expect(duoFinalRoomAlreadyDone(null), isFalse);
+    });
+
+    test('러너가 줄을 읽기 전에 방 표시를 먼저 본다', () {
+      final int run = runner.indexOf('Future<void> _run(');
+      final int guard = runner.indexOf('duoFinalRoomAlreadyDone(', run);
+      final int rows = runner.indexOf("collection('messages').get()", run);
+      expect(run, greaterThan(0));
+      expect(guard, greaterThan(run));
+      expect(guard, lessThan(rows),
+          reason: '줄을 다 돌고 나서 막으면 이미 0을 써 버린 뒤다');
+    });
+
+    test('막을 때는 방 표시를 쓰지 않고 그냥 나간다', () {
+      final int guard = runner.indexOf('duoFinalRoomAlreadyDone(');
+      final int ret = runner.indexOf('return;', guard);
+      final int marker = runner.indexOf('kDuoFinalRoomCompletedField', guard);
+      expect(ret, greaterThan(guard));
+      expect(marker, greaterThan(ret),
+          reason: '한 번 올라간 success는 내려가면 안 된다');
+    });
+  });
+
   group('🎧 창고에서 꺼낸 것은 이미 PCM16이다', () {
     // 🩺 2026-09-15 실기기에서 잡혔다. 러너가 `readKeyed`의 결과를 WAV로 알고
     //   머리말을 **한 번 더** 벗겼다 — RIFF가 없으니 null이 나왔고, 한 판이
