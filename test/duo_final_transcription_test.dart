@@ -342,6 +342,18 @@ void main() {
           reason: '우회 여부가 조건에 안 들어가면 그대로 복원 대기로 빠진다');
     });
 
+    test('나가는 문의 검사도 우회를 안다', () {
+      // 🩺 들어가는 문만 막았더니 3회 연속 StateError로 끝났다.
+      //   "대화를 정리하지 못했습니다" — 뱅글이 실패 화면이 됐을 뿐이다.
+      final int check = history.indexOf('origin restoration incomplete');
+      final int guard =
+          history.lastIndexOf('!restorationCompletedByRunner', check);
+      expect(check, greaterThan(0));
+      expect(guard, greaterThan(0));
+      expect(history.substring(guard, check).contains('!duoFinalDone'), isTrue,
+          reason: '우회한 방은 복원 상태 칸이 비어 있어 이 검사에 반드시 걸린다');
+    });
+
     test('복원 종료 상태를 기다리는 자리는 그 조건 안에만 있다', () {
       // 우회한 방에서는 이 대기에 닿으면 안 된다 — 쓰는 사람이 없다.
       final int gate = history.indexOf('shouldRunRestoration(freshData)');

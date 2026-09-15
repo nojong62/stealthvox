@@ -971,7 +971,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           }
         }
 
-        if (!restorationCompletedByRunner) {
+        // ⚠️ 나가는 문도 같은 눈으로 본다. 들어가는 문만 막으면 우회한 방은
+        //   여기서 `shouldRunRestoration`에 걸려 **반드시** StateError로 끝난다
+        //   — 뱅글이 실패 화면으로 바뀔 뿐이다(2026-09-15 실기기, 3회 연속).
+        //
+        //   복원 상태 칸은 우회한 방에서 영영 비어 있다. 그 칸을 근거로 하는
+        //   검사는 이 방에 적용되지 않는다.
+        if (!restorationCompletedByRunner && !duoFinalDone) {
           refreshed = await widget.historyDoc.get();
           freshData = refreshed.data();
           if (freshData is Map<String, dynamic>) {
