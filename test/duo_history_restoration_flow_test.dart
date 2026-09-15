@@ -12,15 +12,37 @@ void main() {
       read('lib/custom_code/services/origin_restoration_runner.dart');
 
   group('Duo Direct PCM과 빈 대화', () {
-    test('버릴 발화 판정 뒤에 수용된 PCM만 저장한다', () {
+    // 🔄 2026-09-15에 뒤집혔다. 예전에는 **수용된 발화의 PCM만** 담았다 —
+    //   "버린 환청 때문에 내용 없는 History가 생기면 안 된다"가 이유였다.
+    //
+    //   통화가 끝난 뒤 원본 소리로 원문을 다시 만드는 구조에서는 그 전제가
+    //   깨진다. 실시간 STT가 환청이라고 본 발화의 소리까지 버리면, 최종
+    //   기록의 정확도를 계속 실시간 판단에 의존하게 된다.
+    //   **PCM이 원본 증거**라면 판정 앞에서 담아야 한다.
+    //
+    //   ⚠️ 담는 것과 History에 싣는 것은 여전히 다른 일이다. 버려진 발화는
+    //   줄이 안 생기고, 그 소리를 되살릴지는 다음 판에서 따로 정한다.
+    test('수용 판정 **앞에서** 모든 후보 PCM을 담는다', () {
+      final closed = duo.indexOf(
+          'session.onUtteranceClosed = (utteranceId, utterance, voicedMs)');
+      final stash = duo.indexOf('_stashDuoPcm(', closed);
+      final transcript = duo.indexOf('session.onTranscript = (result)', closed);
+      expect(closed, greaterThanOrEqualTo(0));
+      expect(stash, greaterThan(closed));
+      expect(stash, lessThan(transcript),
+          reason: '게이트 뒤에서 담으면 실시간 판정이 최종 기록을 가른다');
+    });
+
+    test('수용 판정 자리에서는 더 이상 담지 않는다', () {
       final handler = duo.indexOf('Future<void> _handleDirectTranscript(');
       final noiseGate = duo.indexOf('noiseTranscriptReason(trimmed)', handler);
-      final pcmStore = duo.indexOf('_stashDuoPcm(pcmResult)', handler);
       final historySave = duo.indexOf('await _saveHistoryMessage(', handler);
       expect(handler, greaterThanOrEqualTo(0));
       expect(noiseGate, greaterThan(handler));
-      expect(pcmStore, greaterThan(noiseGate));
-      expect(historySave, greaterThan(pcmStore));
+      expect(historySave, greaterThan(noiseGate));
+      // 두 곳에서 담으면 같은 소리를 두 번 쓴다.
+      expect(duo.substring(handler, historySave).contains('_stashDuoPcm('),
+          isFalse);
     });
 
     test('첫 발화 PCM은 방 생성 뒤 pending에서 입양한다', () {

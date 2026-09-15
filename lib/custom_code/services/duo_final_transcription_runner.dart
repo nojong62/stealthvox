@@ -30,6 +30,9 @@ import 'origin_restoration.dart'
     show kMessagePcmKeyField, restorationLanguageCode;
 import 'pcm_audio_utils.dart';
 
+/// 공부방이 기다린 결과.
+enum DuoFinalWaitResult { notRunning, completed, timedOut }
+
 class DuoFinalTranscriptionRunner {
   DuoFinalTranscriptionRunner._();
 
@@ -42,10 +45,39 @@ class DuoFinalTranscriptionRunner {
   /// 발화 하나를 다시 듣는 데 주는 상한.
   static const Duration perUtteranceTimeout = Duration(seconds: 30);
 
+  /// 공부방이 한 판을 기다리는 상한. 기존 원문 복원이 쓰던 값과 같다 —
+  /// 그 대기 자리를 이 판이 물려받는다.
+  static const Duration waitTimeout = Duration(minutes: 3);
+
   /// 방마다 도는 판. 같은 방에 두 판이 겹치면 같은 줄을 두 번 고친다.
   final Map<String, Future<void>> _running = <String, Future<void>>{};
 
   bool isRunning(String roomId) => _running.containsKey(roomId);
+
+  /// 🕰️ 도는 판이 있으면 끝날 때까지 기다린다.
+  ///
+  /// **공부방이 화면을 띄우기 전에 부른다.** 통화가 끝나는 자리에서 시작한
+  /// 판이 아직 돌고 있으면 그 결과를 보고 그려야, 사용자가 실시간 전사를
+  /// 봤다가 몇 초 뒤에 글자가 바뀌는 일이 없다.
+  ///
+  /// 도는 판이 없으면 곧바로 돌아온다.
+  Future<DuoFinalWaitResult> awaitIfRunning(
+    String roomId, {
+    Duration timeout = waitTimeout,
+  }) async {
+    final Future<void>? task = _running[roomId];
+    if (task == null) return DuoFinalWaitResult.notRunning;
+    try {
+      await task.timeout(timeout);
+      return DuoFinalWaitResult.completed;
+    } on TimeoutException {
+      debugPrint('[DUO-FINAL] wait_timeout room=$roomId');
+      return DuoFinalWaitResult.timedOut;
+    } catch (_) {
+      // 판이 예외로 끝났어도 기다림은 끝난 것이다. 결과는 방 문서가 말한다.
+      return DuoFinalWaitResult.completed;
+    }
+  }
 
   /// 통화가 끝나는 자리에서 부른다. **기다리지 않는다.**
   void start({
@@ -153,12 +185,43 @@ class DuoFinalTranscriptionRunner {
             'finalLen=${finalText.trim().length} '
             'changed=${update.containsKey(kDuoFinalChangedField)}');
       }
+      // 🏁 한 판이 **끝까지** 돌았다. 여기까지 와야 방에 표시한다 — 중간에
+      //   예외로 빠진 판은 이 줄을 지나지 않는다.
+      await historyRef.set(<String, dynamic>{
+        kDuoFinalRoomCompletedField: FieldValue.serverTimestamp(),
+        kDuoFinalRoomSuccessField: stats.retranscribed,
+        kDuoFinalRoomFailField: stats.failed,
+      }, SetOptions(merge: true));
+
+      // 🧹 [PCM] **이제 이 방의 소리를 지운다.**
+      //
+      //   예전 주인은 원문 복원이었다(`OriginRestorationRunner`가 세 곳에서
+      //   `discard`를 불렀다). 새 경로가 복원을 건너뛰게 되면서 지우는 코드가
+      //   통째로 사라질 뻔했다 — 창고의 유일한 청소부가 그쪽이었다.
+      //
+      //   ⚠️ **History 저장이 끝난 뒤에만 지운다.** 위 `update`가 다 끝나고
+      //   방 표시까지 찍힌 지금이 그 시점이다. 중간에 예외가 나면 이 줄에
+      //   닿지 않으므로 소리가 남고, 다음에 다시 시도할 수 있다.
+      //
+      //   실패한 줄이 있어도 지운다 — 그 줄은 실시간 원문으로 확정됐고,
+      //   같은 소리를 또 들어 봐야 같은 결과다.
+      await OriginPcmStore.instance.discard(roomId);
+      debugPrint('[DUO-FINAL] pcm_discarded room=$roomId');
     } catch (e) {
-      debugPrint('[DUO-FINAL] run_failed room=$roomId ${e.runtimeType}');
+      // ⚠️ 여기서 소리를 지우지 않는다. 끝까지 못 간 판이라 다음 기회가 있다.
+      debugPrint('[DUO-FINAL] run_failed room=$roomId ${e.runtimeType} '
+          '— PCM은 남긴다');
     } finally {
       sw.stop();
+      // 🔎 [계측] `skippedNoPcm`이 곧 **이 폰에 소리가 없는 줄**이다.
+      //   직접 대화에서는 상대 발화가 전부 여기 들어간다 — 내 마이크 소리만
+      //   내 창고에 있기 때문이다. 그래서 한 통화에서 호스트 폰은 호스트
+      //   발화만, 게스트 폰은 게스트 발화만 좋아진다. **버그가 아니다.**
+      //   실기기에서 이 수와 상대 발화 수가 맞는지로 확인한다.
       debugPrint('[DUO-FINAL] done room=$roomId caller=$caller '
-          '$stats elapsedMs=${sw.elapsedMilliseconds}');
+          '$stats localPcmRows=${stats.retranscribed + stats.failed} '
+          'remoteOrMissingRows=${stats.skippedNoPcm} '
+          'elapsedMs=${sw.elapsedMilliseconds}');
     }
   }
 

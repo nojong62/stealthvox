@@ -26,6 +26,40 @@
 
 import 'package:flutter/foundation.dart';
 
+// ══════════════════════════════════════════════════════════════════════
+// 방 단위 표시 — 이 통화가 새 파이프라인을 탔는가
+// ══════════════════════════════════════════════════════════════════════
+
+/// 재전사 한 판이 **끝까지 돌았다.** 중간에 끊긴 판에는 안 찍는다.
+///
+/// 이 값이 있어야 PCM을 지울 수 있고, 원문 복원을 건너뛸지 판단할 수 있다.
+const String kDuoFinalRoomCompletedField = 'duo_final_completed_at';
+
+/// 그 판에서 실제로 글자를 확정한 줄 수. **0이면 새 경로가 아무것도 못 한 것**이다.
+const String kDuoFinalRoomSuccessField = 'duo_final_success_count';
+
+/// 소리를 들었는데 글자를 못 만든 줄 수. 그 줄은 실시간 원문이 남아 있다.
+const String kDuoFinalRoomFailField = 'duo_final_fail_count';
+
+/// 🧭 이 방에서 **원문 복원(`origin_restoration`)을 건너뛸 것인가.**
+///
+/// 새 경로가 한 줄이라도 글자를 확정했으면 건너뛴다. 그 줄들은 이미 원본
+/// 소리로 다시 들은 결과이고, 그 위에 "의심점만 다시 듣는" 층을 또 얹으면
+/// **앞 단계가 고친 것을 뒤 단계가 되돌리는** 상호작용이 생긴다.
+///
+/// 반대로 성공이 0줄이면 새 경로는 실질적으로 아무 일도 못 한 것이다
+/// (소리가 없었거나 전사가 전부 실패했다). 그때는 기존 복원을 그대로 둔다 —
+/// 새 경로를 넣었다는 이유로 있던 방어선을 잃으면 안 된다.
+///
+/// ⚠️ **부분 실패는 건너뛰는 쪽이다.** 몇 줄 때문에 복원 전체를 다시 돌리는
+/// 것이 바로 걷어내려던 그 구조다. 실패한 줄은 실시간 원문이 남는다.
+bool duoFinalSupersedesRestoration(Map<String, dynamic>? room) {
+  if (room == null) return false;
+  if (room[kDuoFinalRoomCompletedField] == null) return false;
+  final Object? success = room[kDuoFinalRoomSuccessField];
+  return success is int && success > 0;
+}
+
 /// 이 줄의 원문을 통화 후 재전사로 확정했다. **성공한 줄에만 찍는다.**
 ///
 /// 두 번 돌지 않게 하는 빗장이자, 나중에 "몇 줄이 재전사를 거쳤나"를 세는 값이다.

@@ -49,6 +49,8 @@ import '/custom_code/services/speech_reconstruction.dart';
 import '/custom_code/services/duo_study_state.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/step2_native_render.dart';
+import '/custom_code/services/duo_final_transcription.dart';
+import '/custom_code/services/duo_final_transcription_runner.dart';
 import '/custom_code/services/duo_canonical.dart';
 import '/custom_code/services/study_access.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
@@ -1096,6 +1098,30 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       _cacheRoomData(freshData);
     }
 
+    // 🎧 [DUO-FINAL] **여기가 새 본선이다.** canonical이 A/B 순서와 소유자를
+    //   확정한 뒤, 각 줄의 `pcm_key`로 원본 소리를 다시 들어 원문을 만든다.
+    //
+    //   통화 종료 직후가 아니라 이 자리인 이유는 canonical이 개인 기록을
+    //   갈아 끼우기 때문이다 — 그 앞에서 고치면 곧 덮일 글을 고치게 된다.
+    //
+    //   ⏳ 기다린다. 사용자는 이 화면에서 검수를 시작하는데, 실시간 전사를
+    //   보여 준 뒤 몇 초 있다가 글자가 바뀌면 그게 더 나쁘다. 기존 원문
+    //   복원이 쓰던 대기 자리를 그대로 물려받는다.
+    if (mounted && _apiKey.isNotEmpty) {
+      DuoFinalTranscriptionRunner.instance.start(
+        historyRef: widget.historyDoc,
+        apiKey: _apiKey,
+        caller: 'sync_canonical',
+      );
+      final wait = await DuoFinalTranscriptionRunner.instance
+          .awaitIfRunning(widget.historyDoc.id);
+      debugPrint('[DUO-FINAL] study_wait history=$_historyId '
+          'result=${wait.name}');
+      final refreshedFinal = await widget.historyDoc.get();
+      final finalData = refreshedFinal.data();
+      if (finalData is Map<String, dynamic>) _cacheRoomData(finalData);
+    }
+
     // Duo 복원은 canonical 뒤에서 시작하며, _fetchRoomData가 이 작업을 기다린다.
     debugPrint('[HISTORY-PREP-STATE] step=canonical_end history=$_historyId '
         'instance=$_instanceId room=$roomId mounted=$mounted '
@@ -1129,6 +1155,22 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       debugPrint('[HISTORY-RESTORE-WAIT] recover skipped caller=$caller '
           'reason=already_done history=$_historyId instance=$_instanceId '
           'restoreState=${data[kOriginRestoreStateField]}');
+      return;
+    }
+    // 🎧 [DUO-FINAL] **새 경로가 글자를 확정한 방은 복원을 건너뛴다.**
+    //
+    //   재전사는 그 발화의 원본 소리를 통째로 다시 들은 결과다. 그 위에
+    //   "의심 가는 낱말만 다시 듣는" 층을 또 얹으면 앞 단계가 고친 것을 뒤
+    //   단계가 되돌릴 수 있다 — 걷어내려던 그 상호작용이다.
+    //
+    //   ⚠️ **성공이 0줄이면 건너뛰지 않는다.** 그때는 새 경로가 실질적으로
+    //   아무 일도 못 한 것이라(소리가 없었거나 전사가 전부 실패), 있던
+    //   방어선을 잃으면 안 된다.
+    if (duoFinalSupersedesRestoration(data)) {
+      debugPrint('[HISTORY-RESTORE-WAIT] recover skipped caller=$caller '
+          'reason=duo_final_applied history=$_historyId '
+          'success=${data[kDuoFinalRoomSuccessField]} '
+          'fail=${data[kDuoFinalRoomFailField]}');
       return;
     }
     // 🧩 듀오 방은 공유 정돈이 내 줄에 적용된 뒤에만 손댄다. 아직이면

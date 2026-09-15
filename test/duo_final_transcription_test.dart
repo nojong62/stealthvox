@@ -210,4 +210,121 @@ void main() {
           reason: '직접 대화에 걸면 canonical이 곧 덮을 글을 고치게 된다');
     });
   });
+
+  // ══════════════════════════════════════════════════════════════════
+  // 직접통화 1차 범위에서 확정한 넷
+  // ══════════════════════════════════════════════════════════════════
+
+  group('🚫 성공 1줄 이상이면 원문 복원을 건너뛴다', () {
+    test('끝났고 성공이 있으면 건너뛴다', () {
+      expect(
+          duoFinalSupersedesRestoration(<String, dynamic>{
+            kDuoFinalRoomCompletedField: 'T',
+            kDuoFinalRoomSuccessField: 1,
+          }),
+          isTrue);
+    });
+
+    test('성공 0줄이면 건너뛰지 않는다 — 있던 방어선을 잃으면 안 된다', () {
+      expect(
+          duoFinalSupersedesRestoration(<String, dynamic>{
+            kDuoFinalRoomCompletedField: 'T',
+            kDuoFinalRoomSuccessField: 0,
+            kDuoFinalRoomFailField: 3,
+          }),
+          isFalse);
+    });
+
+    test('끝까지 안 돈 판은 건너뛰지 않는다', () {
+      expect(
+          duoFinalSupersedesRestoration(<String, dynamic>{
+            kDuoFinalRoomSuccessField: 5,
+          }),
+          isFalse,
+          reason: '완료 표시 없이 성공 수만 있으면 중간에 끊긴 판이다');
+    });
+
+    test('부분 실패는 건너뛰는 쪽이다', () {
+      expect(
+          duoFinalSupersedesRestoration(<String, dynamic>{
+            kDuoFinalRoomCompletedField: 'T',
+            kDuoFinalRoomSuccessField: 4,
+            kDuoFinalRoomFailField: 2,
+          }),
+          isTrue,
+          reason: '몇 줄 때문에 복원 전체를 다시 도는 것이 걷어내려던 구조다');
+    });
+
+    test('옛 방(표시 없음)은 예전대로 복원이 돈다', () {
+      expect(duoFinalSupersedesRestoration(<String, dynamic>{}), isFalse);
+      expect(duoFinalSupersedesRestoration(null), isFalse);
+    });
+  });
+
+  group('🧹 PCM 청소 주인이 재전사로 넘어왔다', () {
+    final String runner = _codeOnly(
+        _read('lib/custom_code/services/duo_final_transcription_runner.dart'));
+
+    test('한 판이 끝까지 돈 뒤에만 지운다', () {
+      final int completed = runner.indexOf('kDuoFinalRoomCompletedField');
+      final int discard = runner.indexOf('OriginPcmStore.instance.discard');
+      expect(completed, greaterThan(0));
+      expect(discard, greaterThan(completed),
+          reason: 'History 저장·방 표시보다 먼저 지우면 되돌릴 근거가 사라진다');
+    });
+
+    test('예외로 끝난 판은 지우지 않는다', () {
+      final int discard = runner.indexOf('OriginPcmStore.instance.discard');
+      final int catchAt = runner.indexOf('} catch (e) {', discard);
+      expect(catchAt, greaterThan(discard),
+          reason: 'discard가 catch 안에 있으면 실패한 판도 소리를 버린다');
+    });
+  });
+
+  group('⏳ 공부방이 기다릴 수 있다', () {
+    final String runner = _codeOnly(
+        _read('lib/custom_code/services/duo_final_transcription_runner.dart'));
+    final String study =
+        _codeOnly(_read('lib/custom_code/widgets/chat_history_master.dart'));
+
+    test('대기 API가 있고 상한이 복원과 같다', () {
+      expect(runner, contains('Future<DuoFinalWaitResult> awaitIfRunning('));
+      expect(runner, contains('static const Duration waitTimeout = Duration(minutes: 3)'));
+    });
+
+    test('공부방이 canonical 직후에 걸고 기다린다', () {
+      // ⚠️ `awaitIfRunning(`만으로 찾으면 안 된다 — 이 파일에는 원문 복원
+      //   쪽 대기 호출이 여러 개 있다. 이 판의 대기는 로그 한 줄로 가린다.
+      final int start = study.indexOf('DuoFinalTranscriptionRunner.instance.start(');
+      final int wait = study.indexOf('[DUO-FINAL] study_wait');
+      final int restore = study.indexOf("_recoverOriginRestoration(caller: 'sync_canonical')");
+      expect(start, greaterThan(0));
+      expect(wait, greaterThan(start));
+      expect(restore, greaterThan(wait),
+          reason: '복원보다 먼저 끝나야 복원을 건너뛸지 판단할 수 있다');
+    });
+  });
+
+  group('💾 직접통화 PCM은 게이트 앞에서 담는다', () {
+    final String duo =
+        _codeOnly(_read('lib/custom_code/widgets/routine_mode_duo.dart'));
+
+    test('onUtteranceClosed에서 담는다', () {
+      final int closed = duo.indexOf('session.onUtteranceClosed = (utteranceId, utterance, voicedMs)');
+      final int stash = duo.indexOf('_stashDuoPcm(', closed);
+      final int transcript = duo.indexOf('session.onTranscript = (result)', closed);
+      expect(closed, greaterThan(0));
+      expect(stash, greaterThan(closed));
+      expect(stash, lessThan(transcript),
+          reason: '게이트 뒤에서 담으면 실시간 판정이 최종 기록을 가른다');
+    });
+
+    test('수용 판정 자리에서는 더 이상 담지 않는다', () {
+      final int handle = duo.indexOf('Future<void> _handleDirectTranscript(');
+      final int end = duo.indexOf('Future<void> _stopDirectCall(', handle);
+      expect(handle, greaterThan(0));
+      expect(duo.substring(handle, end).contains('_stashDuoPcm('), isFalse,
+          reason: '두 곳에서 담으면 같은 소리를 두 번 쓴다');
+    });
+  });
 }

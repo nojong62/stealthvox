@@ -2713,6 +2713,28 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _utteranceRms?.commitUtterance(utteranceId);
       _sttAbProbe?.observe(utterance, voicedMs: voicedMs);
       _directVoicedMs[utteranceId] = voicedMs;
+      // 💾 [ORIGIN-PCM] **소리는 게이트 앞에서 담는다.**
+      //
+      //   예전에는 수용 판정을 다 통과한 뒤에 담았다(`_handleDirectTranscript`).
+      //   그러면 실시간 STT가 환청·저음량이라고 본 발화는 **소리까지 사라진다.**
+      //   통화가 끝난 뒤 원본으로 다시 듣는 구조에서는 그 판단을 실시간 전사에
+      //   맡기는 셈이라, "PCM이 원본 증거"라는 원칙이 성립하지 않는다.
+      //
+      //   여기는 소리가 확정된 유일한 자리이고 아직 아무 판정도 지나지 않았다.
+      //   진단기(`_sttAbProbe`)가 이미 같은 바이트를 여기서 받고 있다.
+      //
+      //   ⚠️ **저장량이 는다.** 방당 40MB(내 발화 약 14분치) 상한에 더 빨리
+      //   닿는다. 넘치면 발화마다 `[DUO-PCM] store_failed reason=capacity`가
+      //   남는다.
+      _stashDuoPcm(DuoSttResult(
+        utteranceId: utteranceId,
+        // 글자는 아직 없다. 창고는 소리만 본다.
+        text: '',
+        utterance: utterance,
+        languageCode: sttLanguageCode,
+        elapsedMs: 0,
+        usedContext: false,
+      ));
     };
     session.onFailed = (utteranceId, reason) {
       if (!_isDirectGenerationCurrent(generation)) return;
@@ -2888,9 +2910,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (_savedDirectItemIds.length > 200) {
       _savedDirectItemIds.remove(_savedDirectItemIds.first);
     }
-    // 💾 [ORIGIN-PCM] 실제 History에 들어갈 것으로 확정된 발화만 남긴다.
-    // GPT Transcribe에 올린 바로 그 PCM이라 이후 주어 재확인의 source of truth다.
-    if (pcmResult != null) _stashDuoPcm(pcmResult);
+    // 💾 [ORIGIN-PCM] **여기서는 담지 않는다.** 소리는 게이트 앞
+    //   (`onUtteranceClosed`)에서 이미 담았다 — 실시간 판정이 버린 발화의
+    //   소리까지 남겨야 통화 후 재전사가 원본을 근거로 삼을 수 있다.
     final int seq = ++_directSeq;
     final DateTime spokenAt = _directSpeechStartedAt ?? DateTime.now();
     _directSpeechStartedAt = null;
