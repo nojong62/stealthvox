@@ -787,8 +787,15 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           // 기다리면 timeout만 난다. 이때는 저장된 실시간 대화만 즉시 보여 주고,
           // 실제 종료된 세션에만 아래 preparation을 적용한다.
           final duoSession = await duoSessionRef(duoRoomId).get();
-          final bool sessionEnded =
-              duoSession.data()?[kDuoEndedAtField] != null;
+          // 🚪 `ended_at`은 호스트만 쓴다. 게스트가 먼저 나가면 그 값이 아직
+          //   없어서 여기가 "통화 중"으로 빠졌고, 게스트 폰은 첫 진입에서
+          //   canonical·재전사를 통째로 건너뛰었다(2026-09-16 실기기).
+          //   내 flush 표시가 있으면 나는 이미 나온 것이다.
+          final String viewerUid = widget.historyDoc.parent.parent?.id ?? '';
+          final bool sessionEnded = duoSessionEndedForViewer(
+            duoSession.data(),
+            viewerUid: viewerUid,
+          );
           if (!sessionEnded) {
             debugPrint('[HISTORY-PREP] history=${widget.historyDoc.id} '
                 'stage=ready reason=active_duo_peek');

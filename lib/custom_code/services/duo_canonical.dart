@@ -307,6 +307,28 @@ List<DuoCanonicalTurn> attachDuoOriginRawTexts(
   ];
 }
 
+/// 🚪 이 통화가 **[viewerUid]에게** 끝난 통화인가.
+///
+/// 공부방은 "통화 중에 잠깐 들여다보기"와 "끝난 통화 정리"를 갈라야 한다.
+/// 예전에는 `ended_at` 하나로 갈랐는데 그 값은 **호스트만 쓴다.** 게스트가
+/// 호스트보다 먼저 나가면(2026-09-16 실기기: 게스트 18.0초, 호스트 19.1초)
+/// 게스트 공부방이 열리는 순간 아직 값이 없고, 게스트 폰은 "통화 중"으로
+/// 오판해 canonical도 재전사도 건너뛴 채 실시간 줄만 보여 준다.
+///
+/// 내 `flush_done` 표시는 **내가 나가면서 직접 찍는 값**이다
+/// ([markDuoFlushDone]). 그것이 있으면 나는 이 통화를 이미 끝냈다 — 상대가
+/// 아직 안 나갔더라도 나에게는 정리할 통화다. 통화 중 들여다보기에는 이
+/// 표시가 없다.
+bool duoSessionEndedForViewer(
+  Map<String, dynamic>? session, {
+  required String viewerUid,
+}) {
+  if (session == null) return false;
+  if (session[kDuoEndedAtField] != null) return true;
+  final Object? marks = session[kDuoFlushDoneField];
+  return viewerUid.isNotEmpty && marks is Map && marks[viewerUid] != null;
+}
+
 /// 세션 문서.
 DocumentReference<Map<String, dynamic>> duoSessionRef(String roomId) =>
     FirebaseFirestore.instance.collection('duo_sessions').doc(roomId);

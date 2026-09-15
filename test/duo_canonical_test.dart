@@ -121,4 +121,43 @@ void main() {
       }
     });
   });
+
+  group('🚪 duoSessionEndedForViewer — 게스트가 먼저 나가도 끝난 통화다', () {
+    const String host = 'host-uid';
+    const String guest = 'guest-uid';
+
+    test('세션 문서가 없으면 끝나지 않았다', () {
+      expect(duoSessionEndedForViewer(null, viewerUid: guest), isFalse);
+    });
+
+    test('ended_at이 있으면 누구에게나 끝났다', () {
+      final session = <String, dynamic>{kDuoEndedAtField: 'ts'};
+      expect(duoSessionEndedForViewer(session, viewerUid: guest), isTrue);
+      expect(duoSessionEndedForViewer(session, viewerUid: host), isTrue);
+    });
+
+    test('2026-09-16: 게스트가 먼저 나가 flush만 찍힌 순간 — 게스트에겐 끝났다',
+        () {
+      final session = <String, dynamic>{
+        'isPartnerJoined': true,
+        kDuoFlushDoneField: <String, dynamic>{guest: 'ts'},
+      };
+      expect(duoSessionEndedForViewer(session, viewerUid: guest), isTrue,
+          reason: '내 flush 표시는 내가 나가면서 찍은 것이다');
+      // 호스트는 아직 통화 중이다. 호스트 폰의 "잠깐 보기"는 그대로 열린다.
+      expect(duoSessionEndedForViewer(session, viewerUid: host), isFalse);
+    });
+
+    test('통화 중 들여다보기: 아무 표시도 없으면 끝나지 않았다', () {
+      final session = <String, dynamic>{'isPartnerJoined': true};
+      expect(duoSessionEndedForViewer(session, viewerUid: guest), isFalse);
+    });
+
+    test('viewerUid가 비어 있으면 flush 표시로는 판단하지 않는다', () {
+      final session = <String, dynamic>{
+        kDuoFlushDoneField: <String, dynamic>{guest: 'ts'},
+      };
+      expect(duoSessionEndedForViewer(session, viewerUid: ''), isFalse);
+    });
+  });
 }
