@@ -2322,6 +2322,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       // 어느 쪽이든 조각이 도착하는 자리는 `DuoMicPcmFanout` 하나로 같다.
       if (useWebrtcNow) {
         await _startWebrtcMicTap(generation);
+        // 🔎 [계측] 직접통화는 여태 오디오 경로를 한 줄도 안 남겼다. 그래서
+        //   마이크 무음·저음량 판이 블루투스 탓인지 가릴 수 없었다
+        //   (2026-09-15). **라우팅은 손대지 않는다** — 무엇이 꽂혀 있는지만
+        //   적는다. 만능 통역의 `audio_route=`와 같은 낱말을 써서 두 경로를
+        //   나란히 읽을 수 있게 한다.
+        unawaited(_logDirectAudioRoute());
         return;
       }
       final capture = await PreparedAudioCapture.start(
@@ -2557,6 +2563,23 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       return false;
     }
     return true;
+  }
+
+  /// 🔎 지금 어떤 출력 장치가 붙어 있는가. **아무것도 바꾸지 않는다.**
+  Future<void> _logDirectAudioRoute() async {
+    String route = 'unknown';
+    try {
+      final outs = await Helper.enumerateDevices('audiooutput');
+      final ids = outs.map((d) => d.deviceId).toList();
+      route = ids.contains('wired-headset')
+          ? 'wired-headset'
+          : ids.contains('bluetooth')
+              ? 'bluetooth'
+              : 'builtin';
+      _lgDuo('[DIRECT]', 'audio_route=$route outputs=${ids.join(',')}');
+    } catch (e) {
+      _lgDuo('[DIRECT]', 'audio_route=$route failed=${e.runtimeType}');
+    }
   }
 
   /// 🔀 [DUO-TRANSPORT] WebRTC로 통화를 연다. P2P 우선, 실패 시 TURN.

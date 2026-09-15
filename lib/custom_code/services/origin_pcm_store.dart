@@ -322,6 +322,12 @@ class OriginPcmStore {
       await file.writeAsBytes(wavBytes, flush: true);
       _bytes[key] = used + wav;
       await _writeManifest(key);
+      // 🔎 [계측] **담긴 소리의 길이.** 실기기에서 "마이크가 잰 길이 →
+      //   창고에 남은 길이 → 재전사가 들은 길이"를 한 줄로 잇는 근거다.
+      //   실패만 찍던 시절에는 어느 발화가 얼마나 담겼는지 알 길이 없었다.
+      debugPrint('[ORIGIN-PCM] stored room=$key key=$pcmKey '
+          'ms=${pcm16DurationMs(wav - 44, sampleRate: kStealthVoxSttSampleRate)} '
+          'bytes=$wav');
     } catch (error) {
       debugPrint('[ORIGIN-PCM] put_failed room=$key key=$pcmKey '
           'reason=${error.runtimeType}');
