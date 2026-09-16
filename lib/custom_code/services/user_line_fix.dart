@@ -36,7 +36,8 @@ Rules for the $kUserFixTag line:
 - Keep every other word, the word order, the grammar, the sentence ending and the speech level exactly as the user said them. This is restoration, not polishing.
 - Replace only what the recognizer got wrong. If the line is fine, or you are not certain, do not use $kUserFixTag — reply normally with no tags.
 - Never use it for a line you merely disagree with, or whose meaning is unclear. Unclear is a different case, handled by the ask-back rule.
-- Never combine it with any other control format.''';
+- Never combine it with any other control format.
+- Without the tags, everything you output IS your reply. Never output a restated, corrected or rewritten user line on its own — that is not a reply.''';
 }
 
 class UserLineFix {
