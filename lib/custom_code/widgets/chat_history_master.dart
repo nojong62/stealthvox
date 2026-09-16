@@ -4170,11 +4170,82 @@ RULES — follow exactly:
     );
   }
 
+  /// 🎬 [SCENE-HEADER] 시나리오톡 기록의 맨 위에 **상황과 역할**을 적는다.
+  ///
+  /// 대사만 남은 기록은 며칠 뒤에 열면 "이게 무슨 장면이었지"가 먼저 온다
+  /// (실장님 요청, 2026-09-16). 방 문서의 `scenario_situation`·`user_label`·
+  /// `partner_label`은 대화방이 만들 때부터 있던 값이라 새로 저장할 것은 없다.
+  /// 상황이 비어 있으면 아무것도 그리지 않는다 — 빈 카드가 대사 위를 차지하면
+  /// 안 된다.
+  Widget? _buildSceneHeader() {
+    final room = _cachedRoomData;
+    if (room == null || _historyString(room, 'mode') != 'scenario_talk') {
+      return null;
+    }
+    final String situation = _historyString(room, 'scenario_situation').isNotEmpty
+        ? _historyString(room, 'scenario_situation')
+        : _historyString(room, 'scenario_keyword');
+    if (situation.trim().isEmpty) return null;
+    String me = _historyString(room, 'user_label');
+    if (me.isEmpty) me = _historyString(room, 'user_role');
+    String partner = _historyString(room, 'partner_label');
+    if (partner.isEmpty) partner = _historyString(room, 'ai_role');
+    final Color accent = const Color(0xFF2563EB);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: accent.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: accent.withValues(alpha: 0.25)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('상황',
+                style: TextStyle(
+                    color: accent,
+                    fontSize: 11 * _fontScale,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5)),
+            const SizedBox(height: 4),
+            Text(situation.trim(),
+                style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontSize: 13 * _fontScale,
+                    height: 1.4)),
+            if (me.isNotEmpty || partner.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                [
+                  if (me.isNotEmpty) '나: $me',
+                  if (partner.isNotEmpty) '상대: $partner',
+                ].join('  ·  '),
+                style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.6),
+                    fontSize: 11 * _fontScale),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildChatBubbles(List<DocumentSnapshot> docs) {
+    // 🎬 상황 카드는 목록의 0번 자리다. 이 목록은 `_practiceItemKeys`를 쓰지
+    //   않으므로(그건 연습 목록의 것) 자리 하나를 앞에 끼워도 어긋나는 색인이
+    //   없다.
+    final Widget? header = _buildSceneHeader();
+    final int offset = header == null ? 0 : 1;
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-      itemCount: docs.length,
-      itemBuilder: (context, index) {
+      itemCount: docs.length + offset,
+      itemBuilder: (context, listIndex) {
+        if (header != null && listIndex == 0) return header;
+        final int index = listIndex - offset;
         var data = docs[index].data() as Map<String, dynamic>;
         bool isHost = data['role'] == 'HOST';
         // 모든 말풍선: \n\n 앞의 첫 대답만 표시
