@@ -63,6 +63,7 @@ import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/tts_adapter.dart';
 import '/custom_code/services/user_line_fix.dart';
+import '/custom_code/services/short_reply_gate.dart';
 import '/custom_code/services/late_continuation.dart';
 import '/custom_code/services/listening_practice.dart';
 import '/custom_code/services/conversation_cancel_command.dart';
@@ -292,6 +293,8 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   /// 순번을 못 받은 조각에 줄 예비 순번. 전사 순번은 소켓이 주는 것이 원본이고
   /// 이건 폴백(Deepgram 경로·이벤트 유실)일 뿐이다.
   int _fallbackSegmentOrder = 0;
+  /// 🗣️ [SHORT-REPLY] 직전 발화의 소리 난 시간(서버 VAD). 잡음 게이트가 본다.
+  int? _lastTurnVoicedMs;
 
   /// 복구 창이 열려 있는가 = 지금 마이크와 오디오 게이트가 살아 있는가.
   ///
@@ -2990,8 +2993,12 @@ $userFixPolicy$finalLanguageRule''';
     //   사라진 예외 상황에서만 쓰인다 — 그때는 도착 순서가 유일한 정보다.
     final int order =
         _streamingStt?.utteranceOrderOf(itemId) ?? (++_fallbackSegmentOrder);
+    // 🗣️ [SHORT-REPLY] 소리 난 시간은 전사기만 안다. itemId가 살아 있는
+    //   여기서 잡아 둬야 잡음 게이트가 "네."를 대답으로 살릴 수 있다.
+    _lastTurnVoicedMs = _streamingStt?.utteranceVoicedMsOf(itemId);
     _log('[ANY-STT]',
-        'final_received item=$itemId order=$order generation=$_listenGeneration len=${text.length}');
+        'final_received item=$itemId order=$order generation=$_listenGeneration '
+        'len=${text.length} voicedMs=${_lastTurnVoicedMs ?? -1}');
     unawaited(
         _processStreamingFinalTranscript(text, itemId: itemId, order: order));
   }
@@ -3067,13 +3074,19 @@ $userFixPolicy$finalLanguageRule''';
       // 🔇 [NOISE-GATE] Deepgram 경로와 완전히 같은 게이트. 여기서 걸린 발화는
       //   말풍선·AI 응답·TTS·저장·턴 수 어디에도 닿지 않는다.
       if (_isNoiseTranscript(userOriginal)) {
+        // 🗣️ [SHORT-REPLY] 서버 VAD가 잰 소리 시간이 충분하면 대답으로 살린다.
+        final bool rescued = shortReplyRescuedByVoice(_lastTurnVoicedMs);
         _log('🔇 [NOISE-GATE]',
-            'mode=circle_talk dropped=true len=${userOriginal.length}');
-        _abortStreamingTurn(
-          reason: 'noise_transcript',
-          expectedPipelineGeneration: pipelineGeneration,
-        );
-        return;
+            'mode=circle_talk dropped=${!rescued} len=${userOriginal.length} '
+            'voicedMs=${_lastTurnVoicedMs ?? -1} '
+            'minVoicedMs=$kShortReplyMinVoicedMs rescued=$rescued');
+        if (!rescued) {
+          _abortStreamingTurn(
+            reason: 'noise_transcript',
+            expectedPipelineGeneration: pipelineGeneration,
+          );
+          return;
+        }
       }
 
       // 🔁 [LATE-CONTINUATION] 잠정 사용자 턴으로 접수한다. 이 시점부터

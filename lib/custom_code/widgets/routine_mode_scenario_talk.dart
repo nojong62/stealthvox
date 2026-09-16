@@ -81,6 +81,7 @@ import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/tts_adapter.dart';
 import '/custom_code/services/user_line_fix.dart';
+import '/custom_code/services/short_reply_gate.dart';
 import 'first_utterance_context_judge.dart'; // 3모드 공통 응답 길이 규칙
 import 'origin_language_recheck_dialog.dart'; // 🌐 [ORIGIN-RECHECK] 언어 확인 창
 
@@ -595,6 +596,12 @@ $outputLanguagePolicy
 - Never introduce the scenario, welcome the user to an activity, explain what will happen, or invite the user to begin.
 - Speak only as "${_scenarioPartnerLabel.trim()}" would actually speak to "${_scenarioUserLabel.trim()}" inside this exact situation.
 - Stay fully in character and react directly to the user's latest line.
+- When the user asks your character something — a price, a time, whether
+  something is available, why something happened — answer it the way that
+  person would, with a concrete detail that fits the scene. If the scene has not
+  fixed that detail, invent a plausible one and keep it consistent afterwards.
+  Never deflect the question, never ask the same question back, and never
+  repeat or rephrase the user's line as your reply.
 - Preserve the established situation, roles, relationship, and conversation memory.
 - Do not translate, teach, coach, narrate, or mention being an AI.
 - Do not output stage directions, labels, brackets, or explanations, except for
@@ -2287,11 +2294,18 @@ $finalLanguageRule''';
       }
 
       // 🔇 [NOISE-GATE] Deepgram 경로와 완전히 같은 게이트.
+      //   🗣️ [SHORT-REPLY] 단, 서버 VAD가 잰 소리 시간이 충분하면 살린다 —
+      //   "네."(1260ms)가 되묻기의 대답이었는데 여기서 버려졌다(2026-09-16).
       if (_isNoiseTranscript(userKorean)) {
+        final bool rescued = shortReplyRescuedByVoice(_lastTurnVoicedMs);
         _log('🔇 [NOISE-GATE]',
-            'mode=scenario_talk dropped=true len=${userKorean.length}');
-        _abortStreamingTurn(reason: 'noise_transcript');
-        return;
+            'mode=scenario_talk dropped=${!rescued} len=${userKorean.length} '
+            'voicedMs=${_lastTurnVoicedMs ?? -1} '
+            'minVoicedMs=$kShortReplyMinVoicedMs rescued=$rescued');
+        if (!rescued) {
+          _abortStreamingTurn(reason: 'noise_transcript');
+          return;
+        }
       }
 
       // 🔁 [LATE-CONTINUATION] 잠정 사용자 턴으로 접수한다. 복구 창이 닫힐
