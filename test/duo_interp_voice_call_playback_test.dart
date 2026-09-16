@@ -92,18 +92,13 @@ void main() {
       }
     });
 
-    test('통역만 주입하고 로봇은 그대로다', () {
+    test('통역 재생 경로를 유지하고 로봇 재생 경로는 제거됐다', () {
       final int interp = duo.indexOf('TtsAdapter? _ensureInterpreterTts()');
-      final int robot = duo.indexOf('TtsAdapter? _ensureRobotTts()');
       expect(interp, greaterThan(-1));
-      expect(robot, greaterThan(-1));
       final String interpBody =
           duo.substring(interp, duo.indexOf('return adapter;', interp));
-      final String robotBody =
-          duo.substring(robot, duo.indexOf('return adapter;', robot));
       expect(interpBody, contains('pcmSink: sink'));
-      expect(robotBody, isNot(contains('pcmSink')),
-          reason: '로봇은 시험 장치다. 통화 경로로 뺄 이유가 없다');
+      expect(duo, isNot(contains('_ensureRobotTts')));
     });
   });
 

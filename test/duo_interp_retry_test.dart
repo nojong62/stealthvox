@@ -159,13 +159,7 @@ void main() {
       expect(timer, contains('stale_generation'));
     });
 
-    // 🔄 Duo Robot이 정식 기능이 되면서(`9a80b405`) 판정이 넓어졌다.
-    //   `_hasConversationPartner = _isPartnerOnline || _robotActive` —
-    //   로봇이 켜져 있으면 상대가 있는 것으로 본다. 혼자 연습 중에 재시도가
-    //   통째로 버려지면 로봇 통역이 영영 안 붙는다.
-    //
-    //   지키는 규칙은 그대로다: **상대가 없으면 늦게 울린 시계는 아무것도
-    //   하지 않는다.** 그 "상대"의 뜻만 로봇까지 품게 됐다.
+    // 실제 상대가 나갔으면 늦게 울린 재시도 타이머는 아무것도 하지 않는다.
     test('상대가 나갔으면 버린다', () {
       expect(timer, contains('if (!_hasConversationPartner)'));
       expect(timer, contains('partner_offline'));
