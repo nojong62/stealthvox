@@ -20,6 +20,7 @@ import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:record/record.dart';
+import '/custom_code/services/mic_record_config.dart';
 import 'package:audioplayers/audioplayers.dart' hide Source;
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -2279,6 +2280,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           '${dir.path}/turn_${currentIndex}_${DateTime.now().millisecondsSinceEpoch}.m4a';
       await appAudioRecorder.start(
         const RecordConfig(
+            androidConfig: kMicAndroidConfig,
             encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1),
         path: path,
       );
@@ -2602,6 +2604,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       if (!micStatus.isGranted) {}
 
       final stream = await appAudioRecorder.startStream(const RecordConfig(
+        androidConfig: kMicAndroidConfig,
         encoder: AudioEncoder.pcm16bits,
         sampleRate: 16000,
         numChannels: 1,
@@ -3561,6 +3564,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           '${dir.path}/tutoring_${DateTime.now().millisecondsSinceEpoch}.m4a';
       await appAudioRecorder.start(
         const RecordConfig(
+            androidConfig: kMicAndroidConfig,
             encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1),
         path: path,
       );
@@ -6656,6 +6660,7 @@ RULES — follow exactly:
           '${DateTime.now().millisecondsSinceEpoch}.m4a';
       await appAudioRecorder.start(
         const RecordConfig(
+          androidConfig: kMicAndroidConfig,
           encoder: AudioEncoder.aacLc,
           sampleRate: 16000,
           numChannels: 1,

@@ -17,6 +17,7 @@ import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
+import 'mic_record_config.dart';
 
 import 'audio_silence_analyzer.dart';
 import 'breath_segment.dart';
@@ -310,6 +311,7 @@ class BreathEchoingEngine {
     try {
       final stream = await recorder.startStream(
         RecordConfig(
+          androidConfig: kMicAndroidConfig,
           encoder: AudioEncoder.pcm16bits,
           sampleRate: analysisConfig.sampleRate,
           numChannels: 1,

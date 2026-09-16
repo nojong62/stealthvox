@@ -42,6 +42,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:record/record.dart';
+import '/custom_code/services/mic_record_config.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -1760,6 +1761,7 @@ $finalLanguageRule''';
       } catch (_) {}
       final stream = await _audioRecorder.startStream(
         const RecordConfig(
+          androidConfig: kMicAndroidConfig,
           encoder: AudioEncoder.pcm16bits,
           sampleRate: kStealthVoxSttSampleRate,
           numChannels: 1,
@@ -5007,6 +5009,7 @@ class DeepgramV2VoiceManager {
       try {
         final stream = await audioRecorder.startStream(
           const RecordConfig(
+            androidConfig: kMicAndroidConfig,
             encoder: AudioEncoder.pcm16bits,
             sampleRate: kStealthVoxSttSampleRate,
             numChannels: 1,

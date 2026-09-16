@@ -35,6 +35,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui;
 import 'package:record/record.dart';
+import '/custom_code/services/mic_record_config.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_remote_config/firebase_remote_config.dart';
@@ -5737,6 +5738,7 @@ class PreparedAudioCapture {
   }) async {
     final source = await recorder.startStream(
       RecordConfig(
+        androidConfig: kMicAndroidConfig,
         encoder: AudioEncoder.pcm16bits,
         sampleRate: kStealthVoxSttSampleRate,
         numChannels: 1,
@@ -6065,6 +6067,7 @@ class DeepgramV2VoiceManager {
           try {
             stream = await audioRecorder.startStream(
               const RecordConfig(
+                androidConfig: kMicAndroidConfig,
                 encoder: AudioEncoder.pcm16bits,
                 sampleRate: kStealthVoxSttSampleRate,
                 numChannels: 1,

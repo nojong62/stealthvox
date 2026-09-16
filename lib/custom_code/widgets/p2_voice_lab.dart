@@ -26,6 +26,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import '/custom_code/services/mic_record_config.dart';
 
 import '/custom_code/services/admin_gate.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
@@ -737,6 +738,7 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
       final watch = Stopwatch()..start();
       await recorder.start(
         const RecordConfig(
+          androidConfig: kMicAndroidConfig,
           encoder: AudioEncoder.aacLc,
           sampleRate: 16000,
           numChannels: 1,
@@ -819,6 +821,7 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
           '${DateTime.now().millisecondsSinceEpoch}.m4a';
       await recorder.start(
         const RecordConfig(
+          androidConfig: kMicAndroidConfig,
           encoder: AudioEncoder.aacLc,
           sampleRate: 16000,
           numChannels: 1,

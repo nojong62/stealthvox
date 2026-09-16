@@ -22,6 +22,7 @@ import 'package:audioplayers/audioplayers.dart' hide Source;
 import 'package:http/http.dart' as http;
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:record/record.dart';
+import '/custom_code/services/mic_record_config.dart';
 import 'routine_mode_scenario_talk.dart' show TtsCache;
 import 'alt_style_popup.dart';
 import '/custom_code/actions/billing_ticker.dart';
@@ -2184,6 +2185,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           '${dir.path}/keeper_${DateTime.now().millisecondsSinceEpoch}.m4a';
       await _keeperRecorder!.start(
         const RecordConfig(
+            androidConfig: kMicAndroidConfig,
             encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1),
         path: path,
       );
