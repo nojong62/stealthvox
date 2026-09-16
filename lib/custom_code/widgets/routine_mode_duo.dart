@@ -2731,15 +2731,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     };
     // 🔬 소리가 닫히는 유일한 자리. 세기를 여기서 멈추고, 진단기는 **본선이
     //   확정한 바로 그 PCM**을 건네받는다(자기가 다시 모으지 않는다).
+    // 🚪 [EXIT-FLUSH] 아래 판정은 `_isDirectGenerationCurrent`가 아니다. 거기엔
+    //   `!_isExiting`이 들어 있는데 나갈 때는 `_isExiting`이 먼저 서고 그다음
+    //   마지막 발화를 flush한다(`_stopDirectCall` ②). 그래서 매 통화 마지막
+    //   발화가 여기서 물러나 PCM이 창고에 안 담겼다(2026-09-16 실기기,
+    //   `DUO-FINAL no_audio`). 전사문 판정과 같은 `_canSaveDirectTranscript`를 쓴다.
     session.onUtteranceClosed = (utteranceId, utterance, voicedMs) {
-      // 🚪 [EXIT-FLUSH] `_isDirectGenerationCurrent`가 아니다. 그 판정에는
-      //   `!_isExiting`이 들어 있는데, 나가는 자리에서는 `_isExiting`이 먼저
-      //   서고 그다음에 마지막 발화를 flush한다(`_stopDirectCall` ②). 그래서
-      //   **매 통화의 마지막 발화는 여기서 물러나** 세기도 voicedMs도 남지
-      //   않고 PCM도 창고에 안 담겼다 — 재전사가 `no_audio`로 끝났다
-      //   (2026-09-16 실기기, 게스트 utt_6 26.9초). 전사문 쪽 판정
-      //   (`_canSaveDirectTranscript`)은 flush 창을 허용하므로 글자는 남았다.
-      //   같은 판정을 쓴다: 세대가 같고, 통화 중이거나 flush 중이면 받는다.
       if (!_canSaveDirectTranscript(generation)) return;
       _utteranceRms?.commitUtterance(utteranceId);
       _sttAbProbe?.observe(utterance, voicedMs: voicedMs);
