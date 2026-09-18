@@ -2992,6 +2992,23 @@ class _IntroMasterState extends State<IntroMaster>
 
   /// 샌드박스 폐기: 체험 중 생성된 임시 데이터를 삭제한다.
   /// anonymous 권한이 살아있는 상태에서 호출해야 한다 (UID 변경 전).
+  /// 가입·로그인 직전에 맛보기 **상태만** 내려놓는다. 기록은 남긴다.
+  ///
+  /// 예전에는 여기서 맛보기 History와 메시지를 지웠다. 그런데 인증 계층은
+  /// 전부 익명 uid를 지키도록 짜여 있다 — email·Google은 `linkWithCredential`,
+  /// Kakao는 CF가 `kakao_uid_map`에 익명 uid를 묶는다("preserve trial data").
+  /// uid가 그대로이니 `users/{uid}/chat_history/{trial}`도 그대로 회원 기록이
+  /// 된다. "가입 후 계속 이용해 주세요"라고 해 놓고 방금 나눈 대화를 지우는
+  /// 것은 그 설계와 어긋났다(2026-09-18).
+  ///
+  /// 기존 회원으로 로그인해 uid가 바뀌는 경우는 기록이 익명 uid 밑에 남는다.
+  /// 규칙이 `isOwner`라 클라이언트가 옮길 수 없고, 그 경우는 맛보기가 아니라
+  /// 재로그인이라 두고 간다.
+  ///
+  /// `step`·`trialHistoryPath`는 기기 값이라 내려야 한다 — 남겨 두면 정식
+  /// 회원 상태에서 StealthRoom이 Duo로 직행하는 등 오작동했다
+  /// (`TrialFlowState` 주석). `trialCompleted`는 1회 사용 기록이므로 되돌리지
+  /// 않는다.
   Future<void> _cleanupTrialSandbox() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || !user.isAnonymous) return;
@@ -3006,28 +3023,15 @@ class _IntroMasterState extends State<IntroMaster>
     if (!hasTrialState) return;
 
     if (historyRef != null) {
-      try {
-        final subDocs = await historyRef.collection('messages').get();
-        for (final doc in subDocs.docs) {
-          await doc.reference.delete();
-        }
-        await historyRef.delete();
-        debugPrint('[TrialCleanup] deleted trial history: ${historyRef.path}');
-      } catch (e) {
-        // 삭제 실패해도 가입 진행은 막지 않음 (고아 문서는 추후 정리)
-        debugPrint('[TrialCleanup] history delete failed (non-blocking): $e');
-      }
+      debugPrint('[TrialCleanup] keeping trial history: ${historyRef.path}');
     }
 
-    // 체험 임시값만 초기화 (trialCompleted는 절대 false로 만들지 않음)
     TrialFlowState.instance.myHistoryRef = null;
     TrialFlowState.instance.step = 0;
     FFAppState().trialStep = 0;
     FFAppState().trialHistoryPath = '';
 
-    // trialCompleted는 1회 사용 기록이므로 여기서 되돌리지 않는다.
-
-    debugPrint('[TrialCleanup] sandbox cleanup complete');
+    debugPrint('[TrialCleanup] trial state released, history kept');
   }
 
   Future<void> _grantSignupBonusIfPossible() async {
