@@ -394,7 +394,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   /// 때마다 리셋되는 이 플래그가 그 방의 실제 내용을 가리킨다.
   bool _currentRoomHasUserTurn = false;
 
-  /// 직전 10분 세션 요약. 시스템 프롬프트로만 넘긴다 — [_recentHistory]는 그대로
+  /// 지금까지의 누적 요약. 시스템 프롬프트로만 넘긴다 — [_recentHistory]는 그대로
   /// messages 배열이 되므로 여기에 'system' 역할을 섞으면 안 된다.
   String _rolloverSummary = '';
 
@@ -458,11 +458,13 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
       _log('⏱️ [ROLLOVER]', 'settled room=${_myHistoryRef?.id}');
 
       // ② 요약. 실패해도 멈추지 않는다 — 정산이 이미 끝나 여기서 되돌리면
-      //    과금 구간과 History가 어긋난다. 빈 문자열이면 최근 턴만 들고 간다.
+      //    과금 구간과 History가 어긋난다. 실패하면 직전 요약이 그대로 온다.
+      //    직전 요약을 같이 넘겨 누적한다 — 방을 안 나가는 한 전체 줄기가 남는다.
       final summary = await SessionRolloverSummary.summarize(
         apiKey: _openAiKey,
         recentTurns: _recentHistory,
         modeContext: 'Circle Talk · ${widget.circleDescription}',
+        previousSummary: _rolloverSummary,
       );
       if (!mounted || !_isConversationActive) return;
 

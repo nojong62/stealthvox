@@ -727,10 +727,10 @@ Return ONLY valid JSON: {"name":"..."}.
         ),
         const SizedBox(height: 12),
         const Text(
-          '한 세션은 최대 10분입니다. 10분을 다 채워야 하는 것은 아닙니다 — '
-          '하고 싶은 만큼 이야기하고 나가면 그때까지의 대화가 기록에 저장됩니다. '
-          '10분이 지나도 대화가 끊기거나 방에서 나가지지 않습니다 — 지금까지의 '
-          '대화가 저장되고, 같은 화면에서 이어서 계속할 수 있습니다.',
+          'Circle Talk와 Scenario Talk에서는 10분 단위로 대화 기록이 저장됩니다. '
+          '저장 후에도 같은 화면에서 최근 대화와 짧은 요약을 바탕으로 '
+          '이야기를 이어갈 수 있습니다. 10분을 다 채워야 하는 것은 아닙니다 — '
+          '하고 싶은 만큼 이야기하고 나가면 그때까지의 대화가 기록에 저장됩니다.',
           style: TextStyle(
             color: Colors.white70,
             fontSize: 12,
@@ -739,7 +739,8 @@ Return ONLY valid JSON: {"name":"..."}.
         ),
         const SizedBox(height: 10),
         const Text(
-          '말하는 도중에 10분이 되어도 하던 말과 AI의 답변이 끝난 뒤에 저장되므로, '
+          'Circle Talk와 Scenario Talk에서는 말하는 도중에 10분이 되어도 '
+          '하던 말과 AI의 답변이 끝난 뒤에 저장되므로, '
           '한 번의 대화가 둘로 잘리지 않습니다.',
           style: TextStyle(
             color: Colors.white70,
