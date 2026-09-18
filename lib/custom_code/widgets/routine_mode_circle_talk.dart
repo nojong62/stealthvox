@@ -728,6 +728,13 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   /// 전사가 발화가 아니라 잡음·추임새인지 판정한다. 파이프라인 진입 전 검열이
   /// 이 함수 하나를 쓴다. 추임새를 통과시키면 "음." 같은 게 "Um."으로 번역돼
   /// 유저 목소리로 나가고 AI가 거기에 대답한다(실기기에서 발생).
+  /// 🗣️ [SHORT-REPLY] 이번 턴의 잡음 판정. 목록에 걸려도 서버 VAD가 잰 소리
+  /// 시간이 충분하면 대답으로 본다. **파이프라인의 모든 검사가 이걸 쓴다** —
+  /// 입구만 고쳤더니 안쪽 검사가 "네"를 다시 버렸다(2026-09-16 실기기,
+  /// `rescued=true` 직후 `TURN-SKIP noise_transcript`).
+  bool _isNoiseTranscriptForTurn(String text) =>
+      _isNoiseTranscript(text) && !shortReplyRescuedByVoice(_lastTurnVoicedMs);
+
   bool _isNoiseTranscript(String text) {
     final clean = text
         .toLowerCase()
@@ -3075,6 +3082,7 @@ $userFixPolicy$finalLanguageRule''';
       //   말풍선·AI 응답·TTS·저장·턴 수 어디에도 닿지 않는다.
       if (_isNoiseTranscript(userOriginal)) {
         // 🗣️ [SHORT-REPLY] 서버 VAD가 잰 소리 시간이 충분하면 대답으로 살린다.
+        //   뒤따르는 모든 검사는 `_isNoiseTranscriptForTurn`으로 같은 판정을 본다.
         final bool rescued = shortReplyRescuedByVoice(_lastTurnVoicedMs);
         _log('🔇 [NOISE-GATE]',
             'mode=circle_talk dropped=${!rescued} len=${userOriginal.length} '
@@ -3149,7 +3157,7 @@ $userFixPolicy$finalLanguageRule''';
     }
 
     // 🔇 잡음은 조각으로 넣지 않는다. 머뭇거림은 §F에 따라 넣는다.
-    if (_isNoiseTranscript(next) && !isHesitationOnlyTranscript(next)) {
+    if (_isNoiseTranscriptForTurn(next) && !isHesitationOnlyTranscript(next)) {
       _log('🔁 [CONT-INGEST]', 'item=$itemId dropped=noise');
       _resolveContinuation(safetyExpired: false, reason: 'continuation_noise');
       return;
@@ -3395,6 +3403,9 @@ $userFixPolicy$finalLanguageRule''';
     //   잡음에도 임시 말풍선이 먼저 뜨고 validator 왕복이 한 번 나간다.
     //   여기서 걸린 발화는 말풍선·validator·AI 응답·TTS·저장·턴 수 어디에도
     //   닿지 않고, 마이크만 다시 열어 다음 발화를 받는다.
+    // 🗣️ [SHORT-REPLY] 이 경로(파일 전사)에는 서버 VAD 값이 없다. 지난 스트리밍
+    //   턴의 값이 남아 잡음을 살리지 않도록 비운다.
+    _lastTurnVoicedMs = null;
     if (_isNoiseTranscript(userOriginal)) {
       _log('🔇 [NOISE-GATE]',
           'mode=circle_talk dropped=true len=${userOriginal.length}');
@@ -3519,7 +3530,7 @@ $userFixPolicy$finalLanguageRule''';
       await _handleConversationCancelCommand(expectedPipelineGeneration);
       return;
     }
-    if (_isNoiseTranscript(userOriginal)) {
+    if (_isNoiseTranscriptForTurn(userOriginal)) {
       _log('[TURN-SKIP]', 'reason=noise_transcript');
       // 이 이른 반환은 `_isPipelineRunning`을 켜기 전에 나간다. 이어 말하기로
       // 들어온 경우 이전 파이프라인이 아직 매달려 있을 수 있는데, 그쪽은
@@ -4229,7 +4240,7 @@ $userFixPolicy$finalLanguageRule''';
     //   _isNoiseTranscript 하나로 모은다 — 목록을 따로 두면 "음."이 빠져나가
     //   "Um."으로 번역된다(실기기에서 발생).
     bool isGhost =
-        ignoreWithoutConsumingFirstTurn || _isNoiseTranscript(finalTranscript);
+        ignoreWithoutConsumingFirstTurn || _isNoiseTranscriptForTurn(finalTranscript);
 
     if (isGhost) {
       if (_turnCounter == currentTurnId && _turnCounter > 0) _turnCounter--;

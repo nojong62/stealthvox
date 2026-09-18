@@ -2297,6 +2297,7 @@ $finalLanguageRule''';
       //   🗣️ [SHORT-REPLY] 단, 서버 VAD가 잰 소리 시간이 충분하면 살린다 —
       //   "네."(1260ms)가 되묻기의 대답이었는데 여기서 버려졌다(2026-09-16).
       if (_isNoiseTranscript(userKorean)) {
+        // 뒤따르는 모든 검사는 `_isNoiseTranscriptForTurn`으로 같은 판정을 본다.
         final bool rescued = shortReplyRescuedByVoice(_lastTurnVoicedMs);
         _log('🔇 [NOISE-GATE]',
             'mode=scenario_talk dropped=${!rescued} len=${userKorean.length} '
@@ -2353,7 +2354,7 @@ $finalLanguageRule''';
       _resolveContinuation(safetyExpired: false, reason: 'continuation_empty');
       return;
     }
-    if (_isNoiseTranscript(next) && !isHesitationOnlyTranscript(next)) {
+    if (_isNoiseTranscriptForTurn(next) && !isHesitationOnlyTranscript(next)) {
       _log('🔁 [CONT-INGEST]', 'item=$itemId dropped=noise');
       _resolveContinuation(safetyExpired: false, reason: 'continuation_noise');
       return;
@@ -2460,6 +2461,13 @@ $finalLanguageRule''';
   ///
   /// Circle Talk(`routine_mode_circle_talk.dart`)·Step Expand와 같은 규칙이다.
   /// 셋 중 하나만 고치면 모드마다 다른 말이 걸러지므로 함께 바꿀 것.
+  /// 🗣️ [SHORT-REPLY] 이번 턴의 잡음 판정. 목록에 걸려도 서버 VAD가 잰 소리
+  /// 시간이 충분하면 대답으로 본다. **파이프라인의 모든 검사가 이걸 쓴다** —
+  /// 입구만 고쳤더니 안쪽 검사가 "네"를 다시 버렸다(2026-09-16 실기기,
+  /// `rescued=true` 직후 `TURN-SKIP noise_transcript`).
+  bool _isNoiseTranscriptForTurn(String text) =>
+      _isNoiseTranscript(text) && !shortReplyRescuedByVoice(_lastTurnVoicedMs);
+
   bool _isNoiseTranscript(String text) {
     final clean = text
         .toLowerCase()
@@ -2558,6 +2566,9 @@ $finalLanguageRule''';
     //   여기서 걸린 발화는 말풍선·validator·AI 응답·TTS·저장·턴 수 어디에도
     //   닿지 않고, 마이크만 다시 열어 다음 발화를 받는다.
     //   마이크를 열 때 달아 둔 "..." 말풍선이 남아 있으므로 같이 걷어낸다.
+    // 🗣️ [SHORT-REPLY] 이 경로(파일 전사)에는 서버 VAD 값이 없다. 지난 스트리밍
+    //   턴의 값이 남아 잡음을 살리지 않도록 비운다.
+    _lastTurnVoicedMs = null;
     if (_isNoiseTranscript(userKorean)) {
       _log('🔇 [NOISE-GATE]',
           'mode=scenario_talk dropped=true len=${userKorean.length}');
