@@ -1832,7 +1832,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
             '"$source" → "$repairedOriginal"');
       }
       debugPrint('[HISTORY-TARGET] generated msg=${messageRef.id} '
-          'model=${sameLanguage ? 'copy' : 'gpt-4o-mini'} '
+          'model=${sameLanguage ? 'copy' : kHistoryRepairModel} '
           'src=$sourceName tgt=$targetLanguage '
           'roomSameLang=$_recordSameLang repaired=$repaired');
       _clearTargetFailure(messageRef.id);
@@ -3490,8 +3490,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          'model': 'gpt-4o-mini',
-          'temperature': 1.0,
+          'model': kPostProcessModel,
+          'reasoning_effort': kPostProcessReasoningEffort,
           'response_format': {'type': 'json_object'},
           'messages': [
             {
@@ -3645,10 +3645,10 @@ RULES — follow exactly:
           'Content-Type': 'application/json'
         },
         body: jsonEncode({
-          'model': 'gpt-4o-mini',
+          'model': kPostProcessModel,
+          'reasoning_effort': kPostProcessReasoningEffort,
           'response_format': {'type': 'json_object'},
-          'temperature': 0.1,
-          'max_tokens': 250,
+          'max_completion_tokens': 250,
           'messages': [
             {'role': 'user', 'content': corrPrompt}
           ]
@@ -8218,8 +8218,8 @@ Formatting Rules (Strict):
                 'Content-Type': 'application/json; charset=utf-8'
               },
               body: jsonEncode({
-                'model': 'gpt-4o-mini',
-                'temperature': 0.1,
+                'model': kPostProcessModel,
+                'reasoning_effort': kPostProcessReasoningEffort,
                 'messages': [
                   {'role': 'system', 'content': systemPrompt},
                   {'role': 'user', 'content': rawText}

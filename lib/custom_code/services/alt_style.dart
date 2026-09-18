@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'ai_style.dart';
+import 'history_text_model.dart';
 
 /// 지금 적용 중인 스타일을 뺀 나머지. 팝업이 보여 줄 목록이다.
 ///
@@ -56,9 +57,9 @@ Future<Map<String, String>> fetchAltStyleSentences({
             'Content-Type': 'application/json; charset=utf-8',
           },
           body: jsonEncode(<String, dynamic>{
-            'model': 'gpt-4o-mini',
-            'temperature': 0.4,
-            'max_tokens': 400,
+            'model': kPostProcessModel,
+            'reasoning_effort': kPostProcessReasoningEffort,
+            'max_completion_tokens': 400,
             'response_format': <String, String>{'type': 'json_object'},
             'messages': <Map<String, String>>[
               <String, String>{

@@ -30,6 +30,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'origin_restoration.dart' show isSuspectOverflow;
+import 'history_text_model.dart';
 
 /// 이 줄을 고친 모델. **고친 줄에만 찍는다.**
 const String kOriginCorrectionModelField = 'origin_correction_model';
@@ -494,9 +495,8 @@ Future<DuoOriginCorrectionResult> correctDuoOriginTexts({
             },
             body: jsonEncode(<String, dynamic>{
               'model': model,
-              // 판정이라 흔들리면 안 된다. 같은 대화는 같은 교정을 낸다.
-              'temperature': 0.0,
-              'max_tokens': 1200,
+              'reasoning_effort': kPostProcessReasoningEffort,
+              'max_completion_tokens': 1200,
               'response_format': <String, String>{'type': 'json_object'},
               'messages': <Map<String, String>>[
                 <String, String>{

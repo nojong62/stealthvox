@@ -8232,10 +8232,10 @@ Return strict JSON only:
                   'Content-Type': 'application/json; charset=utf-8'
                 },
                 body: jsonEncode({
-                  'model': 'gpt-4o-mini',
-                  'temperature': 0.2,
+                  'model': kPostProcessModel,
+                  'reasoning_effort': kPostProcessReasoningEffort,
                   // 한 문장이면 충분하다. 400은 JSON 두 칸 시절의 값이다.
-                  'max_tokens': 200,
+                  'max_completion_tokens': 200,
                   'messages': [
                     {'role': 'system', 'content': prompt},
                     {'role': 'user', 'content': source},
@@ -8331,10 +8331,10 @@ Return strict JSON only:
       'Content-Type': 'application/json; charset=utf-8',
     });
     request.body = jsonEncode(<String, dynamic>{
-      'model': 'gpt-4o-mini',
+      'model': kPostProcessModel,
+      'reasoning_effort': kPostProcessReasoningEffort,
       'stream': true,
-      'temperature': 0.2,
-      'max_tokens': 200,
+      'max_completion_tokens': 200,
       'messages': <Map<String, String>>[
         {'role': 'system', 'content': prompt},
         {'role': 'user', 'content': source},
@@ -8392,9 +8392,9 @@ Return strict JSON only:
                 'Content-Type': 'application/json; charset=utf-8'
               },
               body: jsonEncode({
-                'model': 'gpt-4o-mini',
-                'temperature': 0.3,
-                'max_tokens': 80,
+                'model': kPostProcessModel,
+                'reasoning_effort': kPostProcessReasoningEffort,
+                'max_completion_tokens': 80,
                 'messages': [
                   {'role': 'system', 'content': prompt},
                   {'role': 'user', 'content': lines.join('\n')},
@@ -8464,9 +8464,9 @@ Return strict JSON only:
                 'Content-Type': 'application/json; charset=utf-8'
               },
               body: jsonEncode({
-                'model': 'gpt-4o-mini',
-                'temperature': 0.2,
-                'max_tokens': 400,
+                'model': kPostProcessModel,
+                'reasoning_effort': kPostProcessReasoningEffort,
+                'max_completion_tokens': 400,
                 'response_format': {'type': 'json_object'},
                 'messages': [
                   {'role': 'user', 'content': prompt}

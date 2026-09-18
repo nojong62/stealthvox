@@ -36,6 +36,7 @@ import '/custom_code/services/origin_language_session.dart'
     show kOriginLanguageOptions, koreanLanguageDisplayName;
 // 직접 통화 방을 가리는 필드 이름. 목록이 Replay 표를 붙일 때 본다.
 import '/custom_code/services/duo_canonical.dart';
+import '/custom_code/services/history_text_model.dart';
 
 const String _historyListTtsModel = 'tts-1';
 const String _historyListTtsVoice = 'nova';
@@ -1634,8 +1635,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          'model': 'gpt-4o-mini',
-          'temperature': 1.0,
+          'model': kPostProcessModel,
+          'reasoning_effort': kPostProcessReasoningEffort,
           'response_format': {'type': 'json_object'},
           'messages': [
             {
@@ -2263,8 +2264,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          'model': 'gpt-4o-mini',
-          'temperature': 0.2,
+          'model': kPostProcessModel,
+          'reasoning_effort': kPostProcessReasoningEffort,
           'response_format': {'type': 'json_object'},
           'messages': [
             {

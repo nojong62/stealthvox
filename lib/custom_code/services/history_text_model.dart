@@ -44,3 +44,24 @@ const String kHistoryRepairModel = 'gpt-4.1-mini';
 
 /// 되돌릴 때 쓸 이전 값. 지우지 말 것 — A/B의 반대편이다.
 const String kTextModelPrevious = 'gpt-4o-mini';
+
+// ====================================================================
+// 🛠️ [POST-PROCESS] 위 ②③을 뺀 **나머지 후처리 전부**가 보는 모델.
+// --------------------------------------------------------------------
+// 번역·정돈·검증·요약·언어 판정·공부방 문장 생성 등, "이미 만들어진 말을
+// 다듬는" 28곳이 여기 한 상수를 본다. 2026-09-18 전까지는 파일마다
+// `'gpt-4o-mini'` 문자열이 박혀 있어 한 번에 바꿀 수도, 되돌릴 수도 없었다.
+//
+// 대사를 만드는 [kDialogBrainModel]과 값이 같아도 **합치지 않는다** — 두뇌를
+// 되돌릴 때 후처리까지 같이 되돌아가면 무엇이 달라졌는지 갈라 볼 수 없다.
+//
+// ⚠️ gpt-5 계열은 Chat Completions에서 `temperature`를 받지 않고 `max_tokens`
+//   대신 `max_completion_tokens`를 쓴다. 호출부는 전부 그 모양으로 맞춰
+//   두었다. 이 값을 gpt-4o-mini로 되돌려도 그 모양은 그대로 먹는다.
+// ====================================================================
+
+/// 후처리 모델. 2026-09-18: `gpt-4o-mini` → `gpt-5.6-luna`.
+const String kPostProcessModel = 'gpt-5.6-luna';
+
+/// 후처리 `reasoning_effort`. 판정·번역은 첫 토큰이 먼저라 `none`으로 시작한다.
+const String kPostProcessReasoningEffort = 'none';

@@ -33,6 +33,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'openai_connection_pool.dart';
+import 'history_text_model.dart';
 
 /// 로비가 제공하는 ORIGIN 12종. 판정 결과는 반드시 이 안에서 나온다.
 ///
@@ -303,9 +304,9 @@ Future<String?> _judgeLatinOrigin({
             'Content-Type': 'application/json; charset=utf-8',
           },
           body: jsonEncode(<String, dynamic>{
-            'model': 'gpt-4o-mini',
-            'temperature': 0,
-            'max_tokens': 20,
+            'model': kPostProcessModel,
+            'reasoning_effort': kPostProcessReasoningEffort,
+            'max_completion_tokens': 20,
             'response_format': <String, String>{'type': 'json_object'},
             'messages': <Map<String, String>>[
               <String, String>{

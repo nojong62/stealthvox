@@ -17,6 +17,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'history_text_model.dart';
+
 /// 대화 전체를 목록 미리보기 한 줄로 줄인다. 실패하면 null.
 Future<String?> summarizeConversationForList({
   required String apiKey,
@@ -42,9 +44,9 @@ Future<String?> summarizeConversationForList({
             'Content-Type': 'application/json; charset=utf-8',
           },
           body: jsonEncode(<String, dynamic>{
-            'model': 'gpt-4o-mini',
-            'temperature': 0.3,
-            'max_tokens': 80,
+            'model': kPostProcessModel,
+            'reasoning_effort': kPostProcessReasoningEffort,
+            'max_completion_tokens': 80,
             'messages': <Map<String, String>>[
               <String, String>{'role': 'system', 'content': prompt},
               <String, String>{'role': 'user', 'content': lines.join('\n')},

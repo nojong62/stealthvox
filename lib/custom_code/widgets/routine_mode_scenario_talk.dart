@@ -61,6 +61,7 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/dialog_brain_model.dart';
+import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/history_preview_summary.dart';
 // 🔁 [LATE-CONTINUATION] 판정·합치기·말풍선 규칙은 Circle Talk과 **같은
@@ -5224,9 +5225,9 @@ class UnifiedBrain {
         'Content-Type': 'application/json; charset=utf-8',
       });
       request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
+        'model': kDialogBrainModel,
+        'reasoning_effort': kDialogBrainReasoningEffort,
         'stream': true,
-        'temperature': temp,
         'messages': messages,
         'max_tokens': 500, // 💡 신규: 음성 대화는 짧게 (TTS 지연 최소화)
       });
@@ -6127,9 +6128,9 @@ Return only the line itself.'''
               'Content-Type': 'application/json; charset=utf-8',
             },
             body: jsonEncode(<String, dynamic>{
-              'model': 'gpt-4o-mini',
-              'temperature': 0.75,
-              'max_tokens': 120,
+              'model': kDialogBrainModel,
+              'reasoning_effort': kDialogBrainReasoningEffort,
+              'max_completion_tokens': 120,
               'messages': <Map<String, String>>[
                 <String, String>{'role': 'system', 'content': instructions},
                 if (recentConversation.trim().isNotEmpty)
@@ -6311,9 +6312,9 @@ content and gist of the WHOLE conversation.
               'Content-Type': 'application/json; charset=utf-8',
             },
             body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.2,
-              'max_tokens': 250,
+              'model': kPostProcessModel,
+              'reasoning_effort': kPostProcessReasoningEffort,
+              'max_completion_tokens': 250,
               'messages': [
                 {'role': 'system', 'content': sysPrompt},
                 {
@@ -6713,10 +6714,10 @@ NEVER break character when asking.
         'Content-Type': 'application/json; charset=utf-8',
       });
       request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
+        'model': kPostProcessModel,
+        'reasoning_effort': kPostProcessReasoningEffort,
         'stream': true,
-        'temperature': 0.0,
-        'max_tokens': 120,
+        'max_completion_tokens': 120,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {
@@ -6773,9 +6774,9 @@ NEVER break character when asking.
                 'Content-Type': 'application/json; charset=utf-8',
               },
               body: jsonEncode({
-                'model': 'gpt-4o-mini',
-                'temperature': 0.0,
-                'max_tokens': 150,
+                'model': kPostProcessModel,
+                'reasoning_effort': kPostProcessReasoningEffort,
+                'max_completion_tokens': 150,
                 'messages': [
                   {
                     'role': 'system',
@@ -6893,10 +6894,10 @@ NEVER break character when asking.
         'Content-Type': 'application/json; charset=utf-8',
       });
       request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
+        'model': kDialogBrainModel,
+        'reasoning_effort': kDialogBrainReasoningEffort,
         'stream': true,
-        'temperature': 0.2,
-        'max_tokens': 80,
+        'max_completion_tokens': 80,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {
@@ -6987,10 +6988,10 @@ NEVER break character when asking.
         'Content-Type': 'application/json; charset=utf-8',
       });
       request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
+        'model': kDialogBrainModel,
+        'reasoning_effort': kDialogBrainReasoningEffort,
         'stream': true,
-        'temperature': 0.9,
-        'max_tokens': 60,
+        'max_completion_tokens': 60,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {

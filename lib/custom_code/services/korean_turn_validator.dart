@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'history_text_model.dart';
+
 /// validator가 판정을 내리지 못한 이유.
 ///
 /// [none]이면 모델이 실제로 판정을 내렸다는 뜻이다. 나머지는 전부 장애이고,
@@ -110,9 +112,9 @@ class KoreanTurnValidator {
               'Content-Type': 'application/json; charset=utf-8',
             },
             body: jsonEncode(<String, dynamic>{
-              'model': 'gpt-4o-mini',
-              'temperature': 0,
-              'max_tokens': 100,
+              'model': kPostProcessModel,
+              'reasoning_effort': kPostProcessReasoningEffort,
+              'max_completion_tokens': 100,
               'response_format': <String, String>{'type': 'json_object'},
               'messages': <Map<String, String>>[
                 <String, String>{

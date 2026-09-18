@@ -49,6 +49,7 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/dialog_brain_model.dart';
+import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/history_preview_summary.dart';
 import '/custom_code/services/openai_connection_pool.dart';
@@ -123,7 +124,7 @@ const int kFreeTalkTurnPcmBufferMaxBytes = kStealthVoxSttBytesPerMs * 1000 * 60;
 
 // 🧠 [TRANSLATE-ROUTE] 번역 모델 분기 (guide4 6장). 같은 턴에 두 모델을 동시에
 //   호출하지 않는다 — 판정 결과에 따라 처음부터 하나만 쓴다.
-const String kFreeTalkTranslateModelFast = 'gpt-4o-mini';
+const String kFreeTalkTranslateModelFast = kPostProcessModel;
 
 enum CircleTalkMicOwner {
   none,
@@ -6550,9 +6551,9 @@ Return only the line itself.'''
               'Content-Type': 'application/json; charset=utf-8',
             },
             body: jsonEncode(<String, dynamic>{
-              'model': 'gpt-4o-mini',
-              'temperature': 0.75,
-              'max_tokens': 120,
+              'model': kDialogBrainModel,
+              'reasoning_effort': kDialogBrainReasoningEffort,
+              'max_completion_tokens': 120,
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',
@@ -6613,9 +6614,9 @@ Return only the line itself.'''
         'Content-Type': 'application/json; charset=utf-8',
       });
       request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
+        'model': kDialogBrainModel,
+        'reasoning_effort': kDialogBrainReasoningEffort,
         'stream': true,
-        'temperature': temp,
         'messages': messages,
         'max_tokens': 500, // 💡 신규: 음성 대화는 짧게 (TTS 지연 최소화)
       });
@@ -6906,9 +6907,9 @@ content and gist of the WHOLE conversation.
               'Content-Type': 'application/json; charset=utf-8',
             },
             body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.2,
-              'max_tokens': 250,
+              'model': kPostProcessModel,
+              'reasoning_effort': kPostProcessReasoningEffort,
+              'max_completion_tokens': 250,
               'messages': [
                 {'role': 'system', 'content': sysPrompt},
                 {
@@ -7149,9 +7150,9 @@ ${buildHeardConfirmOutputRule(originLang)}
       });
       request.body = jsonEncode({
         'model': model,
+        'reasoning_effort': kPostProcessReasoningEffort,
         'stream': true,
-        'temperature': 0.0, // 주어 추론 일관성 극대화
-        'max_tokens': 120,
+        'max_completion_tokens': 120,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {'role': 'user', 'content': userContent},
@@ -7258,9 +7259,9 @@ ${buildHeardConfirmOutputRule(originLang)}
                 'Content-Type': 'application/json; charset=utf-8',
               },
               body: jsonEncode({
-                'model': 'gpt-4o-mini',
-                'temperature': 0.0,
-                'max_tokens': 150,
+                'model': kPostProcessModel,
+                'reasoning_effort': kPostProcessReasoningEffort,
+                'max_completion_tokens': 150,
                 'messages': [
                   {
                     'role': 'system',
@@ -7403,9 +7404,9 @@ Update the private memory:'''
               'Content-Type': 'application/json; charset=utf-8',
             },
             body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.0,
-              'max_tokens': 120,
+              'model': kPostProcessModel,
+              'reasoning_effort': kPostProcessReasoningEffort,
+              'max_completion_tokens': 120,
               'messages': [
                 {
                   'role': 'system',
@@ -7536,10 +7537,10 @@ $questionRule
         'Content-Type': 'application/json; charset=utf-8',
       });
       request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
+        'model': kDialogBrainModel,
+        'reasoning_effort': kDialogBrainReasoningEffort,
         'stream': true,
-        'temperature': 0.3,
-        'max_tokens': kFreeTalkAiResponseMaxTokens,
+        'max_completion_tokens': kFreeTalkAiResponseMaxTokens,
         'messages': [
           {'role': 'system', 'content': finalSysPrompt},
           {

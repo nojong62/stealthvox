@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'history_text_model.dart';
 
 /// 10분 세션이 교체될 때 지금까지의 대화를 한 문단으로 압축한다.
 ///
@@ -56,8 +57,9 @@ class SessionRolloverSummary {
                 'Content-Type': 'application/json; charset=utf-8',
               },
               body: jsonEncode(<String, dynamic>{
-                'model': 'gpt-4o-mini',
-                'max_tokens': 260,
+                'model': kPostProcessModel,
+                'reasoning_effort': kPostProcessReasoningEffort,
+                'max_completion_tokens': 260,
                 'messages': <Map<String, String>>[
                   <String, String>{
                     'role': 'system',
