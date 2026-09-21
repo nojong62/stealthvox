@@ -2459,8 +2459,9 @@ RULES — follow exactly:
                             ? "$deleted개의 기록을 삭제했습니다."
                             : "$deleted개를 삭제했습니다. ${failed.length}개는 실패했습니다.",
                         style: const TextStyle(fontWeight: FontWeight.bold)),
-                    backgroundColor:
-                        failed.isEmpty ? Colors.redAccent : Colors.orangeAccent));
+                    backgroundColor: failed.isEmpty
+                        ? const Color(0xFF2C2C2E)
+                        : Colors.orangeAccent));
               },
               child: const Text("삭제",
                   style: TextStyle(
