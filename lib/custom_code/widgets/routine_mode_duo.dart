@@ -10,18 +10,10 @@ import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import 'index.dart'; // Imports other custom widgets
-
-import 'dart:ui';
-import 'dart:ui' as ui;
-import '/auth/firebase_auth/auth_util.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:record/record.dart';
 import 'package:http/http.dart' as http;
@@ -690,17 +682,17 @@ enum InterpPartnerPhase { idle, translating, playing }
 
 class RoutineModeDuo extends StatefulWidget {
   const RoutineModeDuo({
-    Key? key,
+    super.key,
     this.width,
     this.height,
     this.roomId,
-  }) : super(key: key);
+  });
   final double? width;
   final double? height;
   final String? roomId;
 
   @override
-  _RoutineModeDuoState createState() => _RoutineModeDuoState();
+  State<RoutineModeDuo> createState() => _RoutineModeDuoState();
 }
 
 class _RoutineModeDuoState extends State<RoutineModeDuo>
@@ -835,6 +827,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   bool _relayConnected = false;
   bool _partnerRelayConnected = false;
   bool _micActive = false;
+  bool _directPcmFlowing = false;
   bool _sttActive = false;
   bool _directStarting = false;
 
@@ -1278,7 +1271,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final t = s.trim();
     if (t.isEmpty) return;
     _recentGenerated.add(t);
-    while (_recentGenerated.length > 10) _recentGenerated.removeAt(0);
+    while (_recentGenerated.length > 10) {
+      _recentGenerated.removeAt(0);
+    }
   }
 
   // 토큰 자카드 유사도 (0~1)
@@ -1934,7 +1929,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         //   — 게스트에게는 그 뒤로 아무 스냅샷도 떨어지지 않는다.
         _maybeAutoStartInterpreter('keys_ready');
       }
-    } catch (e) {}
+    } catch (e) {
+      _lgDuo('[CONFIG]', 'fetch_failed=${e.runtimeType}');
+    }
   }
 
   void _lgDuo(String tag, String msg) => debugPrint('[Duo]$tag $msg');
@@ -2119,6 +2116,27 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _directCallActive &&
       generation == _directGeneration;
 
+  /// 직접 대화 무대가 밝아져도 되는가.
+  ///
+  /// 상대 입장이나 통화 시작 시도만으로는 켜지지 않는다. 원음 전달 통로와
+  /// 상대 오디오 연결, 실제 마이크 PCM, History용 STT 및 오디오 게이트까지
+  /// 모두 준비되어야 "지금 말하면 소리와 글자가 함께 들어간다"는 뜻이 된다.
+  bool get _directReady =>
+      _isDirectMode &&
+      !_isExiting &&
+      duoDirectReadyToTalk(
+        partnerOnline: _hasConversationPartner,
+        callActive: _directCallActive,
+        muted: _directMuted,
+        transportConnected: _relayConnected,
+        partnerAudioConnected: _partnerRelayConnected,
+        micActive: _micActive,
+        pcmFlowing: _directPcmFlowing,
+        sttActive: _sttActive,
+        sttConnected: _directStt?.isConnected ?? false,
+        audioGateOpen: _directStt?.audioGateOpen ?? false,
+      );
+
   /// 전사문을 저장해도 되는 세대인가. 통화 중이거나, **종료 직전 flush 창**이면
   /// 저장한다. `mounted`는 보지 않는다 — 저장은 Firestore 쓰기뿐이라 위젯이
   /// 살아 있을 필요가 없고, 그 조건을 걸면 마지막 문장을 또 잃는다.
@@ -2230,7 +2248,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _directStarting = true;
     final int generation = ++_directGeneration;
     _directCallActive = true;
-    if (mounted) setState(() => _isConversationActive = true);
+    if (mounted) {
+      setState(() {
+        _isConversationActive = true;
+        _directPcmFlowing = false;
+      });
+    }
     _setDuoState('live');
     BillingTicker.instance.resumeFromActivity('duo_direct_start');
 
@@ -2317,6 +2340,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _directCaptureSub = capture.stream.listen(
         (bytes) {
           if (generation != _directGeneration) return;
+          if (!_directPcmFlowing && mounted) {
+            setState(() => _directPcmFlowing = true);
+          }
           fanout.add(bytes);
         },
         onError: (Object e) =>
@@ -2421,6 +2447,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       trackId: trackId,
       onPcm: (bytes) {
         if (generation != _directGeneration) return;
+        if (!_directPcmFlowing && mounted) {
+          setState(() => _directPcmFlowing = true);
+        }
         fanout.add(bytes);
       },
     );
@@ -2667,6 +2696,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     session.onReconnecting = (attempt) {
       if (!_isDirectGenerationCurrent(generation)) return;
       _utteranceRms?.reset();
+      if (mounted && _sttActive) {
+        setState(() => _sttActive = false);
+      }
+    };
+    session.onConnected = () {
+      if (!_isDirectGenerationCurrent(generation)) return;
+      if (mounted && !_sttActive) {
+        setState(() => _sttActive = true);
+      }
     };
     // 발화 순서는 전사 응답이 돌아온 순서가 아니라 **말을 시작한 시각** 기준이다.
     session.onSpeechStarted = (utteranceId) {
@@ -3085,6 +3123,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (mounted && !_isExiting) {
       setState(() {
         _micActive = false;
+        _directPcmFlowing = false;
         _sttActive = false;
         _relayConnected = false;
         _partnerRelayConnected = false;
@@ -3093,6 +3132,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _setDuoState('idle');
     } else {
       _micActive = false;
+      _directPcmFlowing = false;
       _sttActive = false;
       _relayConnected = false;
       _partnerRelayConnected = false;
@@ -5294,7 +5334,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         if (_processedMsgIds.contains(doc.id)) continue;
         _processedMsgIds.add(doc.id);
 
-        final raw = doc.data() as Map<String, dynamic>?;
+        final raw = doc.data();
         if (raw == null) continue;
         // canonical이 개인 방 줄을 찾으려면 채널 문서 id가 끝까지 따라가야 한다.
         final data = <String, dynamic>{...raw, '__channelMsgId': doc.id};
@@ -5608,10 +5648,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       return 'Reconnecting…';
     }
     if (_directMuted) return 'Muted';
-    if (!_relayConnected || !_micActive) return 'Connecting…';
+    if (!_relayConnected || !_micActive || !_directPcmFlowing) {
+      return 'Connecting…';
+    }
     if (!_partnerRelayConnected) return 'Waiting…';
-    // 전사가 끊겨도 통화는 계속된다. 그 사실을 화면에서 구분할 수 있게 둔다.
-    return _sttActive ? 'Live' : 'Live (no record)';
+    // 전사가 끊겨도 통화는 계속된다. 다만 불빛과 Live는 소리·녹음·글자가
+    // 모두 가능할 때만 표시해야 한다.
+    return _directReady ? 'Live' : 'Live (no record)';
   }
 
   /// 🔵 [INTERP-LIVE] 만능 통역 상태등의 문구.
@@ -6136,29 +6179,29 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         'updatedAt': FieldValue.serverTimestamp(),
       });
       // 4) OneLink URL 생성 (roomId 정상 주입)
-      final String _roomId = _duoSessionRef!.id;
+      final String roomId = _duoSessionRef!.id;
       BillingTicker.instance.setSessionIdentifiers(
         sessionDocId: _myHistoryRef?.id,
-        roomId: _roomId,
+        roomId: roomId,
       );
-      final Map<String, String> _params = {
+      final Map<String, String> params = {
         'deep_link_value': 'duo_chat',
         'invite_type': 'duo',
         'entry_mode': 'guest',
-        'room_id': _roomId,
-        'duo_room_id': _roomId,
+        'room_id': roomId,
+        'duo_room_id': roomId,
         'deep_link_sub1': user.uid,
-        'deep_link_sub2': _roomId,
+        'deep_link_sub2': roomId,
         'inviter_id': user.uid,
         'af_dp': 'stealthvox://duo',
         'af_force_deeplink': 'true',
         'pid': 'friend_invite',
         'c': 'in_app_share',
       };
-      debugPrint('[Duo] inviteLink roomId: $_roomId');
+      debugPrint('[Duo] inviteLink roomId: $roomId');
       final String inviteLink =
           Uri.parse('https://stealthvox.onelink.me/31o1/fipsp75p')
-              .replace(queryParameters: _params)
+              .replace(queryParameters: params)
               .toString();
       debugPrint('[Duo] inviteLink: $inviteLink');
       // 5) 클립보드 복사 + 공유 시트
@@ -6751,7 +6794,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       ).catchError((Object e) {
         // History는 이미 확정돼 있다. 여기서 잃는 것은 없다.
         _lgDuo('[CANONICAL]', 'build_failed=${e.runtimeType}');
-        return false;
       }));
     } else {
       // 옛 방(공유 고리가 없는 통화)은 예전 방식으로 각자 정돈한다.
@@ -6960,7 +7002,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
     return PopScope(
         canPop: false,
-        onPopInvoked: (didPop) async {
+        onPopInvokedWithResult: (didPop, result) async {
           if (didPop) return;
           await _handleAutoSaveAndExit();
         },
@@ -7044,8 +7086,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   //   순수 위젯이라 화면 없이 띄워 눈으로 확인할 수 있다.
   Widget _buildDirectStage() => _hasConversationPartner
       ? DuoDirectStage(
-          callActive: _directCallActive,
-          muted: _directMuted,
+          ready: _directReady,
           partnerOnline: _hasConversationPartner,
         )
       : _buildWaitingStage('assets/images/duo_direct_call.png');
@@ -7662,13 +7703,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                   _buildInvitedModeBadge(),
                   const SizedBox(height: 22),
                   dropdown("Original", native, const Color(0xFF93C5FD), (val) {
-                    if (val != null)
+                    if (val != null) {
                       setState(() => FFAppState().nativeLang = val);
+                    }
                   }, subtitle: "(Chat Lang)", subtitleBelow: false),
                   const SizedBox(height: 18),
                   dropdown("Target", target, const Color(0xFF4ADE80), (val) {
-                    if (val != null)
+                    if (val != null) {
                       setState(() => FFAppState().targetLang = val);
+                    }
                   }, subtitle: "(Learn Lang)", subtitleBelow: true),
                   const SizedBox(height: 28),
                   ElevatedButton(

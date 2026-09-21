@@ -14,6 +14,34 @@ import 'package:flutter/material.dart';
 // 화면 없이 띄워 보고 눈으로 확인할 수 있어야 해서 일부러 갈라놨다.
 // ============================================================================
 
+/// 직접 대화의 화면이 밝아져도 되는지 판정한다.
+///
+/// 단순히 상대가 들어왔거나 통화 객체를 만들기 시작했다는 뜻이 아니다.
+/// 상대에게 원음이 갈 통로, 내 마이크 PCM, History용 STT와 오디오 게이트가
+/// 전부 살아 있어야 "지금 말하면 소리와 글자가 모두 남는다"고 표시한다.
+bool duoDirectReadyToTalk({
+  required bool partnerOnline,
+  required bool callActive,
+  required bool muted,
+  required bool transportConnected,
+  required bool partnerAudioConnected,
+  required bool micActive,
+  required bool pcmFlowing,
+  required bool sttActive,
+  required bool sttConnected,
+  required bool audioGateOpen,
+}) =>
+    partnerOnline &&
+    callActive &&
+    !muted &&
+    transportConnected &&
+    partnerAudioConnected &&
+    micActive &&
+    pcmFlowing &&
+    sttActive &&
+    sttConnected &&
+    audioGateOpen;
+
 /// 직접 대화 — 제공된 직접 통화 이미지를 무대 전체에 채운다.
 ///
 /// 📐 이미지는 폰 주위가 **투명**이다. 그래서 폭·높이를 줄여 잡을 이유가 없다
@@ -23,19 +51,17 @@ import 'package:flutter/material.dart';
 class DuoDirectStage extends StatelessWidget {
   const DuoDirectStage({
     super.key,
-    required this.callActive,
-    required this.muted,
+    required this.ready,
     required this.partnerOnline,
   });
 
-  final bool callActive;
-  final bool muted;
+  /// 원음 전달·마이크 PCM·전사가 모두 준비되어 지금 말해도 되는 상태.
+  final bool ready;
   final bool partnerOnline;
 
   @override
   Widget build(BuildContext context) {
-    final bool live = callActive && !muted;
-    final double opacity = live
+    final double opacity = ready
         ? 1
         : partnerOnline
             ? 0.84
