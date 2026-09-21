@@ -3947,9 +3947,11 @@ RULES — follow exactly:
                       // 여기 오는 방은 둘이다 — 애초에 빈 방과, 검수하다
                       // 모든 줄을 지운 방. 어느 쪽이든 나가기·앞뒤 이동·방
                       // 삭제는 되어야 한다.
+                      final topicHeader = _buildConversationTopicHeader();
                       return ListView(
                         padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
                         children: [
+                          if (topicHeader != null) topicHeader,
                           const Center(
                             child: Text("데이터가 없습니다.",
                                 style: TextStyle(color: Colors.white54)),
@@ -4170,62 +4172,103 @@ RULES — follow exactly:
     );
   }
 
-  /// 🎬 [SCENE-HEADER] 시나리오톡 기록의 맨 위에 **상황과 역할**을 적는다.
-  ///
-  /// 대사만 남은 기록은 며칠 뒤에 열면 "이게 무슨 장면이었지"가 먼저 온다
-  /// (실장님 요청, 2026-09-16). 방 문서의 `scenario_situation`·`user_label`·
-  /// `partner_label`은 대화방이 만들 때부터 있던 값이라 새로 저장할 것은 없다.
-  /// 상황이 비어 있으면 아무것도 그리지 않는다 — 빈 카드가 대사 위를 차지하면
-  /// 안 된다.
-  Widget? _buildSceneHeader() {
+  /// 💬 [TOPIC-HEADER] Scenario Talk과 Circle Talk 기록의 주제를 대사 위에
+  /// 별도 카드로 보여 준다. 모드는 저장된 `mode`만 보지 않고 레거시
+  /// `room_name`까지 해석하는 `_inferHistoryMode`를 사용한다.
+  Widget? _buildConversationTopicHeader() {
     final room = _cachedRoomData;
-    if (room == null || _historyString(room, 'mode') != 'scenario_talk') {
-      return null;
+    if (room == null) return null;
+
+    final mode = _inferHistoryMode(room);
+    final isScenario = mode == 'scenario_talk';
+    final isCircle = mode == 'circle_talk';
+    if (!isScenario && !isCircle) return null;
+
+    String topic;
+    if (isScenario) {
+      topic = _historyString(room, 'scenario_situation');
+      if (topic.isEmpty) topic = _historyString(room, 'scenario_keyword');
+    } else {
+      topic = _historyString(room, 'circle_description');
+      // `circle_description`이 없던 예전 기록은
+      // "Circle Talk · 주제" 형태의 방 이름에서 주제를 복원한다.
+      if (topic.isEmpty) {
+        final savedName = _historyString(room, 'room_name');
+        final separator = savedName.indexOf('·');
+        if (separator >= 0 && separator + 1 < savedName.length) {
+          topic = savedName.substring(separator + 1).trim();
+        }
+      }
     }
-    final String situation = _historyString(room, 'scenario_situation').isNotEmpty
-        ? _historyString(room, 'scenario_situation')
-        : _historyString(room, 'scenario_keyword');
-    if (situation.trim().isEmpty) return null;
-    String me = _historyString(room, 'user_label');
-    if (me.isEmpty) me = _historyString(room, 'user_role');
-    String partner = _historyString(room, 'partner_label');
-    if (partner.isEmpty) partner = _historyString(room, 'ai_role');
-    final Color accent = const Color(0xFF2563EB);
+    topic = topic.trim();
+    if (topic.isEmpty) return null;
+
+    String me = '';
+    String partner = '';
+    if (isScenario) {
+      me = _historyString(room, 'user_label');
+      if (me.isEmpty) me = _historyString(room, 'user_role');
+      partner = _historyString(room, 'partner_label');
+      if (partner.isEmpty) partner = _historyString(room, 'ai_role');
+    }
+
+    final accent =
+        isScenario ? const Color(0xFF60A5FA) : const Color(0xFFFBBF24);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 16),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 13),
         decoration: BoxDecoration(
           color: accent.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: accent.withValues(alpha: 0.25)),
+          border: Border.all(color: accent.withValues(alpha: 0.28)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('상황',
-                style: TextStyle(
+            Row(
+              children: [
+                Icon(Icons.topic_outlined, color: accent, size: 15),
+                const SizedBox(width: 6),
+                Text(
+                  isScenario ? '시나리오 주제' : '서클 주제',
+                  style: TextStyle(
                     color: accent,
                     fontSize: 11 * _fontScale,
                     fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5)),
-            const SizedBox(height: 4),
-            Text(situation.trim(),
-                style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    fontSize: 13 * _fontScale,
-                    height: 1.4)),
-            if (me.isNotEmpty || partner.isNotEmpty) ...[
-              const SizedBox(height: 6),
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 7),
+            Text(
+              topic,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.92),
+                fontSize: 14 * _fontScale,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+              ),
+            ),
+            if (isScenario && (me.isNotEmpty || partner.isNotEmpty)) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                height: 1,
+                color: Colors.white.withValues(alpha: 0.08),
+              ),
+              const SizedBox(height: 8),
               Text(
                 [
                   if (me.isNotEmpty) '나: $me',
                   if (partner.isNotEmpty) '상대: $partner',
                 ].join('  ·  '),
                 style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.6),
-                    fontSize: 11 * _fontScale),
+                  color: Colors.white.withValues(alpha: 0.58),
+                  fontSize: 11 * _fontScale,
+                ),
               ),
             ],
           ],
@@ -4238,7 +4281,7 @@ RULES — follow exactly:
     // 🎬 상황 카드는 목록의 0번 자리다. 이 목록은 `_practiceItemKeys`를 쓰지
     //   않으므로(그건 연습 목록의 것) 자리 하나를 앞에 끼워도 어긋나는 색인이
     //   없다.
-    final Widget? header = _buildSceneHeader();
+    final Widget? header = _buildConversationTopicHeader();
     final int offset = header == null ? 0 : 1;
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
@@ -5436,20 +5479,20 @@ RULES — follow exactly:
     final native = (line['native'] ?? '').toString().trim();
     if (native.isEmpty || native == text) {
       return Text(text,
-          textAlign: lineIsAi ? TextAlign.right : TextAlign.left, style: base);
+          textAlign: lineIsAi ? TextAlign.left : TextAlign.right, style: base);
     }
     return Column(
       crossAxisAlignment:
-          lineIsAi ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          lineIsAi ? CrossAxisAlignment.start : CrossAxisAlignment.end,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(text,
-            textAlign: lineIsAi ? TextAlign.right : TextAlign.left,
+            textAlign: lineIsAi ? TextAlign.left : TextAlign.right,
             style: base),
         const SizedBox(height: 4),
         Text(
           native,
-          textAlign: lineIsAi ? TextAlign.right : TextAlign.left,
+          textAlign: lineIsAi ? TextAlign.left : TextAlign.right,
           style: TextStyle(
             color: isCurrent ? Colors.white54 : Colors.white38,
             fontSize: 12 * _fontScale,
@@ -5650,7 +5693,7 @@ RULES — follow exactly:
 
                   return Align(
                     alignment:
-                        lineIsAi ? Alignment.centerRight : Alignment.centerLeft,
+                        lineIsAi ? Alignment.centerLeft : Alignment.centerRight,
                     child: AnimatedOpacity(
                       key: key,
                       duration: const Duration(milliseconds: 300),
@@ -5675,34 +5718,16 @@ RULES — follow exactly:
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            AnimatedContainer(
-                              duration: const Duration(milliseconds: 250),
-                              width: 34,
-                              height: 34,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: isCurrent
-                                    ? roleColor.withValues(alpha: 0.2)
-                                    : Colors.white.withValues(alpha: 0.05),
-                                border: Border.all(
-                                  color: isCurrent ? roleColor : Colors.white24,
-                                  width: isCurrent ? 2 : 1,
-                                ),
-                              ),
-                              child: Icon(
-                                lineIsAi
-                                    ? Icons.smart_toy_rounded
-                                    : Icons.person_rounded,
-                                color: isCurrent ? roleColor : Colors.white38,
-                                size: 17,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
+                            if (lineIsAi) ...[
+                              _buildTurnPracticeSpeakerIcon(
+                                  lineIsAi, isCurrent, roleColor),
+                              const SizedBox(width: 10),
+                            ],
                             Flexible(
                               child: Column(
                                 crossAxisAlignment: lineIsAi
-                                    ? CrossAxisAlignment.end
-                                    : CrossAxisAlignment.start,
+                                    ? CrossAxisAlignment.start
+                                    : CrossAxisAlignment.end,
                                 children: [
                                   _buildPracticeLineText(
                                       line, isCurrent, lineIsAi),
@@ -5762,6 +5787,11 @@ RULES — follow exactly:
                                 ],
                               ),
                             ),
+                            if (!lineIsAi) ...[
+                              const SizedBox(width: 10),
+                              _buildTurnPracticeSpeakerIcon(
+                                  lineIsAi, isCurrent, roleColor),
+                            ],
                           ],
                         ),
                       ),
@@ -5877,6 +5907,30 @@ RULES — follow exactly:
             child: Center(child: _buildRoleSpeechBubble()),
           ),
       ],
+    );
+  }
+
+  Widget _buildTurnPracticeSpeakerIcon(
+      bool lineIsAi, bool isCurrent, Color roleColor) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: isCurrent
+            ? roleColor.withValues(alpha: 0.2)
+            : Colors.white.withValues(alpha: 0.05),
+        border: Border.all(
+          color: isCurrent ? roleColor : Colors.white24,
+          width: isCurrent ? 2 : 1,
+        ),
+      ),
+      child: Icon(
+        lineIsAi ? Icons.smart_toy_rounded : Icons.person_rounded,
+        color: isCurrent ? roleColor : Colors.white38,
+        size: 17,
+      ),
     );
   }
 

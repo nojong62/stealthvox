@@ -16,6 +16,8 @@ import 'flutter_flow/flutter_flow_util.dart';
 import 'flutter_flow/nav/nav.dart';
 import 'index.dart';
 import 'flutter_flow/revenue_cat_util.dart' as revenue_cat;
+import '/custom_code/services/app_update_policy.dart';
+import '/custom_code/widgets/app_update_gate.dart';
 
 /// 🔍 [OVERFLOW-SCAN] 디버그 빌드 전용 — 레이아웃이 터진 **자리**를 남긴다.
 ///
@@ -132,15 +134,22 @@ void main() async {
     loadDataAfterLaunch: true,
   );
 
-  await initializeFirebaseRemoteConfig();
+  final remoteConfigFetchSucceeded = await initializeFirebaseRemoteConfig();
+  final updateDecision = await resolveAndroidAppUpdateDecision(
+    remoteConfigFetchSucceeded: remoteConfigFetchSucceeded,
+  );
 
   runApp(ChangeNotifierProvider(
     create: (context) => appState,
-    child: MyApp(),
+    child: MyApp(updateDecision: updateDecision),
   ));
 }
 
 class MyApp extends StatefulWidget {
+  const MyApp({super.key, required this.updateDecision});
+
+  final AppUpdateDecision updateDecision;
+
   // This widget is the root of your application.
   @override
   State<MyApp> createState() => _MyAppState();
@@ -238,7 +247,10 @@ class _MyAppState extends State<MyApp> {
           data: media.copyWith(
             textScaler: media.textScaler.clamp(maxScaleFactor: kMaxTextScale),
           ),
-          child: child ?? const SizedBox.shrink(),
+          child: AppUpdateGate(
+            decision: widget.updateDecision,
+            child: child ?? const SizedBox.shrink(),
+          ),
         );
       },
     );

@@ -16,11 +16,9 @@ import 'index.dart'; // Imports other custom widgets
 import '/auth/firebase_auth/auth_util.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:appsflyer_sdk/appsflyer_sdk.dart';
@@ -217,17 +215,11 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         BillingTicker.instance.pause(); // 로비는 과금 없음
       }
 
-      // 2. DB 통신 분리: 버전 체크 및 API 키 로드
+      // 2. DB 통신 분리: API 키 로드
+      // 앱 버전 정책은 모든 진입 경로에 공통 적용되는 AppUpdateGate가 맡는다.
       Map<String, dynamic> configData = await LobbyBrain.fetchRemoteConfig();
       _apiKey = configData['apiKey'] ?? "";
       if (_apiKey.isNotEmpty) _isKeyLoaded = true;
-
-      // 앱 강제 업데이트 체크
-      int currentBuildNumber = await LobbyBrain.getCurrentBuildNumber();
-      int minBuildNumber = configData['minBuildNumber'] ?? 1;
-      if (minBuildNumber > currentBuildNumber && mounted) {
-        _showForceUpdateDialog();
-      }
 
       // 3. RevenueCat 초기화
       final rcKey = configData['revenueCatAndroidKey'] ?? '';
@@ -293,37 +285,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   // 📦 [Box 6: 시스템 알림 팝업]
-  void _showForceUpdateDialog() {
-    showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => PopScope(
-            canPop: false,
-            child: AlertDialog(
-                backgroundColor: const Color(0xFF1C1C1E),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
-                title: const Text("🚀 업데이트 안내",
-                    style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold)),
-                content: const Text("새로운 기능이 추가되었습니다!\n스토어에서 앱을 업데이트해 주세요.",
-                    style: TextStyle(color: Colors.white70)),
-                actions: [
-                  TextButton(
-                      onPressed: () async {
-                        final Uri url = Uri.parse(
-                            'https://play.google.com/store/apps/details?id=com.aienglishpractice.stealthvox');
-                        if (await canLaunchUrl(url))
-                          await launchUrl(url,
-                              mode: LaunchMode.externalApplication);
-                      },
-                      child: const Text("스토어로 이동",
-                          style: TextStyle(
-                              color: Color(0xFF0A84FF),
-                              fontWeight: FontWeight.bold)))
-                ])));
-  }
-
   void _showUsageGuideDialog(BuildContext context) {
     showDialog(
       context: context,
@@ -1350,7 +1311,7 @@ class LobbyBrain {
 
   // 💡 파이어베이스 원격 구성 및 키 호출
   static Future<Map<String, dynamic>> fetchRemoteConfig() async {
-    Map<String, dynamic> result = {'apiKey': '', 'minBuildNumber': 1};
+    Map<String, dynamic> result = {'apiKey': ''};
     try {
       final remoteConfig = FirebaseRemoteConfig.instance;
       await remoteConfig.setConfigSettings(RemoteConfigSettings(
@@ -1359,23 +1320,12 @@ class LobbyBrain {
       await remoteConfig.fetchAndActivate();
 
       result['apiKey'] = remoteConfig.getString('OpenAIAPIKey');
-      result['minBuildNumber'] = remoteConfig.getInt('min_build_number');
       result['revenueCatAndroidKey'] =
           remoteConfig.getString('RevenueCatAndroidKey');
     } catch (e) {
       debugPrint("Remote Config Error: $e");
     }
     return result;
-  }
-
-  // 💡 앱 버전 체크용
-  static Future<int> getCurrentBuildNumber() async {
-    try {
-      PackageInfo packageInfo = await PackageInfo.fromPlatform();
-      return int.tryParse(packageInfo.buildNumber) ?? 1;
-    } catch (e) {
-      return 1;
-    }
   }
 
   // 💡 대화방(History) 문서 신규 생성
