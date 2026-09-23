@@ -788,42 +788,123 @@ class _IntroMasterState extends State<IntroMaster>
   /// Temporary shortcut for overseas testers. It uses the normal Google auth
   /// and signup-bonus flow, then opens Lobby without the Korean age dialog.
   Widget _buildEnglishTesterGoogleAction() {
-    return OutlinedButton.icon(
-      onPressed: isLoading
-          ? null
-          : () => _handleUnifiedAuth(
-                SocialAuthService.signInWithGoogle,
-                provider: 'google',
-                englishTesterDirectLobby: true,
+    final onTap = isLoading
+        ? null
+        : () => _handleUnifiedAuth(
+              SocialAuthService.signInWithGoogle,
+              provider: 'google',
+              englishTesterDirectLobby: true,
+            );
+
+    return Semantics(
+      button: true,
+      label: 'Continue with Google - English tester access',
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 180),
+        opacity: isLoading ? 0.58 : 1,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(1.2),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF4FD8C5), Color(0xFF7665F1)],
+            ),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF756BE8).withValues(alpha: 0.24),
+                blurRadius: 24,
+                offset: const Offset(0, 10),
               ),
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size.fromHeight(48),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-        foregroundColor: const Color(0xFFF2F3F6),
-        disabledForegroundColor: Colors.white38,
-        side: BorderSide(color: Colors.white.withValues(alpha: 0.16)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-      icon: Image.asset(
-        'assets/images/google_logo.png',
-        width: 20,
-        height: 20,
-        errorBuilder: (_, __, ___) => const Icon(
-          Icons.g_mobiledata_rounded,
-          size: 25,
-          color: Colors.blue,
-        ),
-      ),
-      label: Text(
-        isLoading ? 'Signing in...' : 'English Testers - Continue with Google',
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.center,
-        textScaler: _cappedScaler(context, 1.2),
-        style: const TextStyle(
-          fontSize: 13.5,
-          fontWeight: FontWeight.w700,
-          letterSpacing: -0.1,
+            ],
+          ),
+          child: Material(
+            color: const Color(0xFF17191F),
+            borderRadius: BorderRadius.circular(18.8),
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(18.8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 11,
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF7F7F8),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      alignment: Alignment.center,
+                      child: Image.asset(
+                        'assets/images/google_logo.png',
+                        width: 22,
+                        height: 22,
+                        errorBuilder: (_, __, ___) => const Icon(
+                          Icons.g_mobiledata_rounded,
+                          size: 28,
+                          color: Colors.blue,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            isLoading
+                                ? 'Signing in...'
+                                : 'Continue with Google',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textScaler: _cappedScaler(context, 1.15),
+                            style: const TextStyle(
+                              color: Color(0xFFF6F7FA),
+                              fontSize: 15.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.15,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'English tester access',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textScaler: _cappedScaler(context, 1.15),
+                            style: const TextStyle(
+                              color: Color(0xFF9FA4B2),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.15,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF756BE8).withValues(alpha: 0.18),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.arrow_forward_rounded,
+                        size: 17,
+                        color: Color(0xFFC5C1FF),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
