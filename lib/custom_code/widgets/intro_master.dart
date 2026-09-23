@@ -44,6 +44,9 @@ class _IntroMasterState extends State<IntroMaster>
     with SingleTickerProviderStateMixin {
   static const String _termsUrl =
       'https://docs.google.com/document/d/1KE4xrb63SDw1ZkiNQ_wxQjH7iyY6msTuVtazCTnR7KY/edit';
+  // 테스트 종료 후 false로 바꾸면 기존 10분 Duo 맛보기 버튼이 즉시 복구된다.
+  static const bool _showEnglishTesterGoogleEntry = true;
+
   static const String _privacyUrl =
       'https://docs.google.com/document/d/1qz1aCx6ZcxCkANFUSvbnE18H2-SbEhPUWlvZw27-DAQ/edit';
   final emailController = TextEditingController();
@@ -80,10 +83,6 @@ class _IntroMasterState extends State<IntroMaster>
   final GlobalKey _taglineKey = GlobalKey();
   OverlayEntry? _taglineBubble;
   Timer? _taglineBubbleTimer;
-  Timer? _englishTesterPopupFadeTimer;
-  Timer? _englishTesterPopupRemoveTimer;
-  bool _englishTesterPopupVisible = true;
-  bool _englishTesterPopupMounted = true;
   int _taglinePitchIndex = 0;
 
   bool isLoginMode = true;
@@ -132,9 +131,6 @@ class _IntroMasterState extends State<IntroMaster>
     } else {
       _currentScreen = IntroScreen.welcome;
     }
-    if (_currentScreen == IntroScreen.welcome) {
-      _startEnglishTesterPopupTimer();
-    }
     if (FFAppState().trialCompleted) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _showTrialCompletedNotice(),
@@ -154,26 +150,6 @@ class _IntroMasterState extends State<IntroMaster>
     _trialTargetLang = trialLanguages.contains(FFAppState().targetLang)
         ? FFAppState().targetLang
         : 'English';
-  }
-
-  void _startEnglishTesterPopupTimer() {
-    _englishTesterPopupFadeTimer = Timer(
-      const Duration(milliseconds: 4300),
-      () {
-        if (!mounted || !_englishTesterPopupMounted) return;
-        setState(() => _englishTesterPopupVisible = false);
-      },
-    );
-    _englishTesterPopupRemoveTimer = Timer(
-      const Duration(seconds: 5),
-      () {
-        if (!mounted || !_englishTesterPopupMounted) return;
-        setState(() {
-          _englishTesterPopupVisible = false;
-          _englishTesterPopupMounted = false;
-        });
-      },
-    );
   }
 
   void _onDuoInviteSignal() async {
@@ -231,8 +207,6 @@ class _IntroMasterState extends State<IntroMaster>
     _termsTapRecognizer.dispose();
     _privacyTapRecognizer.dispose();
     _hideTaglineBubble();
-    _englishTesterPopupFadeTimer?.cancel();
-    _englishTesterPopupRemoveTimer?.cancel();
     _welcomeMotionController.dispose();
     emailController.dispose();
     passwordController.dispose();
@@ -547,28 +521,7 @@ class _IntroMasterState extends State<IntroMaster>
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        _buildMain(context),
-        if (_currentScreen == IntroScreen.welcome && _englishTesterPopupMounted)
-          Positioned(
-            top: MediaQuery.paddingOf(context).top + 74,
-            right: 18,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 700),
-              curve: Curves.easeInCubic,
-              opacity: _englishTesterPopupVisible ? 1 : 0,
-              child: AnimatedScale(
-                duration: const Duration(milliseconds: 700),
-                curve: Curves.easeInBack,
-                scale: _englishTesterPopupVisible ? 1 : 0.35,
-                child: _buildEnglishTesterGooglePopup(),
-              ),
-            ),
-          ),
-      ],
-    );
+    return Stack(children: [_buildMain(context)]);
   }
 
   Widget _buildMain(BuildContext context) {
@@ -832,93 +785,45 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
-  /// Temporary Google shortcut for overseas testers. The icon disappears after
-  /// five seconds, but uses the normal auth and signup-bonus flow when tapped.
-  Widget _buildEnglishTesterGooglePopup() {
-    return Semantics(
-      button: true,
-      label: 'English testers - Continue with Google',
-      child: Tooltip(
-        message: 'English testers - Continue with Google',
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: isLoading
-                ? null
-                : () {
-                    _englishTesterPopupFadeTimer?.cancel();
-                    _englishTesterPopupRemoveTimer?.cancel();
-                    setState(() {
-                      _englishTesterPopupVisible = false;
-                      _englishTesterPopupMounted = false;
-                    });
-                    _handleUnifiedAuth(
-                      SocialAuthService.signInWithGoogle,
-                      provider: 'google',
-                      englishTesterDirectLobby: true,
-                    );
-                  },
-            customBorder: const CircleBorder(),
-            child: Ink(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF7F7F8),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: const Color(0xFF765EEB).withValues(alpha: 0.45),
-                  width: 1.5,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF765EEB).withValues(alpha: 0.32),
-                    blurRadius: 22,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
+  /// Temporary shortcut for overseas testers. It uses the normal Google auth
+  /// and signup-bonus flow, then opens Lobby without the Korean age dialog.
+  Widget _buildEnglishTesterGoogleAction() {
+    return OutlinedButton.icon(
+      onPressed: isLoading
+          ? null
+          : () => _handleUnifiedAuth(
+                SocialAuthService.signInWithGoogle,
+                provider: 'google',
+                englishTesterDirectLobby: true,
               ),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Center(
-                    child: Image.asset(
-                      'assets/images/google_logo.png',
-                      width: 30,
-                      height: 30,
-                      errorBuilder: (_, __, ___) => const Icon(
-                        Icons.g_mobiledata_rounded,
-                        size: 36,
-                        color: Colors.blue,
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    right: -2,
-                    bottom: -2,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF765EEB),
-                        borderRadius: BorderRadius.circular(99),
-                        border: Border.all(color: const Color(0xFFF7F7F8)),
-                      ),
-                      child: const Text(
-                        'EN',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(48),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+        foregroundColor: const Color(0xFFF2F3F6),
+        disabledForegroundColor: Colors.white38,
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+      icon: Image.asset(
+        'assets/images/google_logo.png',
+        width: 20,
+        height: 20,
+        errorBuilder: (_, __, ___) => const Icon(
+          Icons.g_mobiledata_rounded,
+          size: 25,
+          color: Colors.blue,
+        ),
+      ),
+      label: Text(
+        isLoading ? 'Signing in...' : 'English Testers - Continue with Google',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+        textScaler: _cappedScaler(context, 1.2),
+        style: const TextStyle(
+          fontSize: 13.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.1,
         ),
       ),
     );
@@ -1515,7 +1420,9 @@ class _IntroMasterState extends State<IntroMaster>
                     ),
                   ),
                   const Spacer(flex: 5),
-                  _buildWelcomeTrialAction(),
+                  _showEnglishTesterGoogleEntry
+                      ? _buildEnglishTesterGoogleAction()
+                      : _buildWelcomeTrialAction(),
                   SizedBox(height: compact ? 6 : 10),
                   _buildWelcomeLoginAction(),
                   const Spacer(flex: 2),
