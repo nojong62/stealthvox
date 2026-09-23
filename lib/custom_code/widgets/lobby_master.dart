@@ -166,10 +166,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     if (!_kAiStyles.contains(FFAppState().aiStyle)) {
       setState(() => FFAppState().aiStyle = "Standard");
     }
-    if (FFAppState().nativeLang == null || FFAppState().nativeLang.isEmpty)
-      setState(() => FFAppState().nativeLang = "Korean");
-    if (FFAppState().targetLang == null || FFAppState().targetLang.isEmpty)
-      setState(() => FFAppState().targetLang = "English");
+    // Chat Language와 Learn Language는 사용자가 직접 고른다. 빈 값을
+    // 임의의 언어로 채우지 않아야 로비가 선택 전 상태를 정확히 보여 준다.
     // 로비에서 음성을 선택하지 않는다. 사용자 역할 음성이 필요한 기존
     // 화면(Duo/History Practice)은 항상 verse를 사용한다.
     if (FFAppState().aiVoice != "verse") {
@@ -266,6 +264,19 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     _isActionLocked = true;
     try {
       FocusScope.of(context).unfocus();
+      final missingLanguages = <String>[
+        if (!languages.contains(FFAppState().nativeLang)) 'Chat Language',
+        if (!languages.contains(FFAppState().targetLang)) 'Learn Language',
+      ];
+      if (missingLanguages.isNotEmpty) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            content: Text(
+                '언어 선택이 필요합니다: ${missingLanguages.join(' / ')}'),
+          ));
+        return;
+      }
       if (!guardBillingEntry(context)) return;
       if (currentUserReference == null) return;
 
@@ -589,59 +600,28 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   ///
   /// 선택지(`languages`)도 저장 위치(`FFAppState`)도 예전 그대로다.
   ///
-  /// 📐 부제(`(Chat Lang)` / `(Learn Lang)`)는 **튀지 않게 강조한다.**
-  ///   회색으로 두면 눈에 안 들어오고(실기기에서 확인), 밝게 하면 정작
-  ///   골라야 하는 언어 이름보다 세진다. 그래서 청록을 옅게 깔고 자간만
-  ///   벌린다 — 색이 아니라 결로 도드라지게.
-  /// ORIGIN / TARGET 한 칸. **전체 폭을 쓴다.**
-  ///
-  /// 선택지(`languages`)도 저장 위치(`FFAppState`)도 예전 그대로다.
-  ///
   /// 👆 [터치 영역] **칸 전체가 버튼이다.** 예전에는 드롭다운이 아랫줄만
-  ///   차지해서, 라벨(`ORIGIN (Chat Lang)`)이나 칸 가장자리를 누르면 아무
-  ///   일도 일어나지 않았다 — 눌리는 자리가 눈에 보이는 상자보다 작았다.
+  ///   차지해서, 라벨이나 칸 가장자리를 누르면 아무 일도 일어나지 않았다 —
+  ///   눌리는 자리가 눈에 보이는 상자보다 작았다.
   ///   라벨을 `selectedItemBuilder` 안으로 넣어 상자와 버튼을 같은 크기로
   ///   맞춘다. 이제 어디를 눌러도 목록이 열린다.
   ///
-  /// 📐 부제(`(Chat Lang)` / `(Learn Lang)`)는 **튀지 않게 강조한다.**
-  ///   회색으로 두면 눈에 안 들어오고, 밝게 하면 정작 골라야 하는 언어
-  ///   이름보다 세진다. 그래서 청록을 옅게 깔고 자간만 벌린다.
+  /// 아직 고르지 않았으면 언어 이름 자리에 선택 안내 문구를 보여 준다.
   Widget _buildLangField(
     String label,
-    String subtitle,
+    String placeholder,
     String value,
     ValueChanged<String?> onChanged,
   ) {
-    // 📐 한 줄에 나란히 두되, 폭이 모자라면 부제를 아랫줄로 내린다.
-    //   예전에는 Row + ellipsis라 기기 글자 배율이 크면 "(Chat La…"처럼
-    //   잘려서 무슨 말인지 사라졌다(실기기 2.0배, 2026-08-27).
-    //   Wrap은 자리가 있으면 한 줄, 없으면 두 줄로 알아서 바뀐다.
-    Widget labelRow() => Wrap(
-          spacing: 7,
-          runSpacing: 2,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text(
-              label,
-              maxLines: 1,
-              style: const TextStyle(
-                color: _kLobbyTextMid,
-                fontSize: 11,
-                letterSpacing: 1.4,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            Text(
-              subtitle,
-              maxLines: 1,
-              style: TextStyle(
-                color: _kLobbyCyan.withValues(alpha: 0.72),
-                fontSize: 11,
-                letterSpacing: 0.4,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
+    Widget labelRow() => Text(
+          label,
+          maxLines: 1,
+          style: const TextStyle(
+            color: _kLobbyTextMid,
+            fontSize: 11,
+            letterSpacing: 1.4,
+            fontWeight: FontWeight.w800,
+          ),
         );
 
     return Container(
@@ -652,9 +632,31 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: languages.contains(value) ? value : languages[0],
+          value: languages.contains(value) ? value : null,
           dropdownColor: _kLobbySurfaceHi,
           isExpanded: true,
+          hint: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                labelRow(),
+                const SizedBox(height: 2),
+                Text(
+                  placeholder,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _kLobbyTextLow,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
           // 닫혀 있을 때 상자 안에 그릴 것 — 라벨과 고른 언어를 함께 둔다.
           // 이 위젯이 곧 버튼의 크기라, 라벨까지 누르는 자리가 된다.
           selectedItemBuilder: (context) => languages
@@ -1246,7 +1248,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                       //   말한다 — 아래를 가리키면 원어 → 배울 말이다.
                       _buildLangField(
                         'Origin',
-                        '(Chat Lang)',
+                        'Chat Language',
                         appState.nativeLang,
                         (val) => setState(() => appState.nativeLang = val!),
                       ),
@@ -1257,7 +1259,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                       ),
                       _buildLangField(
                         'Target',
-                        '(Learn Lang)',
+                        'Learn Language',
                         appState.targetLang,
                         // ⚠️ AI STYLE은 여기서 건드리지 않는다. 비영어로 가면
                         //   그 칸이 시트에서 사라지지만, 저장값은 마지막 영어
