@@ -657,8 +657,8 @@ class _IntroMasterState extends State<IntroMaster>
           decoration: BoxDecoration(
             color: active
                 ? (tealActive
-                      ? const Color(0xFF52D4C3)
-                      : const Color(0xFF7B71F4))
+                    ? const Color(0xFF52D4C3)
+                    : const Color(0xFF7B71F4))
                 : Colors.white.withValues(alpha: 0.18),
             borderRadius: BorderRadius.circular(99),
             boxShadow: active && tealActive
@@ -778,6 +778,50 @@ class _IntroMasterState extends State<IntroMaster>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Temporary shortcut for overseas testers. It uses the normal Google auth
+  /// and signup-bonus flow, then opens Lobby without the Korean age dialog.
+  Widget _buildEnglishTesterGoogleAction() {
+    return OutlinedButton.icon(
+      onPressed: isLoading
+          ? null
+          : () => _handleUnifiedAuth(
+                SocialAuthService.signInWithGoogle,
+                provider: 'google',
+                englishTesterDirectLobby: true,
+              ),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(48),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+        foregroundColor: const Color(0xFFF2F3F6),
+        disabledForegroundColor: Colors.white38,
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+      icon: Image.asset(
+        'assets/images/google_logo.png',
+        width: 20,
+        height: 20,
+        errorBuilder: (_, __, ___) => const Icon(
+          Icons.g_mobiledata_rounded,
+          size: 25,
+          color: Colors.blue,
+        ),
+      ),
+      label: Text(
+        isLoading ? 'Signing in...' : 'English Testers - Continue with Google',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+        textScaler: _cappedScaler(context, 1.2),
+        style: const TextStyle(
+          fontSize: 13.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.1,
+        ),
       ),
     );
   }
@@ -1144,8 +1188,7 @@ class _IntroMasterState extends State<IntroMaster>
   /// 두 장이 겹쳐 뜨면 뒤엣것이 앞엣것을 가린다.
   void _showNextTaglinePitch() {
     _hideTaglineBubble();
-    final anchor =
-        _taglineKey.currentContext?.findRenderObject() as RenderBox?;
+    final anchor = _taglineKey.currentContext?.findRenderObject() as RenderBox?;
     final overlay = Overlay.maybeOf(context);
     if (anchor == null || !anchor.hasSize || overlay == null) return;
     final Offset topLeft = anchor.localToGlobal(Offset.zero);
@@ -1323,19 +1366,18 @@ class _IntroMasterState extends State<IntroMaster>
         final headlineSize = constraints.maxWidth < 350 ? 25.0 : 28.0;
         final headlineScaler = _cappedScaler(context, 1.15);
         final scaledHeadline = headlineScaler.scale(headlineSize);
-        final storyGradient =
-            const LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              colors: [Color(0xFF45CDBD), Color(0xFF765EEB)],
-            ).createShader(
-              Rect.fromLTWH(
-                scaledHeadline * 3.2,
-                0,
-                scaledHeadline * 3,
-                scaledHeadline * 1.6,
-              ),
-            );
+        final storyGradient = const LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [Color(0xFF45CDBD), Color(0xFF765EEB)],
+        ).createShader(
+          Rect.fromLTWH(
+            scaledHeadline * 3.2,
+            0,
+            scaledHeadline * 3,
+            scaledHeadline * 1.6,
+          ),
+        );
 
         return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(20, 0, 20, compact ? 12 : 18),
@@ -1378,6 +1420,8 @@ class _IntroMasterState extends State<IntroMaster>
                   _buildWelcomeTrialAction(),
                   SizedBox(height: compact ? 6 : 10),
                   _buildWelcomeLoginAction(),
+                  SizedBox(height: compact ? 4 : 8),
+                  _buildEnglishTesterGoogleAction(),
                   const Spacer(flex: 2),
                   Center(child: _buildPageIndicator(0, tealActive: true)),
                   const Spacer(flex: 2),
@@ -1749,10 +1793,10 @@ class _IntroMasterState extends State<IntroMaster>
         onPressed: isLoading
             ? null
             : () => setState(() {
-                _currentScreen = IntroScreen.accountDiscovery;
-                _showEmailForm = false;
-                _accountDiscoveryMessage = '';
-              }),
+                  _currentScreen = IntroScreen.accountDiscovery;
+                  _showEmailForm = false;
+                  _accountDiscoveryMessage = '';
+                }),
         style: TextButton.styleFrom(
           minimumSize: const Size.fromHeight(52),
           foregroundColor: const Color(0xFFBFD8FF),
@@ -1771,9 +1815,8 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Widget _buildAccountDiscoveryView(BuildContext context) {
-    final foundResults = _accountDiscoveryResults
-        .where((r) => r.found)
-        .toList();
+    final foundResults =
+        _accountDiscoveryResults.where((r) => r.found).toList();
     return _buildAuthScaffold(
       context: context,
       child: Column(
@@ -2218,9 +2261,9 @@ class _IntroMasterState extends State<IntroMaster>
           ),
         );
         onTap = () => _handleUnifiedAuth(
-          SocialAuthService.signInWithKakao,
-          provider: 'kakao',
-        );
+              SocialAuthService.signInWithKakao,
+              provider: 'kakao',
+            );
         break;
       case 'google':
         label = 'Google로 계속하기';
@@ -2238,9 +2281,9 @@ class _IntroMasterState extends State<IntroMaster>
           ),
         );
         onTap = () => _handleUnifiedAuth(
-          SocialAuthService.signInWithGoogle,
-          provider: 'google',
-        );
+              SocialAuthService.signInWithGoogle,
+              provider: 'google',
+            );
         break;
       case 'email':
         label = _showEmailForm ? '이메일 입력 닫기' : '이메일로 계속하기';
@@ -2351,9 +2394,8 @@ class _IntroMasterState extends State<IntroMaster>
   List<Widget> _buildAuthHeader() {
     // 1회 Duo 맛보기를 사용한 사람은 재방문 계정 기록과 관계없이
     // 세 가지 가입/로그인 방법을 모두 선택할 수 있어야 한다.
-    final lastProvider = _requiresAuthOnlyIntro
-        ? null
-        : _validLastAuthProvider();
+    final lastProvider =
+        _requiresAuthOnlyIntro ? null : _validLastAuthProvider();
     if (lastProvider == null) {
       return [
         _authSectionTitle(
@@ -2372,9 +2414,8 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   List<Widget> _buildProviderButtons() {
-    final lastProvider = _requiresAuthOnlyIntro
-        ? null
-        : _validLastAuthProvider();
+    final lastProvider =
+        _requiresAuthOnlyIntro ? null : _validLastAuthProvider();
     if (lastProvider != null) {
       return [_providerButton(lastProvider)];
     }
@@ -2559,6 +2600,7 @@ class _IntroMasterState extends State<IntroMaster>
   Future<void> _handleUnifiedAuth(
     Future<dynamic> Function() authFn, {
     String provider = '',
+    bool englishTesterDirectLobby = false,
   }) async {
     debugPrint('[Auth] _handleUnifiedAuth enter');
     setState(() => isLoading = true);
@@ -2617,7 +2659,10 @@ class _IntroMasterState extends State<IntroMaster>
       }
 
       if (!mounted) return;
-      await _checkAgeAndRoute();
+      await _checkAgeAndRoute(
+        skipAgeCheck: englishTesterDirectLobby,
+        forceLobby: englishTesterDirectLobby,
+      );
     } catch (e, stack) {
       debugPrint('[Auth] _handleUnifiedAuth exception: $e');
       debugPrint('[Auth] stack: $stack');
@@ -2634,33 +2679,38 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   /// 연령 확인 후 라우팅 (소셜/이메일 공통)
-  Future<void> _checkAgeAndRoute() async {
+  Future<void> _checkAgeAndRoute({
+    bool skipAgeCheck = false,
+    bool forceLobby = false,
+  }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || !mounted) return;
 
-    try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      final hasBirthYear =
-          userDoc.exists && userDoc.data()?['birthYear'] != null;
-      if (!hasBirthYear && mounted) {
-        final ageCheckCompleted = await _showBirthYearDialog();
-        if (!ageCheckCompleted) {
-          await _showAgeCheckRequiredDialog();
-          await FirebaseAuth.instance.signOut();
-          FFAppState().remainingTime = 0;
-          FFAppState().remainingTimeLoaded = false;
-          LobbyBrain.lastSyncedUid = null;
-          if (mounted) {
-            setState(() => isLoginMode = true);
+    if (!skipAgeCheck) {
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        final hasBirthYear =
+            userDoc.exists && userDoc.data()?['birthYear'] != null;
+        if (!hasBirthYear && mounted) {
+          final ageCheckCompleted = await _showBirthYearDialog();
+          if (!ageCheckCompleted) {
+            await _showAgeCheckRequiredDialog();
+            await FirebaseAuth.instance.signOut();
+            FFAppState().remainingTime = 0;
+            FFAppState().remainingTimeLoaded = false;
+            LobbyBrain.lastSyncedUid = null;
+            if (mounted) {
+              setState(() => isLoginMode = true);
+            }
+            return;
           }
-          return;
         }
+      } catch (e) {
+        debugPrint('[Auth] birthYear check failed (non-blocking): $e');
       }
-    } catch (e) {
-      debugPrint('[Auth] birthYear check failed (non-blocking): $e');
     }
 
     // 🎫 [GUEST-EXIT] **복구보다 먼저 게스트 딱지를 뗀다.**
@@ -2673,7 +2723,8 @@ class _IntroMasterState extends State<IntroMaster>
     //   기다리는 초대(pendingInviteType == 'duo')가 있으면 손대지 않는다.
     //   그 사람은 지금 막 새 통화의 게스트로 들어가는 길이고,
     //   `_routeAfterAuth`가 StealthRoom으로 보낸다.
-    final bool joiningDuoNext = FFAppState().pendingInviteType == 'duo' &&
+    final bool joiningDuoNext = !forceLobby &&
+        FFAppState().pendingInviteType == 'duo' &&
         FFAppState().duoRoomId.isNotEmpty;
     if (!joiningDuoNext && FFAppState().isGuestSession) {
       FFAppState().isGuestSession = false;
@@ -2694,7 +2745,13 @@ class _IntroMasterState extends State<IntroMaster>
     //   같이 지우면 복구할 근거가 사라진다.
     unawaited(restoreDuoHistoryAfterLogin(uid: user.uid));
 
-    if (mounted) _routeAfterAuth();
+    if (!mounted) return;
+    if (forceLobby) {
+      FFAppState().isGuestSession = false;
+      context.goNamed('Lobby');
+    } else {
+      _routeAfterAuth();
+    }
   }
 
   /// 신규 가입 시 태어난 해 확인 + 14세 미만 보호자 이메일 수집
@@ -2812,9 +2869,8 @@ class _IntroMasterState extends State<IntroMaster>
     if (user == null) return false;
 
     final age = currentYear - selectedYear;
-    final userRef = FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid);
+    final userRef =
+        FirebaseFirestore.instance.collection('users').doc(user.uid);
 
     if (age >= 14) {
       await userRef.set({'birthYear': selectedYear}, SetOptions(merge: true));
@@ -3015,8 +3071,7 @@ class _IntroMasterState extends State<IntroMaster>
 
     TrialFlowState.instance.restoreFromAppState();
     final historyRef = TrialFlowState.instance.myHistoryRef;
-    final hasTrialState =
-        historyRef != null ||
+    final hasTrialState = historyRef != null ||
         TrialFlowState.instance.isTrial ||
         FFAppState().trialCompleted ||
         FFAppState().trialStep > 0;

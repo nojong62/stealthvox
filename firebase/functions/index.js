@@ -435,7 +435,7 @@ exports.grantSignupBonus = functions.https.onCall(async (data, context) => {
 
   const uid = context.auth.uid;
   const userRef = admin.firestore().doc("users/" + uid);
-  const bonusSeconds = 18000;
+  const bonusSeconds = 60 * 60; // 1 hour
 
   const result = await admin.firestore().runTransaction(async (tx) => {
     const snap = await tx.get(userRef);
