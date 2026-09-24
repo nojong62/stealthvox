@@ -30,6 +30,7 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/dialog_brain_model.dart';
 import '/custom_code/services/talk_ui_localization.dart';
+import '/custom_code/services/guide_ui_localization.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
@@ -66,7 +67,6 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   // ============================================================================
   // 0: 메뉴 화면, 1: Duo, 2: Circle Talk, 3: Roleplay, 4: Expand
   int? _currentMode;
-  bool get _menuEnglish => FFAppState().nativeLang.trim() != 'Korean';
   bool _circleSetupOpen = false;
   bool _isRecommendingCircle = false;
   String? _selectedCircleDescription;
@@ -614,117 +614,62 @@ Return ONLY valid JSON: {"name":"..."}.
   // 스텔스 훈련소 가이드 팝업창 및 설명 텍스트 렌더링
   // ============================================================================
   void _showManualDialog() {
-    final useEnglish = FFAppState().nativeLang.trim() != 'Korean';
+    final copy = GuideUiCopy.forLanguage(FFAppState().nativeLang);
     showDialog(
       context: context,
       barrierDismissible: true,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) => BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-            child: Dialog(
-              backgroundColor: const Color(0xFF1C1C1E),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              insetPadding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.help_outline_rounded,
-                          color: Colors.amberAccent,
-                          size: 28,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            useEnglish ? "Talk Mode Guide" : "대화 모드 설명서",
+      builder: (dialogContext) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+        child: Dialog(
+          backgroundColor: const Color(0xFF1C1C1E),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520, maxHeight: 680),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    const Icon(Icons.help_outline_rounded,
+                        color: Colors.amberAccent, size: 28),
+                    const SizedBox(width: 12),
+                    Expanded(
+                        child: Text(copy['modeTitle'],
                             style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    Flexible(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18))),
+                  ]),
+                  const SizedBox(height: 24),
+                  Flexible(
                       child: SingleChildScrollView(
-                        physics: const BouncingScrollPhysics(),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Duo는 초대할 때 호스트가 두 방식 중 하나를 고른다.
-                            // 설명서에도 그 갈림길이 그대로 보이게 둘을 나눠 쓴다.
-                            _buildManualItem(
-                              'Duo Connect',
-                              useEnglish ? 'Direct Call' : '초청 직접 대화',
-                              useEnglish
-                                  ? 'Invite someone by link and talk naturally using your real voices. The conversation becomes language study material in the Study Room.'
-                                  : '초청 링크로 부른 상대와 서로의 실제 목소리로 자연스럽게 통화하면서, 그 통화에서 어학 공부 자료를 수집하는 기능입니다. 통화가 끝나면 오간 대화가 공부방으로 이어집니다.',
-                            ),
-                            const Divider(color: Colors.white12, height: 24),
-                            _buildManualItem(
-                              'Duo Connect',
-                              useEnglish ? 'Live Interpreter' : '초청 만능 통역',
-                              useEnglish
-                                  ? 'Invite a partner and each speak your own language while live interpretation helps you communicate.'
-                                  : '초청 링크를 통해 파트너와 함께 모국어로 대화하면, 실시간으로 통역해주는 글로벌 만능 통역 모드입니다.',
-                            ),
-                            const Divider(color: Colors.white12, height: 24),
-                            _buildManualItem(
-                              'Circle Talk',
-                              useEnglish ? 'Community Talk' : '커뮤니티 대화',
-                              useEnglish
-                                  ? 'Choose an AI suggestion or enter a community. The AI joins as a member and talks in its language, interests, and atmosphere.'
-                                  : 'AI 추천을 받거나 원하는 커뮤니티를 직접 입력하세요. AI가 그 서클의 구성원이 되어 분야의 말투, 관심사와 분위기에 맞춰 자연스럽게 대화합니다.',
-                            ),
-                            const Divider(color: Colors.white12, height: 24),
-                            _buildManualItem(
-                              'Scenario Talk',
-                              useEnglish ? 'Real-Life Scenario' : '실전 상황 대화',
-                              useEnglish
-                                  ? 'Practice realistic business and daily conversations with detailed roles and situations.'
-                                  : '창의적이고 구체적인 역할과 상황을 무한히 추천받고, 현실감 넘치는 실전 비즈니스 및 일상 회화를 연습합니다.',
-                            ),
-                            const Divider(color: Colors.white12, height: 32),
-                            _buildSessionLegend(english: useEnglish),
-                            const Divider(color: Colors.white12, height: 32),
-                            _buildBillingLegend(english: useEnglish),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: Text(
-                          useEnglish ? "Confirm" : "확인",
+                    physics: const BouncingScrollPhysics(),
+                    child: Text(copy['modeBody'],
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 13, height: 1.55)),
+                  )),
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: Text(copy['confirm'],
                           style: const TextStyle(
-                            color: Colors.amberAccent,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                      ),
+                              color: Colors.amberAccent,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -1000,7 +945,7 @@ Return ONLY valid JSON: {"name":"..."}.
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    _menuEnglish ? "Choose a Talk Mode" : "대화 모드 선택",
+                    _setupCopy['modesTitle'],
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 25,
@@ -1012,23 +957,21 @@ Return ONLY valid JSON: {"name":"..."}.
                   _buildMenuCard(
                     1,
                     "Duo Connect",
-                    _menuEnglish
-                        ? "Talk with a Friend\nLive Interpretation"
-                        : "초청 직접 대화\n초청 만능 통역",
+                    _setupCopy['duoMenuSubtitle'],
                     Icons.people,
                     const Color(0xFF3B82F6),
                   ),
                   _buildMenuCard(
                     2,
                     "Circle Talk",
-                    _menuEnglish ? "Group Conversation" : "서클 구성원 대화",
+                    _setupCopy['circleMenuSubtitle'],
                     Icons.groups_rounded,
                     const Color(0xFFA855F7),
                   ),
                   _buildMenuCard(
                     3,
                     "Scenario Talk",
-                    _menuEnglish ? "Real-Life Scenarios" : "실전 상황 대화",
+                    _setupCopy['scenarioMenuSubtitle'],
                     Icons.smart_toy,
                     const Color(0xFF22C55E),
                   ),
@@ -1064,28 +1007,28 @@ Return ONLY valid JSON: {"name":"..."}.
               Expanded(
                 child: _buildBottomNavItem(
                   Icons.grid_view_rounded,
-                  _menuEnglish ? 'Modes' : '모드',
+                  _setupCopy['navModes'],
                   active: true,
                 ),
               ),
               Expanded(
                 child: _buildBottomNavItem(
                   Icons.storefront_rounded,
-                  _menuEnglish ? 'Store' : '스토어',
+                  _setupCopy['navStore'],
                   onTap: () => context.pushNamed('Store'),
                 ),
               ),
               Expanded(
                 child: _buildBottomNavItem(
                   Icons.history_rounded,
-                  _menuEnglish ? 'Usage' : '사용 내역',
+                  _setupCopy['navUsage'],
                   onTap: () => showUsageSheet(context),
                 ),
               ),
               Expanded(
                 child: _buildBottomNavItem(
                   Icons.person_outline_rounded,
-                  _menuEnglish ? 'Account' : '등록 정보',
+                  _setupCopy['navAccount'],
                   onTap: () => showAccountSheet(context),
                 ),
               ),
@@ -1164,7 +1107,7 @@ Return ONLY valid JSON: {"name":"..."}.
                 color: Color(0xFF22D3EE),
                 size: 26,
               ),
-              tooltip: _menuEnglish ? 'Lobby' : '로비로',
+              tooltip: _setupCopy['lobby'],
               padding: const EdgeInsets.symmetric(horizontal: 8),
               constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
               onPressed: () => context.pushNamed('Lobby'),
@@ -1199,7 +1142,7 @@ Return ONLY valid JSON: {"name":"..."}.
             const SizedBox(width: 4),
             IconButton(
               onPressed: _showManualDialog,
-              tooltip: _menuEnglish ? 'Guide' : '사용 설명서',
+              tooltip: _setupCopy['guide'],
               padding: const EdgeInsets.only(left: 8),
               constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
               icon: const Icon(

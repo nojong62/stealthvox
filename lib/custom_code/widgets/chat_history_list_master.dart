@@ -29,6 +29,7 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 // 보기와 비용 기능을 가르는 판정 한 벌. 공부방·과금 티커와 같은 자리를 본다.
 import '/custom_code/services/study_access.dart';
+import '/custom_code/services/guide_ui_localization.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart'
     show deepgramLanguageCode;
@@ -2864,7 +2865,7 @@ RULES — follow exactly:
 
   // 📦 [Box 1: 사용설명서 팝업]
   void _showStudyRoomManual() {
-    final useEnglish = FFAppState().nativeLang.trim() != 'Korean';
+    final guideCopy = GuideUiCopy.forLanguage(FFAppState().nativeLang);
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -2885,7 +2886,7 @@ RULES — follow exactly:
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  useEnglish ? "Study Room Guide" : "스터디룸 사용설명서",
+                  guideCopy['studyTitle'],
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -2906,7 +2907,7 @@ RULES — follow exactly:
             height: MediaQuery.of(ctx).size.height * 0.72,
             child: SingleChildScrollView(
               child: _buildManualBody(
-                useEnglish ? _kManualTextEnglish : _kManualText,
+                guideCopy['studyBody'],
               ),
             ),
           ),
