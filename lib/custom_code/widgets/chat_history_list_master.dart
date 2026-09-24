@@ -55,7 +55,7 @@ Do not add, drop, or reword anything in the text.''';
 
 class ChatHistoryListMaster extends StatefulWidget {
   const ChatHistoryListMaster({Key? key, this.width, this.height})
-    : super(key: key);
+      : super(key: key);
 
   final double? width;
   final double? height;
@@ -557,12 +557,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         final visibleIds = filteredDocs.map((doc) => doc.id).toSet();
         final visibleIdsChanged =
             visibleIds.length != _visibleHistoryDocIds.length ||
-            !visibleIds.every(_visibleHistoryDocIds.contains);
+                !visibleIds.every(_visibleHistoryDocIds.contains);
         if (visibleIdsChanged) {
           _visibleHistoryDocIds = visibleIds;
-          _visibleHistoryDocOrder = filteredDocs
-              .map((doc) => doc.id)
-              .toList(growable: false);
+          _visibleHistoryDocOrder =
+              filteredDocs.map((doc) => doc.id).toList(growable: false);
           _selectedDocIds.retainAll(_visibleHistoryDocIds);
           // 사라진 기록을 기준점으로 들고 있으면 범위가 엉뚱한 데서 시작한다.
           if (_rangeAnchorDocId != null &&
@@ -827,8 +826,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   /// 기준점을 짚기 전과 뒤에 문구가 바뀜다. "끝을 길게"라고 말해 주지
   /// 않으면 처음 짚은 사람은 그다음을 모른다.
   Widget _buildRangeHintChip() {
-    final bool armed =
-        _rangeAnchorDocId != null &&
+    final bool armed = _rangeAnchorDocId != null &&
         _visibleHistoryDocIds.contains(_rangeAnchorDocId);
     // 🚫 [RANGE] **기준점을 찍었을 때만 눌린다.** 그때 하는 일은 하나뿐이고
     //   ─ 기준점 취소 ─ 글자와 ✕가 그렇게 말한다. 기준점이 없을 때는 아예
@@ -1010,9 +1008,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
 
   Widget _buildFilterChip(String filterKey, String label, IconData icon) {
     bool isSelected = _selectedFilter == filterKey;
-    Color baseColor = filterKey == 'All'
-        ? Colors.grey
-        : _getColorForRoom(filterKey);
+    Color baseColor =
+        filterKey == 'All' ? Colors.grey : _getColorForRoom(filterKey);
 
     return GestureDetector(
       onTap: () {
@@ -1689,19 +1686,17 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     // 🗣️ 문제를 낼 언어는 **이 사람의 말**이다. 줄마다 달라지는 값이 아니라
     //   묻지 않는다 — 로비 설정에서 그때그때 읽는다. 설정을 바꾸면 피드백
     //   언어도 같이 따라가는 것이 맞다.
-    _keeperTutoringNative = FFAppState().nativeLang.isNotEmpty
-        ? FFAppState().nativeLang
-        : 'Korean';
+    _keeperTutoringNative =
+        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
     // 🎯 배울 언어만 줄에 매인다. 한 키퍼를 영어로 연습하다 일본어로 바꾸는
     //   일은 있어도, 내 모국어가 줄마다 바뀌지는 않는다.
-    final String savedTarget = (keeperData[kKeeperTargetLangField] ?? '')
-        .toString()
-        .trim();
+    final String savedTarget =
+        (keeperData[kKeeperTargetLangField] ?? '').toString().trim();
     _keeperTutoringTarget = savedTarget.isNotEmpty
         ? savedTarget
         : (FFAppState().targetLang.isNotEmpty
-              ? FFAppState().targetLang
-              : 'English');
+            ? FFAppState().targetLang
+            : 'English');
     _keeperTutoringNeedsLangPick = savedTarget.isEmpty;
 
     // 상태 초기화
@@ -1785,16 +1780,16 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               'role': 'system',
               'content':
                   'You are a grammar application tutor. Keep ONLY the core '
-                  'grammar pattern (tense / structure / word order) of the '
-                  'input $targetLang sentence. Then create ONE completely '
-                  'NEW $promptLang sentence that uses the SAME structure '
-                  'but an ENTIRELY DIFFERENT topic, vocabulary, and '
-                  'situation from the input — it must not be a paraphrase '
-                  'of the input. Also provide one natural $targetLang '
-                  'answer for that new $promptLang sentence. '
-                  'reply ONLY in JSON: '
-                  '{"prompt": "new $promptLang sentence", '
-                  '"answer": "$targetLang answer"}',
+                      'grammar pattern (tense / structure / word order) of the '
+                      'input $targetLang sentence. Then create ONE completely '
+                      'NEW $promptLang sentence that uses the SAME structure '
+                      'but an ENTIRELY DIFFERENT topic, vocabulary, and '
+                      'situation from the input — it must not be a paraphrase '
+                      'of the input. Also provide one natural $targetLang '
+                      'answer for that new $promptLang sentence. '
+                      'reply ONLY in JSON: '
+                      '{"prompt": "new $promptLang sentence", '
+                      '"answer": "$targetLang answer"}',
             },
             {
               'role': 'user',
@@ -1838,61 +1833,62 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
       required String label,
       required String value,
       required void Function(String) onPick,
-    }) => Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 76,
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white12),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: kOriginLanguageOptions.contains(value)
-                      ? value
-                      : kOriginLanguageOptions.first,
-                  isExpanded: true,
-                  dropdownColor: const Color(0xFF2A2A2A),
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                  icon: const Icon(
-                    Icons.expand_more_rounded,
-                    color: Colors.white38,
+    }) =>
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 76,
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
                   ),
-                  items: kOriginLanguageOptions
-                      .map(
-                        (String lang) => DropdownMenuItem<String>(
-                          value: lang,
-                          child: Text(koreanLanguageDisplayName(lang)),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (String? v) {
-                    if (v == null) return;
-                    onPick(v);
-                    _keeperDialogSetState?.call(() {});
-                  },
                 ),
               ),
-            ),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: kOriginLanguageOptions.contains(value)
+                          ? value
+                          : kOriginLanguageOptions.first,
+                      isExpanded: true,
+                      dropdownColor: const Color(0xFF2A2A2A),
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                      icon: const Icon(
+                        Icons.expand_more_rounded,
+                        color: Colors.white38,
+                      ),
+                      items: kOriginLanguageOptions
+                          .map(
+                            (String lang) => DropdownMenuItem<String>(
+                              value: lang,
+                              child: Text(koreanLanguageDisplayName(lang)),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (String? v) {
+                        if (v == null) return;
+                        onPick(v);
+                        _keeperDialogSetState?.call(() {});
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+        );
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -2526,16 +2522,15 @@ RULES — follow exactly:
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         final jsonResult = jsonDecode(data['choices'][0]['message']['content']);
-        _keeperTutoringCorrected = (jsonResult['corrected'] as String? ?? '')
-            .trim();
-        _keeperTutoringCorrection = (jsonResult['explanation'] as String? ?? '')
-            .trim();
+        _keeperTutoringCorrected =
+            (jsonResult['corrected'] as String? ?? '').trim();
+        _keeperTutoringCorrection =
+            (jsonResult['explanation'] as String? ?? '').trim();
         // 옇 키(usage_tip_ko)도 함께 읽는다.
-        _keeperTutoringUsageTip =
-            ((jsonResult['usage_tip'] ?? jsonResult['usage_tip_ko'])
-                        as String? ??
-                    '')
-                .trim();
+        _keeperTutoringUsageTip = ((jsonResult['usage_tip'] ??
+                    jsonResult['usage_tip_ko']) as String? ??
+                '')
+            .trim();
         _keeperDialogSetState?.call(() {});
 
         // STEP 4: 교정 문장 TTS 생성
@@ -2869,7 +2864,7 @@ RULES — follow exactly:
 
   // 📦 [Box 1: 사용설명서 팝업]
   void _showStudyRoomManual() {
-    var useEnglish = true;
+    final useEnglish = FFAppState().nativeLang.trim() != 'Korean';
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -2896,23 +2891,6 @@ RULES — follow exactly:
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
                   ),
-                ),
-              ),
-              IconButton(
-                onPressed: () => setDialogState(() => useEnglish = !useEnglish),
-                tooltip: useEnglish ? '한국어로 보기' : 'View in English',
-                icon: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      useEnglish ? 'EN' : 'KR',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
                 ),
               ),
               IconButton(

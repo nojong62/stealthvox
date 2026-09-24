@@ -66,7 +66,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   // ============================================================================
   // 0: 메뉴 화면, 1: Duo, 2: Circle Talk, 3: Roleplay, 4: Expand
   int? _currentMode;
-  bool _menuEnglish = false;
+  bool get _menuEnglish => FFAppState().nativeLang.trim() != 'Korean';
   bool _circleSetupOpen = false;
   bool _isRecommendingCircle = false;
   String? _selectedCircleDescription;
@@ -99,7 +99,6 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    unawaited(_loadMenuLanguage());
     StealthRoomMaster.exitCurrentMode = () {
       setState(() {
         _currentMode = null;
@@ -615,7 +614,7 @@ Return ONLY valid JSON: {"name":"..."}.
   // 스텔스 훈련소 가이드 팝업창 및 설명 텍스트 렌더링
   // ============================================================================
   void _showManualDialog() {
-    var useEnglish = true;
+    final useEnglish = FFAppState().nativeLang.trim() != 'Korean';
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -652,24 +651,6 @@ Return ONLY valid JSON: {"name":"..."}.
                               fontWeight: FontWeight.bold,
                               fontSize: 18,
                             ),
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () =>
-                              setDialogState(() => useEnglish = !useEnglish),
-                          tooltip: useEnglish ? '한국어로 보기' : 'View in English',
-                          icon: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                useEnglish ? 'EN' : 'KR',
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
                           ),
                         ),
                       ],
@@ -999,20 +980,6 @@ Return ONLY valid JSON: {"name":"..."}.
   // 📦 [4. 메뉴 UI 빌더 (MENU UI BUILDERS)]
   // 초기 메뉴 화면과 3가지 모드 선택 카드 렌더링
   // ============================================================================
-  Future<void> _loadMenuLanguage() async {
-    final prefs = await SharedPreferences.getInstance();
-    final useEnglish = prefs.getBool('stealth_room_menu_english') ?? false;
-    if (mounted && useEnglish != _menuEnglish) {
-      setState(() => _menuEnglish = useEnglish);
-    }
-  }
-
-  Future<void> _toggleMenuLanguage() async {
-    final next = !_menuEnglish;
-    setState(() => _menuEnglish = next);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('stealth_room_menu_english', next);
-  }
 
   Widget _buildMenu() {
     return SafeArea(
@@ -1230,31 +1197,6 @@ Return ONLY valid JSON: {"name":"..."}.
               ),
             ),
             const SizedBox(width: 4),
-            Tooltip(
-              message: _menuEnglish ? '한국어로 보기' : 'View in English',
-              child: InkWell(
-                onTap: _toggleMenuLanguage,
-                borderRadius: BorderRadius.circular(999),
-                child: Container(
-                  width: 38,
-                  height: 32,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: const Color(0x665EE7F7)),
-                    color: const Color(0x1422D3EE),
-                  ),
-                  child: Text(
-                    _menuEnglish ? '한' : 'EN',
-                    style: const TextStyle(
-                      color: Color(0xFF67E8F9),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ),
-            ),
             IconButton(
               onPressed: _showManualDialog,
               tooltip: _menuEnglish ? 'Guide' : '사용 설명서',

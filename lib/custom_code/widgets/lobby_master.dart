@@ -311,7 +311,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
 
   // 📦 [Box 6: 시스템 알림 팝업]
   void _showUsageGuideDialog(BuildContext context) {
-    var useEnglish = true;
+    final useEnglish = FFAppState().nativeLang.trim() != 'Korean';
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -334,51 +334,34 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                   ),
                 ),
               ),
-              IconButton(
-                onPressed: () => setDialogState(() => useEnglish = !useEnglish),
-                tooltip: useEnglish ? '한국어로 보기' : 'View in English',
-                icon: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      useEnglish ? 'EN' : 'KR',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             ],
           ),
           content: SingleChildScrollView(
             child: Text(
               useEnglish
                   ? "1. Talk comfortably in your own language\n"
-                        "StealthVox lets you talk naturally with AI in your own language and turns the conversation into study material.\n\n"
-                        "2. Mix in the language you are learning\n"
-                        "Speak in your own language, the language you are learning, or both. Do not worry about making perfect sentences—just talk naturally.\n\n"
-                        "3. Your conversations become study material\n"
-                        "The Study Room organizes your conversations for listening, role-switch practice, shadowing, and AI tutoring.\n\n"
-                        "4. Practice language for real life\n"
-                        "Instead of chasing one correct answer, repeat what you actually want to say. Your own material helps make the language part of daily life.\n\n"
-                        "5. Talk and practice together with Duo Connect\n"
-                        "Invite a friend or family member and talk as naturally as a phone call. After the call, the conversation becomes study material so you can practice expressions you actually used.\n\n"
-                        "You can also practice each other's languages. Each person chooses the language they speak and the language they want to learn. Live interpretation helps two people communicate naturally even when they speak different languages."
+                      "StealthVox lets you talk naturally with AI in your own language and turns the conversation into study material.\n\n"
+                      "2. Mix in the language you are learning\n"
+                      "Speak in your own language, the language you are learning, or both. Do not worry about making perfect sentences—just talk naturally.\n\n"
+                      "3. Your conversations become study material\n"
+                      "The Study Room organizes your conversations for listening, role-switch practice, shadowing, and AI tutoring.\n\n"
+                      "4. Practice language for real life\n"
+                      "Instead of chasing one correct answer, repeat what you actually want to say. Your own material helps make the language part of daily life.\n\n"
+                      "5. Talk and practice together with Duo Connect\n"
+                      "Invite a friend or family member and talk as naturally as a phone call. After the call, the conversation becomes study material so you can practice expressions you actually used.\n\n"
+                      "You can also practice each other's languages. Each person chooses the language they speak and the language they want to learn. Live interpretation helps two people communicate naturally even when they speak different languages."
                   : "1. 모국어로 편하게 대화하세요\n"
-                        "StealthVox는 사용자가 모국어로 AI와 자연스럽게 대화하면서, 그 대화를 공부방 학습 교재로 만드는 공간입니다.\n\n"
-                        "2. 외국어를 자유롭게 섞어도 됩니다\n"
-                        "모국어로 말해도 되고, 외국어로 말하거나 모국어와 외국어를 섞어서 말해도 됩니다. 완벽한 문장을 만들려고 부담 갖지 말고 평소 말하듯 이야기하세요.\n\n"
-                        "3. 대화가 학습 자료가 됩니다\n"
-                        "대화에서 만들어진 자료는 공부방에 정리되어, 다시 듣기, 역할교환 말하기, 쉐도잉 및 튜터링 학습 자료로 다양하게 활용합니다.\n\n"
-                        "4. 영어 및 외국어를 생활 언어로 연습하세요\n"
-                        "정답을 맞히는 공부보다 내가 실제로 하고 싶은 말을 반복해 보세요. 만들어진 자료를 부담 없이 즐기다 보면 영어를 일상에서 쓰는 생활 언어로 연습할 수 있습니다.\n\n"
-                        "5. Duo Connect로 함께 대화하고 연습하세요\n"
-                        "지인이나 가족을 대화에 초대해 전화 통화하듯 편하게 일상 이야기를 나눌 수 있습니다. 통화가 끝나면 대화 내용이 영어 학습 자료로 남아, 실제로 사용한 대화 패턴을 효율적으로 연습할 수 있습니다.\n\n"
-                        "외국어를 배우고 싶은 사람과 통화하며 서로의 언어를 연습할 수도 있습니다. 초대받은 상대도 자신이 말할 언어와 배우고 싶은 언어를 직접 선택할 수 있어, 두 사람이 각자 원하는 언어를 따로 학습할 수 있습니다. 대화 중에는 만능 통역기처럼 서로 다른 언어로도 자연스럽게 소통할 수 있습니다.\n\n"
-                        "한국인 지인과 자연스럽게 통화하면서 한국어를 배우고 싶은 분들에게도 도움이 되기를 바랍니다.",
+                      "StealthVox는 사용자가 모국어로 AI와 자연스럽게 대화하면서, 그 대화를 공부방 학습 교재로 만드는 공간입니다.\n\n"
+                      "2. 외국어를 자유롭게 섞어도 됩니다\n"
+                      "모국어로 말해도 되고, 외국어로 말하거나 모국어와 외국어를 섞어서 말해도 됩니다. 완벽한 문장을 만들려고 부담 갖지 말고 평소 말하듯 이야기하세요.\n\n"
+                      "3. 대화가 학습 자료가 됩니다\n"
+                      "대화에서 만들어진 자료는 공부방에 정리되어, 다시 듣기, 역할교환 말하기, 쉐도잉 및 튜터링 학습 자료로 다양하게 활용합니다.\n\n"
+                      "4. 영어 및 외국어를 생활 언어로 연습하세요\n"
+                      "정답을 맞히는 공부보다 내가 실제로 하고 싶은 말을 반복해 보세요. 만들어진 자료를 부담 없이 즐기다 보면 영어를 일상에서 쓰는 생활 언어로 연습할 수 있습니다.\n\n"
+                      "5. Duo Connect로 함께 대화하고 연습하세요\n"
+                      "지인이나 가족을 대화에 초대해 전화 통화하듯 편하게 일상 이야기를 나눌 수 있습니다. 통화가 끝나면 대화 내용이 영어 학습 자료로 남아, 실제로 사용한 대화 패턴을 효율적으로 연습할 수 있습니다.\n\n"
+                      "외국어를 배우고 싶은 사람과 통화하며 서로의 언어를 연습할 수도 있습니다. 초대받은 상대도 자신이 말할 언어와 배우고 싶은 언어를 직접 선택할 수 있어, 두 사람이 각자 원하는 언어를 따로 학습할 수 있습니다. 대화 중에는 만능 통역기처럼 서로 다른 언어로도 자연스럽게 소통할 수 있습니다.\n\n"
+                      "한국인 지인과 자연스럽게 통화하면서 한국어를 배우고 싶은 분들에게도 도움이 되기를 바랍니다.",
               style: const TextStyle(
                 color: Colors.white70,
                 fontSize: 13,
@@ -619,15 +602,15 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     final bool isLow = appState.remainingTime <= 60;
 
     Widget numberText(Color color) => Text(
-      displayTime,
-      maxLines: 1,
-      style: GoogleFonts.orbitron(
-        color: color,
-        fontSize: 30,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 1.5,
-      ),
-    );
+          displayTime,
+          maxLines: 1,
+          style: GoogleFonts.orbitron(
+            color: color,
+            fontSize: 30,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.5,
+          ),
+        );
 
     Widget value;
     if (!appState.remainingTimeLoaded) {
@@ -700,15 +683,15 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     ValueChanged<String?> onChanged,
   ) {
     Widget labelRow() => Text(
-      label,
-      maxLines: 1,
-      style: const TextStyle(
-        color: _kLobbyTextMid,
-        fontSize: 11,
-        letterSpacing: 1.4,
-        fontWeight: FontWeight.w800,
-      ),
-    );
+          label,
+          maxLines: 1,
+          style: const TextStyle(
+            color: _kLobbyTextMid,
+            fontSize: 11,
+            letterSpacing: 1.4,
+            fontWeight: FontWeight.w800,
+          ),
+        );
 
     return Container(
       decoration: BoxDecoration(
@@ -1269,14 +1252,13 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 gestures: <Type, GestureRecognizerFactory>{
                   LongPressGestureRecognizer:
                       GestureRecognizerFactoryWithHandlers<
-                        LongPressGestureRecognizer
-                      >(
-                        () => LongPressGestureRecognizer(
-                          duration: const Duration(seconds: 3),
-                        ),
-                        (LongPressGestureRecognizer r) =>
-                            r.onLongPress = _openP2VoiceLab,
-                      ),
+                          LongPressGestureRecognizer>(
+                    () => LongPressGestureRecognizer(
+                      duration: const Duration(seconds: 3),
+                    ),
+                    (LongPressGestureRecognizer r) =>
+                        r.onLongPress = _openP2VoiceLab,
+                  ),
                 },
                 child: ShaderMask(
                   shaderCallback: (rect) => const LinearGradient(
@@ -1564,8 +1546,7 @@ class AppsFlyerManager {
   /// 네트워크 오류는 입장 화면의 기존 재시도 경로에 맡기기 위해 유효로 취급한다.
   static Future<bool> validatePendingDuoInvite() async {
     if (FFAppState().pendingInviteType != 'duo' ||
-        FFAppState().duoRoomId.isEmpty)
-      return false;
+        FFAppState().duoRoomId.isEmpty) return false;
     final roomId = FFAppState().duoRoomId;
     try {
       final snap = await FirebaseFirestore.instance
@@ -1693,21 +1674,18 @@ class AppsFlyerManager {
       deepLinkData = Map<String, dynamic>.from(params['deepLink'] as Map);
     }
 
-    final String? deepLinkValue =
-        params['deep_link_value']?.toString() ??
+    final String? deepLinkValue = params['deep_link_value']?.toString() ??
         deepLinkData['deep_link_value']?.toString();
     if (deepLinkValue != 'duo_chat') return false;
 
-    final String? inviterId =
-        params['deep_link_sub1']?.toString() ??
+    final String? inviterId = params['deep_link_sub1']?.toString() ??
         deepLinkData['deep_link_sub1']?.toString() ??
         params['inviter_id']?.toString() ??
         deepLinkData['inviter_id']?.toString() ??
         params['inviterId']?.toString() ??
         params['af_sub1']?.toString();
 
-    final String? roomId =
-        params['deep_link_sub2']?.toString() ??
+    final String? roomId = params['deep_link_sub2']?.toString() ??
         deepLinkData['deep_link_sub2']?.toString() ??
         params['room_id']?.toString() ??
         deepLinkData['room_id']?.toString() ??

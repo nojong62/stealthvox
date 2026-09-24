@@ -399,6 +399,9 @@ const String kDuoModeInterpreter = 'interpreter';
 /// 저장 id(`kDuoModeDirect`/`kDuoModeInterpreter`)는 여기에 없다 — 표시명만 둔다.
 const Map<String, Map<String, String>> kModePickerText = {
   'Korean': {
+    'waiting': '연결 대기 중...',
+    'connecting': '안전한 StealthVox 연결을 설정하고 있습니다',
+    'cancelConnection': '연결 취소',
     'title': '대화 방식 선택',
     'subtitle': '초대할 대화 방식을 골라주세요.',
     'directTitle': '직접 대화',
@@ -415,6 +418,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteFailDetail': '잠시 후 다시 시도해 주세요.',
   },
   'English': {
+    'waiting': 'Waiting...',
+    'connecting': 'Establishing secure StealthVox connection',
+    'cancelConnection': 'Cancel Connection',
     'title': 'Choose Call Mode',
     'subtitle': "Pick how you'd like to talk.",
     'directTitle': 'Direct Call',
@@ -431,6 +437,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteFailDetail': 'Please try again in a moment.',
   },
   'Japanese': {
+    'waiting': '接続を待っています...',
+    'connecting': '安全なStealthVox接続を確立しています',
+    'cancelConnection': '接続をキャンセル',
     'title': '通話方法を選ぶ',
     'subtitle': '招待する通話方法を選んでください。',
     'directTitle': '直接通話',
@@ -447,6 +456,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteFailDetail': 'しばらくしてからもう一度お試しください。',
   },
   'Chinese': {
+    'waiting': '正在等待连接…',
+    'connecting': '正在建立安全的StealthVox连接',
+    'cancelConnection': '取消连接',
     'title': '选择通话方式',
     'subtitle': '请选择邀请使用的通话方式。',
     'directTitle': '直接通话',
@@ -463,6 +475,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteFailDetail': '请稍后再试。',
   },
   'Spanish': {
+    'waiting': 'Esperando...',
+    'connecting': 'Estableciendo una conexión segura de StealthVox',
+    'cancelConnection': 'Cancelar conexión',
     'title': 'Elige el tipo de llamada',
     'subtitle': 'Elige cómo quieres hablar en esta invitación.',
     'directTitle': 'Llamada directa',
@@ -479,6 +494,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteFailDetail': 'Inténtalo de nuevo en un momento.',
   },
   'French': {
+    'waiting': 'En attente...',
+    'connecting': 'Établissement de la connexion StealthVox sécurisée',
+    'cancelConnection': 'Annuler la connexion',
     'title': "Choisissez le type d'appel",
     'subtitle': 'Choisissez comment vous voulez parler pour cette invitation.',
     'directTitle': 'Appel direct',
@@ -495,6 +513,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteFailDetail': 'Réessayez dans un instant.',
   },
   'German': {
+    'waiting': 'Warten...',
+    'connecting': 'Sichere StealthVox-Verbindung wird hergestellt',
+    'cancelConnection': 'Verbindung abbrechen',
     'title': 'Gesprächsart wählen',
     'subtitle': 'Wähle, wie ihr in dieser Einladung sprechen wollt.',
     'directTitle': 'Direktes Gespräch',
@@ -511,6 +532,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteFailDetail': 'Bitte versuche es gleich noch einmal.',
   },
   'Hindi': {
+    'waiting': 'प्रतीक्षा हो रही है...',
+    'connecting': 'सुरक्षित StealthVox कनेक्शन स्थापित हो रहा है',
+    'cancelConnection': 'कनेक्शन रद्द करें',
     'title': 'कॉल का तरीका चुनें',
     'subtitle': 'इस न्योते के लिए बातचीत का तरीका चुनें।',
     'directTitle': 'सीधी कॉल',
@@ -527,6 +551,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteFailDetail': 'थोड़ी देर बाद फिर कोशिश करें।',
   },
   'Russian': {
+    'waiting': 'Ожидание...',
+    'connecting': 'Устанавливается защищённое соединение StealthVox',
+    'cancelConnection': 'Отменить подключение',
     'title': 'Выберите тип звонка',
     'subtitle': 'Выберите, как вы хотите общаться в этом приглашении.',
     'directTitle': 'Прямой звонок',
@@ -543,6 +570,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteFailDetail': 'Попробуйте ещё раз через минуту.',
   },
   'Portuguese': {
+    'waiting': 'Aguardando...',
+    'connecting': 'Estabelecendo conexão segura do StealthVox',
+    'cancelConnection': 'Cancelar conexão',
     'title': 'Escolha o tipo de chamada',
     'subtitle': 'Escolha como vocês vão conversar neste convite.',
     'directTitle': 'Chamada direta',
@@ -559,6 +589,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteFailDetail': 'Tente novamente em instantes.',
   },
   'Italian': {
+    'waiting': 'In attesa...',
+    'connecting': 'Connessione sicura StealthVox in corso',
+    'cancelConnection': 'Annulla connessione',
     'title': 'Scegli il tipo di chiamata',
     'subtitle': 'Scegli come volete parlare in questo invito.',
     'directTitle': 'Chiamata diretta',
@@ -575,6 +608,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteFailDetail': 'Riprova tra un momento.',
   },
   'Dutch': {
+    'waiting': 'Wachten...',
+    'connecting': 'Beveiligde StealthVox-verbinding wordt gemaakt',
+    'cancelConnection': 'Verbinding annuleren',
     'title': 'Kies het gesprekstype',
     'subtitle': 'Kies hoe jullie willen praten in deze uitnodiging.',
     'directTitle': 'Direct gesprek',
@@ -601,17 +637,6 @@ Map<String, String> modePickerTextFor(String originLang) =>
     kModePickerText[originLang.trim()] ??
     kModePickerText[_kModePickerFallbackLang]!;
 
-/// 🌐 [DUO-INVITE-LANG] 초대 흐름의 글자는 **영어 하나로 통일한다**
-/// (실장님 지시, 2026-08-27).
-///
-/// 방식 선택 팝업과 초대 완료·실패 알림 셋이 이 값을 함께 본다. 예전에는
-/// 로비 ORIGIN을 따라 12개 언어로 갈렸는데, 초대는 **상대가 어느 나라
-/// 사람일지 모르는 자리**라 보내는 사람 언어로만 적어 둘 이유가 약하다.
-///
-/// 언어별 표([kModePickerText])는 지우지 않는다 — 되돌릴 때 이 값을
-/// `FFAppState().nativeLang`으로 바꾸면 그대로 돌아온다. 표가 12개 언어를
-/// 다 덮는지는 `test/mode_picker_text_test.dart`가 계속 지킨다.
-const String kDuoInviteUiLang = 'English';
 const String kInterpreterPartnerTtsVoice = 'alloy';
 
 /// 맛보기 직접 통화 길이. 폰 한 대에 딱 한 번만 주어진다.
@@ -6211,8 +6236,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         subject: 'StealthVox Duo 초대',
       );
       if (mounted) {
-        // 방식 선택 팝업과 같은 말을 쓴다([kDuoInviteUiLang]).
-        final t = modePickerTextFor(kDuoInviteUiLang);
+        // 방식 선택 팝업과 같은 로비 Chat Lang 문구를 쓴다.
+        final t = modePickerTextFor(FFAppState().nativeLang);
         _showDuoSnack(
           icon: Icons.check_circle_rounded,
           accent: const Color(0xFF60A5FA),
@@ -6225,7 +6250,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     } catch (e) {
       debugPrint('[Duo] Share invite error: $e');
       if (mounted) {
-        final t = modePickerTextFor(kDuoInviteUiLang);
+        final t = modePickerTextFor(FFAppState().nativeLang);
         _showDuoSnack(
           icon: Icons.error_outline_rounded,
           accent: const Color(0xFFF87171),
@@ -7103,13 +7128,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 📡 상대가 아직 안 들어왔다. 두 방식 모두 같은 화면을 쓴다 — 기다리는
   ///   동안에는 직접 대화든 통역이든 유저가 할 일이 똑같이 없다.
   Widget _buildWaitingStage(String backdropAsset) {
+    final t = modePickerTextFor(FFAppState().nativeLang);
     return Column(
       children: [
         Expanded(child: DuoWaitingStage(backdropAsset: backdropAsset)),
         const SizedBox(height: 18),
-        const Text(
-          'Waiting...',
-          style: TextStyle(
+        Text(
+          t['waiting']!,
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 25,
             fontWeight: FontWeight.bold,
@@ -7123,7 +7149,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 28),
           child: Text(
-            'Establishing secure StealthVox connection',
+            t['connecting']!,
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.38),
@@ -7152,9 +7178,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 여기서 고른 값만이 세션 문서의 `mode`가 된다.
   Future<String?> _showHostModePicker() {
     String picked = _duoMode;
-    // 글자는 [kDuoInviteUiLang] 하나를 따른다 — 초대 흐름 셋이 같은 말을
+    // 글자는 로비 Chat Lang을 따른다 — 초대 흐름 셋이 같은 말을
     // 쓴다(팝업 · 초대 완료 알림 · 실패 알림).
-    final Map<String, String> t = modePickerTextFor(kDuoInviteUiLang);
+    final Map<String, String> t = modePickerTextFor(FFAppState().nativeLang);
     return showDialog<String>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.72),
@@ -7942,6 +7968,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   내준다 — 그만두기. 위 `<`와 같은 곳으로 가지만, 기다리는 화면에서
     //   구석의 화살표는 눈에 잘 안 띈다.
     if (!_hasConversationPartner) {
+      final t = modePickerTextFor(FFAppState().nativeLang);
       return Container(
         padding: EdgeInsets.fromLTRB(24, 8, 24, bottomPadding),
         decoration: const BoxDecoration(color: Color(0xFF121212)),
@@ -7951,9 +7978,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             child: OutlinedButton.icon(
               onPressed: () => unawaited(_handleAutoSaveAndExit()),
               icon: const Icon(Icons.cancel_outlined, size: 19),
-              label: const Text(
-                'Cancel Connection',
-                style: TextStyle(
+              label: Text(
+                t['cancelConnection']!,
+                style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 1.2),

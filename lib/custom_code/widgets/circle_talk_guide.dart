@@ -2,9 +2,10 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '/app_state.dart';
 
 Future<void> showCircleTalkGuide(BuildContext context) {
-  var useEnglish = true;
+  final useEnglish = FFAppState().nativeLang.trim() != 'Korean';
   return showDialog<void>(
     context: context,
     barrierDismissible: true,
@@ -44,24 +45,6 @@ Future<void> showCircleTalkGuide(BuildContext context) {
                             fontSize: 21,
                             fontWeight: FontWeight.bold,
                           ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () =>
-                            setDialogState(() => useEnglish = !useEnglish),
-                        tooltip: useEnglish ? '한국어로 보기' : 'View in English',
-                        icon: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              useEnglish ? 'EN' : 'KR',
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
                         ),
                       ),
                       IconButton(

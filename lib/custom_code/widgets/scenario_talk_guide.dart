@@ -11,12 +11,13 @@
 // ============================================================================
 
 import 'package:flutter/material.dart';
+import '/app_state.dart';
 
 /// Scenario Talk의 상징색. 아이콘·확인 버튼이 같은 색을 쓴다.
 const Color kScenarioGuideAccent = Color(0xFF4ADE80);
 
 Future<void> showScenarioTalkGuide(BuildContext context) {
-  var useEnglish = true;
+  final useEnglish = FFAppState().nativeLang.trim() != 'Korean';
   return showDialog<void>(
     context: context,
     builder: (dialogContext) => StatefulBuilder(
@@ -31,23 +32,6 @@ Future<void> showScenarioTalkGuide(BuildContext context) {
               child: Text(
                 useEnglish ? 'Scenario Talk Guide' : 'Scenario Talk 사용설명서',
                 style: const TextStyle(color: Colors.white, fontSize: 18),
-              ),
-            ),
-            IconButton(
-              onPressed: () => setDialogState(() => useEnglish = !useEnglish),
-              tooltip: useEnglish ? '한국어로 보기' : 'View in English',
-              icon: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    useEnglish ? 'EN' : 'KR',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
               ),
             ),
           ],

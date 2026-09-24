@@ -119,7 +119,7 @@ class _StoreMasterState extends State<StoreMaster> {
       'https://docs.google.com/document/d/1AyK3KM9anwsVo7PaLdYRdxNnwa0MmRHuhxAN7yXbOjk/edit';
 
   bool isProcessing = false;
-  bool _useEnglishLegalDocs = true;
+  bool get _useEnglishLegalDocs => FFAppState().nativeLang.trim() != 'Korean';
   String _versionText = '';
 
   // [v4.0] 서버 증액 감지용 Firestore 리스너
@@ -245,8 +245,7 @@ class _StoreMasterState extends State<StoreMaster> {
     );
 
     final currentUser = FirebaseAuth.instance.currentUser;
-    final needsAccount =
-        currentUser == null ||
+    final needsAccount = currentUser == null ||
         (currentUser.isAnonymous && !FFAppState().hasLinkedAccount);
     if (needsAccount) {
       final result = await showDialog<bool>(
@@ -533,12 +532,11 @@ class _StoreMasterState extends State<StoreMaster> {
                               separatorBuilder: (_, __) =>
                                   const SizedBox(height: 12),
                               itemBuilder: (context, index) {
-                                var data =
-                                    records[index].data()
-                                        as Map<String, dynamic>;
+                                var data = records[index].data()
+                                    as Map<String, dynamic>;
                                 DateTime ts = data['purchased_at'] != null
                                     ? (data['purchased_at'] as Timestamp)
-                                          .toDate()
+                                        .toDate()
                                     : DateTime.now();
                                 String dateFormatted = DateFormat(
                                   'yyyy.MM.dd HH:mm',
@@ -855,8 +853,8 @@ class _StoreMasterState extends State<StoreMaster> {
 
                               final String modeRaw =
                                   (data['mode'] as String?) ??
-                                  (data['reason'] as String?) ??
-                                  'unknown';
+                                      (data['reason'] as String?) ??
+                                      'unknown';
                               final int secondsUsed =
                                   (data['seconds_used'] as int?) ?? 0;
                               final int actualSeconds =
@@ -869,8 +867,8 @@ class _StoreMasterState extends State<StoreMaster> {
                               final double? rate = rateRaw is double
                                   ? rateRaw
                                   : (rateRaw is num
-                                        ? rateRaw.toDouble()
-                                        : null);
+                                      ? rateRaw.toDouble()
+                                      : null);
                               final String? roomId = data['room_id'] as String?;
 
                               return Container(
@@ -1209,31 +1207,6 @@ class _StoreMasterState extends State<StoreMaster> {
                       spacing: 20,
                       runSpacing: 6,
                       children: [
-                        InkWell(
-                          onTap: () => setState(
-                            () => _useEnglishLegalDocs = !_useEnglishLegalDocs,
-                          ),
-                          borderRadius: BorderRadius.circular(12),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 4,
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  _useEnglishLegalDocs ? 'EN' : 'KR',
-                                  style: const TextStyle(
-                                    color: Colors.white54,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
                         InkWell(
                           onTap: () => _launchURL(
                             _useEnglishLegalDocs
