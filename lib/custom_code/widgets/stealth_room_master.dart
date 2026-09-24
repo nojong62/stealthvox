@@ -39,11 +39,8 @@ import 'circle_talk_guide.dart';
 import 'scenario_talk_guide.dart';
 
 class StealthRoomMaster extends StatefulWidget {
-  const StealthRoomMaster({
-    Key? key,
-    this.width,
-    this.height,
-  }) : super(key: key);
+  const StealthRoomMaster({Key? key, this.width, this.height})
+    : super(key: key);
   final double? width;
   final double? height;
 
@@ -68,6 +65,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   // ============================================================================
   // 0: 메뉴 화면, 1: Duo, 2: Circle Talk, 3: Roleplay, 4: Expand
   int? _currentMode;
+  bool _menuEnglish = false;
   bool _circleSetupOpen = false;
   bool _isRecommendingCircle = false;
   String? _selectedCircleDescription;
@@ -93,6 +91,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_loadMenuLanguage());
     StealthRoomMaster.exitCurrentMode = () {
       setState(() {
         _currentMode = null;
@@ -151,9 +150,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
 
     if (openAiKey.isEmpty || deepgramKey.isEmpty) {
       try {
-        await remoteConfig
-            .fetchAndActivate()
-            .timeout(const Duration(seconds: 6));
+        await remoteConfig.fetchAndActivate().timeout(
+          const Duration(seconds: 6),
+        );
         openAiKey = remoteConfig.getString('OpenAIAPIKey');
         deepgramKey = remoteConfig.getString('DeepgramAPIKey');
       } catch (error) {
@@ -163,33 +162,35 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
 
     // 🔥 [STT-PREWARM] 켜진 엔진 **하나만** 예열한다. 둘 다 열면 소켓도 비용도
     //   이중이 된다 (Circle Talk의 전사 경로는 한 턴에 하나뿐이다).
-    final nativeLanguage =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+    final nativeLanguage = FFAppState().nativeLang.isNotEmpty
+        ? FFAppState().nativeLang
+        : 'Korean';
     if (kFreeTalkUseStreamingStt) {
       if (openAiKey.isNotEmpty) {
-        unawaited(OpenAiStreamingTranscribePrewarm.instance.prepare(
-          apiKey: openAiKey,
-          // 🌐 [ORIGIN-RESOLVE] 언어를 박지 않고 예열한다(빈 값 = 자동 감지).
-          //   첫 발화는 유저가 실제로 쓴 언어 그대로 받아야, 로비 ORIGIN이
-          //   기본값 그대로인 유저를 가려낼 수 있다. 언어가 확정되면 방이
-          //   `switchLanguage`로 갈아 끼운다 — 소켓은 그대로 산다.
-          //   모드 쪽 `take()`도 같은 빈 값으로 물어보므로 채택이 어긋나지 않는다.
-          languageCode: '',
-          onLog: (tag, msg) => debugPrint('$tag $msg'),
-        ));
+        unawaited(
+          OpenAiStreamingTranscribePrewarm.instance.prepare(
+            apiKey: openAiKey,
+            // 🌐 [ORIGIN-RESOLVE] 언어를 박지 않고 예열한다(빈 값 = 자동 감지).
+            //   첫 발화는 유저가 실제로 쓴 언어 그대로 받아야, 로비 ORIGIN이
+            //   기본값 그대로인 유저를 가려낼 수 있다. 언어가 확정되면 방이
+            //   `switchLanguage`로 갈아 끼운다 — 소켓은 그대로 산다.
+            //   모드 쪽 `take()`도 같은 빈 값으로 물어보므로 채택이 어긋나지 않는다.
+            languageCode: '',
+            onLog: (tag, msg) => debugPrint('$tag $msg'),
+          ),
+        );
       }
     } else if (deepgramKey.isNotEmpty) {
-      unawaited(DeepgramPrewarmSession.instance.prepare(
-        apiKey: deepgramKey,
-        languageCode: deepgramLanguageCode(nativeLanguage),
-        onLog: debugPrint,
-      ));
+      unawaited(
+        DeepgramPrewarmSession.instance.prepare(
+          apiKey: deepgramKey,
+          languageCode: deepgramLanguageCode(nativeLanguage),
+          onLog: debugPrint,
+        ),
+      );
     }
     if (openAiKey.isNotEmpty) {
-      await OpenAiConnectionPool.instance.warmUp(
-        openAiKey,
-        onLog: debugPrint,
-      );
+      await OpenAiConnectionPool.instance.warmUp(openAiKey, onLog: debugPrint);
     }
   }
 
@@ -205,10 +206,12 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       await _circleAudioRecorder.hasPermission();
       await _circleAudioRecorder.isRecording();
       debugPrint(
-          '[ANY-INPUT-PREWARM] ready elapsedMs=${stopwatch.elapsedMilliseconds}');
+        '[ANY-INPUT-PREWARM] ready elapsedMs=${stopwatch.elapsedMilliseconds}',
+      );
     } catch (error) {
       debugPrint(
-          '[ANY-INPUT-PREWARM] failed reason=${error.runtimeType} elapsedMs=${stopwatch.elapsedMilliseconds}');
+        '[ANY-INPUT-PREWARM] failed reason=${error.runtimeType} elapsedMs=${stopwatch.elapsedMilliseconds}',
+      );
     } finally {
       stopwatch.stop();
     }
@@ -278,8 +281,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     _aiRoleController.dispose();
     _userRoleController.dispose();
     unawaited(DeepgramPrewarmSession.instance.discard(reason: 'room_dispose'));
-    unawaited(OpenAiStreamingTranscribePrewarm.instance
-        .discard(reason: 'room_dispose'));
+    unawaited(
+      OpenAiStreamingTranscribePrewarm.instance.discard(reason: 'room_dispose'),
+    );
     unawaited(_circleAudioRecorder.dispose());
     super.dispose();
   }
@@ -320,17 +324,19 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     if (!guardBillingEntry(context)) return;
     final clean = description.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (clean.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('참여할 서클을 입력해 주세요.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('참여할 서클을 입력해 주세요.')));
       return;
     }
     _circleMicInputAt = DateTime.now();
     debugPrint(
-        '[FIRST-SPEECH] event=MIC_INPUT at=${_circleMicInputAt!.toIso8601String()} deltaMs=0');
+      '[FIRST-SPEECH] event=MIC_INPUT at=${_circleMicInputAt!.toIso8601String()} deltaMs=0',
+    );
     setState(() {
-      _selectedCircleDescription =
-          clean.length > 200 ? clean.substring(0, 200) : clean;
+      _selectedCircleDescription = clean.length > 200
+          ? clean.substring(0, 200)
+          : clean;
       _circleSetupOpen = false;
       _currentMode = 2;
     });
@@ -419,9 +425,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       final remoteConfig = FirebaseRemoteConfig.instance;
       String apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
       if (apiKey.isEmpty) {
-        await remoteConfig
-            .fetchAndActivate()
-            .timeout(const Duration(seconds: 8));
+        await remoteConfig.fetchAndActivate().timeout(
+          const Duration(seconds: 8),
+        );
         apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
       }
       if (apiKey.isEmpty) throw StateError('OpenAI key unavailable');
@@ -452,9 +458,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     final aiRole = _aiRoleController.text.trim();
     final userRole = _userRoleController.text.trim();
     if (situation.isEmpty || aiRole.isEmpty || userRole.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('상황과 두 역할을 모두 채워 주세요.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('상황과 두 역할을 모두 채워 주세요.')));
       return;
     }
     // 방은 이 홀더를 읽어 시나리오를 세팅한다(재진입 보존과 같은 경로).
@@ -474,9 +480,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       final remoteConfig = FirebaseRemoteConfig.instance;
       String apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
       if (apiKey.isEmpty) {
-        await remoteConfig
-            .fetchAndActivate()
-            .timeout(const Duration(seconds: 8));
+        await remoteConfig.fetchAndActivate().timeout(
+          const Duration(seconds: 8),
+        );
         apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
       }
       if (apiKey.isEmpty) throw StateError('OpenAI key unavailable');
@@ -557,15 +563,19 @@ Return ONLY valid JSON: {"name":"..."}.
 
       if (response.statusCode != 200) {
         // 폴백 없이 거절 본문을 그대로 남긴다.
-        debugPrint('[AI-HTTP] recommend status=${response.statusCode} '
-            'body=${utf8.decode(response.bodyBytes)}');
+        debugPrint(
+          '[AI-HTTP] recommend status=${response.statusCode} '
+          'body=${utf8.decode(response.bodyBytes)}',
+        );
         throw http.ClientException('status=${response.statusCode}');
       }
       final envelope = jsonDecode(utf8.decode(response.bodyBytes));
-      debugPrint('[AI-HTTP] recommend status=200 model=$kDialogBrainModel '
-          'reasoning=$kDialogBrainReasoningEffort stream=false '
-          'finish_reason=${envelope['choices']?[0]?['finish_reason']} '
-          'usage=${envelope['usage']}');
+      debugPrint(
+        '[AI-HTTP] recommend status=200 model=$kDialogBrainModel '
+        'reasoning=$kDialogBrainReasoningEffort stream=false '
+        'finish_reason=${envelope['choices']?[0]?['finish_reason']} '
+        'usage=${envelope['usage']}',
+      );
       final content = envelope['choices'][0]['message']['content'].toString();
       final recommendation = jsonDecode(content) as Map<String, dynamic>;
       final name = (recommendation['name'] ?? '').toString().trim();
@@ -590,86 +600,141 @@ Return ONLY valid JSON: {"name":"..."}.
     }
   }
 
-// ============================================================================
+  // ============================================================================
   // 📦 [2. 도움말 및 팝업 (MANUAL & DIALOGS)]
   // 스텔스 훈련소 가이드 팝업창 및 설명 텍스트 렌더링
   // ============================================================================
   void _showManualDialog() {
+    var useEnglish = true;
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (BuildContext context) {
-        return BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-          child: Dialog(
-            backgroundColor: const Color(0xFF1C1C1E),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            insetPadding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.help_outline_rounded,
-                          color: Colors.amberAccent, size: 28),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          "대화 모드 설명서",
-                          style: TextStyle(
+        return StatefulBuilder(
+          builder: (context, setDialogState) => BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+            child: Dialog(
+              backgroundColor: const Color(0xFF1C1C1E),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.help_outline_rounded,
+                          color: Colors.amberAccent,
+                          size: 28,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            useEnglish ? "Talk Mode Guide" : "대화 모드 설명서",
+                            style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
-                              fontSize: 18),
+                              fontSize: 18,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () =>
+                              setDialogState(() => useEnglish = !useEnglish),
+                          tooltip: useEnglish ? '한국어로 보기' : 'View in English',
+                          icon: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.translate_rounded,
+                                color: Colors.white70,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                useEnglish ? 'EN' : 'KR',
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        physics: const BouncingScrollPhysics(),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Duo는 초대할 때 호스트가 두 방식 중 하나를 고른다.
+                            // 설명서에도 그 갈림길이 그대로 보이게 둘을 나눠 쓴다.
+                            _buildManualItem(
+                              'Duo Connect',
+                              useEnglish ? 'Direct Call' : '초청 직접 대화',
+                              useEnglish
+                                  ? 'Invite someone by link and talk naturally using your real voices. The conversation becomes language study material in the Study Room.'
+                                  : '초청 링크로 부른 상대와 서로의 실제 목소리로 자연스럽게 통화하면서, 그 통화에서 어학 공부 자료를 수집하는 기능입니다. 통화가 끝나면 오간 대화가 공부방으로 이어집니다.',
+                            ),
+                            const Divider(color: Colors.white12, height: 24),
+                            _buildManualItem(
+                              'Duo Connect',
+                              useEnglish ? 'Live Interpreter' : '초청 만능 통역',
+                              useEnglish
+                                  ? 'Invite a partner and each speak your own language while live interpretation helps you communicate.'
+                                  : '초청 링크를 통해 파트너와 함께 모국어로 대화하면, 실시간으로 통역해주는 글로벌 만능 통역 모드입니다.',
+                            ),
+                            const Divider(color: Colors.white12, height: 24),
+                            _buildManualItem(
+                              'Circle Talk',
+                              useEnglish ? 'Community Talk' : '커뮤니티 대화',
+                              useEnglish
+                                  ? 'Choose an AI suggestion or enter a community. The AI joins as a member and talks in its language, interests, and atmosphere.'
+                                  : 'AI 추천을 받거나 원하는 커뮤니티를 직접 입력하세요. AI가 그 서클의 구성원이 되어 분야의 말투, 관심사와 분위기에 맞춰 자연스럽게 대화합니다.',
+                            ),
+                            const Divider(color: Colors.white12, height: 24),
+                            _buildManualItem(
+                              'Scenario Talk',
+                              useEnglish ? 'Real-Life Scenario' : '실전 상황 대화',
+                              useEnglish
+                                  ? 'Practice realistic business and daily conversations with detailed roles and situations.'
+                                  : '창의적이고 구체적인 역할과 상황을 무한히 추천받고, 현실감 넘치는 실전 비즈니스 및 일상 회화를 연습합니다.',
+                            ),
+                            const Divider(color: Colors.white12, height: 32),
+                            _buildSessionLegend(english: useEnglish),
+                            const Divider(color: Colors.white12, height: 32),
+                            _buildBillingLegend(english: useEnglish),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Duo는 초대할 때 호스트가 두 방식 중 하나를 고른다.
-                          // 설명서에도 그 갈림길이 그대로 보이게 둘을 나눠 쓴다.
-                          _buildManualItem('Duo Connect', '초청 직접 대화',
-                              '초청 링크로 부른 상대와 서로의 실제 목소리로 자연스럽게 통화하면서, 그 통화에서 어학 공부 자료를 수집하는 기능입니다. 통화가 끝나면 오간 대화가 공부방으로 이어집니다.'),
-                          const Divider(color: Colors.white12, height: 24),
-                          _buildManualItem('Duo Connect', '초청 만능 통역',
-                              '초청 링크를 통해 파트너와 함께 모국어로 대화하면, 실시간으로 통역해주는 글로벌 만능 통역 모드입니다.'),
-                          const Divider(color: Colors.white12, height: 24),
-                          _buildManualItem('Circle Talk', '커뮤니티 대화',
-                              'AI 추천을 받거나 원하는 커뮤니티를 직접 입력하세요. AI가 그 서클의 구성원이 되어 분야의 말투, 관심사와 분위기에 맞춰 자연스럽게 대화합니다.'),
-                          const Divider(color: Colors.white12, height: 24),
-                          _buildManualItem('Scenario Talk', '실전 상황 대화',
-                              '창의적이고 구체적인 역할과 상황을 무한히 추천받고, 현실감 넘치는 실전 비즈니스 및 일상 회화를 연습합니다.'),
-                          const Divider(color: Colors.white12, height: 32),
-                          _buildSessionLegend(),
-                          const Divider(color: Colors.white12, height: 32),
-                          _buildBillingLegend(),
-                        ],
+                    ),
+                    const SizedBox(height: 24),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: Text(
+                          useEnglish ? "Confirm" : "확인",
+                          style: const TextStyle(
+                            color: Colors.amberAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text("확인",
-                          style: TextStyle(
-                              color: Colors.amberAccent,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16)),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -688,61 +753,76 @@ Return ONLY valid JSON: {"name":"..."}.
           spacing: 8, // 가로 간격
           runSpacing: 4, // 줄바꿈 시 세로 간격
           children: [
-            Text(title,
-                style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16)),
+            Text(
+              title,
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                  color: Colors.white10,
-                  borderRadius: BorderRadius.circular(4)),
-              child: Text(label,
-                  style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                label,
+                style: const TextStyle(color: Colors.white70, fontSize: 11),
+              ),
             ),
           ],
         ),
         const SizedBox(height: 6),
-        Text(desc,
-            style: const TextStyle(
-                color: Colors.white70, fontSize: 13, height: 1.4)),
+        Text(
+          desc,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 13,
+            height: 1.4,
+          ),
+        ),
       ],
     );
   }
 
   /// 10분 세션 안내. "끊긴다"가 아니라 "저장된다"로 읽히게 쓴다 — 실제로도
   /// 방에서 나가지 않고 같은 화면에서 대화가 이어진다.
-  Widget _buildSessionLegend() {
+  Widget _buildSessionLegend({required bool english}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          '대화 세션 (10분)',
-          style: TextStyle(
+        Text(
+          english ? 'Conversation Session (10 minutes)' : '대화 세션 (10분)',
+          style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
             fontSize: 15,
           ),
         ),
         const SizedBox(height: 12),
-        const Text(
-          'Circle Talk와 Scenario Talk에서는 10분 단위로 대화 기록이 저장됩니다. '
-          '저장 후에도 같은 화면에서 최근 대화와 짧은 요약을 바탕으로 '
-          '이야기를 이어갈 수 있습니다. 10분을 다 채워야 하는 것은 아닙니다 — '
-          '하고 싶은 만큼 이야기하고 나가면 그때까지의 대화가 기록에 저장됩니다.',
-          style: TextStyle(
+        Text(
+          english
+              ? 'Circle Talk and Scenario Talk save the conversation every 10 minutes. You can continue on the same screen using the recent conversation and a short summary. You may also leave earlier, and everything up to that point is saved.'
+              : 'Circle Talk와 Scenario Talk에서는 10분 단위로 대화 기록이 저장됩니다. '
+                    '저장 후에도 같은 화면에서 최근 대화와 짧은 요약을 바탕으로 '
+                    '이야기를 이어갈 수 있습니다. 10분을 다 채워야 하는 것은 아닙니다 — '
+                    '하고 싶은 만큼 이야기하고 나가면 그때까지의 대화가 기록에 저장됩니다.',
+          style: const TextStyle(
             color: Colors.white70,
             fontSize: 12,
             height: 1.5,
           ),
         ),
         const SizedBox(height: 10),
-        const Text(
-          'Circle Talk와 Scenario Talk에서는 말하는 도중에 10분이 되어도 '
-          '하던 말과 AI의 답변이 끝난 뒤에 저장되므로, '
-          '한 번의 대화가 둘로 잘리지 않습니다.',
-          style: TextStyle(
+        Text(
+          english
+              ? 'If time runs out while someone is speaking, saving waits until the current speech and AI response finish, so one exchange is never split.'
+              : 'Circle Talk와 Scenario Talk에서는 말하는 도중에 10분이 되어도 '
+                    '하던 말과 AI의 답변이 끝난 뒤에 저장되므로, '
+                    '한 번의 대화가 둘로 잘리지 않습니다.',
+          style: const TextStyle(
             color: Colors.white70,
             fontSize: 12,
             height: 1.5,
@@ -750,10 +830,12 @@ Return ONLY valid JSON: {"name":"..."}.
         ),
         const SizedBox(height: 10),
         // 세 대화 모드가 같은 신호를 쓴다(`BillingSessionDot`·`BillingTimeLabel`).
-        const Text(
-          '세션이 끝나기 30초 전부터 상단 시간 표시가 남은 초를 세고, '
-          '10초 전부터는 점이 주황으로 깜빡입니다.',
-          style: TextStyle(
+        Text(
+          english
+              ? 'The top timer counts down from 30 seconds before the session ends. During the final 10 seconds, the billing dot flashes orange.'
+              : '세션이 끝나기 30초 전부터 상단 시간 표시가 남은 초를 세고, '
+                    '10초 전부터는 점이 주황으로 깜빡입니다.',
+          style: const TextStyle(
             color: Colors.white70,
             fontSize: 12,
             height: 1.5,
@@ -780,12 +862,14 @@ Return ONLY valid JSON: {"name":"..."}.
               ),
             ),
             const SizedBox(width: 10),
-            const Expanded(
+            Expanded(
               child: Text(
-                '세션이 끝나기 30초 전부터 잔여시간 자리에 남은 초가 표시되고, '
-                '마지막 10초에는 과금 표시등이 주황색으로 깜박입니다. 저장이 '
-                '끝나면 잔여시간 표시로 돌아옵니다.',
-                style: TextStyle(
+                english
+                    ? 'The remaining-time display shows the final 30 seconds. During the last 10 seconds, the billing indicator flashes orange. After saving, the normal remaining-time display returns.'
+                    : '세션이 끝나기 30초 전부터 잔여시간 자리에 남은 초가 표시되고, '
+                          '마지막 10초에는 과금 표시등이 주황색으로 깜박입니다. 저장이 '
+                          '끝나면 잔여시간 표시로 돌아옵니다.',
+                style: const TextStyle(
                   color: Colors.white70,
                   fontSize: 12,
                   height: 1.5,
@@ -795,9 +879,11 @@ Return ONLY valid JSON: {"name":"..."}.
           ],
         ),
         const SizedBox(height: 10),
-        const Text(
-          '이 30초 동안에도 잔여시간은 평소와 똑같이 차감됩니다.',
-          style: TextStyle(
+        Text(
+          english
+              ? 'Remaining time continues to be charged normally during these 30 seconds.'
+              : '이 30초 동안에도 잔여시간은 평소와 똑같이 차감됩니다.',
+          style: const TextStyle(
             color: Colors.white54,
             fontSize: 11,
             height: 1.5,
@@ -807,27 +893,26 @@ Return ONLY valid JSON: {"name":"..."}.
     );
   }
 
-  Widget _buildBillingLegend() {
+  Widget _buildBillingLegend({required bool english}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          '과금 인디케이터',
-          style: TextStyle(
+        Text(
+          english ? 'Billing Indicator' : '과금 인디케이터',
+          style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
             fontSize: 15,
           ),
         ),
         const SizedBox(height: 12),
-        _buildBillingDotRow(
-          2,
-          '과금 진행중',
-        ),
+        _buildBillingDotRow(2, english ? 'Billing active' : '과금 진행중'),
         const SizedBox(height: 10),
         _buildBillingDotRow(
           0,
-          '과금 정지 — 마이크 대기(오토포즈) 시 자동 정지',
+          english
+              ? 'Billing paused — automatic while the microphone waits'
+              : '과금 정지 — 마이크 대기(오토포즈) 시 자동 정지',
         ),
       ],
     );
@@ -844,9 +929,7 @@ Return ONLY valid JSON: {"name":"..."}.
             child: SizedBox(
               width: 22,
               height: 22,
-              child: CustomPaint(
-                painter: BillingDotPainter(state),
-              ),
+              child: CustomPaint(painter: BillingDotPainter(state)),
             ),
           ),
         ),
@@ -884,15 +967,17 @@ Return ONLY valid JSON: {"name":"..."}.
     }
     if (_currentMode == 1) {
       return RoutineModeDuo(
-          key: const ValueKey('RoutineModeDuo'),
-          width: widget.width,
-          height: widget.height,
-          roomId: _pendingDuoRoomId);
+        key: const ValueKey('RoutineModeDuo'),
+        width: widget.width,
+        height: widget.height,
+        roomId: _pendingDuoRoomId,
+      );
     } else if (_currentMode == 3) {
       return RoutineModeScenarioTalk(
-          key: const ValueKey('RoutineModeScenarioTalk'),
-          width: widget.width,
-          height: widget.height);
+        key: const ValueKey('RoutineModeScenarioTalk'),
+        width: widget.width,
+        height: widget.height,
+      );
     }
 
     if (_circleSetupOpen) return _buildCircleSetup();
@@ -910,6 +995,21 @@ Return ONLY valid JSON: {"name":"..."}.
   // 📦 [4. 메뉴 UI 빌더 (MENU UI BUILDERS)]
   // 초기 메뉴 화면과 3가지 모드 선택 카드 렌더링
   // ============================================================================
+  Future<void> _loadMenuLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final useEnglish = prefs.getBool('stealth_room_menu_english') ?? false;
+    if (mounted && useEnglish != _menuEnglish) {
+      setState(() => _menuEnglish = useEnglish);
+    }
+  }
+
+  Future<void> _toggleMenuLanguage() async {
+    final next = !_menuEnglish;
+    setState(() => _menuEnglish = next);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('stealth_room_menu_english', next);
+  }
+
   Widget _buildMenu() {
     return SafeArea(
       // 아래는 하단 줄이 직접 피한다 — 그래야 줄의 배경이 제스처 바까지
@@ -928,19 +1028,39 @@ Return ONLY valid JSON: {"name":"..."}.
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text("대화 모드 선택",
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 25,
-                          fontWeight: FontWeight.bold,
-                          height: 1.3)),
+                  Text(
+                    _menuEnglish ? "Choose a Talk Mode" : "대화 모드 선택",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 25,
+                      fontWeight: FontWeight.bold,
+                      height: 1.3,
+                    ),
+                  ),
                   const SizedBox(height: 20),
-                  _buildMenuCard(1, "Duo Connect", "초청 직접 대화\n초청 만능 통역",
-                      Icons.people, const Color(0xFF3B82F6)),
-                  _buildMenuCard(2, "Circle Talk", "서클 구성원 대화",
-                      Icons.groups_rounded, const Color(0xFFA855F7)),
-                  _buildMenuCard(3, "Scenario Talk", "실전 상황 대화",
-                      Icons.smart_toy, const Color(0xFF22C55E)),
+                  _buildMenuCard(
+                    1,
+                    "Duo Connect",
+                    _menuEnglish
+                        ? "Talk with a Friend\nLive Interpretation"
+                        : "초청 직접 대화\n초청 만능 통역",
+                    Icons.people,
+                    const Color(0xFF3B82F6),
+                  ),
+                  _buildMenuCard(
+                    2,
+                    "Circle Talk",
+                    _menuEnglish ? "Group Conversation" : "서클 구성원 대화",
+                    Icons.groups_rounded,
+                    const Color(0xFFA855F7),
+                  ),
+                  _buildMenuCard(
+                    3,
+                    "Scenario Talk",
+                    _menuEnglish ? "Real-Life Scenarios" : "실전 상황 대화",
+                    Icons.smart_toy,
+                    const Color(0xFF22C55E),
+                  ),
                 ],
               ),
             ),
@@ -973,28 +1093,28 @@ Return ONLY valid JSON: {"name":"..."}.
               Expanded(
                 child: _buildBottomNavItem(
                   Icons.grid_view_rounded,
-                  '모드',
+                  _menuEnglish ? 'Modes' : '모드',
                   active: true,
                 ),
               ),
               Expanded(
                 child: _buildBottomNavItem(
                   Icons.storefront_rounded,
-                  '스토어',
+                  _menuEnglish ? 'Store' : '스토어',
                   onTap: () => context.pushNamed('Store'),
                 ),
               ),
               Expanded(
                 child: _buildBottomNavItem(
                   Icons.history_rounded,
-                  '사용 내역',
+                  _menuEnglish ? 'Usage' : '사용 내역',
                   onTap: () => showUsageSheet(context),
                 ),
               ),
               Expanded(
                 child: _buildBottomNavItem(
                   Icons.person_outline_rounded,
-                  '등록 정보',
+                  _menuEnglish ? 'Account' : '등록 정보',
                   onTap: () => showAccountSheet(context),
                 ),
               ),
@@ -1011,8 +1131,9 @@ Return ONLY valid JSON: {"name":"..."}.
     bool active = false,
     VoidCallback? onTap,
   }) {
-    final Color color =
-        active ? const Color(0xFF3B82F6) : const Color(0xFF8C93A1);
+    final Color color = active
+        ? const Color(0xFF3B82F6)
+        : const Color(0xFF8C93A1);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -1029,9 +1150,10 @@ Return ONLY valid JSON: {"name":"..."}.
                 label,
                 maxLines: 1,
                 style: TextStyle(
-                    color: color,
-                    fontSize: 11,
-                    fontWeight: active ? FontWeight.w700 : FontWeight.w400),
+                  color: color,
+                  fontSize: 11,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+                ),
               ),
             ),
           ],
@@ -1067,9 +1189,12 @@ Return ONLY valid JSON: {"name":"..."}.
         child: Row(
           children: [
             IconButton(
-              icon: const Icon(Icons.home_outlined,
-                  color: Color(0xFF22D3EE), size: 26),
-              tooltip: '로비로',
+              icon: const Icon(
+                Icons.home_outlined,
+                color: Color(0xFF22D3EE),
+                size: 26,
+              ),
+              tooltip: _menuEnglish ? 'Lobby' : '로비로',
               padding: const EdgeInsets.symmetric(horizontal: 8),
               constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
               onPressed: () => context.pushNamed('Lobby'),
@@ -1080,8 +1205,10 @@ Return ONLY valid JSON: {"name":"..."}.
               onTap: () => context.pushNamed('ChatHistory'),
               behavior: HitTestBehavior.opaque,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 9,
+                ),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(color: const Color(0x33FFFFFF)),
@@ -1099,13 +1226,42 @@ Return ONLY valid JSON: {"name":"..."}.
                 ),
               ),
             ),
+            const SizedBox(width: 4),
+            Tooltip(
+              message: _menuEnglish ? '한국어로 보기' : 'View in English',
+              child: InkWell(
+                onTap: _toggleMenuLanguage,
+                borderRadius: BorderRadius.circular(999),
+                child: Container(
+                  width: 38,
+                  height: 32,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: const Color(0x665EE7F7)),
+                    color: const Color(0x1422D3EE),
+                  ),
+                  child: Text(
+                    _menuEnglish ? '한' : 'EN',
+                    style: const TextStyle(
+                      color: Color(0xFF67E8F9),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ),
             IconButton(
               onPressed: _showManualDialog,
-              tooltip: '사용 설명서',
+              tooltip: _menuEnglish ? 'Guide' : '사용 설명서',
               padding: const EdgeInsets.only(left: 8),
               constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-              icon: const Icon(Icons.help_outline,
-                  color: Colors.amberAccent, size: 28),
+              icon: const Icon(
+                Icons.help_outline,
+                color: Colors.amberAccent,
+                size: 28,
+              ),
             ),
           ],
         ),
@@ -1203,8 +1359,11 @@ Return ONLY valid JSON: {"name":"..."}.
                 children: [
                   IconButton(
                     onPressed: onBack,
-                    icon: const Icon(Icons.arrow_back_ios_new,
-                        color: Colors.white, size: 22),
+                    icon: const Icon(
+                      Icons.arrow_back_ios_new,
+                      color: Colors.white,
+                      size: 22,
+                    ),
                     tooltip: backTooltip,
                   ),
                   const Spacer(),
@@ -1220,9 +1379,13 @@ Return ONLY valid JSON: {"name":"..."}.
                       minimumSize: const Size(0, 40),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
-                    child: const Text('Guide',
-                        style: TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'Guide',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1247,7 +1410,10 @@ Return ONLY valid JSON: {"name":"..."}.
                     Text(
                       subtitle,
                       style: const TextStyle(
-                          color: Colors.white54, fontSize: 14, height: 1.5),
+                        color: Colors.white54,
+                        fontSize: 14,
+                        height: 1.5,
+                      ),
                     ),
                     const SizedBox(height: 26),
                     // 추천 알약은 글자 폭만 쓴다 — 전체 폭을 채우면 아래
@@ -1261,20 +1427,27 @@ Return ONLY valid JSON: {"name":"..."}.
                           side: BorderSide(color: accent, width: 1.4),
                           shape: const StadiumBorder(),
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 22, vertical: 13),
+                            horizontal: 22,
+                            vertical: 13,
+                          ),
                         ),
                         child: recommending
                             ? SizedBox(
                                 width: 18,
                                 height: 18,
                                 child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: accent),
+                                  strokeWidth: 2,
+                                  color: accent,
+                                ),
                               )
-                            : Text(recommendLabel,
+                            : Text(
+                                recommendLabel,
                                 style: const TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 0.4)),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
                       ),
                     ),
                     const SizedBox(height: 26),
@@ -1285,8 +1458,12 @@ Return ONLY valid JSON: {"name":"..."}.
             ),
             // ── 결론 ── 바닥에 붙어 자판 위로 밀린다.
             Padding(
-              padding:
-                  EdgeInsets.fromLTRB(24, 6, 24, keyboardInset > 0 ? 12 : 24),
+              padding: EdgeInsets.fromLTRB(
+                24,
+                6,
+                24,
+                keyboardInset > 0 ? 12 : 24,
+              ),
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
@@ -1305,11 +1482,16 @@ Return ONLY valid JSON: {"name":"..."}.
                     foregroundColor: Colors.white,
                     minimumSize: const Size.fromHeight(56),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                   ),
-                  child: Text(startLabel,
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold)),
+                  child: Text(
+                    startLabel,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1355,9 +1537,7 @@ Return ONLY valid JSON: {"name":"..."}.
       recommendLabel: '서클 추천',
       recommending: _isRecommendingCircle,
       onRecommend: _recommendCircle,
-      fields: [
-        _setupField(_circleController, accent, '서클', '서클 이름을 입력하세요'),
-      ],
+      fields: [_setupField(_circleController, accent, '서클', '서클 이름을 입력하세요')],
       startLabel: '서클 대화 시작',
       onStart: () => _enterCircleTalk(_circleController.text),
     );
@@ -1365,14 +1545,23 @@ Return ONLY valid JSON: {"name":"..."}.
 
   /// 입력칸 한 줄. 라벨은 칸 **위**에 둔다 — placeholder 안에 넣으면
   /// 입력하는 순간 무엇을 적는 칸이었는지 사라진다.
-  Widget _setupField(TextEditingController controller, Color accent,
-      String label, String hint) {
+  Widget _setupField(
+    TextEditingController controller,
+    Color accent,
+    String label,
+    String hint,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: const TextStyle(
-                color: Colors.white54, fontSize: 13, height: 1.4)),
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white54,
+            fontSize: 13,
+            height: 1.4,
+          ),
+        ),
         const SizedBox(height: 8),
         TextField(
           controller: controller,
@@ -1386,8 +1575,10 @@ Return ONLY valid JSON: {"name":"..."}.
             filled: true,
             fillColor: const Color(0xFF1A1A1A),
             counterText: '',
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 18,
+              vertical: 18,
+            ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
               borderSide: const BorderSide(color: Color(0x1FFFFFFF)),
@@ -1403,7 +1594,12 @@ Return ONLY valid JSON: {"name":"..."}.
   }
 
   Widget _buildMenuCard(
-      int mode, String title, String desc, IconData icon, Color color) {
+    int mode,
+    String title,
+    String desc,
+    IconData icon,
+    Color color,
+  ) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -1442,17 +1638,23 @@ Return ONLY valid JSON: {"name":"..."}.
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(title,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold)),
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 6),
-                      Text(desc,
-                          style: const TextStyle(
-                              color: Color(0xFF8C93A1),
-                              fontSize: 14,
-                              height: 1.5)),
+                      Text(
+                        desc,
+                        style: const TextStyle(
+                          color: Color(0xFF8C93A1),
+                          fontSize: 14,
+                          height: 1.5,
+                        ),
+                      ),
                     ],
                   ),
                 ),

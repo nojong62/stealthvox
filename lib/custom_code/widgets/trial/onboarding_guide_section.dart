@@ -23,7 +23,7 @@ class OnboardingGuideSection extends StatelessWidget {
               borderRadius: BorderRadius.circular(20),
             ),
             child: const Text(
-              '처음 오셨나요',
+              'New Here?',
               style: TextStyle(
                 color: Color(0xFF5DCAA5),
                 fontSize: 12,
@@ -33,7 +33,7 @@ class OnboardingGuideSection extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           const Text(
-            '친구와 10분 동안\nDuo 직접 통화를\n체험해 보세요',
+            'Try a 10-minute\nDuo call with\na friend',
             style: TextStyle(
               color: Colors.white,
               fontSize: 17,
@@ -43,7 +43,7 @@ class OnboardingGuideSection extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            '대화가 끝나면 같은 히스토리 공부방을\n5분 동안 이용할 수 있습니다.\n맛보기는 폰 한 대에 1번입니다.',
+            'After the call, review it for 5 minutes.\nOne trial per device.',
             style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 13),
           ),
           const SizedBox(height: 10),
@@ -52,7 +52,7 @@ class OnboardingGuideSection extends StatelessWidget {
               Icon(Icons.mic_none, size: 14, color: Color(0xFF999999)),
               SizedBox(width: 6),
               Text(
-                '마이크를 사용합니다',
+                'Microphone Required',
                 style: TextStyle(color: Color(0xFF999999), fontSize: 12),
               ),
             ],

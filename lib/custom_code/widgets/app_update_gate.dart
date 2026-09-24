@@ -3,9 +3,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '/custom_code/services/app_update_policy.dart';
 
-/// 모든 라우트 위에서 동작하는 앱 업데이트 게이트.
+/// 모든 라우트 위에서 동작하는 앱 Update 게이트.
 ///
-/// 권장 업데이트의 "나중에" 상태는 이 State에만 보관하므로 앱을 완전히
+/// 권장 Update의 "Later" 상태는 이 State에만 보관하므로 앱을 완전히
 /// 종료했다가 다시 실행하면 다시 안내할 수 있다.
 class AppUpdateGate extends StatefulWidget {
   const AppUpdateGate({
@@ -57,7 +57,7 @@ class _AppUpdateGateState extends State<AppUpdateGate> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                     title: const Text(
-                      '업데이트 안내',
+                      'Update Available',
                       style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
@@ -74,14 +74,14 @@ class _AppUpdateGateState extends State<AppUpdateGate> {
                             () => _recommendedDismissedForSession = true,
                           ),
                           child: const Text(
-                            '나중에',
+                            'Later',
                             style: TextStyle(color: Colors.white60),
                           ),
                         ),
                       TextButton(
                         onPressed: _openStore,
                         child: const Text(
-                          '업데이트',
+                          'Update',
                           style: TextStyle(
                             color: Color(0xFF0A84FF),
                             fontWeight: FontWeight.bold,

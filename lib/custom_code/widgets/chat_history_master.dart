@@ -316,7 +316,16 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool _isAutoRecording = false;
   Timer? _silenceTimer;
   int _silenceCounter = 0;
+  int _autoVadElapsedTicks = 0;
+  bool _autoVadPollBusy = false;
   bool _hasSpoken = false;
+
+  // The phone mic is used when Bluetooth SCO management is disabled. The old
+  // -25 dBFS threshold could miss normal speech when the phone was farther away.
+  static const double _turnPracticeSpeechDbfs = -40.0;
+  static const int _turnPracticeSilenceTicks = 15; // 1.5 seconds
+  static const int _turnPracticeNoSpeechTicks = 100; // 10 seconds
+  static const int _turnPracticeMaxTicks = 300; // 30-second safety stop
 
   /// 못 만든 이유. null이면 실패한 적이 없다. 카드에 그대로 뜬다.
   String? _mySpeechError;
@@ -2274,6 +2283,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       });
     _hasSpoken = false;
     _silenceCounter = 0;
+    _autoVadElapsedTicks = 0;
+    _autoVadPollBusy = false;
     try {
       final dir = await getTemporaryDirectory();
       final path =
@@ -2281,7 +2292,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       await appAudioRecorder.start(
         const RecordConfig(
             androidConfig: kMicAndroidConfig,
-            encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1),
+            encoder: AudioEncoder.aacLc,
+            sampleRate: 16000,
+            numChannels: 1),
         path: path,
       );
       _silenceTimer?.cancel();
@@ -2291,30 +2304,43 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           timer.cancel();
           return;
         }
+        // Do not overlap async amplitude/stop calls from Timer.periodic.
+        if (_autoVadPollBusy) return;
+        _autoVadPollBusy = true;
         try {
-          if (await appAudioRecorder.isRecording()) {
-            final amp = await appAudioRecorder.getAmplitude();
-            if (amp.current > -25.0) {
-              _hasSpoken = true;
-              _silenceCounter = 0;
-            } else {
-              _silenceCounter++;
-              if (_hasSpoken && _silenceCounter >= 15) {
-                timer.cancel();
-                await _stopAutoVADRecordingAndProcess();
-              } else if (!_hasSpoken && _silenceCounter >= 50) {
-                timer.cancel();
-                await appAudioRecorder.stop();
-                if (mounted) setState(() => _isAutoRecording = false);
-                if (mounted && isPracticeMode && !isPaused)
-                  _startAutoVADRecording();
-              }
-            }
-          } else {
+          if (!await appAudioRecorder.isRecording()) {
             timer.cancel();
+            await _recoverAutoVADRecording('recorder stopped unexpectedly');
+            return;
           }
-        } catch (_) {
+
+          _autoVadElapsedTicks++;
+          final amp = await appAudioRecorder.getAmplitude();
+          if (amp.current > _turnPracticeSpeechDbfs) {
+            _hasSpoken = true;
+            _silenceCounter = 0;
+          } else {
+            _silenceCounter++;
+          }
+
+          final reachedSilence =
+              _hasSpoken && _silenceCounter >= _turnPracticeSilenceTicks;
+          final reachedMax =
+              _hasSpoken && _autoVadElapsedTicks >= _turnPracticeMaxTicks;
+          final noSpeech =
+              !_hasSpoken && _autoVadElapsedTicks >= _turnPracticeNoSpeechTicks;
+          if (reachedSilence || reachedMax) {
+            timer.cancel();
+            await _stopAutoVADRecordingAndProcess();
+          } else if (noSpeech) {
+            timer.cancel();
+            await _restartAutoVADRecording();
+          }
+        } catch (e) {
           timer.cancel();
+          await _recoverAutoVADRecording('amplitude polling failed: $e');
+        } finally {
+          _autoVadPollBusy = false;
         }
       });
     } catch (e) {
@@ -2325,7 +2351,12 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   Future<void> _stopAutoVADRecordingAndProcess() async {
     _silenceTimer?.cancel();
-    final path = await appAudioRecorder.stop();
+    String? path;
+    try {
+      path = await appAudioRecorder.stop();
+    } catch (e) {
+      debugPrint('[turnPracticeVAD] stop failed: $e');
+    }
     BillingTicker.instance.resumeFromActivity('history_practice_stt_result');
     if (mounted)
       setState(() {
@@ -2336,6 +2367,46 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       await _processAutoVADRecording(path);
     } else {
       if (mounted && isPracticeMode && !isPaused) _startAutoVADRecording();
+    }
+  }
+
+  Future<void> _restartAutoVADRecording() async {
+    try {
+      await appAudioRecorder.stop();
+    } catch (e) {
+      debugPrint('[turnPracticeVAD] restart stop failed: $e');
+    }
+    if (mounted) {
+      setState(() {
+        _isAutoRecording = false;
+        _tutorUserRecording = false;
+      });
+    }
+    if (mounted && isPracticeMode && !isPaused) {
+      await _startAutoVADRecording();
+    }
+  }
+
+  /// Recover instead of leaving the UI permanently stuck on "recording".
+  Future<void> _recoverAutoVADRecording(String reason) async {
+    debugPrint('[turnPracticeVAD] recovering: $reason');
+    String? path;
+    try {
+      path = await appAudioRecorder.stop();
+    } catch (e) {
+      debugPrint('[turnPracticeVAD] recovery stop failed: $e');
+    }
+    if (mounted) {
+      setState(() {
+        _isAutoRecording = false;
+        _tutorUserRecording = false;
+      });
+    }
+    if (!mounted || !isPracticeMode || isPaused) return;
+    if (_hasSpoken && path != null && path.isNotEmpty) {
+      await _processAutoVADRecording(path);
+    } else {
+      await _startAutoVADRecording();
     }
   }
 
@@ -2506,12 +2577,26 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           }
         }
       } else {
-        if (isPracticeMode && !isPaused) _startAutoVADRecording();
+        _acceptPracticeRecordingWithoutTranscript(
+          path,
+          'STT HTTP ${streamed.statusCode}: $body',
+        );
       }
     } catch (e) {
       debugPrint("[processAutoVADRecording] $e");
-      if (mounted && isPracticeMode && !isPaused) _startAutoVADRecording();
+      _acceptPracticeRecordingWithoutTranscript(path, 'STT failed: $e');
     }
+  }
+
+  /// Conversation flow wins over scoring when DNS/network/STT is unavailable.
+  void _acceptPracticeRecordingWithoutTranscript(String path, String reason) {
+    debugPrint('[turnPracticeSTT] $reason; continuing without transcript');
+    if (!mounted || !isPracticeMode || isPaused) return;
+    _turnPracticeRetryCount = 0;
+    if (currentIndex < _tutorLines.length) {
+      _tutorLines[currentIndex]['user_record_path'] = path;
+    }
+    _nextTurn();
   }
 
   void _exitShadowing() {
@@ -3523,9 +3608,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         final jsonResult = jsonDecode(data['choices'][0]['message']['content']);
         // 옛 판은 키가 ko/en이었다. 캐시된 응답이 섞여 와도 읽히게 둘 다 본다.
-        final newPrompt = ((jsonResult['prompt'] ?? jsonResult['ko']) as String?
-                ?? '')
-            .trim();
+        final newPrompt =
+            ((jsonResult['prompt'] ?? jsonResult['ko']) as String? ?? '')
+                .trim();
         setState(() {
           appOriginalText = newPrompt;
           _appAnswerTarget =
@@ -3565,7 +3650,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       await appAudioRecorder.start(
         const RecordConfig(
             androidConfig: kMicAndroidConfig,
-            encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1),
+            encoder: AudioEncoder.aacLc,
+            sampleRate: 16000,
+            numChannels: 1),
         path: path,
       );
       if (mounted) setState(() => _appIsRecording = true);

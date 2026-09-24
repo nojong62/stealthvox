@@ -177,7 +177,7 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   // 키보드가 올라올 때 포커스된 입력창이 보이도록 자동 스크롤
-  // (항상 맨 아래로 스크롤하면 비밀번호 칸이 화면 밖으로 밀려나 다시 끌어내려야 했음 →
+  // (항상 맨 아래로 스크롤하면 Password 칸이 화면 밖으로 밀려나 다시 끌어내려야 했음 →
   //  포커스된 필드 자체를 기준으로 스크롤)
   void _onFocusChange() {
     final FocusNode? focused = _emailFocusNode.hasFocus
@@ -344,7 +344,8 @@ class _IntroMasterState extends State<IntroMaster>
       if (errorContext != null && errorContext.mounted) {
         ScaffoldMessenger.of(
           errorContext,
-        ).showSnackBar(SnackBar(content: Text('체험을 시작할 수 없습니다: $e')));
+        ).showSnackBar(
+            SnackBar(content: Text('Unable to start the trial: $e')));
       }
     } finally {
       if (authNotificationSuppressed) {
@@ -373,7 +374,7 @@ class _IntroMasterState extends State<IntroMaster>
       'created_at': FieldValue.serverTimestamp(),
       'last_active': FieldValue.serverTimestamp(),
       'last_message_time': FieldValue.serverTimestamp(),
-      'room_name': 'Duo 직접 통화 맛보기',
+      'room_name': 'Duo Trial Call',
       'is_pinned': false,
       'msg_count': 0,
       'mode': 'duo',
@@ -414,17 +415,17 @@ class _IntroMasterState extends State<IntroMaster>
       builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E22),
         title: const Text(
-          '듀오 맛보기가 종료되었습니다',
+          'Duo Trial Ended',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
         ),
         content: const Text(
-          '10분 직접 통화와 연결된 5분 공부방은 폰 한 대에 1번만 이용할 수 있습니다. 회원가입 후 계속 이용해 주세요.',
+          'The 10-minute call and 5-minute study trial are available once per device. Sign up to continue.',
           style: TextStyle(color: Color(0xFFBFC1C9), height: 1.5),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('로그인 방법 선택하기'),
+            child: const Text('Choose a Login Method'),
           ),
         ],
       ),
@@ -471,7 +472,7 @@ class _IntroMasterState extends State<IntroMaster>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            e.message ?? "오류가 발생했습니다.",
+            e.message ?? "An error occurred.",
             style: const TextStyle(
               fontWeight: FontWeight.bold,
               color: Colors.white,
@@ -490,7 +491,7 @@ class _IntroMasterState extends State<IntroMaster>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            "위에 이메일을 먼저 입력해주세요.",
+            "Enter your email first.",
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
         ),
@@ -505,7 +506,7 @@ class _IntroMasterState extends State<IntroMaster>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            "재설정 메일을 보냈습니다! 메일함(혹시 스팸함)을 확인하세요.",
+            "Reset email sent. Check your inbox and spam folder.",
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           backgroundColor: Colors.green,
@@ -515,7 +516,8 @@ class _IntroMasterState extends State<IntroMaster>
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text("전송 실패: ${e.toString()}")));
+      ).showSnackBar(
+          SnackBar(content: Text("Failed to send: ${e.toString()}")));
     }
   }
 
@@ -621,7 +623,7 @@ class _IntroMasterState extends State<IntroMaster>
     showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
-      barrierLabel: 'Duo 한 컷 닫기',
+      barrierLabel: 'Close Duo Preview',
       barrierColor: Colors.black.withValues(alpha: 0.88),
       transitionDuration: const Duration(milliseconds: 220),
       pageBuilder: (dialogContext, animation, secondaryAnimation) {
@@ -724,7 +726,7 @@ class _IntroMasterState extends State<IntroMaster>
                     // 화살표는 크기가 정해져 있어 그대로 둔다.
                     Flexible(
                       child: Text(
-                        '10분 듀오 맛보기',
+                        'Try Duo for 10 Minutes',
                         maxLines: 2,
                         style: TextStyle(
                           color: Color(0xFFF9FAFC),
@@ -762,7 +764,7 @@ class _IntroMasterState extends State<IntroMaster>
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text(
-            '이미 계정이 있어요',
+            'Already have an account?',
             style: TextStyle(
               fontSize: 14.5,
               fontWeight: FontWeight.w500,
@@ -917,7 +919,7 @@ class _IntroMasterState extends State<IntroMaster>
   }) {
     return ConstrainedBox(
       // 📐 높이를 못 박으면 라벨이 두 줄이 될 때 버튼 밖으로 잘린다
-      //   (실기기 2.0배: "10분 Duo 맛보기 시작"의 '시작'이 사라졌다,
+      //   (실기기 2.0배: "Try Duo for 10 Minutes"의 '시작'이 사라졌다,
       //   2026-08-27). 최소 높이만 두고 내용만큼 자라게 한다.
       constraints: const BoxConstraints(minHeight: 56),
       child: SizedBox(
@@ -1480,14 +1482,14 @@ class _IntroMasterState extends State<IntroMaster>
                   Text.rich(
                     TextSpan(
                       children: [
-                        const TextSpan(text: '당신의 '),
+                        const TextSpan(text: 'Your '),
                         TextSpan(
-                          text: '이야기',
+                          text: 'Story',
                           style: TextStyle(
                             foreground: Paint()..shader = storyGradient,
                           ),
                         ),
-                        const TextSpan(text: '가\n최고의 영어 교재가\n됩니다'),
+                        const TextSpan(text: '\nIs Your Best\nLanguage Lesson'),
                       ],
                     ),
                     textAlign: TextAlign.left,
@@ -1509,7 +1511,7 @@ class _IntroMasterState extends State<IntroMaster>
                   const Spacer(flex: 2),
                   Center(child: _buildPageIndicator(0, tealActive: true)),
                   const Spacer(flex: 2),
-                  _buildWelcomePageFooter('옆으로 밀어 계속하기'),
+                  _buildWelcomePageFooter('Swipe to Continue'),
                   SizedBox(height: compact ? 2 : 6),
                 ],
               ),
@@ -1545,7 +1547,7 @@ class _IntroMasterState extends State<IntroMaster>
                     children: [
                       IconButton(
                         onPressed: _goBackToStory,
-                        tooltip: '이전',
+                        tooltip: 'Back',
                         style: IconButton.styleFrom(
                           foregroundColor: const Color(0xFFE6E7EA),
                           backgroundColor: Colors.white.withValues(
@@ -1565,7 +1567,7 @@ class _IntroMasterState extends State<IntroMaster>
                           foregroundColor: const Color(0xFFBFC1C9),
                         ),
                         child: const Text(
-                          '로그인',
+                          'Log In',
                           style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w700,
@@ -1576,7 +1578,7 @@ class _IntroMasterState extends State<IntroMaster>
                   ),
                   SizedBox(height: compact ? 24 : 36),
                   const Text(
-                    '회원가입 없이\n바로 체험해 보세요',
+                    'Try It Without\nSigning Up',
                     style: TextStyle(
                       color: Color(0xFFF7F8FA),
                       fontSize: 30,
@@ -1589,7 +1591,7 @@ class _IntroMasterState extends State<IntroMaster>
                   // 제목 바로 아래가 시작 버튼이다. 사이에 있던 부제·소개
                   // 카드는 아래 안내 1·2·3과 같은 말을 반복하고 있었다.
                   _buildPrimaryAction(
-                    label: '10분 Duo 맛보기 시작',
+                    label: 'Try Duo for 10 Minutes',
                     icon: Icons.mic_rounded,
                     onPressed: () {
                       debugPrint(
@@ -1603,18 +1605,18 @@ class _IntroMasterState extends State<IntroMaster>
                   const Spacer(),
                   SizedBox(height: compact ? 18 : 28),
                   _buildSecondaryAction(
-                    label: '로그인해서 시작하기',
+                    label: 'Log In to Start',
                     icon: Icons.login_rounded,
                     onPressed: _openAuthScreen,
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    '체험 시작 시 마이크 권한을 요청합니다.',
+                    'Microphone access is required.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Color(0xFF737680), fontSize: 11.5),
                   ),
                   const SizedBox(height: 10),
-                  _buildWelcomePageFooter('옆으로 밀면 이전 화면으로'),
+                  _buildWelcomePageFooter('Swipe to Go Back'),
                 ],
               ),
             ),
@@ -1624,7 +1626,7 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
-  /// Duo 직접 통화 맛보기 안내. 팝업이 아니라 가이드 페이지에 그대로 얹는다.
+  /// Duo Trial Call 안내. 팝업이 아니라 가이드 페이지에 그대로 얹는다.
   Widget _buildUsageGuideSection() {
     return Container(
       width: double.infinity,
@@ -1640,22 +1642,22 @@ class _IntroMasterState extends State<IntroMaster>
         children: [
           _buildGuideStep(
             number: 1,
-            title: '대화할 친구를 초대하세요',
-            description: '비회원도 초대 링크로 참여할 수 있습니다.',
+            title: 'Invite a Friend',
+            description: 'Anyone can join with an invite link.',
           ),
           const SizedBox(height: 16),
           _buildGuideStep(
             number: 2,
-            title: '게스트 입장 후 10분간 통화하세요',
+            title: 'Talk for 10 Minutes',
             description:
-                '게스트가 Duo 방에 입장하는 순간 1회 맛보기가 사용 처리되고, 실제 목소리로 10분 동안 통화할 수 있습니다.',
+                'Your one-time trial starts when your guest joins the Duo room.',
           ),
           const SizedBox(height: 16),
           _buildGuideStep(
             number: 3,
-            title: '연결된 공부방에서 5분간 복습하세요',
+            title: 'Review for 5 Minutes',
             description:
-                '10분이 끝나거나 그전에 통화를 끊으면, 방금 대화의 히스토리 공부방으로 자동 연결됩니다. 이 공부방 안의 모든 기능을 5분 동안 이용할 수 있습니다.',
+                'After the call, review the conversation in the study room for 5 minutes.',
           ),
         ],
       ),
@@ -1677,8 +1679,8 @@ class _IntroMasterState extends State<IntroMaster>
       'Italian',
       'Dutch',
     ];
-    String nativeLang = _trialNativeLang;
-    String targetLang = _trialTargetLang;
+    String? nativeLang;
+    String? targetLang;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1697,7 +1699,7 @@ class _IntroMasterState extends State<IntroMaster>
                 side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
               ),
               title: const Text(
-                '언어 설정',
+                'Language Settings',
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -1707,19 +1709,21 @@ class _IntroMasterState extends State<IntroMaster>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   _languageDropdown(
-                    label: '대화 언어',
+                    label: 'Chat Language',
                     value: nativeLang,
                     items: languages,
-                    onChanged: (value) =>
-                        setDialogState(() => nativeLang = value),
+                    onChanged: (value) => setDialogState(() {
+                      nativeLang = value;
+                    }),
                   ),
                   const SizedBox(height: 14),
                   _languageDropdown(
-                    label: '학습 언어',
+                    label: 'Learn Language',
                     value: targetLang,
                     items: languages,
-                    onChanged: (value) =>
-                        setDialogState(() => targetLang = value),
+                    onChanged: (value) => setDialogState(() {
+                      targetLang = value;
+                    }),
                   ),
                 ],
               ),
@@ -1745,17 +1749,19 @@ class _IntroMasterState extends State<IntroMaster>
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    onPressed: () {
-                      if (mounted) {
-                        setState(() {
-                          _trialNativeLang = nativeLang;
-                          _trialTargetLang = targetLang;
-                        });
-                      }
-                      Navigator.of(dialogContext).pop(true);
-                    },
+                    onPressed: nativeLang == null || targetLang == null
+                        ? null
+                        : () {
+                            if (mounted) {
+                              setState(() {
+                                _trialNativeLang = nativeLang!;
+                                _trialTargetLang = targetLang!;
+                              });
+                            }
+                            Navigator.of(dialogContext).pop(true);
+                          },
                     child: const Text(
-                      '확인',
+                      'Confirm',
                       style: TextStyle(
                         color: Color(0xFFCECBF6),
                         fontWeight: FontWeight.bold,
@@ -1774,7 +1780,7 @@ class _IntroMasterState extends State<IntroMaster>
 
   Widget _languageDropdown({
     required String label,
-    required String value,
+    required String? value,
     required List<String> items,
     required ValueChanged<String> onChanged,
   }) {
@@ -1797,6 +1803,10 @@ class _IntroMasterState extends State<IntroMaster>
             ),
             child: DropdownButton<String>(
               value: value,
+              hint: const Text(
+                'Select',
+                style: TextStyle(color: Colors.white70, fontSize: 15),
+              ),
               isExpanded: true,
               dropdownColor: const Color(0xFF2A2A2A),
               underline: const SizedBox(),
@@ -1830,7 +1840,7 @@ class _IntroMasterState extends State<IntroMaster>
                     _currentScreen = IntroScreen.welcome;
                     _showEmailForm = false;
                   }),
-                  tooltip: '뒤로',
+                  tooltip: 'Back',
                   style: IconButton.styleFrom(
                     foregroundColor: const Color(0xFFE6E7EA),
                     backgroundColor: Colors.white.withValues(alpha: 0.045),
@@ -1890,7 +1900,7 @@ class _IntroMasterState extends State<IntroMaster>
         ),
         icon: const Icon(Icons.manage_search_rounded, size: 20),
         label: const Text(
-          '로그인 방법이 기억나지 않나요?  계정 찾기',
+          'Forgot how you logged in? Find Your Account',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
         ),
@@ -1913,12 +1923,12 @@ class _IntroMasterState extends State<IntroMaster>
                   ? null
                   : () => setState(() => _currentScreen = IntroScreen.auth),
               icon: const Icon(Icons.arrow_back, color: Colors.white),
-              tooltip: '뒤로',
+              tooltip: 'Back',
             ),
           ),
           const SizedBox(height: 12),
           const Text(
-            '내 계정 찾아보기',
+            'Find My Account',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white,
@@ -1929,7 +1939,7 @@ class _IntroMasterState extends State<IntroMaster>
           ),
           const SizedBox(height: 12),
           const Text(
-            '이전에 사용했던 로그인 방법을 하나씩 확인해 보세요. 계정은 자동으로 합쳐지지 않으며, 남은 시간과 학습 기록은 별도로 유지됩니다.',
+            'Check each login method you may have used. Accounts and their data are kept separate.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Color(0xFFB7B7C2),
@@ -1940,7 +1950,7 @@ class _IntroMasterState extends State<IntroMaster>
           const SizedBox(height: 28),
           _buildDiscoveryActionButton(
             provider: 'google',
-            label: 'Google 계정 확인',
+            label: 'Check Google Account',
             icon: Image.asset(
               'assets/images/google_logo.png',
               width: 20,
@@ -1954,7 +1964,7 @@ class _IntroMasterState extends State<IntroMaster>
           const SizedBox(height: 12),
           _buildDiscoveryActionButton(
             provider: 'kakao',
-            label: '카카오 계정 확인',
+            label: 'Check Kakao Account',
             backgroundColor: const Color(0xFFFEE500),
             foregroundColor: const Color(0xFF191919),
             icon: Image.asset(
@@ -1970,7 +1980,7 @@ class _IntroMasterState extends State<IntroMaster>
           const SizedBox(height: 12),
           _buildDiscoveryActionButton(
             provider: 'email',
-            label: '이메일 계정 확인',
+            label: 'Check Email Account',
             icon: const Icon(Icons.email_outlined, size: 20),
             onTap: _showEmailDiscoveryGuide,
           ),
@@ -1990,7 +2000,7 @@ class _IntroMasterState extends State<IntroMaster>
             const SizedBox(height: 28),
             if (foundResults.length > 1) ...[
               const Text(
-                '두 개 이상의 기존 계정을 찾았습니다. 각 계정의 남은 시간과 학습 기록은 서로 합쳐지지 않습니다. 사용할 계정을 직접 선택해 주세요.',
+                'Multiple accounts found. Their time and learning history cannot be combined. Choose one account.',
                 style: TextStyle(
                   color: Color(0xFFB7B7C2),
                   fontSize: 13,
@@ -2007,7 +2017,7 @@ class _IntroMasterState extends State<IntroMaster>
                 ? null
                 : _confirmNewAccountFromDiscovery,
             icon: const Icon(Icons.person_add_alt_1, size: 18),
-            label: const Text('새 계정 만들기'),
+            label: const Text('Create New Account'),
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.white,
               side: BorderSide(color: Colors.white.withValues(alpha: 0.22)),
@@ -2020,7 +2030,7 @@ class _IntroMasterState extends State<IntroMaster>
                 ? null
                 : () => launchURL('mailto:support@stealthvox.app'),
             icon: const Icon(Icons.support_agent, size: 18),
-            label: const Text('고객지원 문의'),
+            label: const Text('Contact Support'),
             style: TextButton.styleFrom(
               foregroundColor: const Color(0xFFB9D7FF),
             ),
@@ -2073,7 +2083,7 @@ class _IntroMasterState extends State<IntroMaster>
   Widget _buildDiscoveredAccountCard(AccountDiscoveryResult account) {
     final minutes = (account.remainingTime / 60).floor();
     final lastUsed = account.lastUsedAt == null
-        ? '확인 불가'
+        ? 'Unavailable'
         : '${account.lastUsedAt!.year}.${account.lastUsedAt!.month.toString().padLeft(2, '0')}.${account.lastUsedAt!.day.toString().padLeft(2, '0')}';
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -2099,13 +2109,13 @@ class _IntroMasterState extends State<IntroMaster>
           const SizedBox(height: 8),
           Text(
             account.maskedIdentifier.isEmpty
-                ? '인증된 계정'
+                ? 'Verified Account'
                 : account.maskedIdentifier,
             style: const TextStyle(color: Color(0xFFD7D7DE), fontSize: 13),
           ),
           const SizedBox(height: 10),
           Text(
-            '남은 시간: $minutes분\n학습 기록: ${account.historyCount}개\n마지막 사용: $lastUsed',
+            'Time left: $minutes min\nLearning history: ${account.historyCount}\nLast used: $lastUsed',
             style: const TextStyle(
               color: Color(0xFFB7B7C2),
               fontSize: 13,
@@ -2115,7 +2125,7 @@ class _IntroMasterState extends State<IntroMaster>
           if (account.parentConsentPending) ...[
             const SizedBox(height: 8),
             const Text(
-              '보호자 동의 대기 중',
+              'Waiting for Parental Consent',
               style: TextStyle(
                 color: Color(0xFFFFD166),
                 fontSize: 12,
@@ -2142,7 +2152,7 @@ class _IntroMasterState extends State<IntroMaster>
                 ),
               ),
               child: const Text(
-                '이 계정으로 계속하기',
+                'Continue with This Account',
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -2175,21 +2185,21 @@ class _IntroMasterState extends State<IntroMaster>
         if (result.found) {
           _accountDiscoveryResults.add(result);
           _accountDiscoveryMessage =
-              '기존 StealthVox 기록을 찾았습니다. 사용할 계정을 직접 선택해 주세요.';
+              'We found existing StealthVox data. Choose the account you want to use.';
         } else {
           _accountDiscoveryMessage =
-              '이 계정에서는 기존 StealthVox 기록을 찾지 못했습니다. 다른 계정이나 다른 로그인 방법을 확인해 보세요.';
+              'No StealthVox data was found for this account. Try another account or login method.';
         }
       });
     } on AccountDiscoveryCancelledException {
       if (!mounted) return;
-      setState(() => _accountDiscoveryMessage = '계정 확인이 취소되었습니다.');
+      setState(() => _accountDiscoveryMessage = 'Account check canceled.');
     } catch (e) {
       debugPrint('[AccountDiscovery] lookup failed: $e');
       if (!mounted) return;
       setState(() {
         _accountDiscoveryMessage =
-            '계정 정보를 확인하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.';
+            'Unable to check account information. Check your connection and try again.';
       });
     } finally {
       if (mounted) setState(() => _accountDiscoveryBusyProvider = '');
@@ -2217,7 +2227,8 @@ class _IntroMasterState extends State<IntroMaster>
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('계정으로 계속할 수 없습니다: $e')));
+        ).showSnackBar(SnackBar(
+            content: Text('Unable to continue with this account: $e')));
       }
     } finally {
       AppStateNotifier.instance.updateNotifyOnAuthChange(true);
@@ -2239,19 +2250,20 @@ class _IntroMasterState extends State<IntroMaster>
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF161616),
-        title: const Text('새 계정을 만들까요?', style: TextStyle(color: Colors.white)),
+        title: const Text('Create a New Account?',
+            style: TextStyle(color: Colors.white)),
         content: const Text(
-          '새 계정을 만들면 이전 계정의 남은 시간과 학습 기록은 자동으로 옮겨지지 않습니다. 현재 선택한 로그인 방법으로 새로 가입하시겠습니까?',
+          'Time and learning history from your previous account will not transfer. Sign up with this login method?',
           style: TextStyle(color: Colors.white70, height: 1.45),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('이전 계정 다시 찾기'),
+            child: const Text('Find Previous Account'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('이 계정으로 새로 가입'),
+            child: const Text('Sign Up with This Account'),
           ),
         ],
       ),
@@ -2281,10 +2293,10 @@ class _IntroMasterState extends State<IntroMaster>
 
   String _providerDescription(String provider) {
     return switch (provider) {
-      'kakao' => '이전에 카카오 계정으로 가입했습니다.',
-      'google' => '이전에 Google 계정으로 가입했습니다.',
-      'email' => '이전에 이메일 계정으로 가입했습니다.',
-      _ => '사용할 로그인 방법을 선택해 주세요.',
+      'kakao' => 'You previously signed up with Kakao.',
+      'google' => 'You previously signed up with Google.',
+      'email' => 'You previously signed up with email.',
+      _ => 'Choose a login method.',
     };
   }
 
@@ -2331,7 +2343,7 @@ class _IntroMasterState extends State<IntroMaster>
 
     switch (provider) {
       case 'kakao':
-        label = '카카오톡으로 계속하기';
+        label = 'Continue with Kakao';
         backgroundColor = const Color(0xFFFEE500);
         foregroundColor = const Color(0xFF191919);
         icon = Image.asset(
@@ -2350,7 +2362,7 @@ class _IntroMasterState extends State<IntroMaster>
             );
         break;
       case 'google':
-        label = 'Google로 계속하기';
+        label = 'Continue with Google';
         backgroundColor = const Color(0xFFF7F7F8);
         foregroundColor = const Color(0xFF17181B);
         border = Border.all(color: Colors.white.withValues(alpha: 0.12));
@@ -2370,7 +2382,7 @@ class _IntroMasterState extends State<IntroMaster>
             );
         break;
       case 'email':
-        label = _showEmailForm ? '이메일 입력 닫기' : '이메일로 계속하기';
+        label = _showEmailForm ? 'Close Email Form' : 'Continue with Email';
         backgroundColor = const Color(0xFF24262D);
         foregroundColor = const Color(0xFFF2F3F6);
         border = Border.all(color: Colors.white.withValues(alpha: 0.08));
@@ -2446,7 +2458,7 @@ class _IntroMasterState extends State<IntroMaster>
                           borderRadius: BorderRadius.circular(99),
                         ),
                         child: Text(
-                          '최근',
+                          'Recent',
                           style: TextStyle(
                             color: provider == 'kakao'
                                 ? const Color(0xFF3B3B36)
@@ -2483,15 +2495,15 @@ class _IntroMasterState extends State<IntroMaster>
     if (lastProvider == null) {
       return [
         _authSectionTitle(
-          title: '새로 방문하신 분',
-          description: '사용할 로그인 방법을 선택해 주세요.',
+          title: 'New Here?',
+          description: 'Choose a login method.',
         ),
       ];
     }
 
     return [
       _authSectionTitle(
-        title: '계정으로 계속하기',
+        title: 'Continue with Account',
         description: _providerDescription(lastProvider),
       ),
     ];
@@ -2573,10 +2585,10 @@ class _IntroMasterState extends State<IntroMaster>
             ),
             child: Row(
               children: [
-                _emailTabBtn('로그인', isLoginMode, () {
+                _emailTabBtn('Log In', isLoginMode, () {
                   setState(() => isLoginMode = true);
                 }),
-                _emailTabBtn('가입하기', !isLoginMode, () {
+                _emailTabBtn('Sign Up', !isLoginMode, () {
                   setState(() => isLoginMode = false);
                 }),
               ],
@@ -2585,7 +2597,7 @@ class _IntroMasterState extends State<IntroMaster>
           const SizedBox(height: 14),
           _buildTextField(
             emailController,
-            '이메일 주소',
+            'Email',
             Icons.email_outlined,
             false,
             focusNode: _emailFocusNode,
@@ -2596,7 +2608,7 @@ class _IntroMasterState extends State<IntroMaster>
           const SizedBox(height: 11),
           _buildTextField(
             passwordController,
-            '비밀번호',
+            'Password',
             Icons.lock_outline_rounded,
             true,
             focusNode: _passwordFocusNode,
@@ -2621,7 +2633,8 @@ class _IntroMasterState extends State<IntroMaster>
                   fontWeight: FontWeight.w800,
                 ),
               ),
-              child: Text(isLoginMode ? '이메일로 로그인' : '이메일로 가입하기'),
+              child: Text(
+                  isLoginMode ? 'Log In with Email' : 'Sign Up with Email'),
             ),
           ),
           if (isLoginMode) ...[
@@ -2633,7 +2646,7 @@ class _IntroMasterState extends State<IntroMaster>
                 minimumSize: const Size.fromHeight(42),
               ),
               child: const Text(
-                '비밀번호를 잊으셨나요?',
+                'Forgot your password?',
                 style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
               ),
             ),
@@ -2753,7 +2766,7 @@ class _IntroMasterState extends State<IntroMaster>
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('로그인 실패: $e')));
+        ).showSnackBar(SnackBar(content: Text('Login failed: $e')));
       }
     } finally {
       // GoRouter 알림 복원
@@ -3068,7 +3081,7 @@ class _IntroMasterState extends State<IntroMaster>
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
-                '만 14세 미만은 보호자 동의가 필요합니다.\n보호자의 이메일 주소를 입력해 주세요.',
+                '만 14세 미만은 보호자 동의가 필요합니다.\nEnter a parent or guardian email.',
                 style: TextStyle(
                   color: Colors.white70,
                   fontSize: 13,

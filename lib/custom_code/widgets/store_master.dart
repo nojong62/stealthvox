@@ -36,7 +36,7 @@ final List<Map<String, dynamic>> kStorePlans = [
   {
     'id': 'stealthvox_10m',
     'title': '10 Minutes',
-    'subtitle': '체험권',
+    'subtitle': 'Trial',
     'seconds': 600,
     'price_text': '₩400',
     'theme_color': const Color(0xFF60A5FA),
@@ -45,7 +45,7 @@ final List<Map<String, dynamic>> kStorePlans = [
   {
     'id': 'stealthvox_1h',
     'title': '1 Hour',
-    'subtitle': '기본권',
+    'subtitle': 'Standard',
     'seconds': 3600,
     'price_text': '₩2,000',
     'theme_color': const Color(0xFF34D399),
@@ -54,7 +54,7 @@ final List<Map<String, dynamic>> kStorePlans = [
   {
     'id': 'stealthvox_5h',
     'title': '5 Hours',
-    'subtitle': '추천권',
+    'subtitle': 'Best Value',
     'seconds': 18000,
     'price_text': '₩9,000',
     'theme_color': const Color(0xFFFBBF24),
@@ -63,7 +63,7 @@ final List<Map<String, dynamic>> kStorePlans = [
   {
     'id': 'stealthvox_10h',
     'title': '10 Hours',
-    'subtitle': '프리미엄권',
+    'subtitle': 'Premium',
     'seconds': 36000,
     'price_text': '₩17,000',
     'theme_color': const Color(0xFFA78BFA),
@@ -99,11 +99,7 @@ String resolvePurchaseTitle(
 }
 
 class StoreMaster extends StatefulWidget {
-  const StoreMaster({
-    Key? key,
-    this.width,
-    this.height,
-  }) : super(key: key);
+  const StoreMaster({Key? key, this.width, this.height}) : super(key: key);
 
   final double? width;
   final double? height;
@@ -117,8 +113,13 @@ class _StoreMasterState extends State<StoreMaster> {
       'https://docs.google.com/document/d/1KE4xrb63SDw1ZkiNQ_wxQjH7iyY6msTuVtazCTnR7KY/edit';
   static const String _privacyUrl =
       'https://docs.google.com/document/d/1geOkp2kwM7BXDsGkuxGuc4oDTAQeFmv660ed4oJX9vY/edit';
+  static const String _termsEnglishUrl =
+      'https://docs.google.com/document/d/1vs2n7kF0GzlejNaZOa1ZnfKbuwuOzOCr7Q5ZvYqmbVs/edit';
+  static const String _privacyEnglishUrl =
+      'https://docs.google.com/document/d/1AyK3KM9anwsVo7PaLdYRdxNnwa0MmRHuhxAN7yXbOjk/edit';
 
   bool isProcessing = false;
+  bool _useEnglishLegalDocs = true;
   String _versionText = '';
 
   // [v4.0] 서버 증액 감지용 Firestore 리스너
@@ -161,7 +162,7 @@ class _StoreMasterState extends State<StoreMaster> {
           });
           BillingTicker.instance.remainingSecondsNotifier.value = serverTime;
         }
-        _showFeedback("✅ 충전 완료! ($planTitle)", const Color(0xFF34D399));
+        _showFeedback("✅ Time added! ($planTitle)", const Color(0xFF34D399));
       }
     });
 
@@ -170,8 +171,10 @@ class _StoreMasterState extends State<StoreMaster> {
       _waitingForServerCredit = false;
       _remainingTimeSub?.cancel();
       _log('LISTEN', 'timeout server credit not detected within 20s');
-      _showFeedback("결제 완료! 시간 반영이 지연될 수 있습니다. 잠시 후 다시 확인해 주세요.",
-          const Color(0xFFFBBF24));
+      _showFeedback(
+        "Payment complete. Your time may take a moment to update.",
+        const Color(0xFFFBBF24),
+      );
     });
   }
 
@@ -236,11 +239,14 @@ class _StoreMasterState extends State<StoreMaster> {
   Future<void> _executePurchase(Map<String, dynamic> plan) async {
     if (isProcessing) return;
 
-    _log('PURCHASE',
-        'tap productId=${plan['id']} title=${plan['title']} uid=$currentUserUid ref=${currentUserReference != null}');
+    _log(
+      'PURCHASE',
+      'tap productId=${plan['id']} title=${plan['title']} uid=$currentUserUid ref=${currentUserReference != null}',
+    );
 
     final currentUser = FirebaseAuth.instance.currentUser;
-    final needsAccount = currentUser == null ||
+    final needsAccount =
+        currentUser == null ||
         (currentUser.isAnonymous && !FFAppState().hasLinkedAccount);
     if (needsAccount) {
       final result = await showDialog<bool>(
@@ -260,18 +266,24 @@ class _StoreMasterState extends State<StoreMaster> {
       _log('OFFERINGS', 'default=${offerings.all['default']?.identifier}');
       final offering = offerings.current ?? offerings.all['default'];
       _log('OFFERINGS', 'selected=${offering?.identifier}');
-      _log('OFFERINGS',
-          'packageCount=${offering?.availablePackages.length ?? 0}');
+      _log(
+        'OFFERINGS',
+        'packageCount=${offering?.availablePackages.length ?? 0}',
+      );
       for (final p in offering?.availablePackages ?? []) {
-        _log('OFFERINGS',
-            'package=${p.identifier}, product=${p.storeProduct.identifier}, price=${p.storeProduct.priceString}');
+        _log(
+          'OFFERINGS',
+          'package=${p.identifier}, product=${p.storeProduct.identifier}, price=${p.storeProduct.priceString}',
+        );
       }
 
       if (offering == null) {
         _log('OFFERINGS', 'no current or default offering → abort');
         debugPrint('[RevenueCat] No current or default offering found');
         _showFeedback(
-            "상품 정보를 아직 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
+          "Products are not available yet. Please try again.",
+          const Color(0xFFF87171),
+        );
         return;
       }
 
@@ -284,31 +296,45 @@ class _StoreMasterState extends State<StoreMaster> {
           break;
         }
       }
-      _log('MATCH',
-          'matched package=${matchedPackage?.identifier}, product=${matchedPackage?.storeProduct.identifier}');
+      _log(
+        'MATCH',
+        'matched package=${matchedPackage?.identifier}, product=${matchedPackage?.storeProduct.identifier}',
+      );
 
       if (matchedPackage == null) {
-        _log('MATCH',
-            'package NOT FOUND for productId=$targetProductId → abort');
+        _log(
+          'MATCH',
+          'package NOT FOUND for productId=$targetProductId → abort',
+        );
         debugPrint(
-            '[RevenueCat] Package not found — productId: $targetProductId');
+          '[RevenueCat] Package not found — productId: $targetProductId',
+        );
         debugPrint('[RevenueCat] current offering: ${offering.identifier}');
         debugPrint(
-            '[RevenueCat] available package identifiers: ${offering.availablePackages.map((p) => p.identifier).toList()}');
+          '[RevenueCat] available package identifiers: ${offering.availablePackages.map((p) => p.identifier).toList()}',
+        );
         debugPrint(
-            '[RevenueCat] available store product identifiers: ${offering.availablePackages.map((p) => p.storeProduct.identifier).toList()}');
+          '[RevenueCat] available store product identifiers: ${offering.availablePackages.map((p) => p.storeProduct.identifier).toList()}',
+        );
         _showFeedback(
-            "상품 정보를 아직 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
+          "Products are not available yet. Please try again.",
+          const Color(0xFFF87171),
+        );
         return;
       }
 
       _log('PURCHASE', 'purchasePackage start productId=$targetProductId');
-      final purchaseResult =
-          await Purchases.purchase(PurchaseParams.package(matchedPackage));
-      _log('PURCHASE',
-          'success appUserId=${purchaseResult.customerInfo.originalAppUserId}');
-      _log('PURCHASE',
-          'activeEntitlements=${purchaseResult.customerInfo.entitlements.active.keys.join(',')}');
+      final purchaseResult = await Purchases.purchase(
+        PurchaseParams.package(matchedPackage),
+      );
+      _log(
+        'PURCHASE',
+        'success appUserId=${purchaseResult.customerInfo.originalAppUserId}',
+      );
+      _log(
+        'PURCHASE',
+        'activeEntitlements=${purchaseResult.customerInfo.entitlements.active.keys.join(',')}',
+      );
 
       // 클라이언트 UUID 생성 (RevenueCat 웹훅 ID와 매핑 가능)
       final uid = currentUserUid ?? 'anon';
@@ -317,32 +343,52 @@ class _StoreMasterState extends State<StoreMaster> {
           'client_${DateTime.now().millisecondsSinceEpoch}_$uidPrefix';
 
       _onPurchaseSuccess(plan, clientTxId);
-      _showFeedback("✅ 결제 완료 - 충전 반영 중...", const Color(0xFF60A5FA));
+      _showFeedback(
+        "✅ Payment complete. Adding time...",
+        const Color(0xFF60A5FA),
+      );
     } on PlatformException catch (e) {
       final errorCode = PurchasesErrorHelper.getErrorCode(e);
-      _log('ERROR',
-          'platform code=$errorCode message=${e.message} details=${e.details}');
+      _log(
+        'ERROR',
+        'platform code=$errorCode message=${e.message} details=${e.details}',
+      );
       if (errorCode == PurchasesErrorCode.purchaseCancelledError) {
-        _showFeedback("결제가 취소되었습니다.", Colors.white54);
+        _showFeedback("Payment canceled.", Colors.white54);
       } else if (errorCode == PurchasesErrorCode.purchaseNotAllowedError) {
-        _showFeedback("이 기기에서는 결제할 수 없습니다.", const Color(0xFFF87171));
+        _showFeedback(
+          "Payments are not available on this device.",
+          const Color(0xFFF87171),
+        );
       } else if (errorCode == PurchasesErrorCode.paymentPendingError) {
-        _showFeedback("결제 승인 대기 중입니다.", const Color(0xFFFBBF24));
+        _showFeedback("Payment pending.", const Color(0xFFFBBF24));
       } else if (errorCode == PurchasesErrorCode.networkError) {
-        _showFeedback("네트워크 연결을 확인해 주세요.", const Color(0xFFF87171));
+        _showFeedback(
+          "Check your internet connection.",
+          const Color(0xFFF87171),
+        );
       } else if (errorCode == PurchasesErrorCode.storeProblemError) {
-        _showFeedback("스토어 점검 중입니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
+        _showFeedback(
+          "The store is unavailable. Please try again.",
+          const Color(0xFFF87171),
+        );
       } else {
         _showFeedback(
-            "결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
+          "Payment failed. Please try again.",
+          const Color(0xFFF87171),
+        );
       }
     } catch (e, stack) {
       final stackStr = stack.toString();
       _log('ERROR', 'general: $e');
-      _log('ERROR',
-          'stack: ${stackStr.substring(0, stackStr.length > 200 ? 200 : stackStr.length)}');
+      _log(
+        'ERROR',
+        'stack: ${stackStr.substring(0, stackStr.length > 200 ? 200 : stackStr.length)}',
+      );
       _showFeedback(
-          "결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
+        "Payment failed. Please try again.",
+        const Color(0xFFF87171),
+      );
     } finally {
       if (mounted) setState(() => isProcessing = false);
     }
@@ -356,8 +402,10 @@ class _StoreMasterState extends State<StoreMaster> {
     final planTitle = plan['title'] as String;
     final earnedSeconds = plan['seconds'] as int;
 
-    _log('SYNC',
-        'purchase success planId=$planId txId=$transactionId expectedSeconds=$earnedSeconds');
+    _log(
+      'SYNC',
+      'purchase success planId=$planId txId=$transactionId expectedSeconds=$earnedSeconds',
+    );
     _log('SYNC', 'waiting for server webhook to credit remainingTime...');
 
     _listenForServerCredit(planTitle);
@@ -367,9 +415,13 @@ class _StoreMasterState extends State<StoreMaster> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message,
-            style: const TextStyle(
-                fontWeight: FontWeight.bold, color: Colors.white)),
+        content: Text(
+          message,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
         backgroundColor: bgColor,
         duration: const Duration(milliseconds: 2500),
         behavior: SnackBarBehavior.floating,
@@ -380,7 +432,7 @@ class _StoreMasterState extends State<StoreMaster> {
   Future<void> _launchURL(String urlString) async {
     final Uri url = Uri.parse(urlString);
     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-      _showFeedback('링크를 열 수 없습니다.', const Color(0xFFF87171));
+      _showFeedback('Could not open the link.', const Color(0xFFF87171));
     }
   }
 
@@ -405,8 +457,9 @@ class _StoreMasterState extends State<StoreMaster> {
         // 시스템 글꼴 배율이 크면 영수증 행이 터지므로 상한을 둔다.
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(
-            textScaler:
-                MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.3),
+            textScaler: MediaQuery.textScalerOf(
+              context,
+            ).clamp(maxScaleFactor: 1.3),
           ),
           child: Container(
             height: MediaQuery.of(context).size.height * 0.65,
@@ -425,17 +478,22 @@ class _StoreMasterState extends State<StoreMaster> {
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
                         alignment: Alignment.centerLeft,
-                        child: Text("🧾 Purchase History",
-                            maxLines: 1,
-                            style: GoogleFonts.orbitron(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold)),
+                        child: Text(
+                          "🧾 Purchase History",
+                          maxLines: 1,
+                          style: GoogleFonts.orbitron(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close_rounded,
-                          color: Colors.white54),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white54,
+                      ),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ],
@@ -444,8 +502,11 @@ class _StoreMasterState extends State<StoreMaster> {
                 Expanded(
                   child: currentUserReference == null
                       ? const Center(
-                          child: Text("접근 권한이 없습니다.",
-                              style: TextStyle(color: Colors.white54)))
+                          child: Text(
+                            "Access denied.",
+                            style: TextStyle(color: Colors.white54),
+                          ),
+                        )
                       : StreamBuilder<QuerySnapshot>(
                           stream: currentUserReference!
                               .collection('purchases')
@@ -454,27 +515,34 @@ class _StoreMasterState extends State<StoreMaster> {
                           builder: (context, snapshot) {
                             if (!snapshot.hasData)
                               return const Center(
-                                  child: CircularProgressIndicator(
-                                      color: Colors.amber));
+                                child: CircularProgressIndicator(
+                                  color: Colors.amber,
+                                ),
+                              );
                             final records = snapshot.data!.docs;
                             if (records.isEmpty)
                               return const Center(
-                                  child: Text("결제 내역이 존재하지 않습니다.",
-                                      style: TextStyle(color: Colors.white54)));
+                                child: Text(
+                                  "No purchases yet.",
+                                  style: TextStyle(color: Colors.white54),
+                                ),
+                              );
 
                             return ListView.separated(
                               itemCount: records.length,
                               separatorBuilder: (_, __) =>
                                   const SizedBox(height: 12),
                               itemBuilder: (context, index) {
-                                var data = records[index].data()
-                                    as Map<String, dynamic>;
+                                var data =
+                                    records[index].data()
+                                        as Map<String, dynamic>;
                                 DateTime ts = data['purchased_at'] != null
                                     ? (data['purchased_at'] as Timestamp)
-                                        .toDate()
+                                          .toDate()
                                     : DateTime.now();
-                                String dateFormatted =
-                                    DateFormat('yyyy.MM.dd HH:mm').format(ts);
+                                String dateFormatted = DateFormat(
+                                  'yyyy.MM.dd HH:mm',
+                                ).format(ts);
                                 int addedMinutes =
                                     (data['seconds_added'] ?? 0) ~/ 60;
 
@@ -495,39 +563,52 @@ class _StoreMasterState extends State<StoreMaster> {
                                               CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                                resolvePurchaseTitle(
-                                                    data, storePlans),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 15,
-                                                    fontWeight:
-                                                        FontWeight.bold)),
+                                              resolvePurchaseTitle(
+                                                data,
+                                                storePlans,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
                                             const SizedBox(height: 4),
-                                            Text(dateFormatted,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                    color: Colors.white38,
-                                                    fontSize: 12)),
+                                            Text(
+                                              dateFormatted,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Colors.white38,
+                                                fontSize: 12,
+                                              ),
+                                            ),
                                           ],
                                         ),
                                       ),
                                       const SizedBox(width: 12),
                                       Container(
                                         padding: const EdgeInsets.symmetric(
-                                            horizontal: 12, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          color: Colors.green
-                                              .withValues(alpha: 0.15),
-                                          borderRadius:
-                                              BorderRadius.circular(20),
+                                          horizontal: 12,
+                                          vertical: 6,
                                         ),
-                                        child: Text("+ ${addedMinutes}m",
-                                            style: const TextStyle(
-                                                color: Colors.green,
-                                                fontWeight: FontWeight.bold)),
+                                        decoration: BoxDecoration(
+                                          color: Colors.green.withValues(
+                                            alpha: 0.15,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            20,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          "+ ${addedMinutes}m",
+                                          style: const TextStyle(
+                                            color: Colors.green,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -550,9 +631,7 @@ class _StoreMasterState extends State<StoreMaster> {
 
   // ── 관리자용 Admin Time Log (STORE 제목 long press 진입) ──────────────────
   void _openAdminLogLedgerSheet() {
-    const Set<String> adminEmails = {
-      'nisiekorea@gmail.com',
-    };
+    const Set<String> adminEmails = {'nisiekorea@gmail.com'};
     final String email = currentUserEmail.trim().toLowerCase();
     if (!adminEmails.contains(email)) return;
 
@@ -580,9 +659,10 @@ class _StoreMasterState extends State<StoreMaster> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.orbitron(
-                          color: Colors.amber,
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold),
+                        color: Colors.amber,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -594,12 +674,18 @@ class _StoreMasterState extends State<StoreMaster> {
                         visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints.tightFor(
-                            width: 36, height: 36),
-                        icon: const Icon(Icons.copy_all_rounded,
-                            color: Colors.amber, size: 20),
+                          width: 36,
+                          height: 36,
+                        ),
+                        icon: const Icon(
+                          Icons.copy_all_rounded,
+                          color: Colors.amber,
+                          size: 20,
+                        ),
                         onPressed: () async {
-                          await Clipboard.setData(ClipboardData(
-                              text: AppLogLedger.instance.joined));
+                          await Clipboard.setData(
+                            ClipboardData(text: AppLogLedger.instance.joined),
+                          );
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
@@ -615,9 +701,14 @@ class _StoreMasterState extends State<StoreMaster> {
                         visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints.tightFor(
-                            width: 36, height: 36),
-                        icon: const Icon(Icons.delete_sweep_rounded,
-                            color: Colors.redAccent, size: 20),
+                          width: 36,
+                          height: 36,
+                        ),
+                        icon: const Icon(
+                          Icons.delete_sweep_rounded,
+                          color: Colors.redAccent,
+                          size: 20,
+                        ),
                         onPressed: () {
                           AppLogLedger.instance.clear();
                           Navigator.pop(context);
@@ -628,9 +719,13 @@ class _StoreMasterState extends State<StoreMaster> {
                         visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints.tightFor(
-                            width: 36, height: 36),
-                        icon: const Icon(Icons.close_rounded,
-                            color: Colors.white54),
+                          width: 36,
+                          height: 36,
+                        ),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: Colors.white54,
+                        ),
                         onPressed: () => Navigator.pop(context),
                       ),
                     ],
@@ -641,9 +736,11 @@ class _StoreMasterState extends State<StoreMaster> {
               Expanded(
                 child: lines.isEmpty
                     ? const Center(
-                        child: Text('No logs.',
-                            style:
-                                TextStyle(color: Colors.white38, fontSize: 13)))
+                        child: Text(
+                          'No logs.',
+                          style: TextStyle(color: Colors.white38, fontSize: 13),
+                        ),
+                      )
                     : ListView.builder(
                         reverse: false,
                         itemCount: lines.length,
@@ -670,9 +767,7 @@ class _StoreMasterState extends State<StoreMaster> {
 
   void _openAdminTimeLogSheet() {
     // TODO: 관리자 이메일 목록 확정 후 아래 Set에 추가
-    const Set<String> adminEmails = {
-      'nisiekorea@gmail.com',
-    };
+    const Set<String> adminEmails = {'nisiekorea@gmail.com'};
     final String email = currentUserEmail.trim().toLowerCase();
     if (!adminEmails.contains(email)) return; // 관리자 아니면 아무 반응 없음
     showModalBottomSheet(
@@ -693,14 +788,19 @@ class _StoreMasterState extends State<StoreMaster> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text("🔐 Admin Time Log",
-                      style: GoogleFonts.orbitron(
-                          color: Colors.amber,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold)),
+                  Text(
+                    "🔐 Admin Time Log",
+                    style: GoogleFonts.orbitron(
+                      color: Colors.amber,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   IconButton(
-                    icon:
-                        const Icon(Icons.close_rounded, color: Colors.white54),
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white54,
+                    ),
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
@@ -709,8 +809,11 @@ class _StoreMasterState extends State<StoreMaster> {
               Expanded(
                 child: currentUserReference == null
                     ? const Center(
-                        child: Text("접근 권한이 없습니다.",
-                            style: TextStyle(color: Colors.white54)))
+                        child: Text(
+                          "Access denied.",
+                          style: TextStyle(color: Colors.white54),
+                        ),
+                      )
                     : StreamBuilder<QuerySnapshot>(
                         stream: currentUserReference!
                             .collection('usage_logs')
@@ -720,14 +823,18 @@ class _StoreMasterState extends State<StoreMaster> {
                         builder: (context, snapshot) {
                           if (!snapshot.hasData) {
                             return const Center(
-                                child: CircularProgressIndicator(
-                                    color: Colors.amber));
+                              child: CircularProgressIndicator(
+                                color: Colors.amber,
+                              ),
+                            );
                           }
                           final records = snapshot.data!.docs;
                           if (records.isEmpty) {
                             return const Center(
-                              child: Text("사용시간 로그가 없습니다.",
-                                  style: TextStyle(color: Colors.white54)),
+                              child: Text(
+                                "No usage logs.",
+                                style: TextStyle(color: Colors.white54),
+                              ),
                             );
                           }
 
@@ -742,13 +849,14 @@ class _StoreMasterState extends State<StoreMaster> {
                               final DateTime ts = data['created_at'] != null
                                   ? (data['created_at'] as Timestamp).toDate()
                                   : DateTime.now();
-                              final String dateFormatted =
-                                  DateFormat('yyyy.MM.dd HH:mm:ss').format(ts);
+                              final String dateFormatted = DateFormat(
+                                'yyyy.MM.dd HH:mm:ss',
+                              ).format(ts);
 
                               final String modeRaw =
                                   (data['mode'] as String?) ??
-                                      (data['reason'] as String?) ??
-                                      'unknown';
+                                  (data['reason'] as String?) ??
+                                  'unknown';
                               final int secondsUsed =
                                   (data['seconds_used'] as int?) ?? 0;
                               final int actualSeconds =
@@ -761,8 +869,8 @@ class _StoreMasterState extends State<StoreMaster> {
                               final double? rate = rateRaw is double
                                   ? rateRaw
                                   : (rateRaw is num
-                                      ? rateRaw.toDouble()
-                                      : null);
+                                        ? rateRaw.toDouble()
+                                        : null);
                               final String? roomId = data['room_id'] as String?;
 
                               return Container(
@@ -779,34 +887,42 @@ class _StoreMasterState extends State<StoreMaster> {
                                       mainAxisAlignment:
                                           MainAxisAlignment.spaceBetween,
                                       children: [
-                                        Text(modeRaw,
-                                            style: const TextStyle(
-                                                color: Colors.amber,
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.bold)),
-                                        Text(dateFormatted,
-                                            style: const TextStyle(
-                                                color: Colors.white38,
-                                                fontSize: 10)),
+                                        Text(
+                                          modeRaw,
+                                          style: const TextStyle(
+                                            color: Colors.amber,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        Text(
+                                          dateFormatted,
+                                          style: const TextStyle(
+                                            color: Colors.white38,
+                                            fontSize: 10,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                     const SizedBox(height: 6),
                                     Text(
-                                      "차감 ${_formatDurationFromSeconds(secondsUsed)}"
-                                      "  ·  실제 ${_formatDurationFromSeconds(actualSeconds)}"
+                                      "Used ${_formatDurationFromSeconds(secondsUsed)}"
+                                      "  ·  Actual ${_formatDurationFromSeconds(actualSeconds)}"
                                       "${rate != null ? '  ·  ${rate}x' : ''}",
                                       style: const TextStyle(
-                                          color: Color(0xFF60A5FA),
-                                          fontSize: 12),
+                                        color: Color(0xFF60A5FA),
+                                        fontSize: 12,
+                                      ),
                                     ),
                                     if (beforeSeconds != null &&
                                         afterSeconds != null) ...[
                                       const SizedBox(height: 4),
                                       Text(
-                                        "잔여 ${_formatDurationFromSeconds(beforeSeconds)} → ${_formatDurationFromSeconds(afterSeconds)}",
+                                        "Left ${_formatDurationFromSeconds(beforeSeconds)} → ${_formatDurationFromSeconds(afterSeconds)}",
                                         style: const TextStyle(
-                                            color: Colors.white54,
-                                            fontSize: 12),
+                                          color: Colors.white54,
+                                          fontSize: 12,
+                                        ),
                                       ),
                                     ],
                                     if (roomId != null &&
@@ -815,8 +931,9 @@ class _StoreMasterState extends State<StoreMaster> {
                                       Text(
                                         "room: $roomId",
                                         style: const TextStyle(
-                                            color: Colors.white38,
-                                            fontSize: 11),
+                                          color: Colors.white38,
+                                          fontSize: 11,
+                                        ),
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ],
@@ -853,13 +970,18 @@ class _StoreMasterState extends State<StoreMaster> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         IconButton(
-                          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                              color: Colors.white, size: 20),
-                          tooltip: '이전 단계',
+                          icon: const Icon(
+                            Icons.arrow_back_ios_new_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          tooltip: 'Back',
                           padding: EdgeInsets.zero,
                           alignment: Alignment.centerLeft,
-                          constraints:
-                              const BoxConstraints(minWidth: 64, minHeight: 56),
+                          constraints: const BoxConstraints(
+                            minWidth: 64,
+                            minHeight: 56,
+                          ),
                           onPressed: () => Navigator.pop(context),
                         ),
                         // 📐 제목은 남는 폭에 맞춰 줄어든다. 기기 글자 배율이
@@ -871,13 +993,16 @@ class _StoreMasterState extends State<StoreMaster> {
                             onLongPress: _openAdminTimeLogSheet,
                             child: FittedBox(
                               fit: BoxFit.scaleDown,
-                              child: Text("STORE",
-                                  maxLines: 1,
-                                  style: GoogleFonts.orbitron(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
-                                      letterSpacing: 2)),
+                              child: Text(
+                                "STORE",
+                                maxLines: 1,
+                                style: GoogleFonts.orbitron(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                  letterSpacing: 2,
+                                ),
+                              ),
                             ),
                           ),
                         ),
@@ -887,14 +1012,20 @@ class _StoreMasterState extends State<StoreMaster> {
                             IconButton(
                               onPressed: () => showUsageSheet(context),
                               tooltip: 'Usage',
-                              icon: const Icon(Icons.access_time_rounded,
-                                  color: Color(0xFF60A5FA), size: 22),
+                              icon: const Icon(
+                                Icons.access_time_rounded,
+                                color: Color(0xFF60A5FA),
+                                size: 22,
+                              ),
                             ),
                             IconButton(
                               onPressed: _openReceiptSheet,
                               tooltip: 'Receipt',
-                              icon: const Icon(Icons.receipt_long_rounded,
-                                  color: Colors.amber, size: 22),
+                              icon: const Icon(
+                                Icons.receipt_long_rounded,
+                                color: Colors.amber,
+                                size: 22,
+                              ),
                             ),
                           ],
                         ),
@@ -905,7 +1036,9 @@ class _StoreMasterState extends State<StoreMaster> {
                   Expanded(
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 10),
+                        horizontal: 20,
+                        vertical: 10,
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -920,27 +1053,36 @@ class _StoreMasterState extends State<StoreMaster> {
                             ),
                             child: Column(
                               children: [
-                                const Icon(Icons.shield_moon_rounded,
-                                    color: Colors.amber, size: 28),
+                                const Icon(
+                                  Icons.shield_moon_rounded,
+                                  color: Colors.amber,
+                                  size: 28,
+                                ),
                                 const SizedBox(height: 10),
-                                Text("REMAINING TIME",
-                                    style: GoogleFonts.orbitron(
-                                        color: Colors.amber,
-                                        fontSize: 11,
-                                        letterSpacing: 2)),
+                                Text(
+                                  "REMAINING TIME",
+                                  style: GoogleFonts.orbitron(
+                                    color: Colors.amber,
+                                    fontSize: 11,
+                                    letterSpacing: 2,
+                                  ),
+                                ),
                                 const SizedBox(height: 6),
-                                Text(() {
-                                  final int s = (FFAppState().remainingTime)
-                                      .toInt()
-                                      .clamp(0, 999999);
-                                  final int h = s ~/ 3600;
-                                  final int m = (s % 3600) ~/ 60;
-                                  return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-                                }(),
-                                    style: GoogleFonts.orbitron(
-                                        color: Colors.white,
-                                        fontSize: 48,
-                                        fontWeight: FontWeight.w900)),
+                                Text(
+                                  () {
+                                    final int s = (FFAppState().remainingTime)
+                                        .toInt()
+                                        .clamp(0, 999999);
+                                    final int h = s ~/ 3600;
+                                    final int m = (s % 3600) ~/ 60;
+                                    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+                                  }(),
+                                  style: GoogleFonts.orbitron(
+                                    color: Colors.white,
+                                    fontSize: 48,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -960,7 +1102,9 @@ class _StoreMasterState extends State<StoreMaster> {
                                 borderRadius: BorderRadius.circular(20),
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 16),
+                                    horizontal: 14,
+                                    vertical: 16,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: const Color(0xFF222222),
                                     borderRadius: BorderRadius.circular(20),
@@ -971,13 +1115,16 @@ class _StoreMasterState extends State<StoreMaster> {
                                       Container(
                                         padding: const EdgeInsets.all(12),
                                         decoration: BoxDecoration(
-                                          color: plan['theme_color']
-                                              .withValues(alpha: 0.15),
+                                          color: plan['theme_color'].withValues(
+                                            alpha: 0.15,
+                                          ),
                                           shape: BoxShape.circle,
                                         ),
-                                        child: Icon(plan['icon'],
-                                            color: plan['theme_color'],
-                                            size: 24),
+                                        child: Icon(
+                                          plan['icon'],
+                                          color: plan['theme_color'],
+                                          size: 24,
+                                        ),
                                       ),
                                       const SizedBox(width: 12),
                                       Expanded(
@@ -988,12 +1135,14 @@ class _StoreMasterState extends State<StoreMaster> {
                                             FittedBox(
                                               fit: BoxFit.scaleDown,
                                               alignment: Alignment.centerLeft,
-                                              child: Text(plan['title'],
-                                                  style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 15,
-                                                      fontWeight:
-                                                          FontWeight.bold)),
+                                              child: Text(
+                                                plan['title'],
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 15,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
                                             ),
                                             const SizedBox(height: 4),
                                             // 📐 제목과 같이 줄여서 담는다.
@@ -1003,11 +1152,14 @@ class _StoreMasterState extends State<StoreMaster> {
                                             FittedBox(
                                               fit: BoxFit.scaleDown,
                                               alignment: Alignment.centerLeft,
-                                              child: Text(plan['subtitle'],
-                                                  style: const TextStyle(
-                                                      color: Colors.white54,
-                                                      fontSize: 11),
-                                                  maxLines: 1),
+                                              child: Text(
+                                                plan['subtitle'],
+                                                style: const TextStyle(
+                                                  color: Colors.white54,
+                                                  fontSize: 11,
+                                                ),
+                                                maxLines: 1,
+                                              ),
                                             ),
                                           ],
                                         ),
@@ -1017,18 +1169,24 @@ class _StoreMasterState extends State<StoreMaster> {
                                         fit: BoxFit.scaleDown,
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(
-                                              horizontal: 12, vertical: 10),
+                                            horizontal: 12,
+                                            vertical: 10,
+                                          ),
                                           decoration: BoxDecoration(
                                             color: plan['theme_color']
                                                 .withValues(alpha: 0.15),
-                                            borderRadius:
-                                                BorderRadius.circular(12),
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
                                           ),
-                                          child: Text(plan['price_text'],
-                                              style: TextStyle(
-                                                  color: plan['theme_color'],
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w800)),
+                                          child: Text(
+                                            plan['price_text'],
+                                            style: TextStyle(
+                                              color: plan['theme_color'],
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
                                         ),
                                       ),
                                     ],
@@ -1052,20 +1210,65 @@ class _StoreMasterState extends State<StoreMaster> {
                       runSpacing: 6,
                       children: [
                         InkWell(
-                          onTap: () => _launchURL(_privacyUrl),
-                          child: const Text("개인정보 처리방침",
-                              style: TextStyle(
-                                  color: Colors.white38,
-                                  fontSize: 11,
-                                  decoration: TextDecoration.underline)),
+                          onTap: () => setState(
+                            () => _useEnglishLegalDocs = !_useEnglishLegalDocs,
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 4,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.translate_rounded,
+                                  color: Colors.white54,
+                                  size: 15,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  _useEnglishLegalDocs ? 'EN' : 'KR',
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                         InkWell(
-                          onTap: () => _launchURL(_termsUrl),
-                          child: const Text("이용약관",
-                              style: TextStyle(
-                                  color: Colors.white38,
-                                  fontSize: 11,
-                                  decoration: TextDecoration.underline)),
+                          onTap: () => _launchURL(
+                            _useEnglishLegalDocs
+                                ? _privacyEnglishUrl
+                                : _privacyUrl,
+                          ),
+                          child: Text(
+                            _useEnglishLegalDocs
+                                ? 'Privacy Policy'
+                                : '개인정보 처리방침',
+                            style: const TextStyle(
+                              color: Colors.white38,
+                              fontSize: 11,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () => _launchURL(
+                            _useEnglishLegalDocs ? _termsEnglishUrl : _termsUrl,
+                          ),
+                          child: Text(
+                            _useEnglishLegalDocs ? 'Terms of Use' : '이용약관',
+                            style: const TextStyle(
+                              color: Colors.white38,
+                              fontSize: 11,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -1078,7 +1281,9 @@ class _StoreMasterState extends State<StoreMaster> {
                         _versionText,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                            color: Colors.white24, fontSize: 10),
+                          color: Colors.white24,
+                          fontSize: 10,
+                        ),
                       ),
                     ),
                   ),

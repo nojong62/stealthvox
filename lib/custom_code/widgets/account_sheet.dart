@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════════
-// 👤 [ACCOUNT] 등록 정보 — 로그인 정보와 수정
+// 👤 [ACCOUNT] Account Info — 로그인 정보와 수정
 // --------------------------------------------------------------------
 // 어떤 계정으로 들어와 있는지, 무엇으로 로그인했는지를 한 화면에서 본다.
 // 고칠 수 있는 것은 **표시 이름 하나뿐**이다 — 이메일과 로그인 방법은
@@ -23,10 +23,10 @@ const Color _kAccent = Color(0xFF22D3EE);
 
 /// 로그인 방법을 사람 말로 옮긴다. 제공자 id는 Firebase가 정한 값이다.
 String describeSignInMethod(User? user) {
-  if (user == null) return '로그인 안 됨';
-  if (user.isAnonymous) return '게스트 (체험)';
+  if (user == null) return 'Not Logged In';
+  if (user.isAnonymous) return 'Guest (Trial)';
   final ids = user.providerData.map((p) => p.providerId).toList();
-  if (ids.isEmpty) return '알 수 없음';
+  if (ids.isEmpty) return 'Unknown';
   return ids
       .map((id) {
         switch (id) {
@@ -35,9 +35,9 @@ String describeSignInMethod(User? user) {
           case 'apple.com':
             return 'Apple';
           case 'password':
-            return '이메일 · 비밀번호';
+            return 'Email · Password';
           case 'phone':
-            return '전화번호';
+            return 'Phone';
           default:
             return id;
         }
@@ -46,7 +46,7 @@ String describeSignInMethod(User? user) {
       .join(' · ');
 }
 
-/// 👤 등록 정보를 아래에서 올라오는 시트로 연다.
+/// 👤 Account Info를 아래에서 올라오는 시트로 연다.
 void showAccountSheet(BuildContext context) {
   showModalBottomSheet<void>(
     context: context,
@@ -80,7 +80,7 @@ class _AccountSheetState extends State<_AccountSheet> {
   Future<void> _saveDisplayName() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      _toast('이름을 입력해 주세요.');
+      _toast('Enter a name.');
       return;
     }
     if (name == currentUserDisplayName) {
@@ -98,11 +98,11 @@ class _AccountSheetState extends State<_AccountSheet> {
         _editing = false;
         _saving = false;
       });
-      _toast('이름을 바꿨습니다.');
+      _toast('Name updated.');
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      _toast('바꾸지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      _toast('Unable to update the name. Please try again.');
     }
   }
 
@@ -153,7 +153,7 @@ class _AccountSheetState extends State<_AccountSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Flexible(
-                    child: Text('등록 정보',
+                    child: Text('Account Info',
                         style: TextStyle(
                             color: Colors.white,
                             fontSize: 18,
@@ -181,15 +181,15 @@ class _AccountSheetState extends State<_AccountSheet> {
               const SizedBox(height: 18),
 
               // ── 로그인 정보 (바꿀 수 없는 것들) ──
-              _infoRow(Icons.mail_outline_rounded, '이메일',
+              _infoRow(Icons.mail_outline_rounded, 'Email',
                   currentUserEmail.isEmpty ? '-' : currentUserEmail),
               const SizedBox(height: 8),
-              _infoRow(
-                  Icons.vpn_key_outlined, '로그인 방법', describeSignInMethod(user)),
+              _infoRow(Icons.vpn_key_outlined, 'Login Method',
+                  describeSignInMethod(user)),
               const SizedBox(height: 8),
               _infoRow(
                 Icons.event_outlined,
-                '가입일',
+                'Joined',
                 createdAt == null
                     ? '-'
                     : DateFormat('yyyy.MM.dd').format(createdAt.toLocal()),
@@ -205,7 +205,7 @@ class _AccountSheetState extends State<_AccountSheet> {
                     foregroundColor: Colors.white60,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  label: const Text('로그아웃'),
+                  label: const Text('Log Out'),
                 ),
               ),
             ],
@@ -237,7 +237,7 @@ class _AccountSheetState extends State<_AccountSheet> {
       children: [
         Expanded(
           child: Text(
-            name.isEmpty ? '이름 없음' : name,
+            name.isEmpty ? 'No Name' : name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -247,7 +247,7 @@ class _AccountSheetState extends State<_AccountSheet> {
           ),
         ),
         IconButton(
-          tooltip: '이름 바꾸기',
+          tooltip: 'Change Name',
           icon: const Icon(Icons.edit_outlined, color: _kAccent, size: 19),
           onPressed: () => setState(() => _editing = true),
         ),
@@ -266,7 +266,7 @@ class _AccountSheetState extends State<_AccountSheet> {
             style: const TextStyle(color: Colors.white, fontSize: 16),
             decoration: InputDecoration(
               isDense: true,
-              hintText: '표시할 이름',
+              hintText: 'Display Name',
               hintStyle: const TextStyle(color: Colors.white24),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -296,7 +296,7 @@ class _AccountSheetState extends State<_AccountSheet> {
                 child:
                     CircularProgressIndicator(strokeWidth: 2, color: _kAccent))
             : IconButton(
-                tooltip: '저장',
+                tooltip: 'Save',
                 icon: const Icon(Icons.check_rounded, color: _kAccent),
                 onPressed: _saveDisplayName,
               ),

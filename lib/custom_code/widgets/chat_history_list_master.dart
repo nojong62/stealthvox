@@ -54,11 +54,8 @@ Speak clearly and slightly slower than conversational pace, as a model for a lea
 Do not add, drop, or reword anything in the text.''';
 
 class ChatHistoryListMaster extends StatefulWidget {
-  const ChatHistoryListMaster({
-    Key? key,
-    this.width,
-    this.height,
-  }) : super(key: key);
+  const ChatHistoryListMaster({Key? key, this.width, this.height})
+    : super(key: key);
 
   final double? width;
   final double? height;
@@ -274,8 +271,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         _historyFallbackDocs = result.docs;
         _historyLoadError = null;
       });
-      debugPrint(
-          '[HISTORY-LIST-STREAM] fallback loaded=${result.docs.length}');
+      debugPrint('[HISTORY-LIST-STREAM] fallback loaded=${result.docs.length}');
     } catch (e) {
       if (!mounted) return;
       setState(() => _historyLoadError = e.toString());
@@ -348,7 +344,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
       return const Scaffold(
         backgroundColor: Colors.black,
         body: Center(
-            child: Text("로그인이 필요합니다.", style: TextStyle(color: Colors.white))),
+          child: Text("로그인이 필요합니다.", style: TextStyle(color: Colors.white)),
+        ),
       );
     }
 
@@ -387,7 +384,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                     : Colors.white70,
               ),
               onPressed: () => _switchFilter(
-                  _selectedFilter == 'Keepers' ? 'All' : 'Keepers'),
+                _selectedFilter == 'Keepers' ? 'All' : 'Keepers',
+              ),
             ),
           ],
         ),
@@ -407,31 +405,40 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             child: FittedBox(
               fit: BoxFit.scaleDown,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF3B82F6)
-                      .withValues(alpha: _selectedFilter == 'All' ? 0.15 : 0.3),
+                  color: const Color(
+                    0xFF3B82F6,
+                  ).withValues(alpha: _selectedFilter == 'All' ? 0.15 : 0.3),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                      color: const Color(0xFF3B82F6).withValues(
-                          alpha: _selectedFilter == 'All' ? 0.5 : 0.9),
-                      width: 1.5),
+                    color: const Color(
+                      0xFF3B82F6,
+                    ).withValues(alpha: _selectedFilter == 'All' ? 0.5 : 0.9),
+                    width: 1.5,
+                  ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (_selectedFilter != 'All') ...[
-                      const Icon(Icons.arrow_back_rounded,
-                          color: Colors.white, size: 14),
+                      const Icon(
+                        Icons.arrow_back_rounded,
+                        color: Colors.white,
+                        size: 14,
+                      ),
                       const SizedBox(width: 5),
                     ],
                     const Text(
                       "Study Room",
                       style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13),
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
                     ),
                   ],
                 ),
@@ -458,8 +465,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             ),
           ),
           IconButton(
-            icon: Icon(Icons.help_outline_rounded,
-                color: Colors.amber.withValues(alpha: 0.75), size: 20),
+            icon: Icon(
+              Icons.help_outline_rounded,
+              color: Colors.amber.withValues(alpha: 0.75),
+              size: 20,
+            ),
             tooltip: "사용설명서",
             padding: const EdgeInsets.symmetric(horizontal: 8),
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -471,12 +481,14 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         children: [
           _buildFilterBar(),
           Expanded(
-            child: Stack(children: [
-              _selectedFilter == 'Keepers'
-                  ? _buildKeepersBody()
-                  : _buildHistoryBody(),
-              _buildIdleOverlay(),
-            ]),
+            child: Stack(
+              children: [
+                _selectedFilter == 'Keepers'
+                    ? _buildKeepersBody()
+                    : _buildHistoryBody(),
+                _buildIdleOverlay(),
+              ],
+            ),
           ),
         ],
       ),
@@ -506,11 +518,16 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.error_outline_rounded,
-                      size: 48, color: Colors.redAccent),
+                  const Icon(
+                    Icons.error_outline_rounded,
+                    size: 48,
+                    color: Colors.redAccent,
+                  ),
                   const SizedBox(height: 16),
-                  Text('히스토리를 불러오지 못했습니다.',
-                      style: GoogleFonts.notoSans(color: Colors.white70)),
+                  Text(
+                    '히스토리를 불러오지 못했습니다.',
+                    style: GoogleFonts.notoSans(color: Colors.white70),
+                  ),
                   const SizedBox(height: 12),
                   OutlinedButton(
                     onPressed: _retryHistoryLoad,
@@ -521,7 +538,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             );
           }
           return const Center(
-              child: CircularProgressIndicator(color: Colors.amber));
+            child: CircularProgressIndicator(color: Colors.amber),
+          );
         }
 
         final filteredDocs = allDocs.where((doc) {
@@ -539,11 +557,12 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         final visibleIds = filteredDocs.map((doc) => doc.id).toSet();
         final visibleIdsChanged =
             visibleIds.length != _visibleHistoryDocIds.length ||
-                !visibleIds.every(_visibleHistoryDocIds.contains);
+            !visibleIds.every(_visibleHistoryDocIds.contains);
         if (visibleIdsChanged) {
           _visibleHistoryDocIds = visibleIds;
-          _visibleHistoryDocOrder =
-              filteredDocs.map((doc) => doc.id).toList(growable: false);
+          _visibleHistoryDocOrder = filteredDocs
+              .map((doc) => doc.id)
+              .toList(growable: false);
           _selectedDocIds.retainAll(_visibleHistoryDocIds);
           // 사라진 기록을 기준점으로 들고 있으면 범위가 엉뚱한 데서 시작한다.
           if (_rangeAnchorDocId != null &&
@@ -562,11 +581,16 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.history_toggle_off,
-                    size: 60, color: Colors.white24),
+                const Icon(
+                  Icons.history_toggle_off,
+                  size: 60,
+                  color: Colors.white24,
+                ),
                 const SizedBox(height: 20),
-                Text("해당 모드의 기록이 없습니다.",
-                    style: GoogleFonts.notoSans(color: Colors.white54)),
+                Text(
+                  "해당 모드의 기록이 없습니다.",
+                  style: GoogleFonts.notoSans(color: Colors.white54),
+                ),
               ],
             ),
           );
@@ -590,8 +614,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   Widget _buildKeepersBody() {
     if (!_keepersMigrateOnce) {
       _keepersMigrateOnce = true;
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => _migrateKeeperMissingIsDeleted());
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _migrateKeeperMissingIsDeleted(),
+      );
     }
     _keepersStream ??= currentUserReference!.collection('keepers').snapshots();
     return StreamBuilder<QuerySnapshot>(
@@ -605,23 +630,33 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.error_outline_rounded,
-                    size: 48, color: Colors.redAccent),
+                const Icon(
+                  Icons.error_outline_rounded,
+                  size: 48,
+                  color: Colors.redAccent,
+                ),
                 const SizedBox(height: 16),
-                Text("Keepers를 불러오지 못했습니다.",
-                    style: GoogleFonts.notoSans(color: Colors.white70)),
+                Text(
+                  "Keepers를 불러오지 못했습니다.",
+                  style: GoogleFonts.notoSans(color: Colors.white70),
+                ),
                 const SizedBox(height: 8),
                 Text(
                   "오류: ${snapshot.error}",
                   style: GoogleFonts.notoSans(
-                      color: Colors.redAccent.withValues(alpha: 0.8),
-                      fontSize: 11),
+                    color: Colors.redAccent.withValues(alpha: 0.8),
+                    fontSize: 11,
+                  ),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
-                Text("잠시 후 다시 시도해 주세요.",
-                    style: GoogleFonts.notoSans(
-                        color: Colors.white30, fontSize: 12)),
+                Text(
+                  "잠시 후 다시 시도해 주세요.",
+                  style: GoogleFonts.notoSans(
+                    color: Colors.white30,
+                    fontSize: 12,
+                  ),
+                ),
               ],
             ),
           );
@@ -630,7 +665,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         if (snapshot.connectionState == ConnectionState.waiting &&
             !snapshot.hasData) {
           return const Center(
-              child: CircularProgressIndicator(color: _keepersColor));
+            child: CircularProgressIndicator(color: _keepersColor),
+          );
         }
         final allDocs = snapshot.data?.docs ?? [];
 
@@ -645,15 +681,24 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.bookmark_border_rounded,
-                    size: 60, color: Colors.white24),
+                const Icon(
+                  Icons.bookmark_border_rounded,
+                  size: 60,
+                  color: Colors.white24,
+                ),
                 const SizedBox(height: 20),
-                Text("저장된 표현이 없습니다.",
-                    style: GoogleFonts.notoSans(color: Colors.white54)),
+                Text(
+                  "저장된 표현이 없습니다.",
+                  style: GoogleFonts.notoSans(color: Colors.white54),
+                ),
                 const SizedBox(height: 8),
-                Text("대화 기록에서 대사를 길게 누르면 여기에 저장됩니다.",
-                    style: GoogleFonts.notoSans(
-                        color: Colors.white30, fontSize: 12)),
+                Text(
+                  "대화 기록에서 대사를 길게 누르면 여기에 저장됩니다.",
+                  style: GoogleFonts.notoSans(
+                    color: Colors.white30,
+                    fontSize: 12,
+                  ),
+                ),
               ],
             ),
           );
@@ -688,15 +733,21 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.bookmark_border_rounded,
-                size: 60, color: Colors.white24),
+            const Icon(
+              Icons.bookmark_border_rounded,
+              size: 60,
+              color: Colors.white24,
+            ),
             const SizedBox(height: 20),
-            Text("저장된 표현이 없습니다.",
-                style: GoogleFonts.notoSans(color: Colors.white54)),
+            Text(
+              "저장된 표현이 없습니다.",
+              style: GoogleFonts.notoSans(color: Colors.white54),
+            ),
             const SizedBox(height: 8),
-            Text("대화 기록에서 대사를 탭하면 여기에 저장됩니다.",
-                style:
-                    GoogleFonts.notoSans(color: Colors.white30, fontSize: 12)),
+            Text(
+              "대화 기록에서 대사를 탭하면 여기에 저장됩니다.",
+              style: GoogleFonts.notoSans(color: Colors.white30, fontSize: 12),
+            ),
           ],
         ),
       );
@@ -758,8 +809,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 : [
                     _buildDeleteActionChip(),
                     _buildRangeHintChip(),
-                    _buildFilterChip(_selectedFilter, _selectedFilter,
-                        _getIconForRoom(_selectedFilter)),
+                    _buildFilterChip(
+                      _selectedFilter,
+                      _selectedFilter,
+                      _getIconForRoom(_selectedFilter),
+                    ),
                   ],
           ),
         ),
@@ -773,7 +827,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   /// 기준점을 짚기 전과 뒤에 문구가 바뀜다. "끝을 길게"라고 말해 주지
   /// 않으면 처음 짚은 사람은 그다음을 모른다.
   Widget _buildRangeHintChip() {
-    final bool armed = _rangeAnchorDocId != null &&
+    final bool armed =
+        _rangeAnchorDocId != null &&
         _visibleHistoryDocIds.contains(_rangeAnchorDocId);
     // 🚫 [RANGE] **기준점을 찍었을 때만 눌린다.** 그때 하는 일은 하나뿐이고
     //   ─ 기준점 취소 ─ 글자와 ✕가 그렇게 말한다. 기준점이 없을 때는 아예
@@ -819,14 +874,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             // 무엇을 취소하는 것인지 알 수 없다.
             if (armed) ...[
               const SizedBox(width: 8),
-              Container(
-                width: 1,
-                height: 12,
-                color: Colors.white24,
-              ),
+              Container(width: 1, height: 12, color: Colors.white24),
               const SizedBox(width: 8),
-              const Icon(Icons.close_rounded,
-                  size: 15, color: Color(0xFFBDBDBD)),
+              const Icon(
+                Icons.close_rounded,
+                size: 15,
+                color: Color(0xFFBDBDBD),
+              ),
               const SizedBox(width: 3),
               const Text(
                 '취소',
@@ -867,8 +921,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.bookmark_rounded,
-                size: 16, color: isSelected ? _keepersColor : Colors.white54),
+            Icon(
+              Icons.bookmark_rounded,
+              size: 16,
+              color: isSelected ? _keepersColor : Colors.white54,
+            ),
             const SizedBox(width: 6),
             Flexible(
               child: Text(
@@ -898,42 +955,53 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-              color: _selectedDocIds.isNotEmpty
-                  ? const Color(0xFF9E9E9E)
-                  : Colors.white24,
-              width: 1.5),
+            color: _selectedDocIds.isNotEmpty
+                ? const Color(0xFF9E9E9E)
+                : Colors.white24,
+            width: 1.5,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.delete_sweep,
-                size: 16,
-                color: _selectedDocIds.isNotEmpty
-                    ? const Color(0xFF9E9E9E)
-                    : Colors.white54),
+            Icon(
+              Icons.delete_sweep,
+              size: 16,
+              color: _selectedDocIds.isNotEmpty
+                  ? const Color(0xFF9E9E9E)
+                  : Colors.white54,
+            ),
             const SizedBox(width: 6),
             Flexible(
-              child: Text("선택삭제",
-                  style: TextStyle(
-                      color: _selectedDocIds.isNotEmpty
-                          ? const Color(0xFF9E9E9E)
-                          : Colors.white54,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold)),
+              child: Text(
+                "선택삭제",
+                style: TextStyle(
+                  color: _selectedDocIds.isNotEmpty
+                      ? const Color(0xFF9E9E9E)
+                      : Colors.white54,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
             if (_selectedDocIds.isNotEmpty) ...[
               const SizedBox(width: 6),
               Container(
                 padding: const EdgeInsets.all(5),
                 decoration: const BoxDecoration(
-                    color: Color(0xFF9E9E9E), shape: BoxShape.circle),
-                child: Text('${_selectedDocIds.length}',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold)),
-              )
-            ]
+                  color: Color(0xFF9E9E9E),
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  '${_selectedDocIds.length}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -942,8 +1010,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
 
   Widget _buildFilterChip(String filterKey, String label, IconData icon) {
     bool isSelected = _selectedFilter == filterKey;
-    Color baseColor =
-        filterKey == 'All' ? Colors.grey : _getColorForRoom(filterKey);
+    Color baseColor = filterKey == 'All'
+        ? Colors.grey
+        : _getColorForRoom(filterKey);
 
     return GestureDetector(
       onTap: () {
@@ -969,8 +1038,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon,
-                size: 16, color: isSelected ? baseColor : Colors.white54),
+            Icon(
+              icon,
+              size: 16,
+              color: isSelected ? baseColor : Colors.white54,
+            ),
             const SizedBox(width: 6),
             Flexible(
               child: Text(
@@ -1003,8 +1075,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     } else {
       Timestamp? ts = data['created_at'];
       if (ts != null) {
-        title =
-            DateFormat('yyyy.MM.dd (E) a h:mm', 'ko_KR').format(ts.toDate());
+        title = DateFormat(
+          'yyyy.MM.dd (E) a h:mm',
+          'ko_KR',
+        ).format(ts.toDate());
       } else {
         title = "날짜 정보 없음";
       }
@@ -1036,8 +1110,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         context.pushNamed(
           'ChatDetail',
           queryParameters: {
-            'historyRef':
-                serializeParam(doc.reference, ParamType.DocumentReference)
+            'historyRef': serializeParam(
+              doc.reference,
+              ParamType.DocumentReference,
+            ),
           }.withoutNulls,
         );
       },
@@ -1050,15 +1126,19 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           borderRadius: BorderRadius.circular(12),
           border: isPinned
               ? Border.all(
-                  color: Colors.amber.withValues(alpha: 0.6), width: 1.5)
+                  color: Colors.amber.withValues(alpha: 0.6),
+                  width: 1.5,
+                )
               : Border.all(
                   color: isChecked ? const Color(0xFF9E9E9E) : Colors.white10,
-                  width: isChecked ? 1.5 : 1.0),
+                  width: isChecked ? 1.5 : 1.0,
+                ),
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withValues(alpha: 0.3),
-                blurRadius: 4,
-                offset: const Offset(0, 2))
+              color: Colors.black.withValues(alpha: 0.3),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
           ],
         ),
         child: Row(
@@ -1106,8 +1186,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                   final int hi = from < to ? to : from;
                   HapticFeedback.mediumImpact();
                   setState(() {
-                    _selectedDocIds
-                        .addAll(_visibleHistoryDocOrder.sublist(lo, hi + 1));
+                    _selectedDocIds.addAll(
+                      _visibleHistoryDocOrder.sublist(lo, hi + 1),
+                    );
                     // 집은 끝이 다음 범위의 시작이 된다. 이어서 집기가 된다.
                     _rangeAnchorDocId = doc.id;
                   });
@@ -1121,7 +1202,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                       checkColor: Colors.white,
                       side: const BorderSide(color: Colors.white54, width: 1.5),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4)),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
                       visualDensity: VisualDensity.standard,
                       onChanged: (_) {},
                     ),
@@ -1134,21 +1216,27 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 color: _getColorForRoom(roomName).withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Icon(_getIconForRoom(roomName),
-                  color: _getColorForRoom(roomName), size: 20),
+              child: Icon(
+                _getIconForRoom(roomName),
+                color: _getColorForRoom(roomName),
+                size: 20,
+              ),
             ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: isPinned ? Colors.amber : Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15)),
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isPinned ? Colors.amber : Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   // 미리보기 한 줄 앞에 표를 붙인다. 줄을 새로 만들지 않는다 —
                   // 목록 카드의 높이가 방마다 달라지면 훑어보기가 나빠진다.
@@ -1157,10 +1245,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                       if (isDuoDirect) ...[
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
-                            color:
-                                const Color(0xFF52D4C3).withValues(alpha: 0.16),
+                            color: const Color(
+                              0xFF52D4C3,
+                            ).withValues(alpha: 0.16),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: const Text(
@@ -1176,11 +1267,15 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                         const SizedBox(width: 6),
                       ],
                       Expanded(
-                        child: Text(previewText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                color: Colors.white54, fontSize: 12)),
+                        child: Text(
+                          previewText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -1188,8 +1283,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               ),
             ),
             if (!showCheckbox)
-              const Icon(Icons.arrow_forward_ios_rounded,
-                  color: Colors.white24, size: 14),
+              const Icon(
+                Icons.arrow_forward_ios_rounded,
+                color: Colors.white24,
+                size: 14,
+              ),
           ],
         ),
       ),
@@ -1217,13 +1315,16 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         borderRadius: BorderRadius.circular(12),
         border: isPinned
             ? Border.all(
-                color: _keepersColor.withValues(alpha: 0.6), width: 1.5)
+                color: _keepersColor.withValues(alpha: 0.6),
+                width: 1.5,
+              )
             : Border.all(color: Colors.white10, width: 1.0),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
-              blurRadius: 4,
-              offset: const Offset(0, 2))
+            color: Colors.black.withValues(alpha: 0.3),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
       child: Column(
@@ -1234,13 +1335,17 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             Row(
               children: [
                 if (sourceRoom.isNotEmpty)
-                  Text(sourceRoom,
-                      style:
-                          const TextStyle(color: Colors.white24, fontSize: 10)),
+                  Text(
+                    sourceRoom,
+                    style: const TextStyle(color: Colors.white24, fontSize: 10),
+                  ),
                 const Spacer(),
                 if (isPinned)
-                  const Icon(Icons.push_pin_rounded,
-                      color: _keepersColor, size: 12),
+                  const Icon(
+                    Icons.push_pin_rounded,
+                    color: _keepersColor,
+                    size: 12,
+                  ),
               ],
             ),
           const SizedBox(height: 10),
@@ -1248,10 +1353,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           Text(
             translated,
             style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                height: 1.4),
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              height: 1.4,
+            ),
           ),
           if (original.isNotEmpty) ...[
             const SizedBox(height: 6),
@@ -1282,8 +1388,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 icon: Icons.school_rounded,
                 color: Colors.deepPurpleAccent,
                 tooltip: '실전 튜터링',
-                onTap: () =>
-                    _showKeeperTutoringPopup(doc.id, data, translated),
+                onTap: () => _showKeeperTutoringPopup(doc.id, data, translated),
               ),
               // 3) 다른 표현 보기 — 히스토리 말풍선과 같은 팝업이다
               _buildKeeperAction(
@@ -1414,8 +1519,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   /// [model]/[instructions]를 주지 않으면 기존 tts-1 경로 그대로다(튜터링용).
   /// instructions는 gpt-4o-mini-tts에서만 동작하고, 그 모델은 speed를 무시하므로
   /// 둘을 같이 보내지 않는다.
-  Future<Uint8List?> _fetchTts(String text, String voice,
-      {double speed = 1.0, String? model, String? instructions}) async {
+  Future<Uint8List?> _fetchTts(
+    String text,
+    String voice, {
+    double speed = 1.0,
+    String? model,
+    String? instructions,
+  }) async {
     if (_apiKey.isEmpty || text.trim().isEmpty) return null;
     try {
       final payload = <String, dynamic>{
@@ -1437,8 +1547,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         body: jsonEncode(payload),
       );
       if (response.statusCode != 200) {
-        debugPrint('[Keepers] fetchTts http ${response.statusCode}: '
-            '${response.body}');
+        debugPrint(
+          '[Keepers] fetchTts http ${response.statusCode}: '
+          '${response.body}',
+        );
         return null;
       }
       return response.bodyBytes;
@@ -1455,11 +1567,16 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     try {
       await doc.reference.update({'pinned_at': FieldValue.serverTimestamp()});
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("맨 위로 올렸습니다.",
-                style: TextStyle(fontWeight: FontWeight.bold)),
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "맨 위로 올렸습니다.",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             backgroundColor: _keepersColor,
-            duration: Duration(seconds: 1)));
+            duration: Duration(seconds: 1),
+          ),
+        );
       }
     } catch (e) {
       debugPrint('[Keepers] moveToTop error: $e');
@@ -1475,31 +1592,41 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF333333),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text("Keepers 삭제",
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: const Text("이 표현을 Keepers에서 삭제할까요?",
-            style: TextStyle(color: Colors.white70)),
+        title: const Text(
+          "Keepers 삭제",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          "이 표현을 Keepers에서 삭제할까요?",
+          style: TextStyle(color: Colors.white70),
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("취소", style: TextStyle(color: Colors.grey))),
+            onPressed: () => Navigator.pop(context),
+            child: const Text("취소", style: TextStyle(color: Colors.grey)),
+          ),
           TextButton(
-              // 지우면 그 줄이 목록에서 곧바로 사라진다. 그게 이미 대답이라
-              // 알림을 겹쳐 띄우지 않는다 — 물어보고, 누르면, 사라진다.
-              onPressed: () async {
-                Navigator.pop(context);
-                try {
-                  await doc.reference.update({
-                    'is_deleted': true,
-                    'deleted_at': FieldValue.serverTimestamp()
-                  });
-                } catch (e) {
-                  debugPrint('[Keepers] delete error: $e');
-                }
-              },
-              child: const Text("삭제",
-                  style: TextStyle(
-                      color: Colors.redAccent, fontWeight: FontWeight.bold))),
+            // 지우면 그 줄이 목록에서 곧바로 사라진다. 그게 이미 대답이라
+            // 알림을 겹쳐 띄우지 않는다 — 물어보고, 누르면, 사라진다.
+            onPressed: () async {
+              Navigator.pop(context);
+              try {
+                await doc.reference.update({
+                  'is_deleted': true,
+                  'deleted_at': FieldValue.serverTimestamp(),
+                });
+              } catch (e) {
+                debugPrint('[Keepers] delete error: $e');
+              }
+            },
+            child: const Text(
+              "삭제",
+              style: TextStyle(
+                color: Colors.redAccent,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1514,11 +1641,15 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   //  뜻이라 그쪽이 맞다.
   void _showKeeperAltStylePopup(String baseText) {
     if (_apiKey.isEmpty || baseText.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('다른 표현을 불러올 수 없습니다.',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.orangeAccent,
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            '다른 표현을 불러올 수 없습니다.',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: Colors.orangeAccent,
+        ),
+      );
       return;
     }
     resetBillingIdle();
@@ -1534,12 +1665,20 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   //  Keepers 튜터링 팝업 (chat_history_master의 패턴 재사용)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   void _showKeeperTutoringPopup(
-      String keeperId, Map<String, dynamic> keeperData, String baseText) {
+    String keeperId,
+    Map<String, dynamic> keeperData,
+    String baseText,
+  ) {
     if (baseText.trim().isEmpty || _apiKey.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("튜터링을 시작할 수 없습니다.",
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.orangeAccent));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "튜터링을 시작할 수 없습니다.",
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: Colors.orangeAccent,
+        ),
+      );
       return;
     }
 
@@ -1550,17 +1689,19 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     // 🗣️ 문제를 낼 언어는 **이 사람의 말**이다. 줄마다 달라지는 값이 아니라
     //   묻지 않는다 — 로비 설정에서 그때그때 읽는다. 설정을 바꾸면 피드백
     //   언어도 같이 따라가는 것이 맞다.
-    _keeperTutoringNative =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+    _keeperTutoringNative = FFAppState().nativeLang.isNotEmpty
+        ? FFAppState().nativeLang
+        : 'Korean';
     // 🎯 배울 언어만 줄에 매인다. 한 키퍼를 영어로 연습하다 일본어로 바꾸는
     //   일은 있어도, 내 모국어가 줄마다 바뀌지는 않는다.
-    final String savedTarget =
-        (keeperData[kKeeperTargetLangField] ?? '').toString().trim();
+    final String savedTarget = (keeperData[kKeeperTargetLangField] ?? '')
+        .toString()
+        .trim();
     _keeperTutoringTarget = savedTarget.isNotEmpty
         ? savedTarget
         : (FFAppState().targetLang.isNotEmpty
-            ? FFAppState().targetLang
-            : 'English');
+              ? FFAppState().targetLang
+              : 'English');
     _keeperTutoringNeedsLangPick = savedTarget.isEmpty;
 
     // 상태 초기화
@@ -1602,7 +1743,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               //   히스토리 쪽 튜터링 시트와 같은 값이다 — 두 시트가 서로
               //   다르게 앉으면 같은 기능인데 다른 화면처럼 보인다.
               padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(ctx).padding.bottom + 24),
+                bottom: MediaQuery.of(ctx).padding.bottom + 24,
+              ),
               child: _buildKeeperTutoringBody(
                 baseText,
                 onClose: () => Navigator.of(ctx).pop(),
@@ -1643,16 +1785,16 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               'role': 'system',
               'content':
                   'You are a grammar application tutor. Keep ONLY the core '
-                      'grammar pattern (tense / structure / word order) of the '
-                      'input $targetLang sentence. Then create ONE completely '
-                      'NEW $promptLang sentence that uses the SAME structure '
-                      'but an ENTIRELY DIFFERENT topic, vocabulary, and '
-                      'situation from the input — it must not be a paraphrase '
-                      'of the input. Also provide one natural $targetLang '
-                      'answer for that new $promptLang sentence. '
-                      'reply ONLY in JSON: '
-                      '{"prompt": "new $promptLang sentence", '
-                      '"answer": "$targetLang answer"}',
+                  'grammar pattern (tense / structure / word order) of the '
+                  'input $targetLang sentence. Then create ONE completely '
+                  'NEW $promptLang sentence that uses the SAME structure '
+                  'but an ENTIRELY DIFFERENT topic, vocabulary, and '
+                  'situation from the input — it must not be a paraphrase '
+                  'of the input. Also provide one natural $targetLang '
+                  'answer for that new $promptLang sentence. '
+                  'reply ONLY in JSON: '
+                  '{"prompt": "new $promptLang sentence", '
+                  '"answer": "$targetLang answer"}',
             },
             {
               'role': 'user',
@@ -1696,56 +1838,61 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
       required String label,
       required String value,
       required void Function(String) onPick,
-    }) =>
-        Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 76,
-                child: Text(label,
-                    style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold)),
+    }) => Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 76,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
               ),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white12),
+            ),
+          ),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: kOriginLanguageOptions.contains(value)
+                      ? value
+                      : kOriginLanguageOptions.first,
+                  isExpanded: true,
+                  dropdownColor: const Color(0xFF2A2A2A),
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  icon: const Icon(
+                    Icons.expand_more_rounded,
+                    color: Colors.white38,
                   ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: kOriginLanguageOptions.contains(value)
-                          ? value
-                          : kOriginLanguageOptions.first,
-                      isExpanded: true,
-                      dropdownColor: const Color(0xFF2A2A2A),
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 14),
-                      icon: const Icon(Icons.expand_more_rounded,
-                          color: Colors.white38),
-                      items: kOriginLanguageOptions
-                          .map((String lang) => DropdownMenuItem<String>(
-                                value: lang,
-                                child: Text(koreanLanguageDisplayName(lang)),
-                              ))
-                          .toList(),
-                      onChanged: (String? v) {
-                        if (v == null) return;
-                        onPick(v);
-                        _keeperDialogSetState?.call(() {});
-                      },
-                    ),
-                  ),
+                  items: kOriginLanguageOptions
+                      .map(
+                        (String lang) => DropdownMenuItem<String>(
+                          value: lang,
+                          child: Text(koreanLanguageDisplayName(lang)),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (String? v) {
+                    if (v == null) return;
+                    onPick(v);
+                    _keeperDialogSetState?.call(() {});
+                  },
                 ),
               ),
-            ],
+            ),
           ),
-        );
+        ],
+      ),
+    );
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -1763,11 +1910,14 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               const Icon(Icons.school_rounded, color: _keepersColor, size: 20),
               const SizedBox(width: 8),
               const Expanded(
-                child: Text("Keepers 실전 튜터링",
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15)),
+                child: Text(
+                  "Keepers 실전 튜터링",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.close, color: Colors.white38, size: 20),
@@ -1785,9 +1935,14 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               color: Colors.white.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Text(baseText,
-                style: const TextStyle(
-                    color: Colors.white70, fontSize: 13, height: 1.4)),
+            child: Text(
+              baseText,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
           ),
           const Divider(color: Colors.white12, height: 24),
           _buildStepHeader('STEP 0', '언어', _keepersColor),
@@ -1796,7 +1951,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             '이 줄은 처음입니다. 어느 말로 말해 볼지 한 번만 정해 주세요.\n'
             '문제는 ${koreanLanguageDisplayName(_keeperTutoringNative)}로 나옵니다.',
             style: const TextStyle(
-                color: Colors.white38, fontSize: 11, height: 1.4),
+              color: Colors.white38,
+              fontSize: 11,
+              height: 1.4,
+            ),
           ),
           const SizedBox(height: 12),
           picker(
@@ -1808,11 +1966,14 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           if (_keeperTutoringNative == _keeperTutoringTarget)
             const Padding(
               padding: EdgeInsets.only(bottom: 8),
-              child: Text('두 언어가 같으면 옮겨 말할 것이 없습니다.',
-                  style: TextStyle(
-                      color: Colors.orangeAccent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold)),
+              child: Text(
+                '두 언어가 같으면 옮겨 말할 것이 없습니다.',
+                style: TextStyle(
+                  color: Colors.orangeAccent,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           SizedBox(
             width: double.infinity,
@@ -1822,16 +1983,20 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 disabledBackgroundColor: Colors.white12,
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
               onPressed: _keeperTutoringNative == _keeperTutoringTarget
                   ? null
                   : () => _startKeeperTutoringWithLangs(baseText),
-              child: const Text('이 짝으로 시작',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14)),
+              child: const Text(
+                '이 짝으로 시작',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
             ),
           ),
         ],
@@ -1881,11 +2046,14 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               const Icon(Icons.school_rounded, color: _keepersColor, size: 20),
               const SizedBox(width: 8),
               const Expanded(
-                child: Text("Keepers 실전 튜터링",
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15)),
+                child: Text(
+                  "Keepers 실전 튜터링",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.close, color: Colors.white38, size: 20),
@@ -1904,9 +2072,14 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               color: Colors.white.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Text(baseText,
-                style: const TextStyle(
-                    color: Colors.white70, fontSize: 13, height: 1.4)),
+            child: Text(
+              baseText,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
           ),
           const Divider(color: Colors.white12, height: 24),
 
@@ -1915,11 +2088,14 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           const SizedBox(height: 8),
           if (_keeperTutoringLoading)
             const Center(
-                child: Padding(
-              padding: EdgeInsets.all(16),
-              child: CircularProgressIndicator(
-                  color: _keepersColor, strokeWidth: 2),
-            ))
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: CircularProgressIndicator(
+                  color: _keepersColor,
+                  strokeWidth: 2,
+                ),
+              ),
+            )
           else if (_keeperTutoringPrompt.isNotEmpty)
             Container(
               width: double.infinity,
@@ -1927,16 +2103,24 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               decoration: BoxDecoration(
                 color: Colors.cyanAccent.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(10),
-                border:
-                    Border.all(color: Colors.cyanAccent.withValues(alpha: 0.2)),
+                border: Border.all(
+                  color: Colors.cyanAccent.withValues(alpha: 0.2),
+                ),
               ),
-              child: Text(_keeperTutoringPrompt,
-                  style: const TextStyle(
-                      color: Colors.white, fontSize: 15, height: 1.5)),
+              child: Text(
+                _keeperTutoringPrompt,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  height: 1.5,
+                ),
+              ),
             )
           else
-            const Text("생성 실패 — 다시 시도해주세요.",
-                style: TextStyle(color: Colors.redAccent, fontSize: 13)),
+            const Text(
+              "생성 실패 — 다시 시도해주세요.",
+              style: TextStyle(color: Colors.redAccent, fontSize: 13),
+            ),
           const SizedBox(height: 16),
 
           // ── STEP 2: 도전 (녹음) ──
@@ -1949,18 +2133,21 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                     ? _stopKeeperRecording
                     : _startKeeperRecording,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     color: _keeperIsRecording
                         ? Colors.redAccent.withValues(alpha: 0.2)
                         : Colors.orangeAccent.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(
-                        color: _keeperIsRecording
-                            ? Colors.redAccent
-                            : Colors.orangeAccent,
-                        width: 1.5),
+                      color: _keeperIsRecording
+                          ? Colors.redAccent
+                          : Colors.orangeAccent,
+                      width: 1.5,
+                    ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1999,8 +2186,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 color: Colors.white.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Text("내 답변: $_keeperTutoringTranscript",
-                  style: const TextStyle(color: Colors.white54, fontSize: 13)),
+              child: Text(
+                "내 답변: $_keeperTutoringTranscript",
+                style: const TextStyle(color: Colors.white54, fontSize: 13),
+              ),
             ),
           ],
           const SizedBox(height: 16),
@@ -2016,22 +2205,31 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 color: Colors.greenAccent.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                    color: Colors.greenAccent.withValues(alpha: 0.2)),
+                  color: Colors.greenAccent.withValues(alpha: 0.2),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(_keeperTutoringCorrected,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          height: 1.4)),
+                  Text(
+                    _keeperTutoringCorrected,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      height: 1.4,
+                    ),
+                  ),
                   if (_keeperTutoringCorrection.isNotEmpty) ...[
                     const SizedBox(height: 8),
-                    Text(_keeperTutoringCorrection,
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 12, height: 1.4)),
+                    Text(
+                      _keeperTutoringCorrection,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -2045,33 +2243,46 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 decoration: BoxDecoration(
                   color: Colors.amber.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
-                  border:
-                      Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                  border: Border.all(
+                    color: Colors.amber.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Padding(
-                            padding: EdgeInsets.only(top: 1),
-                            child: Icon(Icons.lightbulb_outline,
-                                color: Colors.amber, size: 14),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: EdgeInsets.only(top: 1),
+                          child: Icon(
+                            Icons.lightbulb_outline,
+                            color: Colors.amber,
+                            size: 14,
                           ),
-                          SizedBox(width: 6),
-                          Flexible(
-                            child: Text("더 자연스러운 표현",
-                                style: TextStyle(
-                                    color: Colors.amber,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold)),
+                        ),
+                        SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            "더 자연스러운 표현",
+                            style: TextStyle(
+                              color: Colors.amber,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ]),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 8),
-                    Text(_keeperTutoringUsageTip,
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 13, height: 1.5)),
+                    Text(
+                      _keeperTutoringUsageTip,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        height: 1.5,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -2087,8 +2298,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               child: GestureDetector(
                 onTap: _playKeeperCorrectedAudio,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.amberAccent.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(24),
@@ -2139,10 +2352,15 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                   _keeperDialogSetState?.call(() {});
                   _generateKeeperAppText(baseText);
                 },
-                icon: const Icon(Icons.refresh_rounded,
-                    color: Colors.white38, size: 18),
-                label: const Text("다시 하기",
-                    style: TextStyle(color: Colors.white38, fontSize: 13)),
+                icon: const Icon(
+                  Icons.refresh_rounded,
+                  color: Colors.white38,
+                  size: 18,
+                ),
+                label: const Text(
+                  "다시 하기",
+                  style: TextStyle(color: Colors.white38, fontSize: 13),
+                ),
               ),
             ),
         ],
@@ -2159,17 +2377,25 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             color: color.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(6),
           ),
-          child: Text(step,
-              style: TextStyle(
-                  color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+          child: Text(
+            step,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ),
         const SizedBox(width: 8),
         Flexible(
-          child: Text(label,
-              style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold)),
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ),
       ],
     );
@@ -2186,8 +2412,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           '${dir.path}/keeper_${DateTime.now().millisecondsSinceEpoch}.m4a';
       await _keeperRecorder!.start(
         const RecordConfig(
-            androidConfig: kMicAndroidConfig,
-            encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1),
+          androidConfig: kMicAndroidConfig,
+          encoder: AudioEncoder.aacLc,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
         path: path,
       );
       BillingTicker.instance.resumeFromActivity('history_keeper_mic_start');
@@ -2230,14 +2459,16 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     if (_apiKey.isEmpty) return '';
     try {
       var request = http.MultipartRequest(
-          'POST', Uri.parse('https://api.openai.com/v1/audio/transcriptions'));
+        'POST',
+        Uri.parse('https://api.openai.com/v1/audio/transcriptions'),
+      );
       request.headers['Authorization'] = 'Bearer $_apiKey';
       request.fields['model'] = OpenAiTranscribeService.model;
       // 🎓 [TUTORING-LANG] 사용자가 말하는 것은 STEP 0에서 고른 배울 언어다.
-      request.fields['language'] =
-          deepgramLanguageCode(_keeperTutoringTarget);
-      request.files.add(http.MultipartFile.fromBytes('file', audioBytes,
-          filename: 'audio.m4a'));
+      request.fields['language'] = deepgramLanguageCode(_keeperTutoringTarget);
+      request.files.add(
+        http.MultipartFile.fromBytes('file', audioBytes, filename: 'audio.m4a'),
+      );
       final response = await request.send();
       if (response.statusCode == 200) {
         final body = await response.stream.bytesToString();
@@ -2295,14 +2526,15 @@ RULES — follow exactly:
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         final jsonResult = jsonDecode(data['choices'][0]['message']['content']);
-        _keeperTutoringCorrected =
-            (jsonResult['corrected'] as String? ?? '').trim();
-        _keeperTutoringCorrection =
-            (jsonResult['explanation'] as String? ?? '').trim();
+        _keeperTutoringCorrected = (jsonResult['corrected'] as String? ?? '')
+            .trim();
+        _keeperTutoringCorrection = (jsonResult['explanation'] as String? ?? '')
+            .trim();
         // 옇 키(usage_tip_ko)도 함께 읽는다.
         _keeperTutoringUsageTip =
-            ((jsonResult['usage_tip'] ?? jsonResult['usage_tip_ko']) as String?
-                    ?? '')
+            ((jsonResult['usage_tip'] ?? jsonResult['usage_tip_ko'])
+                        as String? ??
+                    '')
                 .trim();
         _keeperDialogSetState?.call(() {});
 
@@ -2378,10 +2610,15 @@ RULES — follow exactly:
 
   void _showBatchDeleteDialog() {
     if (_selectedDocIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("삭제할 대화 기록을 선택해주세요.",
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.orangeAccent));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "삭제할 대화 기록을 선택해주세요.",
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: Colors.orangeAccent,
+        ),
+      );
       return;
     }
 
@@ -2396,76 +2633,90 @@ RULES — follow exactly:
       builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF333333),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text("선택 기록 삭제",
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text(
+          "선택 기록 삭제",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
         content: Text(
-            "${_selectedDocIds.length}개의 대화 기록을 정말로 삭제하시겠습니까?\n복구할 수 없습니다.",
-            style: const TextStyle(color: Colors.white70, height: 1.5)),
+          "${_selectedDocIds.length}개의 대화 기록을 정말로 삭제하시겠습니까?\n복구할 수 없습니다.",
+          style: const TextStyle(color: Colors.white70, height: 1.5),
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text("취소", style: TextStyle(color: Colors.grey))),
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text("취소", style: TextStyle(color: Colors.grey)),
+          ),
           TextButton(
-              onPressed: () async {
-                // 스낵바를 띄울 상대는 다이얼로그가 아니라 화면이다.
-                // 닫기 전에 잡아 두어야 지운 뒤에도 살아 있다.
-                final messenger = ScaffoldMessenger.of(context);
-                Navigator.pop(dialogContext);
+            onPressed: () async {
+              // 스낵바를 띄울 상대는 다이얼로그가 아니라 화면이다.
+              // 닫기 전에 잡아 두어야 지운 뒤에도 살아 있다.
+              final messenger = ScaffoldMessenger.of(context);
+              Navigator.pop(dialogContext);
 
-                // 🗑️ [BATCH-DELETE] **먼저 베껴 두고 지운다.**
-                //
-                //   예전에는 `_selectedDocIds`를 그대로 순회했다. 그런데
-                //   `delete()`의 `await`마다 이벤트 루프가 돌고, 그 사이
-                //   Firestore 스냅샷이 도착해 StreamBuilder가 다시 그린다.
-                //   거기서 `_selectedDocIds.retainAll(_visibleHistoryDocIds)`가
-                //   방금 지운 id를 **순회 중인 집합에서 빼** 버린다.
-                //   다음 반복에서 ConcurrentModificationError가 나고 루프가
-                //   끊긴다 — 그래서 고른 것 중 한두 개만 지워졌다.
-                //   예외는 async onPressed 안에서 삼켜져 스낵바도 안 떴다.
-                //
-                //   베낀 목록을 돌면 스트림이 무엇을 하든 상관없다. 선택도
-                //   먼저 비워 화면이 곧바로 결과를 보여 준다.
-                final List<String> targets = _selectedDocIds.toList();
-                if (mounted) {
-                  setState(() {
-                    _selectedDocIds.clear();
-                    _rangeAnchorDocId = null;
-                  });
+              // 🗑️ [BATCH-DELETE] **먼저 베껴 두고 지운다.**
+              //
+              //   예전에는 `_selectedDocIds`를 그대로 순회했다. 그런데
+              //   `delete()`의 `await`마다 이벤트 루프가 돌고, 그 사이
+              //   Firestore 스냅샷이 도착해 StreamBuilder가 다시 그린다.
+              //   거기서 `_selectedDocIds.retainAll(_visibleHistoryDocIds)`가
+              //   방금 지운 id를 **순회 중인 집합에서 빼** 버린다.
+              //   다음 반복에서 ConcurrentModificationError가 나고 루프가
+              //   끊긴다 — 그래서 고른 것 중 한두 개만 지워졌다.
+              //   예외는 async onPressed 안에서 삼켜져 스낵바도 안 떴다.
+              //
+              //   베낀 목록을 돌면 스트림이 무엇을 하든 상관없다. 선택도
+              //   먼저 비워 화면이 곧바로 결과를 보여 준다.
+              final List<String> targets = _selectedDocIds.toList();
+              if (mounted) {
+                setState(() {
+                  _selectedDocIds.clear();
+                  _rangeAnchorDocId = null;
+                });
+              }
+
+              // 하나가 실패해도 나머지는 지운다 — 한 줄 때문에 통째로
+              // 멈추면 사용자는 무엇이 남았는지 알 수 없다.
+              int deleted = 0;
+              final List<String> failed = <String>[];
+              for (final String docId in targets) {
+                try {
+                  await _deleteHistoryRoomDeep(
+                    currentUserReference!.collection('chat_history').doc(docId),
+                  );
+                  deleted++;
+                } catch (e) {
+                  failed.add(docId);
+                  debugPrint(
+                    '[BATCH-DELETE] failed id=$docId (${e.runtimeType})',
+                  );
                 }
+              }
+              if (!mounted) return;
 
-                // 하나가 실패해도 나머지는 지운다 — 한 줄 때문에 통째로
-                // 멈추면 사용자는 무엇이 남았는지 알 수 없다.
-                int deleted = 0;
-                final List<String> failed = <String>[];
-                for (final String docId in targets) {
-                  try {
-                    await _deleteHistoryRoomDeep(currentUserReference!
-                        .collection('chat_history')
-                        .doc(docId));
-                    deleted++;
-                  } catch (e) {
-                    failed.add(docId);
-                    debugPrint(
-                        '[BATCH-DELETE] failed id=$docId (${e.runtimeType})');
-                  }
-                }
-                if (!mounted) return;
-
-                // 몇 개를 지웠는지 말한다. 예전 문구는 한 개만 지워져도
-                // 똑같이 "삭제되었습니다"라 어긋난 것을 알 수 없었다.
-                messenger.showSnackBar(SnackBar(
-                    content: Text(
-                        failed.isEmpty
-                            ? "$deleted개의 기록을 삭제했습니다."
-                            : "$deleted개를 삭제했습니다. ${failed.length}개는 실패했습니다.",
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    backgroundColor: failed.isEmpty
-                        ? const Color(0xFF2C2C2E)
-                        : Colors.orangeAccent));
-              },
-              child: const Text("삭제",
-                  style: TextStyle(
-                      color: Colors.redAccent, fontWeight: FontWeight.bold))),
+              // 몇 개를 지웠는지 말한다. 예전 문구는 한 개만 지워져도
+              // 똑같이 "삭제되었습니다"라 어긋난 것을 알 수 없었다.
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text(
+                    failed.isEmpty
+                        ? "$deleted개의 기록을 삭제했습니다."
+                        : "$deleted개를 삭제했습니다. ${failed.length}개는 실패했습니다.",
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  backgroundColor: failed.isEmpty
+                      ? const Color(0xFF2C2C2E)
+                      : Colors.orangeAccent,
+                ),
+              );
+            },
+            child: const Text(
+              "삭제",
+              style: TextStyle(
+                color: Colors.redAccent,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -2476,7 +2727,8 @@ RULES — follow exactly:
       context: context,
       backgroundColor: const Color(0xFF222222),
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) => Container(
         padding: const EdgeInsets.all(20),
         // 📐 높이를 220으로 못 박으면 기기 글자 배율이 큰 기기에서 아래
@@ -2486,28 +2738,33 @@ RULES — follow exactly:
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                    color: Colors.white24,
-                    borderRadius: BorderRadius.circular(2))),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
             const SizedBox(height: 20),
             ListTile(
-                leading: const Icon(Icons.edit, color: Colors.amber),
-                title: const Text("제목 수정 (상단 고정)",
-                    style: TextStyle(color: Colors.white)),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showRenameDialog(doc);
-                }),
+              leading: const Icon(Icons.edit, color: Colors.amber),
+              title: const Text(
+                "제목 수정 (상단 고정)",
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _showRenameDialog(doc);
+              },
+            ),
             ListTile(
-                leading: const Icon(Icons.delete, color: Colors.redAccent),
-                title:
-                    const Text("삭제하기", style: TextStyle(color: Colors.white)),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showDeleteDialog(doc);
-                }),
+              leading: const Icon(Icons.delete, color: Colors.redAccent),
+              title: const Text("삭제하기", style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                _showDeleteDialog(doc);
+              },
+            ),
           ],
         ),
       ),
@@ -2525,36 +2782,48 @@ RULES — follow exactly:
         backgroundColor: const Color(0xFF333333),
         title: const Text("제목 수정", style: TextStyle(color: Colors.white)),
         content: TextField(
-            controller: controller,
-            style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-                hintText: "예: 영어 면접 연습",
-                hintStyle: TextStyle(color: Colors.white30),
-                enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white30)),
-                focusedBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.amber)))),
+          controller: controller,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: "예: 영어 면접 연습",
+            hintStyle: TextStyle(color: Colors.white30),
+            enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.white30),
+            ),
+            focusedBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.amber),
+            ),
+          ),
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("취소", style: TextStyle(color: Colors.grey))),
+            onPressed: () => Navigator.pop(context),
+            child: const Text("취소", style: TextStyle(color: Colors.grey)),
+          ),
           TextButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                String newTitle = controller.text.trim();
-                if (newTitle.isNotEmpty) {
-                  await doc.reference
-                      .update({'custom_title': newTitle, 'is_pinned': true});
-                } else {
-                  await doc.reference.update({
-                    'custom_title': FieldValue.delete(),
-                    'is_pinned': false
-                  });
-                }
-              },
-              child: const Text("저장",
-                  style: TextStyle(
-                      color: Colors.amber, fontWeight: FontWeight.bold))),
+            onPressed: () async {
+              Navigator.pop(context);
+              String newTitle = controller.text.trim();
+              if (newTitle.isNotEmpty) {
+                await doc.reference.update({
+                  'custom_title': newTitle,
+                  'is_pinned': true,
+                });
+              } else {
+                await doc.reference.update({
+                  'custom_title': FieldValue.delete(),
+                  'is_pinned': false,
+                });
+              }
+            },
+            child: const Text(
+              "저장",
+              style: TextStyle(
+                color: Colors.amber,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -2566,25 +2835,33 @@ RULES — follow exactly:
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF333333),
         title: const Text("기록 삭제", style: TextStyle(color: Colors.white)),
-        content: const Text("정말로 삭제하시겠습니까?",
-            style: TextStyle(color: Colors.white70)),
+        content: const Text(
+          "정말로 삭제하시겠습니까?",
+          style: TextStyle(color: Colors.white70),
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("취소", style: TextStyle(color: Colors.grey))),
+            onPressed: () => Navigator.pop(context),
+            child: const Text("취소", style: TextStyle(color: Colors.grey)),
+          ),
           TextButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                // 대사까지 지운다 — 방 문서만 지우면 messages가 고아로 남는다.
-                try {
-                  await _deleteHistoryRoomDeep(doc.reference);
-                } catch (e) {
-                  debugPrint('[DELETE-ROOM] failed (${e.runtimeType})');
-                }
-              },
-              child: const Text("삭제",
-                  style: TextStyle(
-                      color: Colors.redAccent, fontWeight: FontWeight.bold))),
+            onPressed: () async {
+              Navigator.pop(context);
+              // 대사까지 지운다 — 방 문서만 지우면 messages가 고아로 남는다.
+              try {
+                await _deleteHistoryRoomDeep(doc.reference);
+              } catch (e) {
+                debugPrint('[DELETE-ROOM] failed (${e.runtimeType})');
+              }
+            },
+            child: const Text(
+              "삭제",
+              style: TextStyle(
+                color: Colors.redAccent,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -2592,83 +2869,140 @@ RULES — follow exactly:
 
   // 📦 [Box 1: 사용설명서 팝업]
   void _showStudyRoomManual() {
+    var useEnglish = true;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1C1E),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        titlePadding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
-        contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-        title: Row(
-          children: [
-            const Icon(Icons.help_outline_rounded,
-                color: Colors.amber, size: 20),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Text(
-                "스터디룸 사용설명서",
-                style: TextStyle(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1C1C1E),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+          contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+          title: Row(
+            children: [
+              const Icon(
+                Icons.help_outline_rounded,
+                color: Colors.amber,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  useEnglish ? "Study Room Guide" : "스터디룸 사용설명서",
+                  style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
-                    fontSize: 16),
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: () => setDialogState(() => useEnglish = !useEnglish),
+                tooltip: useEnglish ? '한국어로 보기' : 'View in English',
+                icon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.translate_rounded,
+                      color: Colors.white70,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      useEnglish ? 'EN' : 'KR',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.white38, size: 20),
+                onPressed: () => Navigator.pop(ctx),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: MediaQuery.of(ctx).size.height * 0.72,
+            child: SingleChildScrollView(
+              child: _buildManualBody(
+                useEnglish ? _kManualTextEnglish : _kManualText,
               ),
             ),
-            IconButton(
-              icon: const Icon(Icons.close, color: Colors.white38, size: 20),
-              onPressed: () => Navigator.pop(ctx),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            ),
-          ],
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: MediaQuery.of(ctx).size.height * 0.72,
-          child: SingleChildScrollView(
-            child: _buildManualBody(),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildManualBody() {
-    final lines = _kManualText.split('\n');
+  Widget _buildManualBody(String manualText) {
+    final lines = manualText.split('\n');
     final widgets = <Widget>[];
     for (final line in lines) {
       if (RegExp(r'^━+$').hasMatch(line.trim())) {
         widgets.add(const SizedBox(height: 6));
-        widgets
-            .add(const Divider(color: Colors.white12, thickness: 1, height: 8));
+        widgets.add(
+          const Divider(color: Colors.white12, thickness: 1, height: 8),
+        );
       } else if (line.startsWith('📍 STEP')) {
         widgets.add(const SizedBox(height: 6));
-        widgets.add(Text(line,
+        widgets.add(
+          Text(
+            line,
             style: const TextStyle(
-                color: Colors.amber,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-                height: 1.7)));
+              color: Colors.amber,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              height: 1.7,
+            ),
+          ),
+        );
       } else if (RegExp(r'^[🎯🎮🔁🎓📂❓📚]').hasMatch(line) &&
           line.length > 5) {
-        widgets.add(Text(line,
+        widgets.add(
+          Text(
+            line,
             style: const TextStyle(
-                color: Colors.amber,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-                height: 1.7)));
+              color: Colors.amber,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              height: 1.7,
+            ),
+          ),
+        );
       } else if (line.startsWith('▸ ')) {
-        widgets.add(Padding(
-          padding: const EdgeInsets.only(left: 8),
-          child: Text(line,
+        widgets.add(
+          Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: Text(
+              line,
               style: TextStyle(
-                  color: Colors.amber.withValues(alpha: 0.7),
-                  fontSize: 13,
-                  height: 1.55)),
-        ));
+                color: Colors.amber.withValues(alpha: 0.7),
+                fontSize: 13,
+                height: 1.55,
+              ),
+            ),
+          ),
+        );
       } else {
-        widgets.add(Text(line,
+        widgets.add(
+          Text(
+            line,
             style: const TextStyle(
-                color: Colors.white70, fontSize: 13, height: 1.55)));
+              color: Colors.white70,
+              fontSize: 13,
+              height: 1.55,
+            ),
+          ),
+        );
       }
     }
     return Column(
@@ -2738,3 +3072,40 @@ Keepers에서 지워도 원래 대화는 손대지 않습니다.
 60초 이상 반응이 없으면 자동으로 일시정지되어 과금이 멈춥니다.
 다시 말을 시작하거나 화면을 터치하면 자동으로 재개됩니다.
 자리를 비워도 요금 걱정 없이 안심하세요.''';
+
+const String _kManualTextEnglish = r'''
+The Study Room turns material from your conversations into speaking practice.
+
+📝 Edit Lines — on the first conversation page
+After a conversation, review what you said. Fix any misheard line and clear lines you do not want to study. Tap the pencil on a speech bubble to edit it.
+
+To remove a line, erase all its text and save. It will disappear from the conversation and study material.
+
+✅ Finalize Edits — available once
+When your review is complete, tap Finalize Edits to lock the lines. You cannot edit them again, so finish every correction first.
+
+Finalized lines become the source for all later study material. Practice stays locked until finalization. If you open Practice first, a confirmation dialog lets you finalize and continue.
+
+🏋️ AI Tutoring
+Speak new sentences with the same structure and receive corrections and feedback from AI. Generate similar sentences repeatedly to learn the pattern.
+
+🔄 Practice — Role-Switch Conversation
+Switch roles with AI and practice the conversation as if it were real.
+
+✨ Clear & Easy · Natural & Sharp
+Clear & Easy turns your conversation into simple, direct speaking practice. Natural & Sharp expresses the same ideas with natural context and connections. Practice both in meaning chunks through echoing and shadowing.
+
+🔊 Volume — lower the AI voice while shadowing
+Lowering the volume during practice reduces only the AI voice while your voice records normally. Raise it again when listening to your recording.
+
+💾 Keepers — saved expressions
+Press and hold a speech bubble for about 0.5 seconds to save it to Keepers.
+
+Open saved sentences from the 🔖 icon at the top of the Study Room. For each sentence you can:
+  ▶ Listen   🎓 AI Tutoring   🔀 View alternatives
+  ⬆ Move to top   🗑 Delete
+
+Keepers is independent from conversation history. Deleting a conversation does not remove saved sentences, and deleting a Keeper does not change the original conversation.
+
+⏸️ Auto Pause — billing protection
+After 60 seconds without activity, the session pauses automatically and billing stops. Speaking or touching the screen resumes it automatically.''';

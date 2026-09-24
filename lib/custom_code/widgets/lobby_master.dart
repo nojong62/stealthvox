@@ -79,11 +79,7 @@ const String _kAiStyleTargetLang = kAiStyleTargetLanguage;
 
 /// 📦 [Box 2: 클래스 선언부]
 class LobbyMaster extends StatefulWidget {
-  const LobbyMaster({
-    Key? key,
-    this.width,
-    this.height,
-  }) : super(key: key);
+  const LobbyMaster({Key? key, this.width, this.height}) : super(key: key);
   final double? width;
   final double? height;
 
@@ -105,7 +101,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     'Russian',
     'Portuguese',
     'Italian',
-    'Dutch'
+    'Dutch',
   ];
 
   bool isLoading = false;
@@ -133,7 +129,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Duo 초대 pending 상태이면 Lobby 스킵하고 바로 StealthRoom으로
       debugPrint(
-          '[Lobby] isGuestSession=${FFAppState().isGuestSession}, pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}');
+        '[Lobby] isGuestSession=${FFAppState().isGuestSession}, pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}',
+      );
       if (FFAppState().isGuestSession &&
           FFAppState().pendingInviteType == 'duo' &&
           FFAppState().duoRoomId.isNotEmpty) {
@@ -168,6 +165,13 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     }
     // Chat Language와 Learn Language는 사용자가 직접 고른다. 빈 값을
     // 임의의 언어로 채우지 않아야 로비가 선택 전 상태를 정확히 보여 준다.
+    if (FFAppState().nativeLang.isNotEmpty ||
+        FFAppState().targetLang.isNotEmpty) {
+      setState(() {
+        FFAppState().nativeLang = '';
+        FFAppState().targetLang = '';
+      });
+    }
     // 로비에서 음성을 선택하지 않는다. 사용자 역할 음성이 필요한 기존
     // 화면(Duo/History Practice)은 항상 verse를 사용한다.
     if (FFAppState().aiVoice != "verse") {
@@ -181,7 +185,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         currentUid != null && currentUid == LobbyBrain.lastSyncedUid;
     final alreadyLoaded = FFAppState().remainingTimeLoaded;
     debugPrint(
-        '[Lobby] _initializeLobbyData enter, alreadyLoaded=$alreadyLoaded, sameAccount=$isSameAccountAsLastSync, remainingTime=${FFAppState().remainingTime}');
+      '[Lobby] _initializeLobbyData enter, alreadyLoaded=$alreadyLoaded, sameAccount=$isSameAccountAsLastSync, remainingTime=${FFAppState().remainingTime}',
+    );
     setState(() {
       isLoading = true;
       // 계정이 바뀐 경우(다른 uid 또는 최초 동기화)에만 로딩 상태로 되돌린다.
@@ -192,8 +197,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     });
     try {
       // 1. DB 통신 분리: 서버 시간 및 남은 시간 동기화
-      int? serverRemainingTime =
-          await LobbyBrain.getRemainingTime(FirebaseAuth.instance.currentUser);
+      int? serverRemainingTime = await LobbyBrain.getRemainingTime(
+        FirebaseAuth.instance.currentUser,
+      );
       debugPrint('[Lobby] Firestore remainingTime=$serverRemainingTime');
       if (mounted) {
         setState(() {
@@ -271,24 +277,32 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       if (missingLanguages.isNotEmpty) {
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
-          ..showSnackBar(SnackBar(
-            content: Text(
-                '언어 선택이 필요합니다: ${missingLanguages.join(' / ')}'),
-          ));
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                'Please select your languages: ${missingLanguages.join(' / ')}',
+              ),
+            ),
+          );
         return;
       }
       if (!guardBillingEntry(context)) return;
       if (currentUserReference == null) return;
 
       // DB 통신 분리: 대화방 히스토리 문서 생성
-      final newHistoryRef =
-          await LobbyBrain.createHistoryDoc(currentUserReference!);
+      final newHistoryRef = await LobbyBrain.createHistoryDoc(
+        currentUserReference!,
+      );
       if (mounted) {
-        context.pushNamed('StealthRoom',
-            queryParameters: {
-              'historyRef':
-                  serializeParam(newHistoryRef, ParamType.DocumentReference)
-            }.withoutNulls);
+        context.pushNamed(
+          'StealthRoom',
+          queryParameters: {
+            'historyRef': serializeParam(
+              newHistoryRef,
+              ParamType.DocumentReference,
+            ),
+          }.withoutNulls,
+        );
       }
     } finally {
       _isActionLocked = false;
@@ -297,46 +311,100 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
 
   // 📦 [Box 6: 시스템 알림 팝업]
   void _showUsageGuideDialog(BuildContext context) {
+    var useEnglish = true;
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1C1E),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(children: const [
-          Icon(Icons.menu_book_outlined, color: Color(0xFF0A84FF)),
-          SizedBox(width: 8),
-          Flexible(
-            child: Text("[ 사용 설명서 ]",
-                style: TextStyle(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1C1C1E),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              const Icon(Icons.menu_book_outlined, color: Color(0xFF0A84FF)),
+              const SizedBox(width: 8),
+              const Flexible(
+                child: Text(
+                  "[ User Guide ]",
+                  style: TextStyle(
                     color: Colors.white,
                     fontSize: 16,
-                    fontWeight: FontWeight.bold)),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: () => setDialogState(() => useEnglish = !useEnglish),
+                tooltip: useEnglish ? '한국어로 보기' : 'View in English',
+                icon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.translate_rounded,
+                      color: Colors.white70,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      useEnglish ? 'EN' : 'KR',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ]),
-        content: const SingleChildScrollView(
-          child: Text(
-            "1. 모국어로 편하게 대화하세요\n"
-            "StealthVox는 사용자가 모국어로 AI와 자연스럽게 대화하면서, 그 대화를 공부방 학습 교재로 만드는 공간입니다.\n\n"
-            "2. 외국어를 자유롭게 섞어도 됩니다\n"
-            "모국어로 말해도 되고, 외국어로 말하거나 모국어와 외국어를 섞어서 말해도 됩니다. 완벽한 문장을 만들려고 부담 갖지 말고 평소 말하듯 이야기하세요.\n\n"
-            "3. 대화가 학습 자료가 됩니다\n"
-            "대화에서 만들어진 자료는 공부방에 정리되어, 다시 듣기, 역할교환 말하기, 쉐도잉 및 튜터링 학습 자료로 다양하게 활용합니다.\n\n"
-            "4. 영어 및 외국어를 생활 언어로 연습하세요\n"
-            "정답을 맞히는 공부보다 내가 실제로 하고 싶은 말을 반복해 보세요. 만들어진 자료를 부담 없이 즐기다 보면 영어를 일상에서 쓰는 생활 언어로 연습할 수 있습니다.\n\n"
-            "5. Duo Connect로 함께 대화하고 연습하세요\n"
-            "지인이나 가족을 대화에 초대해 전화 통화하듯 편하게 일상 이야기를 나눌 수 있습니다. 통화가 끝나면 대화 내용이 영어 학습 자료로 남아, 실제로 사용한 대화 패턴을 효율적으로 연습할 수 있습니다.\n\n"
-            "외국어를 배우고 싶은 사람과 통화하며 서로의 언어를 연습할 수도 있습니다. 초대받은 상대도 자신이 말할 언어와 배우고 싶은 언어를 직접 선택할 수 있어, 두 사람이 각자 원하는 언어를 따로 학습할 수 있습니다. 대화 중에는 만능 통역기처럼 서로 다른 언어로도 자연스럽게 소통할 수 있습니다.\n\n"
-            "한국인 지인과 자연스럽게 통화하면서 한국어를 배우고 싶은 분들에게도 도움이 되기를 바랍니다.",
-            style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+          content: SingleChildScrollView(
+            child: Text(
+              useEnglish
+                  ? "1. Talk comfortably in your own language\n"
+                        "StealthVox lets you talk naturally with AI in your own language and turns the conversation into study material.\n\n"
+                        "2. Mix in the language you are learning\n"
+                        "Speak in your own language, the language you are learning, or both. Do not worry about making perfect sentences—just talk naturally.\n\n"
+                        "3. Your conversations become study material\n"
+                        "The Study Room organizes your conversations for listening, role-switch practice, shadowing, and AI tutoring.\n\n"
+                        "4. Practice language for real life\n"
+                        "Instead of chasing one correct answer, repeat what you actually want to say. Your own material helps make the language part of daily life.\n\n"
+                        "5. Talk and practice together with Duo Connect\n"
+                        "Invite a friend or family member and talk as naturally as a phone call. After the call, the conversation becomes study material so you can practice expressions you actually used.\n\n"
+                        "You can also practice each other's languages. Each person chooses the language they speak and the language they want to learn. Live interpretation helps two people communicate naturally even when they speak different languages."
+                  : "1. 모국어로 편하게 대화하세요\n"
+                        "StealthVox는 사용자가 모국어로 AI와 자연스럽게 대화하면서, 그 대화를 공부방 학습 교재로 만드는 공간입니다.\n\n"
+                        "2. 외국어를 자유롭게 섞어도 됩니다\n"
+                        "모국어로 말해도 되고, 외국어로 말하거나 모국어와 외국어를 섞어서 말해도 됩니다. 완벽한 문장을 만들려고 부담 갖지 말고 평소 말하듯 이야기하세요.\n\n"
+                        "3. 대화가 학습 자료가 됩니다\n"
+                        "대화에서 만들어진 자료는 공부방에 정리되어, 다시 듣기, 역할교환 말하기, 쉐도잉 및 튜터링 학습 자료로 다양하게 활용합니다.\n\n"
+                        "4. 영어 및 외국어를 생활 언어로 연습하세요\n"
+                        "정답을 맞히는 공부보다 내가 실제로 하고 싶은 말을 반복해 보세요. 만들어진 자료를 부담 없이 즐기다 보면 영어를 일상에서 쓰는 생활 언어로 연습할 수 있습니다.\n\n"
+                        "5. Duo Connect로 함께 대화하고 연습하세요\n"
+                        "지인이나 가족을 대화에 초대해 전화 통화하듯 편하게 일상 이야기를 나눌 수 있습니다. 통화가 끝나면 대화 내용이 영어 학습 자료로 남아, 실제로 사용한 대화 패턴을 효율적으로 연습할 수 있습니다.\n\n"
+                        "외국어를 배우고 싶은 사람과 통화하며 서로의 언어를 연습할 수도 있습니다. 초대받은 상대도 자신이 말할 언어와 배우고 싶은 언어를 직접 선택할 수 있어, 두 사람이 각자 원하는 언어를 따로 학습할 수 있습니다. 대화 중에는 만능 통역기처럼 서로 다른 언어로도 자연스럽게 소통할 수 있습니다.\n\n"
+                        "한국인 지인과 자연스럽게 통화하면서 한국어를 배우고 싶은 분들에게도 도움이 되기를 바랍니다.",
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                height: 1.5,
+              ),
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
+          actions: [
+            TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text("확인",
-                  style: TextStyle(
-                      color: Color(0xFF0A84FF), fontWeight: FontWeight.bold))),
-        ],
+              child: const Text(
+                "Confirm",
+                style: TextStyle(
+                  color: Color(0xFF0A84FF),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -347,26 +415,37 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1C1C1E),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(children: const [
-          Icon(Icons.warning_amber_rounded, color: Color(0xFFFF453A)),
-          SizedBox(width: 8),
-          Flexible(
-            child: Text("회원 탈퇴",
+        title: Row(
+          children: const [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFFFF453A)),
+            SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                "Delete Account",
                 style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold)),
-          ),
-        ]),
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
         content: const Text(
-            "정말 탈퇴하시겠습니까?\n모든 정보(잔여 시간, 히스토리 등)가 영구적으로 삭제되며 복구할 수 없습니다.",
-            style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5)),
+          "Delete your account?\nAll data, including remaining time and history, will be permanently deleted.",
+          style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("취소",
-                  style: TextStyle(
-                      color: Colors.white54, fontWeight: FontWeight.bold))),
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              "Cancel",
+              style: TextStyle(
+                color: Colors.white54,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
           TextButton(
             onPressed: () async {
               if (_isActionLocked) return;
@@ -376,17 +455,26 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 await FirebaseAuth.instance.currentUser?.delete();
                 if (mounted) context.goNamed('Intro');
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text("보안을 위해 로그아웃 후 다시 로그인하신 뒤 탈퇴를 진행해주세요.",
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    backgroundColor: Color(0xFFFF453A)));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      "For security, log in again before deleting your account.",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    backgroundColor: Color(0xFFFF453A),
+                  ),
+                );
               } finally {
                 _isActionLocked = false;
               }
             },
-            child: const Text("탈퇴하기",
-                style: TextStyle(
-                    color: Color(0xFFFF453A), fontWeight: FontWeight.bold)),
+            child: const Text(
+              "Delete",
+              style: TextStyle(
+                color: Color(0xFFFF453A),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
@@ -497,9 +585,11 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icon,
-                    size: 15,
-                    color: highlighted ? _kLobbyCyan : _kLobbyTextLow),
+                Icon(
+                  icon,
+                  size: 15,
+                  color: highlighted ? _kLobbyCyan : _kLobbyTextLow,
+                ),
                 const SizedBox(width: 6),
                 Text(
                   label,
@@ -535,15 +625,15 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     final bool isLow = appState.remainingTime <= 60;
 
     Widget numberText(Color color) => Text(
-          displayTime,
-          maxLines: 1,
-          style: GoogleFonts.orbitron(
-            color: color,
-            fontSize: 30,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.5,
-          ),
-        );
+      displayTime,
+      maxLines: 1,
+      style: GoogleFonts.orbitron(
+        color: color,
+        fontSize: 30,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.5,
+      ),
+    );
 
     Widget value;
     if (!appState.remainingTimeLoaded) {
@@ -554,8 +644,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           child: SizedBox(
             width: 20,
             height: 20,
-            child:
-                CircularProgressIndicator(strokeWidth: 2, color: _kLobbyCyan),
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: _kLobbyCyan,
+            ),
           ),
         ),
       );
@@ -614,15 +706,15 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     ValueChanged<String?> onChanged,
   ) {
     Widget labelRow() => Text(
-          label,
-          maxLines: 1,
-          style: const TextStyle(
-            color: _kLobbyTextMid,
-            fontSize: 11,
-            letterSpacing: 1.4,
-            fontWeight: FontWeight.w800,
-          ),
-        );
+      label,
+      maxLines: 1,
+      style: const TextStyle(
+        color: _kLobbyTextMid,
+        fontSize: 11,
+        letterSpacing: 1.4,
+        fontWeight: FontWeight.w800,
+      ),
+    );
 
     return Container(
       decoration: BoxDecoration(
@@ -660,33 +752,38 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           // 닫혀 있을 때 상자 안에 그릴 것 — 라벨과 고른 언어를 함께 둔다.
           // 이 위젯이 곧 버튼의 크기라, 라벨까지 누르는 자리가 된다.
           selectedItemBuilder: (context) => languages
-              .map((String lang) => Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        labelRow(),
-                        const SizedBox(height: 2),
-                        Text(
-                          lang,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: _kLobbyTextHi,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                          ),
+              .map(
+                (String lang) => Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      labelRow(),
+                      const SizedBox(height: 2),
+                      Text(
+                        lang,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _kLobbyTextHi,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
                         ),
-                      ],
-                    ),
-                  ))
+                      ),
+                    ],
+                  ),
+                ),
+              )
               .toList(),
           icon: const Padding(
             padding: EdgeInsets.only(right: 12),
-            child: Icon(Icons.keyboard_arrow_down_rounded,
-                color: _kLobbyTextMid, size: 22),
+            child: Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: _kLobbyTextMid,
+              size: 22,
+            ),
           ),
           // 목록 쪽 글자. 닫힌 상자는 위 builder가 그리므로 여기 값은
           // 펼친 목록에만 쓰인다.
@@ -703,15 +800,20 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           itemHeight: null,
           borderRadius: BorderRadius.circular(16),
           items: languages
-              .map((String lang) => DropdownMenuItem<String>(
-                    value: lang,
-                    child: Container(
-                      constraints: const BoxConstraints(minHeight: 44),
-                      alignment: Alignment.centerLeft,
-                      child: Text(lang,
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
+              .map(
+                (String lang) => DropdownMenuItem<String>(
+                  value: lang,
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 44),
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      lang,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ))
+                  ),
+                ),
+              )
               .toList(),
           onChanged: onChanged,
         ),
@@ -741,7 +843,11 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
             // 제스처 바만큼 더 띄운다. 안 띄우면 마지막 알약(Casual)이
             // 화면 밑에 잘린다(실기기 확인, 2026-08-27).
             padding: EdgeInsets.fromLTRB(
-                20, 20, 20, 28 + MediaQuery.of(sheetContext).padding.bottom),
+              20,
+              20,
+              20,
+              28 + MediaQuery.of(sheetContext).padding.bottom,
+            ),
             decoration: const BoxDecoration(
               color: _kLobbySurface,
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -754,16 +860,21 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Flexible(
-                      child: Text('AI SETTINGS',
-                          style: TextStyle(
-                              color: _kLobbyTextHi,
-                              fontSize: 16,
-                              letterSpacing: 1.6,
-                              fontWeight: FontWeight.w800)),
+                      child: Text(
+                        'AI SETTINGS',
+                        style: TextStyle(
+                          color: _kLobbyTextHi,
+                          fontSize: 16,
+                          letterSpacing: 1.6,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close_rounded,
-                          color: _kLobbyTextMid),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: _kLobbyTextMid,
+                      ),
                       onPressed: () => Navigator.pop(sheetContext),
                     ),
                   ],
@@ -785,7 +896,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                     child: Text(
                       'AI STYLE applies only when TARGET is English.',
                       style: TextStyle(
-                          color: _kLobbyTextLow, fontSize: 12, height: 1.4),
+                        color: _kLobbyTextLow,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
                     ),
                   ),
                 ],
@@ -816,7 +930,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                   color: _kLobbyBlue.withValues(alpha: 0.32),
                   blurRadius: 16,
                   spreadRadius: 1,
-                )
+                ),
               ]
             : null,
       ),
@@ -902,18 +1016,26 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
 
   /// AI TONE — 언제나 둘, 같은 폭.
   Widget _buildAiToneSelector(
-      String selectedValue, ValueChanged<String> onSelected) {
+    String selectedValue,
+    ValueChanged<String> onSelected,
+  ) {
     const List<String> options = ['Formal', 'Casual'];
     return Row(
       children: [
         Expanded(
-          child: _buildPill(options[0], selectedValue == options[0],
-              () => onSelected(options[0])),
+          child: _buildPill(
+            options[0],
+            selectedValue == options[0],
+            () => onSelected(options[0]),
+          ),
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: _buildPill(options[1], selectedValue == options[1],
-              () => onSelected(options[1])),
+          child: _buildPill(
+            options[1],
+            selectedValue == options[1],
+            () => onSelected(options[1]),
+          ),
         ),
       ],
     );
@@ -937,7 +1059,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
               color: _kLobbyBlue.withValues(alpha: 0.35),
               blurRadius: 22,
               offset: const Offset(0, 8),
-            )
+            ),
           ],
         ),
         child: Material(
@@ -990,7 +1112,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
               Expanded(
                 child: _buildBottomBarItem(
                   Icons.help_outline_rounded,
-                  '사용 설명서',
+                  'User Guide',
                   () => _showUsageGuideDialog(context),
                 ),
               ),
@@ -998,7 +1120,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
               Expanded(
                 child: _buildBottomBarItem(
                   Icons.logout_rounded,
-                  '로그아웃',
+                  'Log Out',
                   () async {
                     FFAppState().remainingTime = 0;
                     FFAppState().remainingTimeLoaded = false;
@@ -1013,7 +1135,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
               Expanded(
                 child: _buildBottomBarItem(
                   Icons.person_remove_alt_1_outlined,
-                  '회원 탈퇴',
+                  'Delete Account',
                   () => _showDeleteAccountDialog(context),
                 ),
               ),
@@ -1025,11 +1147,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   /// 하단 줄 사이의 얇은 세로 선. 셋이 서로 다른 일을 한다는 표시다.
-  Widget _bottomBarDivider() => Container(
-        width: 1,
-        height: 18,
-        color: _kLobbyBorder,
-      );
+  Widget _bottomBarDivider() =>
+      Container(width: 1, height: 18, color: _kLobbyBorder);
 
   Widget _buildBottomBarItem(IconData icon, String label, VoidCallback onTap) {
     return InkWell(
@@ -1088,15 +1207,19 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           bottom: false,
           child: (isLoading || _isDuoInvitePending)
               ? const Center(
-                  child: CircularProgressIndicator(color: _kLobbyCyan))
+                  child: CircularProgressIndicator(color: _kLobbyCyan),
+                )
               : Center(
                   child: ConstrainedBox(
-                    constraints:
-                        const BoxConstraints(maxWidth: _kLobbyMaxContentWidth),
+                    constraints: const BoxConstraints(
+                      maxWidth: _kLobbyMaxContentWidth,
+                    ),
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        final Widget content =
-                            _buildLobbyBody(appState, displayTime);
+                        final Widget content = _buildLobbyBody(
+                          appState,
+                          displayTime,
+                        );
                         // 세로가 아주 짧으면(창을 줄인 웹, 분할 화면) 고정
                         // 영역만으로도 화면을 넘긴다. 그때는 고정을 포기하고
                         // 화면째 스크롤한다 — ENTER가 잘려 보이는 것보다
@@ -1130,9 +1253,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   void _openP2VoiceLab() {
     if (!AdminGate.isAdmin) return;
     if (!mounted) return;
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const P2VoiceLabPage()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const P2VoiceLabPage()));
   }
 
   /// 로비 본문 한 벌. 세로가 짧을 때 통째로 스크롤에 담기 위해 갈라 뒀다.
@@ -1152,18 +1275,19 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 gestures: <Type, GestureRecognizerFactory>{
                   LongPressGestureRecognizer:
                       GestureRecognizerFactoryWithHandlers<
-                          LongPressGestureRecognizer>(
-                    () => LongPressGestureRecognizer(
-                      duration: const Duration(seconds: 3),
-                    ),
-                    (LongPressGestureRecognizer r) =>
-                        r.onLongPress = _openP2VoiceLab,
-                  ),
+                        LongPressGestureRecognizer
+                      >(
+                        () => LongPressGestureRecognizer(
+                          duration: const Duration(seconds: 3),
+                        ),
+                        (LongPressGestureRecognizer r) =>
+                            r.onLongPress = _openP2VoiceLab,
+                      ),
                 },
                 child: ShaderMask(
-                  shaderCallback: (rect) =>
-                      const LinearGradient(colors: [_kLobbyCyan, _kLobbyViolet])
-                          .createShader(rect),
+                  shaderCallback: (rect) => const LinearGradient(
+                    colors: [_kLobbyCyan, _kLobbyViolet],
+                  ).createShader(rect),
                   blendMode: BlendMode.srcIn,
                   child: const Text(
                     'StealthVox',
@@ -1181,15 +1305,19 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
               // 👤 등록 정보 — 스텔스룸 아래 줄에 있는 것과 같은 시트다.
               Material(
                 color: _kLobbySurfaceHi,
-                shape:
-                    const CircleBorder(side: BorderSide(color: _kLobbyBorder)),
+                shape: const CircleBorder(
+                  side: BorderSide(color: _kLobbyBorder),
+                ),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   onTap: () => showAccountSheet(context),
                   child: const Padding(
                     padding: EdgeInsets.all(9),
-                    child: Icon(Icons.person_outline_rounded,
-                        color: _kLobbyTextMid, size: 20),
+                    child: Icon(
+                      Icons.person_outline_rounded,
+                      color: _kLobbyTextMid,
+                      size: 20,
+                    ),
                   ),
                 ),
               ),
@@ -1227,14 +1355,20 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                           IconButton(
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(
-                                minWidth: 48, minHeight: 48),
-                            tooltip: 'AI 설정',
-                            icon: const Icon(Icons.settings_outlined,
-                                color: _kLobbyTextMid, size: 20),
+                              minWidth: 48,
+                              minHeight: 48,
+                            ),
+                            tooltip: 'AI Settings',
+                            icon: const Icon(
+                              Icons.settings_outlined,
+                              color: _kLobbyTextMid,
+                              size: 20,
+                            ),
                             style: IconButton.styleFrom(
                               backgroundColor: _kLobbySurfaceHi,
                               shape: const CircleBorder(
-                                  side: BorderSide(color: _kLobbyBorder)),
+                                side: BorderSide(color: _kLobbyBorder),
+                              ),
                               minimumSize: const Size(44, 44),
                             ),
                             onPressed: _openAiSettingsSheet,
@@ -1247,19 +1381,22 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                       //   (실기기 확인, 2026-08-27). 방향은 가운데 화살표가
                       //   말한다 — 아래를 가리키면 원어 → 배울 말이다.
                       _buildLangField(
-                        'Origin',
-                        'Chat Language',
+                        'Origin (Chat Lang)',
+                        'Select',
                         appState.nativeLang,
                         (val) => setState(() => appState.nativeLang = val!),
                       ),
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 6),
-                        child: Icon(Icons.arrow_downward_rounded,
-                            color: _kLobbyTextMid, size: 18),
+                        child: Icon(
+                          Icons.arrow_downward_rounded,
+                          color: _kLobbyTextMid,
+                          size: 18,
+                        ),
                       ),
                       _buildLangField(
-                        'Target',
-                        'Learn Language',
+                        'Target (Learn Lang)',
+                        'Select',
                         appState.targetLang,
                         // ⚠️ AI STYLE은 여기서 건드리지 않는다. 비영어로 가면
                         //   그 칸이 시트에서 사라지지만, 저장값은 마지막 영어
@@ -1316,14 +1453,18 @@ class LobbyBrain {
     Map<String, dynamic> result = {'apiKey': ''};
     try {
       final remoteConfig = FirebaseRemoteConfig.instance;
-      await remoteConfig.setConfigSettings(RemoteConfigSettings(
+      await remoteConfig.setConfigSettings(
+        RemoteConfigSettings(
           fetchTimeout: const Duration(minutes: 1),
-          minimumFetchInterval: const Duration(seconds: 0)));
+          minimumFetchInterval: const Duration(seconds: 0),
+        ),
+      );
       await remoteConfig.fetchAndActivate();
 
       result['apiKey'] = remoteConfig.getString('OpenAIAPIKey');
-      result['revenueCatAndroidKey'] =
-          remoteConfig.getString('RevenueCatAndroidKey');
+      result['revenueCatAndroidKey'] = remoteConfig.getString(
+        'RevenueCatAndroidKey',
+      );
     } catch (e) {
       debugPrint("Remote Config Error: $e");
     }
@@ -1332,7 +1473,8 @@ class LobbyBrain {
 
   // 💡 대화방(History) 문서 신규 생성
   static Future<DocumentReference> createHistoryDoc(
-      DocumentReference userRef) async {
+    DocumentReference userRef,
+  ) async {
     final newHistoryRef = userRef.collection('chat_history').doc();
     await newHistoryRef.set({
       'created_at': FieldValue.serverTimestamp(),
@@ -1387,8 +1529,9 @@ class LobbyBrain {
 class AppsFlyerManager {
   static AppsflyerSdk? _instance;
   static bool _isInitialized = false;
-  static const MethodChannel _installReferrerChannel =
-      MethodChannel('stealthvox/install_referrer');
+  static const MethodChannel _installReferrerChannel = MethodChannel(
+    'stealthvox/install_referrer',
+  );
   static const String _consumedReferrerKey =
       'duo_consumed_play_install_referrer';
   static const String _completedDuoRoomsKey = 'duo_completed_guest_room_ids';
@@ -1414,7 +1557,8 @@ class AppsFlyerManager {
       if (!applied) return false;
       await prefs.setString(_consumedReferrerKey, referrer);
       debugPrint(
-          '[AppsFlyerManager] Play install referrer applied - roomId: ${params['deep_link_sub2']}');
+        '[AppsFlyerManager] Play install referrer applied - roomId: ${params['deep_link_sub2']}',
+      );
       return true;
     } catch (e) {
       debugPrint('[AppsFlyerManager] install referrer error: $e');
@@ -1426,7 +1570,8 @@ class AppsFlyerManager {
   /// 네트워크 오류는 입장 화면의 기존 재시도 경로에 맡기기 위해 유효로 취급한다.
   static Future<bool> validatePendingDuoInvite() async {
     if (FFAppState().pendingInviteType != 'duo' ||
-        FFAppState().duoRoomId.isEmpty) return false;
+        FFAppState().duoRoomId.isEmpty)
+      return false;
     final roomId = FFAppState().duoRoomId;
     try {
       final snap = await FirebaseFirestore.instance
@@ -1438,7 +1583,8 @@ class AppsFlyerManager {
       if (!valid && FFAppState().duoRoomId == roomId) {
         clearPendingDuoInvite();
         debugPrint(
-            '[AppsFlyerManager] stale Duo invite cleared - roomId: $roomId');
+          '[AppsFlyerManager] stale Duo invite cleared - roomId: $roomId',
+        );
       }
       return valid;
     } catch (e) {
@@ -1461,8 +1607,9 @@ class AppsFlyerManager {
     if (roomId == null || roomId.isEmpty) return;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final completedRoomIds =
-          List<String>.from(prefs.getStringList(_completedDuoRoomsKey) ?? []);
+      final completedRoomIds = List<String>.from(
+        prefs.getStringList(_completedDuoRoomsKey) ?? [],
+      );
       completedRoomIds.remove(roomId);
       completedRoomIds.add(roomId);
       if (completedRoomIds.length > 20) {
@@ -1470,7 +1617,8 @@ class AppsFlyerManager {
       }
       await prefs.setStringList(_completedDuoRoomsKey, completedRoomIds);
       debugPrint(
-          '[AppsFlyerManager] completed Duo room recorded - roomId: $roomId');
+        '[AppsFlyerManager] completed Duo room recorded - roomId: $roomId',
+      );
     } catch (e) {
       debugPrint('[AppsFlyerManager] failed to record completed Duo room: $e');
     }
@@ -1537,8 +1685,10 @@ class AppsFlyerManager {
   }
 
   /// Duo 초대 딥링크를 전역 처리한다.
-  static Future<bool> handleDuoDeepLink(Map<String, dynamic> params,
-      {bool emitSignal = true}) async {
+  static Future<bool> handleDuoDeepLink(
+    Map<String, dynamic> params, {
+    bool emitSignal = true,
+  }) async {
     Map<String, dynamic> deepLinkData = {};
     if (params['deepLink'] is String) {
       try {
@@ -1549,18 +1699,21 @@ class AppsFlyerManager {
       deepLinkData = Map<String, dynamic>.from(params['deepLink'] as Map);
     }
 
-    final String? deepLinkValue = params['deep_link_value']?.toString() ??
+    final String? deepLinkValue =
+        params['deep_link_value']?.toString() ??
         deepLinkData['deep_link_value']?.toString();
     if (deepLinkValue != 'duo_chat') return false;
 
-    final String? inviterId = params['deep_link_sub1']?.toString() ??
+    final String? inviterId =
+        params['deep_link_sub1']?.toString() ??
         deepLinkData['deep_link_sub1']?.toString() ??
         params['inviter_id']?.toString() ??
         deepLinkData['inviter_id']?.toString() ??
         params['inviterId']?.toString() ??
         params['af_sub1']?.toString();
 
-    final String? roomId = params['deep_link_sub2']?.toString() ??
+    final String? roomId =
+        params['deep_link_sub2']?.toString() ??
         deepLinkData['deep_link_sub2']?.toString() ??
         params['room_id']?.toString() ??
         deepLinkData['room_id']?.toString() ??
@@ -1586,7 +1739,8 @@ class AppsFlyerManager {
 
       if (completedRoomIds.contains(roomId)) {
         debugPrint(
-            '[AppsFlyerManager] replayed completed Duo invite ignored - roomId: $roomId');
+          '[AppsFlyerManager] replayed completed Duo invite ignored - roomId: $roomId',
+        );
         return false;
       }
 
@@ -1594,7 +1748,8 @@ class AppsFlyerManager {
           FFAppState().pendingInviteType == 'duo' &&
           FFAppState().duoRoomId == roomId) {
         debugPrint(
-            '[AppsFlyerManager] duplicate pending Duo invite ignored - roomId: $roomId');
+          '[AppsFlyerManager] duplicate pending Duo invite ignored - roomId: $roomId',
+        );
         return true;
       }
 
@@ -1607,7 +1762,8 @@ class AppsFlyerManager {
       FFAppState().pendingInviteType = 'duo';
       FFAppState().update(() {});
       debugPrint(
-          '[AppsFlyerManager] Duo invite ready - roomId: $roomId, signal++');
+        '[AppsFlyerManager] Duo invite ready - roomId: $roomId, signal++',
+      );
       if (emitSignal) duoInviteSignal.value++;
       return true;
     } catch (e) {

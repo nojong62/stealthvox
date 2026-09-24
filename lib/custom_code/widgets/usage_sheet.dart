@@ -37,7 +37,7 @@ String usageModeGroup(String mode) {
 }
 
 String usageModeGroupName(String mode) =>
-    usageModeGroup(mode) == 'talk' ? '대화방' : '공부방';
+    usageModeGroup(mode) == 'talk' ? 'Talk Room' : 'Study Room';
 
 /// Today / This Week 요약 카드 한 장.
 Widget _summaryCard({
@@ -86,9 +86,9 @@ Widget _summaryCard({
                 fontWeight: FontWeight.w600,
                 letterSpacing: 1.2)),
         const SizedBox(height: 10),
-        row('대화방', talkSeconds),
+        row('Talk Room', talkSeconds),
         const SizedBox(height: 6),
-        row('공부방', studySeconds),
+        row('Study Room', studySeconds),
       ],
     ),
   );
@@ -131,7 +131,7 @@ void showUsageSheet(BuildContext context) {
             Expanded(
               child: currentUserReference == null
                   ? const Center(
-                      child: Text("로그인 후 이용해 주세요.",
+                      child: Text("Log in to view usage.",
                           style: TextStyle(color: Colors.white54)))
                   : StreamBuilder<QuerySnapshot>(
                       stream: currentUserReference!
@@ -173,7 +173,7 @@ void showUsageSheet(BuildContext context) {
                                   SizedBox(height: 16),
                                   FittedBox(
                                     fit: BoxFit.scaleDown,
-                                    child: Text("아직 사용 내역이 없습니다.",
+                                    child: Text("No usage yet.",
                                         maxLines: 1,
                                         style: TextStyle(
                                             color: Colors.white54,
@@ -181,7 +181,7 @@ void showUsageSheet(BuildContext context) {
                                   ),
                                   SizedBox(height: 8),
                                   Text(
-                                    "대화를 시작하면 사용 시간이 이곳에 표시됩니다.",
+                                    "Your usage will appear here.",
                                     style: TextStyle(
                                         color: Colors.white38, fontSize: 12),
                                     textAlign: TextAlign.center,
@@ -282,7 +282,7 @@ void showUsageSheet(BuildContext context) {
                                       children: [
                                         Text(
                                           isDiff
-                                              ? '$groupName  ·  실제 ${formatUsageDuration(actualSec)} 사용  ·  ${formatUsageDuration(usedSec)} 차감'
+                                              ? '$groupName  ·  ${formatUsageDuration(actualSec)} actual  ·  ${formatUsageDuration(usedSec)} deducted'
                                               : '$groupName  ·  ${formatUsageDuration(actualSec)}',
                                           style: const TextStyle(
                                               color: _kUsageAccent,

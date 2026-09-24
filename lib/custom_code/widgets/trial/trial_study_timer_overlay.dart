@@ -95,7 +95,7 @@ class _TrialStudyTimerOverlayState extends State<TrialStudyTimerOverlay> {
               Icon(Icons.bookmark_added, size: 48, color: Color(0xFFD4AF37)),
               SizedBox(height: 16),
               Text(
-                '5분 공부방 체험이 끝났습니다.\n회원가입 후 계속 이용해 주세요.',
+                'Your 5-minute trial has ended.\nSign up to continue.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white,
@@ -106,7 +106,7 @@ class _TrialStudyTimerOverlayState extends State<TrialStudyTimerOverlay> {
               ),
               SizedBox(height: 8),
               Text(
-                '로그인 방법 선택 화면으로 이동합니다...',
+                'Opening login options...',
                 style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 13),
               ),
             ],

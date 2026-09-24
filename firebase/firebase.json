@@ -7,6 +7,10 @@
     {
       "source": "functions",
       "codebase": "functions"
+    },
+    {
+      "source": "functions-cleanup",
+      "codebase": "anonymous-cleanup"
     }
   ],
   "storage": {

@@ -67,27 +67,27 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
   String _friendlyError(Object e) {
     final msg = e.toString();
     if (msg.contains('cancelled') || msg.contains('cancel')) {
-      return '로그인을 취소했습니다.';
+      return 'Login canceled.';
     }
     if (msg.contains('network')) {
-      return '네트워크 오류가 발생했습니다.';
+      return 'Network error.';
     }
     if (msg.contains('wrong-password') || msg.contains('invalid-credential')) {
-      return '이메일 또는 비밀번호가 올바르지 않습니다.';
+      return 'Incorrect email or password.';
     }
     if (msg.contains('user-not-found')) {
-      return '가입된 계정이 없습니다.';
+      return 'Account not found.';
     }
     if (msg.contains('weak-password')) {
-      return '비밀번호는 6자 이상이어야 합니다.';
+      return 'Password must be at least 6 characters.';
     }
     if (msg.contains('invalid-email')) {
-      return '이메일 형식을 확인해 주세요.';
+      return 'Check your email address.';
     }
     if (msg.contains('email-already-in-use')) {
-      return '이미 가입된 이메일입니다. 로그인으로 진행해 주세요.';
+      return 'Email already registered. Please log in.';
     }
-    return '로그인에 실패했습니다. 다시 시도해 주세요.';
+    return 'Login failed. Please try again.';
   }
 
   @override
@@ -126,7 +126,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
     return Column(
       children: [
         SharedSocialButton(
-          label: '카카오톡으로 계속하기',
+          label: 'Continue with Kakao',
           backgroundColor: const Color(0xFFFEE500),
           textColor: const Color(0xFF191919),
           icon: Image.asset(
@@ -143,7 +143,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
         ),
         const SizedBox(height: 12),
         SharedSocialButton(
-          label: 'Google로 계속하기',
+          label: 'Continue with Google',
           backgroundColor: Colors.white,
           textColor: Colors.black87,
           border: Border.all(color: Colors.grey.shade300),
@@ -166,7 +166,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Text(
-                '다른 방법으로 가입하기',
+                'Other Sign-Up Options',
                 style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
               ),
             ),
@@ -175,7 +175,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
         ),
         const SizedBox(height: 12),
         SharedSocialButton(
-          label: '이메일로 시작하기',
+          label: 'Continue with Email',
           backgroundColor: Colors.grey.shade100,
           textColor: Colors.black87,
           icon: const Icon(
@@ -196,11 +196,11 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
           }),
           child: RichText(
             text: TextSpan(
-              text: '이미 계정이 있나요? ',
+              text: 'Already have an account? ',
               style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
               children: const [
                 TextSpan(
-                  text: '바로 로그인하세요',
+                  text: 'Log in.',
                   style: TextStyle(
                     color: Colors.blue,
                     fontWeight: FontWeight.bold,
@@ -222,13 +222,13 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
         Row(
           children: [
             _tabButton(
-              '로그인',
+              'Log In',
               !_isSignUp,
               () => setState(() => _isSignUp = false),
             ),
             const SizedBox(width: 8),
             _tabButton(
-              '회원가입',
+              'Sign Up',
               _isSignUp,
               () => setState(() => _isSignUp = true),
             ),
@@ -239,7 +239,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
           controller: _emailCtrl,
           keyboardType: TextInputType.emailAddress,
           decoration: const InputDecoration(
-            labelText: '이메일',
+            labelText: 'Email',
             border: OutlineInputBorder(),
           ),
         ),
@@ -248,7 +248,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
           controller: _passwordCtrl,
           obscureText: true,
           decoration: const InputDecoration(
-            labelText: '비밀번호',
+            labelText: 'Password',
             border: OutlineInputBorder(),
           ),
         ),
@@ -261,11 +261,11 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
               isSignUp: _isSignUp,
             ),
           ),
-          child: Text(_isSignUp ? '가입하기' : '로그인'),
+          child: Text(_isSignUp ? 'Sign Up' : 'Log In'),
         ),
         TextButton(
           onPressed: () => setState(() => _showEmailForm = false),
-          child: const Text('뒤로'),
+          child: const Text('Back'),
         ),
       ],
     );

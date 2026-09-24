@@ -1,4 +1,4 @@
-const String kDefaultAndroidUpdateMessage = '새 버전이 있습니다. 업데이트해 주세요.';
+const String kDefaultAndroidUpdateMessage = 'A new version is available.';
 const String kStealthVoxPlayStoreUrl =
     'https://play.google.com/store/apps/details?id=com.aienglishpractice.stealthvox';
 
