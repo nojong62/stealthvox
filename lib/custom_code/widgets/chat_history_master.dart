@@ -49,6 +49,7 @@ import '/custom_code/services/p2_voice_styles.dart';
 import '/custom_code/services/speech_reconstruction.dart';
 import '/custom_code/services/duo_study_state.dart';
 import '/custom_code/services/history_text_model.dart';
+import '/custom_code/services/talk_ui_localization.dart';
 import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/duo_final_transcription.dart';
 import '/custom_code/services/duo_final_transcription_runner.dart';
@@ -4290,6 +4291,11 @@ RULES — follow exactly:
     topic = topic.trim();
     if (topic.isEmpty) return null;
 
+    final copy = TalkUiCopy.forLanguage(
+      (_sessionNativeLang ?? '').trim().isEmpty
+          ? 'Korean'
+          : _sessionNativeLang!.trim(),
+    );
     String me = '';
     String partner = '';
     if (isScenario) {
@@ -4319,7 +4325,7 @@ RULES — follow exactly:
                 Icon(Icons.topic_outlined, color: accent, size: 15),
                 const SizedBox(width: 6),
                 Text(
-                  isScenario ? '시나리오 주제' : '서클 주제',
+                  isScenario ? copy['scenarioTopic'] : copy['circleTopic'],
                   style: TextStyle(
                     color: accent,
                     fontSize: 11 * _fontScale,
@@ -4349,8 +4355,8 @@ RULES — follow exactly:
               const SizedBox(height: 8),
               Text(
                 [
-                  if (me.isNotEmpty) '나: $me',
-                  if (partner.isNotEmpty) '상대: $partner',
+                  if (me.isNotEmpty) '${copy['me']}: $me',
+                  if (partner.isNotEmpty) '${copy['partner']}: $partner',
                 ].join('  ·  '),
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.58),

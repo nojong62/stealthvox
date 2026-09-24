@@ -1222,12 +1222,6 @@ class _StoreMasterState extends State<StoreMaster> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(
-                                  Icons.translate_rounded,
-                                  color: Colors.white54,
-                                  size: 15,
-                                ),
-                                const SizedBox(width: 4),
                                 Text(
                                   _useEnglishLegalDocs ? 'EN' : 'KR',
                                   style: const TextStyle(

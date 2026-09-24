@@ -1106,7 +1106,10 @@ $finalLanguageRule''';
     if (_openAiKey.isEmpty || _isGeneratingScenario) return;
     setState(() => _isGeneratingScenario = true);
     try {
-      final result = await ScenarioBrain.generateDramaticScenario(_openAiKey);
+      final result = await ScenarioBrain.generateDramaticScenario(
+        _openAiKey,
+        languageName: _nativeLangName(),
+      );
       if (mounted && result != null) {
         setState(() {
           _scenarioKeyword = result['situation'] ?? '';
@@ -1293,7 +1296,8 @@ $finalLanguageRule''';
           'original_text': aiKorean,
         },
       ]);
-      _log('[OPENER]',
+      _log(
+          '[OPENER]',
           'model=$kDialogBrainModel reasoning=$kDialogBrainReasoningEffort '
               'stream=false elapsedMs=${openerSw.elapsedMilliseconds} '
               'voice=$_aiVoice lang=${_nativeLangCode()}');
@@ -2302,10 +2306,11 @@ $finalLanguageRule''';
       if (_isNoiseTranscript(userKorean)) {
         // 뒤따르는 모든 검사는 `_isNoiseTranscriptForTurn`으로 같은 판정을 본다.
         final bool rescued = shortReplyRescuedByVoice(_lastTurnVoicedMs);
-        _log('🔇 [NOISE-GATE]',
+        _log(
+            '🔇 [NOISE-GATE]',
             'mode=scenario_talk dropped=${!rescued} len=${userKorean.length} '
-            'voicedMs=${_lastTurnVoicedMs ?? -1} '
-            'minVoicedMs=$kShortReplyMinVoicedMs rescued=$rescued');
+                'voicedMs=${_lastTurnVoicedMs ?? -1} '
+                'minVoicedMs=$kShortReplyMinVoicedMs rescued=$rescued');
         if (!rescued) {
           _abortStreamingTurn(reason: 'noise_transcript');
           return;
@@ -3127,7 +3132,8 @@ $finalLanguageRule''';
       final hostLine = <String, dynamic>{
         'role': 'HOST',
         'original_text': userKorean,
-        ...listeningStepFields(step, isAi: false, targetLang: _targetLangName()),
+        ...listeningStepFields(step,
+            isAi: false, targetLang: _targetLangName()),
         if (sttText != null) ...userLineFixFields(sttText: sttText),
       };
       final systemLine = <String, dynamic>{
@@ -3143,7 +3149,8 @@ $finalLanguageRule''';
         _saveHistoryMessages(<Map<String, dynamic>>[hostLine, systemLine]),
       ]);
       await _pendingTurnPersistence;
-      _log('[GPT-HISTORY]',
+      _log(
+          '[GPT-HISTORY]',
           'turn=$turnNumber model=$kDialogBrainModel step=${step.value} '
               'voice=$_aiVoice tts=true');
     } catch (error) {
@@ -4240,7 +4247,7 @@ $finalLanguageRule''';
           'last_active': FieldValue.serverTimestamp(),
         });
         _log('💾 [HIST-UPD]',
-            'msg_count+${chatLines.length}, korean_text_only=true');
+            'msg_count+${chatLines.length}, original_text_only=true');
       }
     } catch (e) {
       _log('❌ [HIST-ERR]', 'chat_history 저장 실패: $e');
@@ -4363,8 +4370,8 @@ $finalLanguageRule''';
           context.pushNamed(
             'ChatDetail',
             queryParameters: {
-              'historyRef': serializeParam(
-                  openStudyRoomRef, ParamType.DocumentReference),
+              'historyRef':
+                  serializeParam(openStudyRoomRef, ParamType.DocumentReference),
             }.withoutNulls,
           );
         }
@@ -6203,7 +6210,8 @@ Return only the line itself.'''
               'content':
                   'Recent scene dialogue (continue it consistently):\n$recentConversation',
             },
-          if (trailingSystemNote != null && trailingSystemNote.trim().isNotEmpty)
+          if (trailingSystemNote != null &&
+              trailingSystemNote.trim().isNotEmpty)
             <String, String>{'role': 'system', 'content': trailingSystemNote},
           <String, String>{
             'role': 'user',
@@ -6429,7 +6437,9 @@ content and gist of the WHOLE conversation.
   // 📦 [Box 7-1-0] generateDramaticScenario — 드라마/영화 장면 자동 생성
   // ==================================================================
   static Future<Map<String, String>?> generateDramaticScenario(
-      String apiKey) async {
+    String apiKey, {
+    String languageName = 'Korean',
+  }) async {
     final client = http.Client();
     try {
       // 🎲 [풀 구성] 일상 100 + 사고 100 = 200.
@@ -6472,10 +6482,12 @@ content and gist of the WHOLE conversation.
       final systemPrompt = "You are setting up ONE ordinary, everyday scene between TWO people for a spoken roleplay app.\n"
               "\n"
               "OUTPUT: Return ONLY valid JSON, no extra text.\n"
+              "Write every JSON string value naturally in $languageName only.\n"
+              "Do not include the Korean source, a second-language translation, romanization, or explanation.\n"
               "{\n"
-              '  "situation": "핵심 상황 요약 (10-15 Korean chars, e.g. 카페에서 신메뉴 추천)",\n'
-              '  "ai_role": "AI가 맡을 사람 (10자 이내, e.g. 바리스타)",\n'
-              '  "user_role": "유저가 맡을 사람 (8자 이내, e.g. 단골 손님)"\n'
+              '  "situation": "a concise situation title in $languageName (roughly 2-8 words)",\n'
+              '  "ai_role": "the AI character role in $languageName (roughly 1-5 words)",\n'
+              '  "user_role": "the user character role in $languageName (roughly 1-5 words)"\n'
               "}\n"
               "\n"
               "RULES:\n"
@@ -6484,8 +6496,9 @@ content and gist of the WHOLE conversation.
               //   끌려가고, 유저는 평범하게 말하고 싶은데 상대가 과장된다.
               "- ai_role and user_role: the ROLE ONLY — a plain job, position, or relationship noun.\n"
               "  NO personality, NO emotion, NO attitude, NO adjectives.\n"
-              "  Good: 바리스타 / 은행 창구 직원 / 옆자리 동료 / 헬스장 트레이너 / 단골 손님\n"
-              "  Bad: 친절한 바리스타 / 화난 손님 / 의심 많은 형사 / 지친 동료\n"
+              "  Good role shapes: barista / bank teller / coworker / gym trainer / regular customer.\n"
+              "  Bad role shapes: friendly barista / angry customer / suspicious detective / tired coworker.\n"
+              "  Localize these ideas naturally into $languageName; do not copy the English examples.\n"
               "- The two roles must be people who would plausibly talk to each other in that scene.\n"
               "- situation: concrete and ordinary. Something that happens to normal people on a normal day.\n"
               "  Do NOT make it dramatic, high-stakes, or cinematic. Do NOT name any show or character.\n" +
@@ -6493,6 +6506,7 @@ content and gist of the WHOLE conversation.
           //   같은 상황이 글자 그대로 반복됐다. 이제 뼈대만 유지하고
           //   이웃한 일상 장면으로 조금씩 옮겨 매번 다르게 만든다.
           '- BASE SITUATION: "$pick"\n'
+              '  The base is written in Korean. Understand its meaning, but write the result in $languageName only.\n'
               '  Keep its core activity, but shift it slightly into a NEARBY variant so it is not identical to the base.\n'
               '  Move one or two of these: the place, the time of day, the errand at hand, or which of the two people needs something.\n' +
           // 🔀 일상 절반과 사고 절반은 지켜야 할 선이 다르다. 한쪽 기준을
@@ -6526,7 +6540,8 @@ content and gist of the WHOLE conversation.
                 {'role': 'system', 'content': systemPrompt},
                 {
                   'role': 'user',
-                  'content': '지금 바로 JSON 생성해줘.',
+                  'content':
+                      'Generate the JSON now. All values must be in $languageName.',
                 },
               ],
             }),

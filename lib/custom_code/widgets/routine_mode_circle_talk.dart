@@ -3848,7 +3848,7 @@ $userFixPolicy$finalLanguageRule''';
         return;
       }
 
-      // 대화방에는 한국어 텍스트만 저장한다. TTS 오디오는 재생 후 폐기하고
+      // 대화방에는 Chat Lang 원문 텍스트만 저장한다. TTS 오디오는 재생 후 폐기하고
       // 파일이나 캐시 형태로 대화 기록에 넣지 않는다.
       // 🎧 [LISTENING] HOST 줄은 언제나 유저의 ORIGIN. Step 2의 AI 줄은 배울
       //   언어 문장이 그대로 들어가므로 source_lang을 같이 남긴다.
@@ -5308,7 +5308,7 @@ $userFixPolicy$finalLanguageRule''';
           'last_active': FieldValue.serverTimestamp(),
         });
         _log('💾 [HIST-UPD]',
-            'msg_count+${chatLines.length}, korean_text_only=true');
+            'msg_count+${chatLines.length}, original_text_only=true');
       }
     } catch (e) {
       _log('❌ [HIST-ERR]', 'chat_history 저장 실패: $e');

@@ -29,6 +29,7 @@ import 'account_sheet.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/dialog_brain_model.dart';
+import '/custom_code/services/talk_ui_localization.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
@@ -40,7 +41,7 @@ import 'scenario_talk_guide.dart';
 
 class StealthRoomMaster extends StatefulWidget {
   const StealthRoomMaster({Key? key, this.width, this.height})
-    : super(key: key);
+      : super(key: key);
   final double? width;
   final double? height;
 
@@ -79,6 +80,13 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   final TextEditingController _situationController = TextEditingController();
   final TextEditingController _aiRoleController = TextEditingController();
   final TextEditingController _userRoleController = TextEditingController();
+
+  /// 설정 화면과 추천 결과는 로비 Chat Lang 하나만 따른다.
+  String get _chatLanguage => FFAppState().nativeLang.trim().isEmpty
+      ? 'Korean'
+      : FFAppState().nativeLang.trim();
+  TalkUiCopy get _setupCopy => TalkUiCopy.forLanguage(_chatLanguage);
+
   final AudioRecorder _circleAudioRecorder = AudioRecorder();
   late Future<void> _circleAudioReady;
   DateTime? _circleMicInputAt;
@@ -151,8 +159,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     if (openAiKey.isEmpty || deepgramKey.isEmpty) {
       try {
         await remoteConfig.fetchAndActivate().timeout(
-          const Duration(seconds: 6),
-        );
+              const Duration(seconds: 6),
+            );
         openAiKey = remoteConfig.getString('OpenAIAPIKey');
         deepgramKey = remoteConfig.getString('DeepgramAPIKey');
       } catch (error) {
@@ -162,9 +170,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
 
     // 🔥 [STT-PREWARM] 켜진 엔진 **하나만** 예열한다. 둘 다 열면 소켓도 비용도
     //   이중이 된다 (Circle Talk의 전사 경로는 한 턴에 하나뿐이다).
-    final nativeLanguage = FFAppState().nativeLang.isNotEmpty
-        ? FFAppState().nativeLang
-        : 'Korean';
+    final nativeLanguage =
+        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
     if (kFreeTalkUseStreamingStt) {
       if (openAiKey.isNotEmpty) {
         unawaited(
@@ -326,7 +333,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     if (clean.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('참여할 서클을 입력해 주세요.')));
+      ).showSnackBar(SnackBar(content: Text(_setupCopy['circleRequired'])));
       return;
     }
     _circleMicInputAt = DateTime.now();
@@ -334,9 +341,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       '[FIRST-SPEECH] event=MIC_INPUT at=${_circleMicInputAt!.toIso8601String()} deltaMs=0',
     );
     setState(() {
-      _selectedCircleDescription = clean.length > 200
-          ? clean.substring(0, 200)
-          : clean;
+      _selectedCircleDescription =
+          clean.length > 200 ? clean.substring(0, 200) : clean;
       _circleSetupOpen = false;
       _currentMode = 2;
     });
@@ -426,13 +432,16 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       String apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
       if (apiKey.isEmpty) {
         await remoteConfig.fetchAndActivate().timeout(
-          const Duration(seconds: 8),
-        );
+              const Duration(seconds: 8),
+            );
         apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
       }
       if (apiKey.isEmpty) throw StateError('OpenAI key unavailable');
 
-      final result = await ScenarioBrain.generateDramaticScenario(apiKey);
+      final result = await ScenarioBrain.generateDramaticScenario(
+        apiKey,
+        languageName: _chatLanguage,
+      );
       if (result == null) throw const FormatException('empty scenario');
       if (!mounted) return;
       setState(() {
@@ -444,7 +453,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       debugPrint('[SCENARIO-RECOMMEND] failed reason=${error.runtimeType}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('상황을 추천하지 못했습니다. 다시 눌러 주세요.')),
+          SnackBar(content: Text(_setupCopy['scenarioRecommendError'])),
         );
       }
     } finally {
@@ -460,7 +469,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     if (situation.isEmpty || aiRole.isEmpty || userRole.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('상황과 두 역할을 모두 채워 주세요.')));
+      ).showSnackBar(SnackBar(content: Text(_setupCopy['scenarioRequired'])));
       return;
     }
     // 방은 이 홀더를 읽어 시나리오를 세팅한다(재진입 보존과 같은 경로).
@@ -481,11 +490,12 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       String apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
       if (apiKey.isEmpty) {
         await remoteConfig.fetchAndActivate().timeout(
-          const Duration(seconds: 8),
-        );
+              const Duration(seconds: 8),
+            );
         apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
       }
       if (apiKey.isEmpty) throw StateError('OpenAI key unavailable');
+      final recommendationLanguage = _chatLanguage;
 
       // 🔁 회원별 순차 배분. 무작위로 뽑으면 200개를 다 보기 전에 같은 분야가
       //   계속 겹친다. 커서를 하나씩 밀어 한 바퀴 안에는 분야가 안 겹치게 하고,
@@ -532,29 +542,29 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                 <String, String>{
                   'role': 'system',
                   'content':
-                      '''Name ONE real Korean circle that matches this seed: "$seed".
+                      '''Name ONE real circle that matches this seed: "$seed".
+The seed is written in Korean. Understand its meaning, but write the returned
+name naturally in $recommendationLanguage only.
 A circle is a workplace team, a shop and its regulars, a club, or a local community.
-Its members are ordinary Korean adults between their 20s and their 50s.
+Its members are ordinary adults between their 20s and their 50s.
 Return ONLY valid JSON: {"name":"..."}.
+- Every character in "name" must belong naturally in $recommendationLanguage.
+  Do not append the Korean source, a translation, romanization, or explanation.
 - Stay inside "$domain". Do not drift to another field.
 - Reflect the whole seed, not just the field. If the seed describes who they are
   or when they meet, let the name carry that.
 - Give it the flavour of that field: who these people are and what they deal with.
-  "무역회사" → 무역회사 영업팀 / 수출 통관 담당자들 / 무역회사 신입사원들
-  "배드민턴 동호회" → 동네 배드민턴 동호회 / 배드민턴 동호회 초보반
-  "병원 간호팀" → 소아과 간호사들 / 응급실 야간 간호팀
-- Vary the shape of the name. Do NOT fall back on the same few templates every
-  time — "OO 동호회 초보반", "동네 OO 단골들", "OO 모임 회원들" are worn out.
-  Name the people, the place, the shift, or the thing they gather around.
+- Vary the shape of the name. Name the people, the place, the shift, or the thing
+  they gather around instead of repeating the same generic club template.
 - It must be a group that really exists and that ordinary people join or visit.
   Concrete is good. Weird is not.
-  Bad: 우주덕후 무역회사, 심해어 연구 간호팀, 세계정복 배드민턴부
-- One natural Korean name, 20 characters or fewer. No quotes, no explanation.
+- Use one concise, natural name. No quotes and no explanation.
 - Do not create a classroom, AI chat, language-learning group, or generic casual-chat group.''',
                 },
                 <String, String>{
                   'role': 'user',
-                  'content': '"$seed" 서클 하나를 추천해 줘.',
+                  'content':
+                      'Recommend one circle for "$seed". Return its name in $recommendationLanguage.',
                 },
               ],
             }),
@@ -592,7 +602,7 @@ Return ONLY valid JSON: {"name":"..."}.
       debugPrint('[CIRCLE-RECOMMEND] failed reason=${error.runtimeType}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('서클을 추천하지 못했습니다. 다시 눌러 주세요.')),
+          SnackBar(content: Text(_setupCopy['circleRecommendError'])),
         );
       }
     } finally {
@@ -651,12 +661,6 @@ Return ONLY valid JSON: {"name":"..."}.
                           icon: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(
-                                Icons.translate_rounded,
-                                color: Colors.white70,
-                                size: 18,
-                              ),
-                              const SizedBox(width: 3),
                               Text(
                                 useEnglish ? 'EN' : 'KR',
                                 style: const TextStyle(
@@ -806,9 +810,9 @@ Return ONLY valid JSON: {"name":"..."}.
           english
               ? 'Circle Talk and Scenario Talk save the conversation every 10 minutes. You can continue on the same screen using the recent conversation and a short summary. You may also leave earlier, and everything up to that point is saved.'
               : 'Circle Talk와 Scenario Talk에서는 10분 단위로 대화 기록이 저장됩니다. '
-                    '저장 후에도 같은 화면에서 최근 대화와 짧은 요약을 바탕으로 '
-                    '이야기를 이어갈 수 있습니다. 10분을 다 채워야 하는 것은 아닙니다 — '
-                    '하고 싶은 만큼 이야기하고 나가면 그때까지의 대화가 기록에 저장됩니다.',
+                  '저장 후에도 같은 화면에서 최근 대화와 짧은 요약을 바탕으로 '
+                  '이야기를 이어갈 수 있습니다. 10분을 다 채워야 하는 것은 아닙니다 — '
+                  '하고 싶은 만큼 이야기하고 나가면 그때까지의 대화가 기록에 저장됩니다.',
           style: const TextStyle(
             color: Colors.white70,
             fontSize: 12,
@@ -820,8 +824,8 @@ Return ONLY valid JSON: {"name":"..."}.
           english
               ? 'If time runs out while someone is speaking, saving waits until the current speech and AI response finish, so one exchange is never split.'
               : 'Circle Talk와 Scenario Talk에서는 말하는 도중에 10분이 되어도 '
-                    '하던 말과 AI의 답변이 끝난 뒤에 저장되므로, '
-                    '한 번의 대화가 둘로 잘리지 않습니다.',
+                  '하던 말과 AI의 답변이 끝난 뒤에 저장되므로, '
+                  '한 번의 대화가 둘로 잘리지 않습니다.',
           style: const TextStyle(
             color: Colors.white70,
             fontSize: 12,
@@ -834,7 +838,7 @@ Return ONLY valid JSON: {"name":"..."}.
           english
               ? 'The top timer counts down from 30 seconds before the session ends. During the final 10 seconds, the billing dot flashes orange.'
               : '세션이 끝나기 30초 전부터 상단 시간 표시가 남은 초를 세고, '
-                    '10초 전부터는 점이 주황으로 깜빡입니다.',
+                  '10초 전부터는 점이 주황으로 깜빡입니다.',
           style: const TextStyle(
             color: Colors.white70,
             fontSize: 12,
@@ -867,8 +871,8 @@ Return ONLY valid JSON: {"name":"..."}.
                 english
                     ? 'The remaining-time display shows the final 30 seconds. During the last 10 seconds, the billing indicator flashes orange. After saving, the normal remaining-time display returns.'
                     : '세션이 끝나기 30초 전부터 잔여시간 자리에 남은 초가 표시되고, '
-                          '마지막 10초에는 과금 표시등이 주황색으로 깜박입니다. 저장이 '
-                          '끝나면 잔여시간 표시로 돌아옵니다.',
+                        '마지막 10초에는 과금 표시등이 주황색으로 깜박입니다. 저장이 '
+                        '끝나면 잔여시간 표시로 돌아옵니다.',
                 style: const TextStyle(
                   color: Colors.white70,
                   fontSize: 12,
@@ -1131,9 +1135,8 @@ Return ONLY valid JSON: {"name":"..."}.
     bool active = false,
     VoidCallback? onTap,
   }) {
-    final Color color = active
-        ? const Color(0xFF3B82F6)
-        : const Color(0xFF8C93A1);
+    final Color color =
+        active ? const Color(0xFF3B82F6) : const Color(0xFF8C93A1);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -1503,42 +1506,50 @@ Return ONLY valid JSON: {"name":"..."}.
 
   Widget _buildScenarioSetup() {
     const accent = Color(0xFF16A34A);
+    final copy = _setupCopy;
     return _buildSetupScaffold(
       accent: accent,
       onBack: () => setState(() => _scenarioSetupOpen = false),
-      backTooltip: '대화 모드 선택으로 돌아가기',
+      backTooltip: copy['back'],
       onGuide: () => showScenarioTalkGuide(context),
-      title: 'Scenario Talk\nSettings',
-      subtitle: '추천을 받거나 원하는 상황과 역할을 직접 입력해도 됩니다.',
-      recommendLabel: '상황 추천',
+      title: copy['scenarioTitle'],
+      subtitle: copy['scenarioSubtitle'],
+      recommendLabel: copy['scenarioRecommend'],
       recommending: _isRecommendingScenario,
       onRecommend: _recommendScenario,
       fields: [
-        _setupField(_situationController, accent, '상황', '예: 카페에서 음료 고르기'),
+        _setupField(_situationController, accent, copy['situation'],
+            copy['situationHint']),
         const SizedBox(height: 18),
-        _setupField(_aiRoleController, accent, 'AI 역할', '예: 바리스타'),
+        _setupField(
+            _aiRoleController, accent, copy['aiRole'], copy['aiRoleHint']),
         const SizedBox(height: 18),
-        _setupField(_userRoleController, accent, '내 역할', '예: 단골 손님'),
+        _setupField(_userRoleController, accent, copy['userRole'],
+            copy['userRoleHint']),
       ],
-      startLabel: '상황 대화 시작',
+      startLabel: copy['scenarioStart'],
       onStart: _enterScenarioTalk,
     );
   }
 
   Widget _buildCircleSetup() {
     const accent = Color(0xFF9333EA);
+    final copy = _setupCopy;
     return _buildSetupScaffold(
       accent: accent,
       onBack: () => setState(() => _circleSetupOpen = false),
-      backTooltip: '대화 모드 선택으로 돌아가기',
+      backTooltip: copy['back'],
       onGuide: () => showCircleTalkGuide(context),
-      title: 'Circle Talk\nSettings',
-      subtitle: '추천을 받거나 원하는 서클을 직접 입력해도 됩니다.',
-      recommendLabel: '서클 추천',
+      title: copy['circleTitle'],
+      subtitle: copy['circleSubtitle'],
+      recommendLabel: copy['circleRecommend'],
       recommending: _isRecommendingCircle,
       onRecommend: _recommendCircle,
-      fields: [_setupField(_circleController, accent, '서클', '서클 이름을 입력하세요')],
-      startLabel: '서클 대화 시작',
+      fields: [
+        _setupField(
+            _circleController, accent, copy['circle'], copy['circleHint']),
+      ],
+      startLabel: copy['circleStart'],
       onStart: () => _enterCircleTalk(_circleController.text),
     );
   }

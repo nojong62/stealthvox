@@ -340,12 +340,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 icon: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(
-                      Icons.translate_rounded,
-                      color: Colors.white70,
-                      size: 18,
-                    ),
-                    const SizedBox(width: 3),
                     Text(
                       useEnglish ? 'EN' : 'KR',
                       style: const TextStyle(
