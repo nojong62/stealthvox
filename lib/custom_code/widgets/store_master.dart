@@ -27,7 +27,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '/components/social_login_modal.dart';
 // 💡 에러의 원인이었던 외부 패키지 삭제 완료! Firebase로 대체합니다.
 
-/// 스토어 상품 정의. **상품 ID·제목·초·가격의 유일한 출처다.**
+/// 스토어 상품 정의. **상품 ID·제목·초의 유일한 출처다.**
 ///
 /// 화면 안에만 두면 구매이력 제목 복원([resolvePurchaseTitle])에서 쓸 수도,
 /// 테스트로 확인할 수도 없어서 최상위로 뺐다. 값은 예전 그대로다.
@@ -38,8 +38,6 @@ final List<Map<String, dynamic>> kStorePlans = [
     'title': '10 Minutes',
     'subtitle': 'Trial',
     'seconds': 600,
-    'price_text': '₩400',
-    'fallback_usd_price': r'$0.29',
     'theme_color': const Color(0xFF60A5FA),
     'icon': Icons.bolt_rounded,
   },
@@ -48,8 +46,6 @@ final List<Map<String, dynamic>> kStorePlans = [
     'title': '1 Hour',
     'subtitle': 'Standard',
     'seconds': 3600,
-    'price_text': '₩2,000',
-    'fallback_usd_price': r'$1.49',
     'theme_color': const Color(0xFF34D399),
     'icon': Icons.hourglass_top_rounded,
   },
@@ -58,8 +54,6 @@ final List<Map<String, dynamic>> kStorePlans = [
     'title': '5 Hours',
     'subtitle': 'Best Value',
     'seconds': 18000,
-    'price_text': '₩9,000',
-    'fallback_usd_price': r'$6.49',
     'theme_color': const Color(0xFFFBBF24),
     'icon': Icons.star_rounded,
   },
@@ -68,28 +62,20 @@ final List<Map<String, dynamic>> kStorePlans = [
     'title': '10 Hours',
     'subtitle': 'Premium',
     'seconds': 36000,
-    'price_text': '₩17,000',
-    'fallback_usd_price': r'$11.99',
     'theme_color': const Color(0xFFA78BFA),
     'icon': Icons.diamond_rounded,
   },
 ];
 
-/// Google Play/RevenueCat에서 받은 현지 가격을 우선하고, 상품 메타데이터가
-/// 아직 준비되지 않았거나 비어 있으면 스토어 국가에 맞는 fallback을 사용한다.
-String resolveStorePrice(
+/// Google Play/RevenueCat에서 받은 실제 현지 가격만 반환한다.
+/// 아직 로딩 중이거나 조회에 실패한 상품은 `null`이며 구매할 수 없다.
+String? resolveStorePrice(
   Map<String, dynamic> plan,
-  Map<String, String> localizedPrices, {
-  String? storefrontCountryCode,
-}) {
+  Map<String, String> localizedPrices,
+) {
   final productId = plan['id']?.toString().trim() ?? '';
   final localizedPrice = localizedPrices[productId]?.trim() ?? '';
-  if (localizedPrice.isNotEmpty) return localizedPrice;
-
-  if (storefrontCountryCode?.trim().toUpperCase() == 'KR') {
-    return plan['price_text']?.toString() ?? '';
-  }
-  return plan['fallback_usd_price']?.toString() ?? '';
+  return localizedPrice.isEmpty ? null : localizedPrice;
 }
 
 /// 구매이력 카드에 띄울 상품 이름.
@@ -141,7 +127,7 @@ class _StoreMasterState extends State<StoreMaster> {
 
   bool isProcessing = false;
   Map<String, String> _localizedPrices = const {};
-  String? _storefrontCountryCode;
+  bool _priceLookupComplete = false;
   bool get _useEnglishLegalDocs => FFAppState().nativeLang.trim() != 'Korean';
   String _versionText = '';
 
@@ -225,55 +211,46 @@ class _StoreMasterState extends State<StoreMaster> {
 
   Future<void> _initializeStorePricing() async {
     await _initRevenueCatUser();
-    await _loadStorefrontCountry();
     await _loadLocalizedPrices();
   }
 
-  Future<void> _loadStorefrontCountry() async {
-    try {
-      final storefront = await Purchases.storefront;
-      final countryCode = storefront?.countryCode.trim().toUpperCase();
-      _log('PRICE', 'storefront country=${countryCode ?? 'unknown'}');
-      if (!mounted || countryCode == null || countryCode.isEmpty) return;
-      setState(() => _storefrontCountryCode = countryCode);
-    } catch (e) {
-      _log('PRICE', 'storefront lookup failed; using USD fallback: $e');
-    }
-  }
-
   /// 스토어가 반환한 실제 현지 가격을 상품 ID별로 보관한다.
-  /// 조회 실패 시 UI는 [resolveStorePrice]의 국가별 fallback을 쓴다.
+  /// 조회가 끝난 뒤에도 가격이 없는 상품은 안전하게 비활성화한다.
   Future<void> _loadLocalizedPrices() async {
+    var localizedPrices = <String, String>{};
     try {
       final offerings = await Purchases.getOfferings();
       final offering = offerings.current ?? offerings.all['default'];
       if (offering == null) {
-        _log('PRICE', 'no current or default offering; using fallback prices');
-        return;
-      }
-
-      final knownProductIds = kStorePlans
-          .map((plan) => plan['id']?.toString() ?? '')
-          .where((id) => id.isNotEmpty)
-          .toSet();
-      final localizedPrices = <String, String>{};
-      for (final package in offering.availablePackages) {
-        final product = package.storeProduct;
-        final priceString = product.priceString.trim();
-        if (knownProductIds.contains(product.identifier) &&
-            priceString.isNotEmpty) {
-          localizedPrices[product.identifier] = priceString;
+        _log('PRICE', 'no current or default offering; disabling purchases');
+      } else {
+        final knownProductIds = kStorePlans
+            .map((plan) => plan['id']?.toString() ?? '')
+            .where((id) => id.isNotEmpty)
+            .toSet();
+        for (final package in offering.availablePackages) {
+          final product = package.storeProduct;
+          final priceString = product.priceString.trim();
+          if (knownProductIds.contains(product.identifier) &&
+              priceString.isNotEmpty) {
+            localizedPrices[product.identifier] = priceString;
+          }
         }
+        _log(
+          'PRICE',
+          'loaded ${localizedPrices.length}/${knownProductIds.length} localized prices',
+        );
       }
-
-      _log(
-        'PRICE',
-        'loaded ${localizedPrices.length}/${knownProductIds.length} localized prices',
-      );
-      if (!mounted || localizedPrices.isEmpty) return;
-      setState(() => _localizedPrices = localizedPrices);
     } catch (e) {
-      _log('PRICE', 'load failed; using fallback prices: $e');
+      _log('PRICE', 'load failed; disabling purchases: $e');
+      localizedPrices = <String, String>{};
+    } finally {
+      if (mounted) {
+        setState(() {
+          _localizedPrices = localizedPrices;
+          _priceLookupComplete = true;
+        });
+      }
     }
   }
 
@@ -1172,8 +1149,17 @@ class _StoreMasterState extends State<StoreMaster> {
                                 const SizedBox(height: 14),
                             itemBuilder: (context, index) {
                               final plan = storePlans[index];
+                              final localizedPrice = resolveStorePrice(
+                                plan,
+                                _localizedPrices,
+                              );
+                              final priceAvailable = localizedPrice != null;
+                              final priceLabel = localizedPrice ??
+                                  (_priceLookupComplete ? 'Unavailable' : '—');
                               return InkWell(
-                                onTap: () => _executePurchase(plan),
+                                onTap: priceAvailable
+                                    ? () => _executePurchase(plan)
+                                    : null,
                                 borderRadius: BorderRadius.circular(20),
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
@@ -1255,14 +1241,11 @@ class _StoreMasterState extends State<StoreMaster> {
                                             ),
                                           ),
                                           child: Text(
-                                            resolveStorePrice(
-                                              plan,
-                                              _localizedPrices,
-                                              storefrontCountryCode:
-                                                  _storefrontCountryCode,
-                                            ),
+                                            priceLabel,
                                             style: TextStyle(
-                                              color: plan['theme_color'],
+                                              color: priceAvailable
+                                                  ? plan['theme_color']
+                                                  : Colors.white38,
                                               fontSize: 12,
                                               fontWeight: FontWeight.w800,
                                             ),

@@ -10,55 +10,28 @@ void main() {
   group('resolveStorePrice', () {
     final plan = kStorePlans.first;
 
-    test('RevenueCat 현지 가격이 있으면 하드코딩 가격보다 우선한다', () {
+    test('RevenueCat 현지 가격이 있으면 그대로 반환한다', () {
       expect(
         resolveStorePrice(plan, const {'stealthvox_10m': r'$0.29'}),
         r'$0.29',
       );
     });
 
-    test('상품 로딩 전 한국 스토어는 기존 원화 가격을 fallback으로 쓴다', () {
+    test('상품 로딩 전에는 가격을 반환하지 않는다', () {
+      expect(resolveStorePrice(plan, const {}), isNull);
+    });
+
+    test('가격이 빈 문자열이면 가격을 반환하지 않는다', () {
       expect(
-        resolveStorePrice(
-          plan,
-          const {},
-          storefrontCountryCode: 'KR',
-        ),
-        '₩400',
+        resolveStorePrice(plan, const {'stealthvox_10m': '   '}),
+        isNull,
       );
     });
 
-    test('한국 외 스토어에서 실제 가격이 없으면 USD fallback을 쓴다', () {
+    test('다른 상품 가격을 현재 상품에 사용하지 않는다', () {
       expect(
-        resolveStorePrice(
-          plan,
-          const {},
-          storefrontCountryCode: 'US',
-        ),
-        r'$0.29',
-      );
-    });
-
-    test('스토어 국가를 결정하지 못해도 USD fallback을 쓴다', () {
-      expect(resolveStorePrice(plan, const {}), r'$0.29');
-    });
-
-    test('RevenueCat 가격이 빈 문자열이면 국가별 fallback을 쓴다', () {
-      expect(
-        resolveStorePrice(
-          plan,
-          const {'stealthvox_10m': '   '},
-          storefrontCountryCode: 'KR',
-        ),
-        '₩400',
-      );
-      expect(
-        resolveStorePrice(
-          plan,
-          const {'stealthvox_10m': '   '},
-          storefrontCountryCode: 'JP',
-        ),
-        r'$0.29',
+        resolveStorePrice(plan, const {'stealthvox_1h': r'$1.49'}),
+        isNull,
       );
     });
   });
