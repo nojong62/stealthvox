@@ -7,6 +7,61 @@ import 'package:stealth_vox/custom_code/widgets/store_master.dart';
 /// 넣지 않아 화면이 `Unknown Item`을 띄웠다. 옛 클라이언트 기록에는 제목이
 /// 있으므로 **두 형식이 한 목록에 섞여 있어도** 둘 다 제대로 보여야 한다.
 void main() {
+  group('resolveStorePrice', () {
+    final plan = kStorePlans.first;
+
+    test('RevenueCat 현지 가격이 있으면 하드코딩 가격보다 우선한다', () {
+      expect(
+        resolveStorePrice(plan, const {'stealthvox_10m': r'$0.29'}),
+        r'$0.29',
+      );
+    });
+
+    test('상품 로딩 전 한국 스토어는 기존 원화 가격을 fallback으로 쓴다', () {
+      expect(
+        resolveStorePrice(
+          plan,
+          const {},
+          storefrontCountryCode: 'KR',
+        ),
+        '₩400',
+      );
+    });
+
+    test('한국 외 스토어에서 실제 가격이 없으면 USD fallback을 쓴다', () {
+      expect(
+        resolveStorePrice(
+          plan,
+          const {},
+          storefrontCountryCode: 'US',
+        ),
+        r'$0.29',
+      );
+    });
+
+    test('스토어 국가를 결정하지 못해도 USD fallback을 쓴다', () {
+      expect(resolveStorePrice(plan, const {}), r'$0.29');
+    });
+
+    test('RevenueCat 가격이 빈 문자열이면 국가별 fallback을 쓴다', () {
+      expect(
+        resolveStorePrice(
+          plan,
+          const {'stealthvox_10m': '   '},
+          storefrontCountryCode: 'KR',
+        ),
+        '₩400',
+      );
+      expect(
+        resolveStorePrice(
+          plan,
+          const {'stealthvox_10m': '   '},
+          storefrontCountryCode: 'JP',
+        ),
+        r'$0.29',
+      );
+    });
+  });
   group('resolvePurchaseTitle', () {
     test('저장된 제목이 있으면 그대로 쓴다 (옛 클라이언트 기록)', () {
       final title = resolvePurchaseTitle({
