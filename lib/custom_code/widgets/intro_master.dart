@@ -45,8 +45,9 @@ class _IntroMasterState extends State<IntroMaster>
     with SingleTickerProviderStateMixin {
   static const String _termsEnglishUrl =
       'https://docs.google.com/document/d/1vs2n7kF0GzlejNaZOa1ZnfKbuwuOzOCr7Q5ZvYqmbVs/edit';
-  // 테스트 종료 후 false로 바꾸면 기존 10분 Duo 맛보기 버튼이 즉시 복구된다.
-  static const bool _showEnglishTesterGoogleEntry = true;
+  // 해외 테스터용 Google 바로가기는 종료했다. 첫 화면의 기본 진입점은
+  // 다시 Duo 10분 맛보기 안내 페이지다.
+  static const bool _showEnglishTesterGoogleEntry = false;
 
   static const String _privacyEnglishUrl =
       'https://docs.google.com/document/d/1AyK3KM9anwsVo7PaLdYRdxNnwa0MmRHuhxAN7yXbOjk/edit';
@@ -542,9 +543,14 @@ class _IntroMasterState extends State<IntroMaster>
     if (_scrollController.hasClients) {
       _scrollController.jumpTo(0);
     }
+    final lastProvider =
+        _requiresAuthOnlyIntro ? null : _validLastAuthProvider();
     setState(() {
       _currentScreen = IntroScreen.auth;
       _showEmailForm = false;
+      // 최근 로그인 흔적이 있으면 기존 로그인 안내를 유지하고, 흔적이
+      // 없으면 이메일 폼까지 포함해 신규 가입 모드로 시작한다.
+      isLoginMode = lastProvider != null;
     });
   }
 
@@ -765,7 +771,7 @@ class _IntroMasterState extends State<IntroMaster>
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text(
-            'Already have an account?',
+            'Login or Join',
             style: TextStyle(
               fontSize: 14.5,
               fontWeight: FontWeight.w500,
@@ -1884,27 +1890,44 @@ class _IntroMasterState extends State<IntroMaster>
         borderRadius: BorderRadius.circular(15),
         border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
       ),
-      child: TextButton.icon(
-        onPressed: isLoading
-            ? null
-            : () => setState(() {
-                  _currentScreen = IntroScreen.accountDiscovery;
-                  _showEmailForm = false;
-                  _accountDiscoveryMessage = '';
-                }),
-        style: TextButton.styleFrom(
-          minimumSize: const Size.fromHeight(52),
-          foregroundColor: const Color(0xFFBFD8FF),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(15),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextButton.icon(
+            onPressed: isLoading
+                ? null
+                : () => setState(() {
+                      _currentScreen = IntroScreen.accountDiscovery;
+                      _showEmailForm = false;
+                      _accountDiscoveryMessage = '';
+                    }),
+            style: TextButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
+              foregroundColor: const Color(0xFFBFD8FF),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(15),
+              ),
+            ),
+            icon: const Icon(Icons.manage_search_rounded, size: 20),
+            label: const Text(
+              'Forgot how you logged in? Find Your Account',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+            ),
           ),
-        ),
-        icon: const Icon(Icons.manage_search_rounded, size: 20),
-        label: const Text(
-          'Forgot how you logged in? Find Your Account',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
-        ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
+            child: Text(
+              'If you changed phones, please finish setting up your Google Account and KakaoTalk on your new phone before trying to find your account.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Color(0xFF9297A5),
+                fontSize: 11.5,
+                height: 1.45,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2273,6 +2296,8 @@ class _IntroMasterState extends State<IntroMaster>
       setState(() {
         _currentScreen = IntroScreen.auth;
         _accountDiscoveryMessage = '';
+        _showEmailForm = false;
+        isLoginMode = false;
       });
     }
   }
@@ -2344,7 +2369,7 @@ class _IntroMasterState extends State<IntroMaster>
 
     switch (provider) {
       case 'kakao':
-        label = 'Continue with Kakao';
+        label = isLoginMode ? 'Continue with Kakao' : 'Join with Kakao';
         backgroundColor = const Color(0xFFFEE500);
         foregroundColor = const Color(0xFF191919);
         icon = Image.asset(
@@ -2363,7 +2388,7 @@ class _IntroMasterState extends State<IntroMaster>
             );
         break;
       case 'google':
-        label = 'Continue with Google';
+        label = isLoginMode ? 'Continue with Google' : 'Join with Google';
         backgroundColor = const Color(0xFFF7F7F8);
         foregroundColor = const Color(0xFF17181B);
         border = Border.all(color: Colors.white.withValues(alpha: 0.12));
@@ -2383,7 +2408,11 @@ class _IntroMasterState extends State<IntroMaster>
             );
         break;
       case 'email':
-        label = _showEmailForm ? 'Close Email Form' : 'Continue with Email';
+        label = _showEmailForm
+            ? 'Close Email Form'
+            : isLoginMode
+                ? 'Continue with Email'
+                : 'Join with Email';
         backgroundColor = const Color(0xFF24262D);
         foregroundColor = const Color(0xFFF2F3F6);
         border = Border.all(color: Colors.white.withValues(alpha: 0.08));
@@ -2496,8 +2525,8 @@ class _IntroMasterState extends State<IntroMaster>
     if (lastProvider == null) {
       return [
         _authSectionTitle(
-          title: 'New Here?',
-          description: 'Choose a login method.',
+          title: 'Create Your Account',
+          description: 'Choose a sign-up method to get started.',
         ),
       ];
     }

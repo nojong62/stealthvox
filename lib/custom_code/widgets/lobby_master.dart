@@ -365,9 +365,12 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   void _showDeleteAccountDialog(BuildContext context) {
+    // The builder below receives a dialog context that is disposed as soon as
+    // the dialog is popped. Keep the Lobby context for post-delete navigation.
+    final lobbyContext = context;
     showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
+      context: lobbyContext,
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF1C1C1E),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
@@ -392,7 +395,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text(
               "Cancel",
               style: TextStyle(
@@ -406,19 +409,28 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
               if (_isActionLocked) return;
               _isActionLocked = true;
               try {
-                Navigator.pop(context);
-                await FirebaseAuth.instance.currentUser?.delete();
-                if (mounted) context.goNamed('Intro');
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      "For security, log in again before deleting your account.",
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                Navigator.pop(dialogContext);
+                try {
+                  await FirebaseAuth.instance.currentUser?.delete();
+                } on FirebaseAuthException {
+                  if (!mounted || !lobbyContext.mounted) return;
+                  ScaffoldMessenger.of(lobbyContext).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        "For security, log in again before deleting your account.",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      backgroundColor: Color(0xFFFF453A),
                     ),
-                    backgroundColor: Color(0xFFFF453A),
-                  ),
-                );
+                  );
+                  return;
+                }
+
+                if (!mounted || !lobbyContext.mounted) return;
+                FFAppState().remainingTime = 0;
+                FFAppState().remainingTimeLoaded = false;
+                LobbyBrain.lastSyncedUid = null;
+                lobbyContext.goNamed('Intro');
               } finally {
                 _isActionLocked = false;
               }
