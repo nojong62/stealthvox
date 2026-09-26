@@ -83,7 +83,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
 
   /// 설정 화면과 추천 결과는 로비 Chat Lang 하나만 따른다.
   String get _chatLanguage => FFAppState().nativeLang.trim().isEmpty
-      ? 'Korean'
+      ? 'English'
       : FFAppState().nativeLang.trim();
   TalkUiCopy get _setupCopy => TalkUiCopy.forLanguage(_chatLanguage);
 
@@ -169,8 +169,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
 
     // 🔥 [STT-PREWARM] 켜진 엔진 **하나만** 예열한다. 둘 다 열면 소켓도 비용도
     //   이중이 된다 (Circle Talk의 전사 경로는 한 턴에 하나뿐이다).
-    final nativeLanguage =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+    final nativeLanguage = FFAppState().nativeLang.isNotEmpty
+        ? FFAppState().nativeLang
+        : 'English';
     if (kFreeTalkUseStreamingStt) {
       if (openAiKey.isNotEmpty) {
         unawaited(
@@ -615,6 +616,20 @@ Return ONLY valid JSON: {"name":"..."}.
   // ============================================================================
   void _showManualDialog() {
     final copy = GuideUiCopy.forLanguage(FFAppState().nativeLang);
+    final modeBody = copy['modeBody'];
+    // Last block is the billing legend (title plus two status lines).
+    final legendStart = modeBody.lastIndexOf('\n\n');
+    final legendLines = legendStart >= 0
+        ? modeBody
+            .substring(legendStart + 2)
+            .split('\n')
+            .where((line) => line.trim().isNotEmpty)
+            .toList()
+        : const <String>[];
+    final hasBillingLegend = legendLines.length == 3;
+    final manualBody = hasBillingLegend
+        ? modeBody.substring(0, legendStart).trimRight()
+        : modeBody;
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -648,9 +663,24 @@ Return ONLY valid JSON: {"name":"..."}.
                   Flexible(
                       child: SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
-                    child: Text(copy['modeBody'],
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 13, height: 1.55)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(manualBody,
+                            style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                                height: 1.55)),
+                        if (hasBillingLegend) ...[
+                          const SizedBox(height: 22),
+                          _buildBillingLegend(
+                            title: legendLines[0],
+                            activeLabel: legendLines[1],
+                            pausedLabel: legendLines[2],
+                          ),
+                        ],
+                      ],
+                    ),
                   )),
                   const SizedBox(height: 16),
                   Align(
@@ -823,12 +853,16 @@ Return ONLY valid JSON: {"name":"..."}.
     );
   }
 
-  Widget _buildBillingLegend({required bool english}) {
+  Widget _buildBillingLegend({
+    required String title,
+    required String activeLabel,
+    required String pausedLabel,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          english ? 'Billing Indicator' : '과금 인디케이터',
+          title,
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
@@ -836,14 +870,9 @@ Return ONLY valid JSON: {"name":"..."}.
           ),
         ),
         const SizedBox(height: 12),
-        _buildBillingDotRow(2, english ? 'Billing active' : '과금 진행중'),
+        _buildBillingDotRow(2, activeLabel),
         const SizedBox(height: 10),
-        _buildBillingDotRow(
-          0,
-          english
-              ? 'Billing paused — automatic while the microphone waits'
-              : '과금 정지 — 마이크 대기(오토포즈) 시 자동 정지',
-        ),
+        _buildBillingDotRow(0, pausedLabel),
       ],
     );
   }
