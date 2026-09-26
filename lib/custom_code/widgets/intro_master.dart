@@ -10,6 +10,7 @@ import 'package:flutter/gestures.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'trial/trial_flow_state.dart';
@@ -42,13 +43,13 @@ class IntroMaster extends StatefulWidget {
 
 class _IntroMasterState extends State<IntroMaster>
     with SingleTickerProviderStateMixin {
-  static const String _termsUrl =
-      'https://docs.google.com/document/d/1KE4xrb63SDw1ZkiNQ_wxQjH7iyY6msTuVtazCTnR7KY/edit';
+  static const String _termsEnglishUrl =
+      'https://docs.google.com/document/d/1vs2n7kF0GzlejNaZOa1ZnfKbuwuOzOCr7Q5ZvYqmbVs/edit';
   // 테스트 종료 후 false로 바꾸면 기존 10분 Duo 맛보기 버튼이 즉시 복구된다.
   static const bool _showEnglishTesterGoogleEntry = true;
 
-  static const String _privacyUrl =
-      'https://docs.google.com/document/d/1qz1aCx6ZcxCkANFUSvbnE18H2-SbEhPUWlvZw27-DAQ/edit';
+  static const String _privacyEnglishUrl =
+      'https://docs.google.com/document/d/1AyK3KM9anwsVo7PaLdYRdxNnwa0MmRHuhxAN7yXbOjk/edit';
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -67,16 +68,16 @@ class _IntroMasterState extends State<IntroMaster>
   //   밀린다. 떠 있는 동안에도 화면은 그대로 만질 수 있어야 한다.
   static const List<List<String>> _kTaglinePitches = <List<String>>[
     <String>[
-      '🎙️ AI 실전 외국어 연습장',
-      '문법 강의도, 패턴 드릴도 없습니다.\n오직 대화, 오직 실전.\n이용 시간만큼만 차감',
+      '🎙️ Real-World AI Language Practice',
+      'No grammar lectures. No pattern drills.\nJust real conversation.\nPay only for the time you use.',
     ],
     <String>[
-      '🎙️ 수업은 없고, 실전만 있습니다',
-      'AI와 진짜 대화하는 외국어 연습장.\n이용 시간만큼만 차감',
+      '🎙️ No Lessons, Just Real Practice',
+      'Practice real conversations with AI.\nPay only for the time you use.',
     ],
     <String>[
-      '🎙️ 나만의 AI 실전 연습장',
-      '강의 없이, 대화로만 외국어를 익히세요.\n이용 시간만큼만 차감',
+      '🎙️ Your Personal AI Practice Room',
+      'Learn through conversation, without lectures.\nPay only for the time you use.',
     ],
   ];
   static const Duration _kTaglineBubbleLife = Duration(seconds: 5);
@@ -95,7 +96,7 @@ class _IntroMasterState extends State<IntroMaster>
   int _trialRequestGeneration = 0;
   bool _trialCompletionNoticeShown = false;
   bool _isValidatingDuoInvite = false;
-  String _trialNativeLang = 'Korean';
+  String _trialNativeLang = 'English';
   String _trialTargetLang = 'English';
 
   // =======================================================
@@ -115,9 +116,9 @@ class _IntroMasterState extends State<IntroMaster>
       '[TrialDebug] IntroMaster initState, time=${DateTime.now().toIso8601String()}',
     );
     _termsTapRecognizer = TapGestureRecognizer()
-      ..onTap = () => launchURL(_termsUrl);
+      ..onTap = () => _openLegalDocument(isTerms: true);
     _privacyTapRecognizer = TapGestureRecognizer()
-      ..onTap = () => launchURL(_privacyUrl);
+      ..onTap = () => _openLegalDocument(isTerms: false);
     _welcomeMotionController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 6),
@@ -146,7 +147,7 @@ class _IntroMasterState extends State<IntroMaster>
     ];
     _trialNativeLang = trialLanguages.contains(FFAppState().nativeLang)
         ? FFAppState().nativeLang
-        : 'Korean';
+        : 'English';
     _trialTargetLang = trialLanguages.contains(FFAppState().targetLang)
         ? FFAppState().targetLang
         : 'English';
@@ -2028,7 +2029,7 @@ class _IntroMasterState extends State<IntroMaster>
           TextButton.icon(
             onPressed: _accountDiscoveryBusyProvider.isNotEmpty
                 ? null
-                : () => launchURL('mailto:support@stealthvox.app'),
+                : () => launchURL('mailto:stealthvox.app@gmail.com'),
             icon: const Icon(Icons.support_agent, size: 18),
             label: const Text('Contact Support'),
             style: TextButton.styleFrom(
@@ -2673,24 +2674,39 @@ class _IntroMasterState extends State<IntroMaster>
         TextSpan(
           style: baseStyle,
           children: [
-            const TextSpan(text: '가입하면 '),
+            const TextSpan(text: 'By joining, you agree to the '),
             TextSpan(
-              text: '이용약관',
+              text: 'Terms of Use',
               style: linkStyle,
               recognizer: _termsTapRecognizer,
             ),
-            const TextSpan(text: ' 및 '),
+            const TextSpan(text: ' and '),
             TextSpan(
-              text: '개인정보 처리방침',
+              text: 'Privacy Policy',
               style: linkStyle,
               recognizer: _privacyTapRecognizer,
             ),
-            const TextSpan(text: '에 동의하는 것으로 간주합니다.'),
+            const TextSpan(text: '.'),
           ],
         ),
         textAlign: TextAlign.center,
       ),
     );
+  }
+
+  Future<void> _openLegalDocument({required bool isTerms}) async {
+    final String url = isTerms ? _termsEnglishUrl : _privacyEnglishUrl;
+    final bool opened = await launchUrl(
+      Uri.parse(url),
+      mode: LaunchMode.inAppBrowserView,
+    );
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Could not open the document.'),
+        ),
+      );
+    }
   }
 
   /// 통합 소셜 인증: 약관 시트 없이 바로 소셜 로그인 -> 신규면 연령 확인
@@ -2868,9 +2884,9 @@ class _IntroMasterState extends State<IntroMaster>
                 borderRadius: BorderRadius.circular(20),
                 side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
               ),
-              title: const Text(
-                '태어난 해를 알려주세요',
-                style: TextStyle(
+              title: Text(
+                'What year were you born?',
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: 18,
@@ -2880,10 +2896,10 @@ class _IntroMasterState extends State<IntroMaster>
                 height: 225,
                 child: Column(
                   children: [
-                    const Text(
-                      '미성년자 확인을 위한 필수 절차입니다.\n미성년자는 부모님 동의 후 가입할 수 있습니다.',
+                    Text(
+                      'This is required to verify your age.\nMinors may sign up with a parent or guardian\'s consent.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 13,
                         height: 1.5,
@@ -2908,7 +2924,7 @@ class _IntroMasterState extends State<IntroMaster>
                             }
                             return Center(
                               child: Text(
-                                '$year년',
+                                '$year',
                                 style: TextStyle(
                                   color: year == selectedYear
                                       ? Colors.white
@@ -2944,9 +2960,9 @@ class _IntroMasterState extends State<IntroMaster>
                       ),
                     ),
                     onPressed: () => Navigator.of(dialogContext).pop(true),
-                    child: const Text(
-                      '확인',
-                      style: TextStyle(
+                    child: Text(
+                      'Confirm',
+                      style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
                       ),
@@ -2985,13 +3001,13 @@ class _IntroMasterState extends State<IntroMaster>
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Text(
-                '보호자에게 동의 요청을 보냈습니다.\n보호자가 동의하면 모든 기능을 이용할 수 있습니다.',
-                style: TextStyle(fontWeight: FontWeight.bold),
+                'A consent request was sent to your parent or guardian.\nAll features will be available after they approve it.',
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              backgroundColor: Color(0xFF4A90D9),
-              duration: Duration(seconds: 4),
+              backgroundColor: const Color(0xFF4A90D9),
+              duration: const Duration(seconds: 4),
             ),
           );
         }
@@ -3013,17 +3029,21 @@ class _IntroMasterState extends State<IntroMaster>
           borderRadius: BorderRadius.circular(20),
           side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
         ),
-        title: const Text(
-          '연령 확인이 필요합니다',
-          style: TextStyle(
+        title: Text(
+          'Age verification is required',
+          style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
             fontSize: 18,
           ),
         ),
-        content: const Text(
-          '탄생년 선택은 미성년자 확인을 위한 필수 절차입니다.\n\n미성년자는 부모님 동의 후 가입할 수 있습니다.\n로그인 페이지로 돌아갑니다.',
-          style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+        content: Text(
+          'Selecting your birth year is required to verify whether you are a minor.\n\nMinors may sign up with a parent or guardian\'s consent.\nYou will return to the login page.',
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 14,
+            height: 1.5,
+          ),
         ),
         actions: [
           ConstrainedBox(
@@ -3041,9 +3061,9 @@ class _IntroMasterState extends State<IntroMaster>
                 ),
               ),
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text(
-                '확인',
-                style: TextStyle(
+              child: Text(
+                'Confirm',
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                 ),
@@ -3069,9 +3089,9 @@ class _IntroMasterState extends State<IntroMaster>
             borderRadius: BorderRadius.circular(20),
             side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
           ),
-          title: const Text(
-            '보호자 동의가 필요합니다',
-            style: TextStyle(
+          title: Text(
+            'Parent or guardian consent is required',
+            style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
               fontSize: 17,
@@ -3080,9 +3100,9 @@ class _IntroMasterState extends State<IntroMaster>
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                '만 14세 미만은 보호자 동의가 필요합니다.\nEnter a parent or guardian email.',
-                style: TextStyle(
+              Text(
+                'Users under 14 need consent from a parent or guardian.\nEnter their email address.',
+                style: const TextStyle(
                   color: Colors.white70,
                   fontSize: 13,
                   height: 1.5,
@@ -3094,7 +3114,7 @@ class _IntroMasterState extends State<IntroMaster>
                 keyboardType: TextInputType.emailAddress,
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
-                  hintText: '보호자 이메일',
+                  hintText: 'Parent or guardian email',
                   hintStyle: const TextStyle(color: Colors.white30),
                   filled: true,
                   fillColor: Colors.black.withValues(alpha: 0.5),
@@ -3113,7 +3133,10 @@ class _IntroMasterState extends State<IntroMaster>
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(null),
-              child: const Text('나중에', style: TextStyle(color: Colors.white38)),
+              child: Text(
+                'Later',
+                style: const TextStyle(color: Colors.white38),
+              ),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
@@ -3126,9 +3149,9 @@ class _IntroMasterState extends State<IntroMaster>
                 final email = controller.text.trim();
                 Navigator.of(dialogContext).pop(email.isEmpty ? null : email);
               },
-              child: const Text(
-                '동의 요청 보내기',
-                style: TextStyle(
+              child: Text(
+                'Send consent request',
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                 ),

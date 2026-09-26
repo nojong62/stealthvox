@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class TermsResult {
   const TermsResult({
@@ -38,8 +39,12 @@ class TermsAgreementSheet extends StatefulWidget {
 class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
   static const String _termsUrl =
       'https://docs.google.com/document/d/1KE4xrb63SDw1ZkiNQ_wxQjH7iyY6msTuVtazCTnR7KY/edit';
+  static const String _termsEnglishUrl =
+      'https://docs.google.com/document/d/1vs2n7kF0GzlejNaZOa1ZnfKbuwuOzOCr7Q5ZvYqmbVs/edit';
   static const String _privacyUrl =
       'https://docs.google.com/document/d/1qz1aCx6ZcxCkANFUSvbnE18H2-SbEhPUWlvZw27-DAQ/edit';
+  static const String _privacyEnglishUrl =
+      'https://docs.google.com/document/d/1AyK3KM9anwsVo7PaLdYRdxNnwa0MmRHuhxAN7yXbOjk/edit';
   static const Color _backgroundColor = Color(0xFF1E1E22);
   static const Color _brandBlue = Color(0xFF4A90D9);
   static const Color _primaryText = Colors.white;
@@ -51,6 +56,27 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
   bool _privacyAccepted = false;
   bool _ageConfirmed = false;
   bool _marketingAccepted = false;
+
+  bool get _useEnglishLegalDocs => FFAppState().nativeLang.trim() != 'Korean';
+
+  Future<void> _openLegalDocument({required bool isTerms}) async {
+    final bool english = _useEnglishLegalDocs;
+    final String url = isTerms
+        ? (english ? _termsEnglishUrl : _termsUrl)
+        : (english ? _privacyEnglishUrl : _privacyUrl);
+    final bool opened = await launchUrl(
+      Uri.parse(url),
+      mode: LaunchMode.inAppBrowserView,
+    );
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content:
+              Text(english ? 'Could not open the document.' : '문서를 열 수 없습니다.'),
+        ),
+      );
+    }
+  }
 
   bool get _allAccepted =>
       _termsAccepted && _privacyAccepted && _ageConfirmed && _marketingAccepted;
@@ -84,6 +110,7 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = FlutterFlowTheme.of(context);
+    final bool english = _useEnglishLegalDocs;
     final bottomPadding = MediaQuery.viewInsetsOf(context).bottom +
         MediaQuery.paddingOf(context).bottom;
 
@@ -141,21 +168,25 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
             const Divider(height: 1, thickness: 1, color: _dividerColor),
             const SizedBox(height: 18),
             _AgreementRow(
-              label: '(필수) 서비스 이용약관 동의',
+              label: english
+                  ? '(Required) Agree to the Terms of Use'
+                  : '(필수) 서비스 이용약관 동의',
               checked: _termsAccepted,
               showTrailingLink: true,
               onChanged: (value) => setState(() => _termsAccepted = value),
               onTrailingTap: () {
-                launchURL(_termsUrl);
+                _openLegalDocument(isTerms: true);
               },
             ),
             _AgreementRow(
-              label: '(필수) 개인정보 수집 및 이용 동의',
+              label: english
+                  ? '(Required) Agree to the Privacy Policy'
+                  : '(필수) 개인정보 수집 및 이용 동의',
               checked: _privacyAccepted,
               showTrailingLink: true,
               onChanged: (value) => setState(() => _privacyAccepted = value),
               onTrailingTap: () {
-                launchURL(_privacyUrl);
+                _openLegalDocument(isTerms: false);
               },
             ),
             _AgreementRow(
