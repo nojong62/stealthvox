@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '/custom_code/services/app_update_policy.dart';
+import '/flutter_flow/flutter_flow_util.dart';
 
 /// 모든 라우트 위에서 동작하는 앱 Update 게이트.
 ///
@@ -24,9 +26,41 @@ class AppUpdateGate extends StatefulWidget {
 class _AppUpdateGateState extends State<AppUpdateGate> {
   bool _recommendedDismissedForSession = false;
 
+  bool get _english => FFAppState().nativeLang.trim() != 'Korean';
+
   Future<void> _openStore() async {
-    final uri = Uri.parse(widget.decision.storeUrl);
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    var opened = false;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        opened = await launchUrl(
+          Uri.parse('market://details?id=com.aienglishpractice.stealthvox'),
+          mode: LaunchMode.externalApplication,
+        );
+      } catch (_) {
+        opened = false;
+      }
+    }
+    if (!opened) {
+      try {
+        opened = await launchUrl(
+          Uri.parse(widget.decision.storeUrl),
+          mode: LaunchMode.externalApplication,
+        );
+      } catch (_) {
+        opened = false;
+      }
+    }
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _english
+                ? 'Could not open the Play Store.'
+                : 'Play Store를 열 수 없습니다.',
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -56,9 +90,9 @@ class _AppUpdateGateState extends State<AppUpdateGate> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    title: const Text(
-                      'Update Available',
-                      style: TextStyle(
+                    title: Text(
+                      _english ? 'Update Available' : '업데이트 안내',
+                      style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
                       ),
@@ -73,16 +107,16 @@ class _AppUpdateGateState extends State<AppUpdateGate> {
                           onPressed: () => setState(
                             () => _recommendedDismissedForSession = true,
                           ),
-                          child: const Text(
-                            'Later',
-                            style: TextStyle(color: Colors.white60),
+                          child: Text(
+                            _english ? 'Later' : '나중에',
+                            style: const TextStyle(color: Colors.white60),
                           ),
                         ),
                       TextButton(
                         onPressed: _openStore,
-                        child: const Text(
-                          'Update',
-                          style: TextStyle(
+                        child: Text(
+                          _english ? 'Update' : '업데이트',
+                          style: const TextStyle(
                             color: Color(0xFF0A84FF),
                             fontWeight: FontWeight.bold,
                           ),
