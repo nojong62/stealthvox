@@ -43,6 +43,34 @@ class IntroMaster extends StatefulWidget {
 
 class _IntroMasterState extends State<IntroMaster>
     with SingleTickerProviderStateMixin {
+  static const List<String> _introLanguageFlags = [
+    '🇺🇸',
+    '🇯🇵',
+    '🇨🇳',
+    '🇪🇸',
+    '🇫🇷',
+    '🇩🇪',
+    '🇰🇷',
+    '🇮🇳',
+    '🇷🇺',
+    '🇵🇹',
+    '🇮🇹',
+    '🇳🇱',
+  ];
+  static const List<String> _introLanguageNames = [
+    'English',
+    'Japanese',
+    'Chinese',
+    'Spanish',
+    'French',
+    'German',
+    'Korean',
+    'Hindi',
+    'Russian',
+    'Portuguese',
+    'Italian',
+    'Dutch',
+  ];
   static const String _termsEnglishUrl =
       'https://docs.google.com/document/d/1vs2n7kF0GzlejNaZOa1ZnfKbuwuOzOCr7Q5ZvYqmbVs/edit';
   // 해외 테스터용 Google 바로가기는 종료했다. 첫 화면의 기본 진입점은
@@ -543,8 +571,7 @@ class _IntroMasterState extends State<IntroMaster>
     if (_scrollController.hasClients) {
       _scrollController.jumpTo(0);
     }
-    final lastProvider =
-        _requiresAuthOnlyIntro ? null : _validLastAuthProvider();
+    final lastProvider = _validLastAuthProvider();
     setState(() {
       _currentScreen = IntroScreen.auth;
       _showEmailForm = false;
@@ -733,7 +760,7 @@ class _IntroMasterState extends State<IntroMaster>
                     // 화살표는 크기가 정해져 있어 그대로 둔다.
                     Flexible(
                       child: Text(
-                        'Try Duo for 10 Minutes',
+                        'Try Duo',
                         maxLines: 2,
                         style: TextStyle(
                           color: Color(0xFFF9FAFC),
@@ -926,7 +953,7 @@ class _IntroMasterState extends State<IntroMaster>
   }) {
     return ConstrainedBox(
       // 📐 높이를 못 박으면 라벨이 두 줄이 될 때 버튼 밖으로 잘린다
-      //   (실기기 2.0배: "Try Duo for 10 Minutes"의 '시작'이 사라졌다,
+      //   (실기기 2.0배에서 긴 라벨의 끝이 사라졌던 이력이 있다,
       //   2026-08-27). 최소 높이만 두고 내용만큼 자라게 한다.
       constraints: const BoxConstraints(minHeight: 56),
       child: SizedBox(
@@ -1149,14 +1176,20 @@ class _IntroMasterState extends State<IntroMaster>
 
   Widget _buildHtmlWelcomeHeader() {
     return SizedBox(
-      height: 86,
+      height: 142,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
           Positioned(
             left: 0,
             right: 0,
-            top: 15,
+            top: 0,
+            child: _buildLanguageFlagCluster(),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 88,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -1179,13 +1212,68 @@ class _IntroMasterState extends State<IntroMaster>
           ),
           Positioned(
             right: -17,
-            top: 2,
+            top: 73,
             child: Transform.rotate(
               angle: -math.pi / 4,
               child: _buildDuoSnapshotBadge(),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 앱이 지원하는 열두 언어를 첫눈에 보여 주는 작은 국기 모음.
+  /// 한 줄을 길게 늘이지 않고 6개씩 두 줄로 묶어, 첨부된 아이콘 그룹처럼
+  /// 하나의 상단 비주얼로 읽히게 한다.
+  Widget _buildLanguageFlagCluster() {
+    return Semantics(
+      label: 'Twelve supported languages',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(2, (row) {
+          return Padding(
+            padding: EdgeInsets.only(bottom: row == 0 ? 6 : 0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(6, (column) {
+                final index = row * 6 + column;
+                return Padding(
+                  padding: EdgeInsets.only(left: column == 0 ? 0 : 7),
+                  child: Tooltip(
+                    message: _introLanguageNames[index],
+                    child: Container(
+                      width: 29,
+                      height: 29,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1B1E27),
+                        borderRadius: BorderRadius.circular(9),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.11),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(
+                              0xFF756BE8,
+                            ).withValues(alpha: 0.11),
+                            blurRadius: 8,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        _introLanguageFlags[index],
+                        textScaler: TextScaler.noScaling,
+                        style: const TextStyle(fontSize: 18, height: 1),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          );
+        }),
       ),
     );
   }
@@ -1598,7 +1686,7 @@ class _IntroMasterState extends State<IntroMaster>
                   // 제목 바로 아래가 시작 버튼이다. 사이에 있던 부제·소개
                   // 카드는 아래 안내 1·2·3과 같은 말을 반복하고 있었다.
                   _buildPrimaryAction(
-                    label: 'Try Duo for 10 Minutes',
+                    label: 'Try Duo',
                     icon: Icons.mic_rounded,
                     onPressed: () {
                       debugPrint(
@@ -1612,9 +1700,23 @@ class _IntroMasterState extends State<IntroMaster>
                   const Spacer(),
                   SizedBox(height: compact ? 18 : 28),
                   _buildSecondaryAction(
-                    label: 'Log In to Start',
-                    icon: Icons.login_rounded,
-                    onPressed: _openAuthScreen,
+                    label: 'Forgot how you logged in? Find Your Account',
+                    icon: Icons.manage_search_rounded,
+                    onPressed: () => setState(() {
+                      _currentScreen = IntroScreen.accountDiscovery;
+                      _showEmailForm = false;
+                      _accountDiscoveryMessage = '';
+                    }),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'If you changed phones, please finish setting up your Google Account and KakaoTalk on your new phone before trying to find your account.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xFF9297A5),
+                      fontSize: 11.5,
+                      height: 1.45,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   const Text(
@@ -1874,59 +1976,8 @@ class _IntroMasterState extends State<IntroMaster>
             const SizedBox(height: 16),
             _buildEmailForm(isLogin: isLoginMode),
           ],
-          const SizedBox(height: 22),
-          _buildAccountDiscoveryEntrySection(),
           const SizedBox(height: 26),
           _buildTermsInlineText(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAccountDiscoveryEntrySection() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.035),
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextButton.icon(
-            onPressed: isLoading
-                ? null
-                : () => setState(() {
-                      _currentScreen = IntroScreen.accountDiscovery;
-                      _showEmailForm = false;
-                      _accountDiscoveryMessage = '';
-                    }),
-            style: TextButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-              foregroundColor: const Color(0xFFBFD8FF),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(15),
-              ),
-            ),
-            icon: const Icon(Icons.manage_search_rounded, size: 20),
-            label: const Text(
-              'Forgot how you logged in? Find Your Account',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
-            child: Text(
-              'If you changed phones, please finish setting up your Google Account and KakaoTalk on your new phone before trying to find your account.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Color(0xFF9297A5),
-                fontSize: 11.5,
-                height: 1.45,
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -2357,8 +2408,7 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Widget _providerButton(String provider) {
-    final isRecent =
-        !_requiresAuthOnlyIntro && _validLastAuthProvider() == provider;
+    final isRecent = _validLastAuthProvider() == provider;
 
     late final String label;
     late final Color backgroundColor;
@@ -2518,10 +2568,7 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   List<Widget> _buildAuthHeader() {
-    // 1회 Duo 맛보기를 사용한 사람은 재방문 계정 기록과 관계없이
-    // 세 가지 가입/로그인 방법을 모두 선택할 수 있어야 한다.
-    final lastProvider =
-        _requiresAuthOnlyIntro ? null : _validLastAuthProvider();
+    final lastProvider = _validLastAuthProvider();
     if (lastProvider == null) {
       return [
         _authSectionTitle(
@@ -2540,8 +2587,7 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   List<Widget> _buildProviderButtons() {
-    final lastProvider =
-        _requiresAuthOnlyIntro ? null : _validLastAuthProvider();
+    final lastProvider = _validLastAuthProvider();
     if (lastProvider != null) {
       return [_providerButton(lastProvider)];
     }

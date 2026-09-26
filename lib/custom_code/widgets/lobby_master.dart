@@ -429,6 +429,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 if (!mounted || !lobbyContext.mounted) return;
                 FFAppState().remainingTime = 0;
                 FFAppState().remainingTimeLoaded = false;
+                FFAppState().lastAuthProvider = '';
+                FFAppState().hasLinkedAccount = false;
                 LobbyBrain.lastSyncedUid = null;
                 lobbyContext.goNamed('Intro');
               } finally {
