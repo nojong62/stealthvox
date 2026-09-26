@@ -723,7 +723,7 @@ class RoutineModeDuo extends StatefulWidget {
 class _RoutineModeDuoState extends State<RoutineModeDuo>
     with
         WidgetsBindingObserver,
-        SingleTickerProviderStateMixin,
+        TickerProviderStateMixin,
         BillingIdleMixin<RoutineModeDuo> {
   // ============================================================================
   // 📦 [1. 상태 변수 (STATE VARIABLES)]
@@ -1013,6 +1013,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 상태등의 약한 맥박. **발화 중에만 돈다** — 가만히 있는 화면에서 프레임을
   /// 계속 태우지 않기 위해 [_setInterpMicPhase]가 켜고 끈다.
   late final AnimationController _interpPulse;
+
+  /// 호스트가 상대를 기다리는 동안 초대 버튼의 위치를 알려 주는 맥박.
+  /// 아이콘만 움직이고 IconButton의 56dp 터치 영역과 동작은 그대로 둔다.
+  late final AnimationController _invitePulse;
 
   /// 상대 발화 재생기. tts-1 PCM을 받는 대로 튼다(mp3 통파일 대기 없음).
   TtsAdapter? _interpTts;
@@ -1732,7 +1736,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   String _myTarget() =>
       FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
   String _myNative() =>
-      FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+      FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'English';
 
   // ──────────────────────────────────────────────────────────────────────────
 
@@ -1753,6 +1757,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _interpPulse = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
+    );
+    _invitePulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 760),
     );
     _fetchKeys();
 
@@ -1775,6 +1783,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       debugPrint('[Duo] role=GUEST (invite entry)');
     } else {
       debugPrint('[Duo] role=HOST (direct entry)');
+      _invitePulse.repeat(reverse: true);
     }
 
     TrialFlowState.instance.restoreFromAppState();
@@ -1861,6 +1870,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     unawaited(_interpTts?.dispose());
     _interpTts = null;
     _interpPulse.dispose();
+    _invitePulse.dispose();
     _cancelInterpRetry('dispose');
     _clearInterpPendingSends('dispose');
     _cancelAudio();
@@ -7832,8 +7842,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
               // An already connected room does not need another invite action.
               if (_amIHost && !_hasConversationPartner)
                 IconButton(
-                  icon: const Icon(Icons.person_add_alt_1,
-                      color: Colors.white, size: 24),
+                  icon: AnimatedBuilder(
+                    animation: _invitePulse,
+                    builder: (context, child) => Opacity(
+                      opacity: 0.35 + (_invitePulse.value * 0.65),
+                      child: Transform.scale(
+                        scale: 0.92 + (_invitePulse.value * 0.16),
+                        child: child,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.person_add_alt_1,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
                   tooltip: 'Duo 초대장 발행',
                   onPressed: _shareInviteCode,
                   padding: EdgeInsets.zero,
