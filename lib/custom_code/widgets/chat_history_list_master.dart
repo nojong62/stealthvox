@@ -42,6 +42,195 @@ import '/custom_code/services/history_text_model.dart';
 const String _historyListTtsModel = 'tts-1';
 const String _historyListTtsVoice = 'nova';
 
+// Deletion dialogs follow the Original language selected in the lobby.
+class _DeletionUiCopy {
+  const _DeletionUiCopy(this.values);
+  final Map<String, String> values;
+
+  String operator [](String key) =>
+      values[key] ?? _copies['English']![key] ?? key;
+  String count(String key, int count) =>
+      this[key].replaceAll('{count}', '$count');
+  String result(String key, int deleted, int failed) => this[key]
+      .replaceAll('{deleted}', '$deleted')
+      .replaceAll('{failed}', '$failed');
+
+  static _DeletionUiCopy forLanguage(String language) =>
+      _DeletionUiCopy(_copies[language.trim()] ?? _copies['English']!);
+
+  static const Map<String, Map<String, String>> _copies = {
+    'English': {
+      'select': 'Please select conversation records to delete.',
+      'batchTitle': 'Delete selected records',
+      'batchQuestion':
+          'Delete {count} conversation records?\nThis cannot be undone.',
+      'historyTitle': 'Delete record',
+      'historyQuestion': 'Are you sure you want to delete this record?',
+      'keeperTitle': 'Delete from Keepers',
+      'keeperQuestion': 'Delete this expression from Keepers?',
+      'cancel': 'Cancel',
+      'delete': 'Delete',
+      'success': 'Deleted {count} records.',
+      'partial': 'Deleted {deleted} records. {failed} could not be deleted.',
+    },
+    'Korean': {
+      'select': '삭제할 대화 기록을 선택해주세요.',
+      'batchTitle': '선택 기록 삭제',
+      'batchQuestion': '{count}개의 대화 기록을 정말로 삭제하시겠습니까?\n복구할 수 없습니다.',
+      'historyTitle': '기록 삭제',
+      'historyQuestion': '정말로 삭제하시겠습니까?',
+      'keeperTitle': 'Keepers 삭제',
+      'keeperQuestion': '이 표현을 Keepers에서 삭제할까요?',
+      'cancel': '취소',
+      'delete': '삭제',
+      'success': '{count}개의 기록을 삭제했습니다.',
+      'partial': '{deleted}개를 삭제했습니다. {failed}개는 실패했습니다.',
+    },
+    'Japanese': {
+      'select': '削除する会話履歴を選択してください。',
+      'batchTitle': '選択した履歴を削除',
+      'batchQuestion': '{count}件の会話履歴を削除しますか？\n元に戻せません。',
+      'historyTitle': '履歴を削除',
+      'historyQuestion': 'この履歴を削除してもよろしいですか？',
+      'keeperTitle': 'Keepersから削除',
+      'keeperQuestion': 'この表現をKeepersから削除しますか？',
+      'cancel': 'キャンセル',
+      'delete': '削除',
+      'success': '{count}件の履歴を削除しました。',
+      'partial': '{deleted}件を削除しました。{failed}件は削除できませんでした。',
+    },
+    'Chinese': {
+      'select': '请选择要删除的对话记录。',
+      'batchTitle': '删除所选记录',
+      'batchQuestion': '确定要删除{count}条对话记录吗？\n删除后无法恢复。',
+      'historyTitle': '删除记录',
+      'historyQuestion': '确定要删除这条记录吗？',
+      'keeperTitle': '从 Keepers 中删除',
+      'keeperQuestion': '要从 Keepers 中删除这个表达吗？',
+      'cancel': '取消',
+      'delete': '删除',
+      'success': '已删除{count}条记录。',
+      'partial': '已删除{deleted}条，另有{failed}条删除失败。',
+    },
+    'Spanish': {
+      'select': 'Selecciona las conversaciones que deseas eliminar.',
+      'batchTitle': 'Eliminar registros seleccionados',
+      'batchQuestion':
+          '¿Quieres eliminar {count} conversaciones?\nEsta acción no se puede deshacer.',
+      'historyTitle': 'Eliminar registro',
+      'historyQuestion': '¿Seguro que quieres eliminar este registro?',
+      'keeperTitle': 'Eliminar de Keepers',
+      'keeperQuestion': '¿Quieres eliminar esta expresión de Keepers?',
+      'cancel': 'Cancelar',
+      'delete': 'Eliminar',
+      'success': 'Se eliminaron {count} registros.',
+      'partial':
+          'Se eliminaron {deleted} registros. No se pudieron eliminar {failed}.',
+    },
+    'French': {
+      'select': 'Sélectionnez les conversations à supprimer.',
+      'batchTitle': 'Supprimer les éléments sélectionnés',
+      'batchQuestion':
+          'Supprimer {count} conversations ?\nCette action est irréversible.',
+      'historyTitle': 'Supprimer la conversation',
+      'historyQuestion': 'Voulez-vous vraiment supprimer cette conversation ?',
+      'keeperTitle': 'Supprimer de Keepers',
+      'keeperQuestion': 'Supprimer cette expression de Keepers ?',
+      'cancel': 'Annuler',
+      'delete': 'Supprimer',
+      'success': '{count} éléments ont été supprimés.',
+      'partial': '{deleted} éléments supprimés. Échec pour {failed} éléments.',
+    },
+    'German': {
+      'select': 'Wähle die zu löschenden Unterhaltungen aus.',
+      'batchTitle': 'Ausgewählte Einträge löschen',
+      'batchQuestion':
+          '{count} Unterhaltungen löschen?\nDies kann nicht rückgängig gemacht werden.',
+      'historyTitle': 'Eintrag löschen',
+      'historyQuestion': 'Möchtest du diesen Eintrag wirklich löschen?',
+      'keeperTitle': 'Aus Keepers löschen',
+      'keeperQuestion': 'Diesen Ausdruck aus Keepers löschen?',
+      'cancel': 'Abbrechen',
+      'delete': 'Löschen',
+      'success': '{count} Einträge wurden gelöscht.',
+      'partial':
+          '{deleted} Einträge gelöscht. {failed} konnten nicht gelöscht werden.',
+    },
+    'Hindi': {
+      'select': 'हटाने के लिए बातचीत के रिकॉर्ड चुनें।',
+      'batchTitle': 'चुने गए रिकॉर्ड हटाएँ',
+      'batchQuestion':
+          'क्या {count} बातचीत के रिकॉर्ड हटाने हैं?\nइन्हें वापस नहीं लाया जा सकता।',
+      'historyTitle': 'रिकॉर्ड हटाएँ',
+      'historyQuestion': 'क्या आप वाकई यह रिकॉर्ड हटाना चाहते हैं?',
+      'keeperTitle': 'Keepers से हटाएँ',
+      'keeperQuestion': 'क्या यह अभिव्यक्ति Keepers से हटानी है?',
+      'cancel': 'रद्द करें',
+      'delete': 'हटाएँ',
+      'success': '{count} रिकॉर्ड हटा दिए गए।',
+      'partial': '{deleted} रिकॉर्ड हटा दिए गए। {failed} रिकॉर्ड नहीं हट सके।',
+    },
+    'Russian': {
+      'select': 'Выберите записи разговоров для удаления.',
+      'batchTitle': 'Удалить выбранные записи',
+      'batchQuestion':
+          'Удалить {count} записей разговоров?\nЭто действие нельзя отменить.',
+      'historyTitle': 'Удалить запись',
+      'historyQuestion': 'Вы действительно хотите удалить эту запись?',
+      'keeperTitle': 'Удалить из Keepers',
+      'keeperQuestion': 'Удалить это выражение из Keepers?',
+      'cancel': 'Отмена',
+      'delete': 'Удалить',
+      'success': 'Удалено записей: {count}.',
+      'partial': 'Удалено: {deleted}. Не удалось удалить: {failed}.',
+    },
+    'Portuguese': {
+      'select': 'Selecione as conversas que deseja excluir.',
+      'batchTitle': 'Excluir registros selecionados',
+      'batchQuestion':
+          'Excluir {count} conversas?\nEsta ação não pode ser desfeita.',
+      'historyTitle': 'Excluir registro',
+      'historyQuestion': 'Tem certeza de que deseja excluir este registro?',
+      'keeperTitle': 'Excluir do Keepers',
+      'keeperQuestion': 'Deseja excluir esta expressão do Keepers?',
+      'cancel': 'Cancelar',
+      'delete': 'Excluir',
+      'success': '{count} registros foram excluídos.',
+      'partial': '{deleted} registros excluídos. Falha ao excluir {failed}.',
+    },
+    'Italian': {
+      'select': 'Seleziona le conversazioni da eliminare.',
+      'batchTitle': 'Elimina gli elementi selezionati',
+      'batchQuestion':
+          'Eliminare {count} conversazioni?\nQuesta azione non può essere annullata.',
+      'historyTitle': 'Elimina conversazione',
+      'historyQuestion': 'Vuoi davvero eliminare questa conversazione?',
+      'keeperTitle': 'Elimina da Keepers',
+      'keeperQuestion': 'Eliminare questa espressione da Keepers?',
+      'cancel': 'Annulla',
+      'delete': 'Elimina',
+      'success': 'Eliminati {count} elementi.',
+      'partial':
+          'Eliminati {deleted} elementi. Impossibile eliminarne {failed}.',
+    },
+    'Dutch': {
+      'select': 'Selecteer de gesprekken die je wilt verwijderen.',
+      'batchTitle': 'Geselecteerde items verwijderen',
+      'batchQuestion':
+          '{count} gesprekken verwijderen?\nDit kan niet ongedaan worden gemaakt.',
+      'historyTitle': 'Gesprek verwijderen',
+      'historyQuestion': 'Weet je zeker dat je dit gesprek wilt verwijderen?',
+      'keeperTitle': 'Uit Keepers verwijderen',
+      'keeperQuestion': 'Deze uitdrukking uit Keepers verwijderen?',
+      'cancel': 'Annuleren',
+      'delete': 'Verwijderen',
+      'success': '{count} items verwijderd.',
+      'partial':
+          '{deleted} items verwijderd. {failed} konden niet worden verwijderd.',
+    },
+  };
+}
+
 // ── Keepers 소리듣기 전용 ─────────────────────────────────────────────
 // 의미단위 리듬을 말로 지시하려면 instructions를 받는 모델이어야 한다.
 // tts-1은 instructions 자리가 없고, gpt-4o-mini-tts는 대신 speed를 무시한다.
@@ -1585,23 +1774,30 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   //  Keepers 삭제 (소프트 삭제)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   void _showDeleteKeeperDialog(DocumentSnapshot doc) {
+    final copy = _DeletionUiCopy.forLanguage(FFAppState().nativeLang);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF333333),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          "Keepers 삭제",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        title: Text(
+          copy['keeperTitle'],
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
         ),
-        content: const Text(
-          "이 표현을 Keepers에서 삭제할까요?",
-          style: TextStyle(color: Colors.white70),
+        content: Text(
+          copy['keeperQuestion'],
+          style: const TextStyle(color: Colors.white70),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("취소", style: TextStyle(color: Colors.grey)),
+            child: Text(
+              copy['cancel'],
+              style: const TextStyle(color: Colors.grey),
+            ),
           ),
           TextButton(
             // 지우면 그 줄이 목록에서 곧바로 사라진다. 그게 이미 대답이라
@@ -1617,9 +1813,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 debugPrint('[Keepers] delete error: $e');
               }
             },
-            child: const Text(
-              "삭제",
-              style: TextStyle(
+            child: Text(
+              copy['delete'],
+              style: const TextStyle(
                 color: Colors.redAccent,
                 fontWeight: FontWeight.bold,
               ),
@@ -1687,8 +1883,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     // 🗣️ 문제를 낼 언어는 **이 사람의 말**이다. 줄마다 달라지는 값이 아니라
     //   묻지 않는다 — 로비 설정에서 그때그때 읽는다. 설정을 바꾸면 피드백
     //   언어도 같이 따라가는 것이 맞다.
-    _keeperTutoringNative =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+    _keeperTutoringNative = FFAppState().nativeLang.isNotEmpty
+        ? FFAppState().nativeLang
+        : 'English';
     // 🎯 배울 언어만 줄에 매인다. 한 키퍼를 영어로 연습하다 일본어로 바꾸는
     //   일은 있어도, 내 모국어가 줄마다 바뀌지는 않는다.
     final String savedTarget =
@@ -2605,12 +2802,13 @@ RULES — follow exactly:
   }
 
   void _showBatchDeleteDialog() {
+    final copy = _DeletionUiCopy.forLanguage(FFAppState().nativeLang);
     if (_selectedDocIds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            "삭제할 대화 기록을 선택해주세요.",
-            style: TextStyle(fontWeight: FontWeight.bold),
+            copy['select'],
+            style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           backgroundColor: Colors.orangeAccent,
         ),
@@ -2629,18 +2827,24 @@ RULES — follow exactly:
       builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF333333),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          "선택 기록 삭제",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        title: Text(
+          copy['batchTitle'],
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         content: Text(
-          "${_selectedDocIds.length}개의 대화 기록을 정말로 삭제하시겠습니까?\n복구할 수 없습니다.",
+          copy.count('batchQuestion', _selectedDocIds.length),
           style: const TextStyle(color: Colors.white70, height: 1.5),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text("취소", style: TextStyle(color: Colors.grey)),
+            child: Text(
+              copy['cancel'],
+              style: const TextStyle(color: Colors.grey),
+            ),
           ),
           TextButton(
             onPressed: () async {
@@ -2695,8 +2899,8 @@ RULES — follow exactly:
                 SnackBar(
                   content: Text(
                     failed.isEmpty
-                        ? "$deleted개의 기록을 삭제했습니다."
-                        : "$deleted개를 삭제했습니다. ${failed.length}개는 실패했습니다.",
+                        ? copy.count('success', deleted)
+                        : copy.result('partial', deleted, failed.length),
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   backgroundColor: failed.isEmpty
@@ -2705,9 +2909,9 @@ RULES — follow exactly:
                 ),
               );
             },
-            child: const Text(
-              "삭제",
-              style: TextStyle(
+            child: Text(
+              copy['delete'],
+              style: const TextStyle(
                 color: Colors.redAccent,
                 fontWeight: FontWeight.bold,
               ),
@@ -2826,19 +3030,26 @@ RULES — follow exactly:
   }
 
   void _showDeleteDialog(DocumentSnapshot doc) {
+    final copy = _DeletionUiCopy.forLanguage(FFAppState().nativeLang);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF333333),
-        title: const Text("기록 삭제", style: TextStyle(color: Colors.white)),
-        content: const Text(
-          "정말로 삭제하시겠습니까?",
-          style: TextStyle(color: Colors.white70),
+        title: Text(
+          copy['historyTitle'],
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          copy['historyQuestion'],
+          style: const TextStyle(color: Colors.white70),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("취소", style: TextStyle(color: Colors.grey)),
+            child: Text(
+              copy['cancel'],
+              style: const TextStyle(color: Colors.grey),
+            ),
           ),
           TextButton(
             onPressed: () async {
@@ -2850,9 +3061,9 @@ RULES — follow exactly:
                 debugPrint('[DELETE-ROOM] failed (${e.runtimeType})');
               }
             },
-            child: const Text(
-              "삭제",
-              style: TextStyle(
+            child: Text(
+              copy['delete'],
+              style: const TextStyle(
                 color: Colors.redAccent,
                 fontWeight: FontWeight.bold,
               ),
