@@ -1,8 +1,8 @@
 // ====================================================================
 // 🌐 [ORIGIN-RESOLVE] 첫 발화가 로비 ORIGIN과 다른 언어인지 **알아만 둔다**
 // --------------------------------------------------------------------
-// 로비 ORIGIN 기본값은 'Korean'이다(app_state.dart). 설정을 모르는 유저가
-// 그대로 두고 자기 언어로 말하면, 전사기에 language=ko가 박혀 있어서 일본어
+// 로비 ORIGIN 기본값은 'English'다(app_state.dart). 설정을 모르는 유저가
+// 그대로 두고 자기 언어로 말하면, 전사기에 language=en이 박혀 있어서 다른 언어
 // 발화가 한글로 음차되어 나온다. 그 깨진 문장이 원문으로 저장되고 학습
 // 자료의 출발점이 된다.
 //
@@ -331,8 +331,8 @@ Reply as JSON: {"language": "<one of the names above, or Unknown>"}''',
     final decoded =
         jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
     final content = (((decoded['choices'] as List<dynamic>?)?.first
-            as Map<String, dynamic>?)?['message'] as Map<String, dynamic>?)?['content']
-        as String?;
+            as Map<String, dynamic>?)?['message']
+        as Map<String, dynamic>?)?['content'] as String?;
     if (content == null) return null;
     final parsed = jsonDecode(content) as Map<String, dynamic>;
     final name = (parsed['language'] as String?)?.trim() ?? '';
@@ -382,7 +382,8 @@ Future<String?> resolveOriginFromFirstUtterance({
   // 라틴 문자다. 로비값이 비라틴이면 이미 불일치가 확정이지만, 어느
   // 라틴 언어인지는 모델만 안다. 로비값이 라틴이어도 물어봐야 한다 —
   // 기본값 그대로 둔 영어권 밖 유저가 여기로 들어온다.
-  final wordCount = text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+  final wordCount =
+      text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
   if (wordCount < _kMinLatinWords) {
     onLog?.call(
         '🌐 [ORIGIN-RESOLVE]', 'latin too short words=$wordCount → keep lobby');
@@ -396,8 +397,7 @@ Future<String?> resolveOriginFromFirstUtterance({
         'judge=${judged ?? 'none'} lobby=$lobbyOrigin → keep');
     return null;
   }
-  onLog?.call(
-      '🌐 [ORIGIN-RESOLVE]', 'judge lobby=$lobbyOrigin → $judged');
+  onLog?.call('🌐 [ORIGIN-RESOLVE]', 'judge lobby=$lobbyOrigin → $judged');
   return judged;
 }
 

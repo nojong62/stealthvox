@@ -6438,7 +6438,7 @@ content and gist of the WHOLE conversation.
   // ==================================================================
   static Future<Map<String, String>?> generateDramaticScenario(
     String apiKey, {
-    String languageName = 'Korean',
+    String languageName = 'English',
   }) async {
     final client = http.Client();
     try {

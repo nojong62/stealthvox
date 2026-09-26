@@ -345,7 +345,8 @@ String originLanguageKeepLabel(String detectedLanguage) {
 
 /// Anyone 자유대화 답변 전 내부 숙고 지시.
 /// 응답이 1초 정도 느려지더라도 어중간한 답 대신 구체적인 답과 질문을 뽑는다.
-const String kCircleTalkDeliberateReplyPolicy = '''[THINK TWICE BEFORE YOU SPEAK]
+const String kCircleTalkDeliberateReplyPolicy =
+    '''[THINK TWICE BEFORE YOU SPEAK]
 - Take an extra beat. A slightly slower reply that lands is far better than a fast, vague one.
 - Silently draft two different replies, compare them, then say only the better one.
 - Throw away any draft that is hedging or generic — anything that could have been said to anyone by anyone ("That sounds tough.", "I see.", "How do you feel about that?"). Commit to a real reaction instead.
@@ -381,7 +382,7 @@ const String kSpokenReplyLengthPolicy =
 /// 로비에서 고른 원어 이름을 프롬프트용으로 정규화한다. 비어 있으면 Korean.
 String resolveNativeLanguageName(String nativeLang) {
   final name = nativeLang.trim();
-  return name.isEmpty ? 'Korean' : name;
+  return name.isEmpty ? 'English' : name;
 }
 
 /// 3모드 대화방 공통 출력 언어 규칙.

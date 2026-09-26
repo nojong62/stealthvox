@@ -61,7 +61,7 @@ Future<OriginLanguageRecheckResult?> showOriginLanguageRecheckDialog({
   const List<String> langs = kOriginLanguageOptions;
   String native = langs.contains(detected)
       ? detected
-      : (langs.contains(currentNative) ? currentNative : 'Korean');
+      : (langs.contains(currentNative) ? currentNative : 'English');
   String target = langs.contains(currentTarget) ? currentTarget : 'English';
   bool targetTouched = false;
 

@@ -1235,7 +1235,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     OriginRestorationRunner.instance.start(
       roomRef: widget.historyDoc,
       apiKey: _apiKey,
-      sourceName: (data['native_lang'] ?? 'Korean').toString(),
+      sourceName: (data['native_lang'] ?? 'English').toString(),
       targetLanguage: (data['target_lang'] ?? 'English').toString(),
       // 임시 Target은 Duo Direct에서만 I/you/제3자·행위자 모순을 찾는다.
       // 이름·문체·숫자 교정기는 아니며 저장되지 않는다.
@@ -1484,7 +1484,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     final perMessage = (data?['source_lang'] ?? '').toString().trim();
     if (perMessage.isNotEmpty) return perMessage;
     final session = (_sessionNativeLang ?? '').trim();
-    return session.isNotEmpty ? session : 'Korean';
+    return session.isNotEmpty ? session : 'English';
   }
 
   /// 잘못 실린 배울글을 고쳐 쓴 줄. **한 세션에 한 줄당 한 번뿐이다.**
@@ -1528,7 +1528,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     String source,
   ) async {
     final String targetLanguage = (_sessionTargetLang ?? 'English').trim();
-    final String nativeLanguage = (_sessionNativeLang ?? 'Korean').trim();
+    final String nativeLanguage = (_sessionNativeLang ?? 'English').trim();
     try {
       final ok = await renderStep2MessageToNative(
         messageRef: messageRef,
@@ -1698,7 +1698,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     try {
       final targetLanguage = (_sessionTargetLang ?? 'English').trim();
       final sourceName =
-          sourceLanguage.trim().isEmpty ? 'Korean' : sourceLanguage.trim();
+          sourceLanguage.trim().isEmpty ? 'English' : sourceLanguage.trim();
       // 원문과 타겟이 같은 언어면 번역할 게 없다. 방 단위 판정(_recordSameLang)에
       // 더해 줄 단위 출발 언어도 본다 — Duo 직접 대화는 줄마다 언어가 다르다.
       final sameLanguage = _recordSameLang == true ||
@@ -3142,7 +3142,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   ///   한국어 문장을 주고 영어로 답하라고 했다.
   String _sessionNativeLangName() {
     final name = (_sessionNativeLang ?? '').trim();
-    return name.isEmpty ? 'Korean' : name;
+    return name.isEmpty ? 'English' : name;
   }
 
   /// 같은 뜻을 스타일만 바꿔 늘어놓는다. 목록도 생성 규칙도 공용이다.
@@ -4293,7 +4293,7 @@ RULES — follow exactly:
 
     final copy = TalkUiCopy.forLanguage(
       (_sessionNativeLang ?? '').trim().isEmpty
-          ? 'Korean'
+          ? 'English'
           : _sessionNativeLang!.trim(),
     );
     String me = '';

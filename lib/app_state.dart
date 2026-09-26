@@ -21,7 +21,8 @@ class FFAppState extends ChangeNotifier {
   Future initializePersistedState() async {
     prefs = await SharedPreferences.getInstance();
     _safeInit(() {
-      _targetLang = prefs.getString('ff_targetLang') ?? _targetLang;
+      final saved = prefs.getString('ff_targetLang')?.trim() ?? '';
+      _targetLang = saved.isEmpty ? 'English' : saved;
     });
     _safeInit(() {
       _tone = prefs.getString('ff_tone') ?? _tone;
@@ -36,7 +37,8 @@ class FFAppState extends ChangeNotifier {
       _aiRole = prefs.getString('ff_aiRole') ?? _aiRole;
     });
     _safeInit(() {
-      _nativeLang = prefs.getString('ff_nativeLang') ?? _nativeLang;
+      final saved = prefs.getString('ff_nativeLang')?.trim() ?? '';
+      _nativeLang = saved.isEmpty ? 'English' : saved;
     });
     _safeInit(() {
       _aiLevel = prefs.getString('ff_aiLevel') ?? _aiLevel;
@@ -131,7 +133,7 @@ class FFAppState extends ChangeNotifier {
     _selectedEpisode = value;
   }
 
-  String _targetLang = '';
+  String _targetLang = 'English';
   String get targetLang => _targetLang;
   set targetLang(String value) {
     _targetLang = value;
@@ -206,8 +208,8 @@ class FFAppState extends ChangeNotifier {
   /// **레거시 이름**이다(이 저장소의 첫 커밋에 이미 이 형태로 존재한다).
   /// 이름을 바꾸면 기존 사용자의 저장값이 통째로 사라지므로 그대로 둔다.
   /// 앱 코드는 `_myNative()` · `_nativeLangName()` 같은 래퍼를 통해 쓴다.
-  /// 신규 사용자는 로비에서 직접 선택하도록 초기값을 비워 둔다.
-  String _nativeLang = '';
+  /// 신규 사용자와 비어 있는 레거시 저장값은 영어를 기본값으로 쓴다.
+  String _nativeLang = 'English';
   String get nativeLang => _nativeLang;
   set nativeLang(String value) {
     _nativeLang = value;
