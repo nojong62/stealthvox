@@ -1207,10 +1207,7 @@ class _IntroMasterState extends State<IntroMaster>
           Positioned(
             right: -17,
             top: 3,
-            child: Transform.rotate(
-              angle: -math.pi / 4,
-              child: _buildDuoSnapshotBadge(),
-            ),
+            child: _buildAnimatedDuoSnapshotBadge(),
           ),
         ],
       ),
@@ -1372,6 +1369,49 @@ class _IntroMasterState extends State<IntroMaster>
     _taglineBubbleTimer = null;
     _taglineBubble?.remove();
     _taglineBubble = null;
+  }
+
+  /// 첫 박자에는 워드마크를 온전히 보여 주고, 뒤이어 광고 배지가
+  /// 대각선으로 미끄러져 들어와 StealthVox 일부를 덮는다.
+  Widget _buildAnimatedDuoSnapshotBadge() {
+    return AnimatedBuilder(
+      animation: _welcomeMotionController,
+      child: Transform.rotate(
+        angle: -math.pi / 4,
+        child: _buildDuoSnapshotBadge(),
+      ),
+      builder: (context, child) {
+        final progress = _welcomeMotionController.value;
+        // 0~42%: 로고만 노출, 42~55%: 등장, 55~88%: 유지,
+        // 88~100%: 퇴장. 다음 반복에서도 자연스럽게 다시 시작한다.
+        final double visibility;
+        if (progress < 0.42) {
+          visibility = 0;
+        } else if (progress < 0.55) {
+          visibility = Curves.easeOutCubic.transform(
+            (progress - 0.42) / 0.13,
+          );
+        } else if (progress < 0.88) {
+          visibility = 1;
+        } else {
+          visibility =
+              1 - Curves.easeInCubic.transform((progress - 0.88) / 0.12);
+        }
+        return IgnorePointer(
+          ignoring: visibility < 0.5,
+          child: Opacity(
+            opacity: visibility.clamp(0.0, 1.0),
+            child: Transform.translate(
+              offset: Offset(18 * (1 - visibility), -12 * (1 - visibility)),
+              child: Transform.scale(
+                scale: 0.94 + visibility * 0.06,
+                child: child,
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Widget _buildDuoSnapshotBadge() {
