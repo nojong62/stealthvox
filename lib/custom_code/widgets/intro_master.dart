@@ -571,13 +571,13 @@ class _IntroMasterState extends State<IntroMaster>
     if (_scrollController.hasClients) {
       _scrollController.jumpTo(0);
     }
-    final lastProvider = _validLastAuthProvider();
     setState(() {
       _currentScreen = IntroScreen.auth;
       _showEmailForm = false;
-      // 최근 로그인 흔적이 있으면 기존 로그인 안내를 유지하고, 흔적이
-      // 없으면 이메일 폼까지 포함해 신규 가입 모드로 시작한다.
-      isLoginMode = lastProvider != null;
+      // Local recent-provider state can be lost during an app reinstall.
+      // Always start in login mode so an existing user is not presented with
+      // account creation unless they explicitly choose Sign Up.
+      isLoginMode = true;
     });
   }
 
@@ -1233,18 +1233,18 @@ class _IntroMasterState extends State<IntroMaster>
         mainAxisSize: MainAxisSize.min,
         children: List.generate(2, (row) {
           return Padding(
-            padding: EdgeInsets.only(bottom: row == 0 ? 6 : 0),
+            padding: EdgeInsets.only(bottom: row == 0 ? 4 : 0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(6, (column) {
                 final index = row * 6 + column;
                 return Padding(
-                  padding: EdgeInsets.only(left: column == 0 ? 0 : 7),
+                  padding: EdgeInsets.only(left: column == 0 ? 0 : 5),
                   child: Tooltip(
                     message: _introLanguageNames[index],
                     child: Container(
-                      width: 29,
-                      height: 29,
+                      width: 34,
+                      height: 34,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: const Color(0xFF1B1E27),
@@ -1265,7 +1265,7 @@ class _IntroMasterState extends State<IntroMaster>
                       child: Text(
                         _introLanguageFlags[index],
                         textScaler: TextScaler.noScaling,
-                        style: const TextStyle(fontSize: 18, height: 1),
+                        style: const TextStyle(fontSize: 21, height: 1),
                       ),
                     ),
                   ),
@@ -2572,8 +2572,8 @@ class _IntroMasterState extends State<IntroMaster>
     if (lastProvider == null) {
       return [
         _authSectionTitle(
-          title: 'Create Your Account',
-          description: 'Choose a sign-up method to get started.',
+          title: 'Log In or Sign Up',
+          description: 'Existing users can log in with their previous method.',
         ),
       ];
     }
