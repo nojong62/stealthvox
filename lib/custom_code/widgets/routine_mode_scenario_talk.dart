@@ -64,6 +64,7 @@ import '/custom_code/services/dialog_brain_model.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/history_preview_summary.dart';
+import '/custom_code/services/talk_ui_localization.dart';
 // 🔁 [LATE-CONTINUATION] 판정·합치기·말풍선 규칙은 Circle Talk과 **같은
 //   함수**를 쓴다. 여기에 규칙을 다시 구현하면 한쪽만 고쳐지고 다른 쪽은 남는다.
 import '/custom_code/services/late_continuation.dart';
@@ -310,6 +311,7 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
       OriginLanguageSession.instance.resolve(FFAppState().nativeLang));
 
   String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
+  TalkUiCopy get _uiCopy => TalkUiCopy.forLanguage(_nativeLangName());
 
   /// 🎯 [LANG] 이 방의 배울 언어(LearnLang = 로비 Target). 비어 있으면 English다.
   ///
@@ -4443,18 +4445,48 @@ $finalLanguageRule''';
     if (situation.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-      child: Text(
-        situation,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: Colors.white70,
-          fontSize: 13 * _fontScale,
-          fontWeight: FontWeight.w600,
-          height: 1.35,
-          letterSpacing: 0.2,
-        ),
+      child: Column(
+        children: [
+          Text(_uiCopy['scenarioTopic'],
+              style: TextStyle(
+                color: const Color(0xFF60A5FA),
+                fontSize: 11 * _fontScale,
+                fontWeight: FontWeight.bold,
+              )),
+          const SizedBox(height: 3),
+          Text(
+            situation,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 13 * _fontScale,
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+              letterSpacing: 0.2,
+            ),
+          ),
+          if (_scenarioUserRole.trim().isNotEmpty ||
+              _scenarioAiRole.trim().isNotEmpty) ...[
+            const SizedBox(height: 3),
+            Text(
+              [
+                if (_scenarioUserRole.trim().isNotEmpty)
+                  '${_uiCopy['me']}: ${_scenarioUserRole.trim()}',
+                if (_scenarioAiRole.trim().isNotEmpty)
+                  '${_uiCopy['partner']}: ${_scenarioAiRole.trim()}',
+              ].join('  ·  '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white38,
+                fontSize: 10 * _fontScale,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -4487,7 +4519,7 @@ $finalLanguageRule''';
                 IconButton(
                   icon: const Icon(Icons.menu_book_rounded,
                       color: Colors.white70, size: 22),
-                  tooltip: '공부방으로',
+                  tooltip: _uiCopy['studyRoom'],
                   padding: EdgeInsets.zero,
                   constraints:
                       const BoxConstraints(minWidth: 40, minHeight: 40),
@@ -4521,7 +4553,9 @@ $finalLanguageRule''';
                     size: const Size(26, 26),
                     painter: _LangIconPainter(active: _showOriginal),
                   ),
-                  tooltip: _showOriginal ? '원문 숨기기' : '원문 함께 보기',
+                  tooltip: _showOriginal
+                      ? _uiCopy['hideOriginal']
+                      : _uiCopy['showOriginal'],
                   onPressed: () =>
                       setState(() => _showOriginal = !_showOriginal),
                   padding: EdgeInsets.zero,
@@ -4735,11 +4769,11 @@ $finalLanguageRule''';
               // 📏 폰 글꼴을 키워 둔 기기에서 이 제목이 커지면서 Start 버튼을
               //   밀어내 줄 오른쪽이 잘렸다. 버튼 자리를 먼저 주고 제목은
               //   남는 폭에 맞춰 줄어들게 한다.
-              const Expanded(
+              Expanded(
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
-                  child: Text("Scenario Talk",
+                  child: Text(_uiCopy['scenarioTalk'],
                       maxLines: 1,
                       style: TextStyle(
                           color: Colors.white54,

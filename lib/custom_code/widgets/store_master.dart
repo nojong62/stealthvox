@@ -25,6 +25,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/components/social_login_modal.dart';
+import '/custom_code/services/talk_ui_localization.dart';
 // 💡 에러의 원인이었던 외부 패키지 삭제 완료! Firebase로 대체합니다.
 
 /// 스토어 상품 정의. **상품 ID·제목·초의 유일한 출처다.**
@@ -36,7 +37,9 @@ final List<Map<String, dynamic>> kStorePlans = [
   {
     'id': 'stealthvox_10m',
     'title': '10 Minutes',
+    'title_key': 'plan10m',
     'subtitle': 'Trial',
+    'subtitle_key': 'trial',
     'seconds': 600,
     'theme_color': const Color(0xFF60A5FA),
     'icon': Icons.bolt_rounded,
@@ -44,7 +47,9 @@ final List<Map<String, dynamic>> kStorePlans = [
   {
     'id': 'stealthvox_1h',
     'title': '1 Hour',
+    'title_key': 'plan1h',
     'subtitle': 'Standard',
+    'subtitle_key': 'standard',
     'seconds': 3600,
     'theme_color': const Color(0xFF34D399),
     'icon': Icons.hourglass_top_rounded,
@@ -52,7 +57,9 @@ final List<Map<String, dynamic>> kStorePlans = [
   {
     'id': 'stealthvox_5h',
     'title': '5 Hours',
+    'title_key': 'plan5h',
     'subtitle': 'Best Value',
+    'subtitle_key': 'bestValue',
     'seconds': 18000,
     'theme_color': const Color(0xFFFBBF24),
     'icon': Icons.star_rounded,
@@ -60,7 +67,9 @@ final List<Map<String, dynamic>> kStorePlans = [
   {
     'id': 'stealthvox_10h',
     'title': '10 Hours',
+    'title_key': 'plan10h',
     'subtitle': 'Premium',
+    'subtitle_key': 'premium',
     'seconds': 36000,
     'theme_color': const Color(0xFFA78BFA),
     'icon': Icons.diamond_rounded,
@@ -88,20 +97,25 @@ String? resolveStorePrice(
 /// 복원 → 그래도 모르면 `Unknown Item`. 이렇게 하면 **이미 쌓인 기록도
 /// Firestore를 건드리지 않고** 제대로 보인다.
 String resolvePurchaseTitle(
-  Map<String, dynamic> data,
-  List<Map<String, dynamic>> plans,
-) {
+    Map<String, dynamic> data, List<Map<String, dynamic>> plans,
+    {String language = 'English'}) {
   final String savedTitle = data['product_title']?.toString().trim() ?? '';
-  if (savedTitle.isNotEmpty) return savedTitle;
-
+  // 기본 영어 조회는 옛 기록의 제목 우선 규칙을 그대로 보존한다.
+  // 다른 Original 언어에서는 알려진 상품만 현 언어명으로 다시 표시한다.
+  if (language.trim() == 'English' && savedTitle.isNotEmpty) {
+    return savedTitle;
+  }
   final String productId = data['product_id']?.toString().trim() ?? '';
   if (productId.isNotEmpty) {
     for (final plan in plans) {
       if (plan['id']?.toString() != productId) continue;
+      final key = plan['title_key']?.toString().trim() ?? '';
+      if (key.isNotEmpty) return TalkUiCopy.forLanguage(language)[key];
       final String planTitle = plan['title']?.toString().trim() ?? '';
       if (planTitle.isNotEmpty) return planTitle;
     }
   }
+  if (savedTitle.isNotEmpty) return savedTitle;
   return 'Unknown Item';
 }
 
@@ -129,6 +143,7 @@ class _StoreMasterState extends State<StoreMaster> {
   Map<String, String> _localizedPrices = const {};
   bool _priceLookupComplete = false;
   bool get _useEnglishLegalDocs => FFAppState().nativeLang.trim() != 'Korean';
+  TalkUiCopy get _copy => TalkUiCopy.forLanguage(FFAppState().nativeLang);
   String _versionText = '';
 
   // [v4.0] 서버 증액 감지용 Firestore 리스너
@@ -532,7 +547,7 @@ class _StoreMasterState extends State<StoreMaster> {
                         fit: BoxFit.scaleDown,
                         alignment: Alignment.centerLeft,
                         child: Text(
-                          "🧾 Purchase History",
+                          "🧾 ${_copy['purchaseHistory']}",
                           maxLines: 1,
                           style: GoogleFonts.orbitron(
                             color: Colors.white,
@@ -554,11 +569,9 @@ class _StoreMasterState extends State<StoreMaster> {
                 const Divider(color: Colors.white12, height: 30),
                 Expanded(
                   child: currentUserReference == null
-                      ? const Center(
-                          child: Text(
-                            "Access denied.",
-                            style: TextStyle(color: Colors.white54),
-                          ),
+                      ? Center(
+                          child: Text(_copy['accessDenied'],
+                              style: const TextStyle(color: Colors.white54)),
                         )
                       : StreamBuilder<QuerySnapshot>(
                           stream: currentUserReference!
@@ -574,11 +587,10 @@ class _StoreMasterState extends State<StoreMaster> {
                               );
                             final records = snapshot.data!.docs;
                             if (records.isEmpty)
-                              return const Center(
-                                child: Text(
-                                  "No purchases yet.",
-                                  style: TextStyle(color: Colors.white54),
-                                ),
+                              return Center(
+                                child: Text(_copy['noPurchases'],
+                                    style:
+                                        const TextStyle(color: Colors.white54)),
                               );
 
                             return ListView.separated(
@@ -618,6 +630,8 @@ class _StoreMasterState extends State<StoreMaster> {
                                               resolvePurchaseTitle(
                                                 data,
                                                 storePlans,
+                                                language:
+                                                    FFAppState().nativeLang,
                                               ),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
@@ -1046,7 +1060,7 @@ class _StoreMasterState extends State<StoreMaster> {
                             child: FittedBox(
                               fit: BoxFit.scaleDown,
                               child: Text(
-                                "STORE",
+                                _copy['navStore'].toUpperCase(),
                                 maxLines: 1,
                                 style: GoogleFonts.orbitron(
                                   fontSize: 18,
@@ -1063,7 +1077,7 @@ class _StoreMasterState extends State<StoreMaster> {
                           children: [
                             IconButton(
                               onPressed: () => showUsageSheet(context),
-                              tooltip: 'Usage',
+                              tooltip: _copy['navUsage'],
                               icon: const Icon(
                                 Icons.access_time_rounded,
                                 color: Color(0xFF60A5FA),
@@ -1072,7 +1086,7 @@ class _StoreMasterState extends State<StoreMaster> {
                             ),
                             IconButton(
                               onPressed: _openReceiptSheet,
-                              tooltip: 'Receipt',
+                              tooltip: _copy['purchaseHistory'],
                               icon: const Icon(
                                 Icons.receipt_long_rounded,
                                 color: Colors.amber,
@@ -1112,7 +1126,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                 ),
                                 const SizedBox(height: 10),
                                 Text(
-                                  "REMAINING TIME",
+                                  _copy['remainingTime'],
                                   style: GoogleFonts.orbitron(
                                     color: Colors.amber,
                                     fontSize: 11,
@@ -1155,7 +1169,9 @@ class _StoreMasterState extends State<StoreMaster> {
                               );
                               final priceAvailable = localizedPrice != null;
                               final priceLabel = localizedPrice ??
-                                  (_priceLookupComplete ? 'Unavailable' : '—');
+                                  (_priceLookupComplete
+                                      ? _copy['unavailable']
+                                      : '—');
                               return InkWell(
                                 onTap: priceAvailable
                                     ? () => _executePurchase(plan)
@@ -1197,7 +1213,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                               fit: BoxFit.scaleDown,
                                               alignment: Alignment.centerLeft,
                                               child: Text(
-                                                plan['title'],
+                                                _copy[plan['title_key']],
                                                 style: const TextStyle(
                                                   color: Colors.white,
                                                   fontSize: 15,
@@ -1214,7 +1230,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                               fit: BoxFit.scaleDown,
                                               alignment: Alignment.centerLeft,
                                               child: Text(
-                                                plan['subtitle'],
+                                                _copy[plan['subtitle_key']],
                                                 style: const TextStyle(
                                                   color: Colors.white54,
                                                   fontSize: 11,
@@ -1279,9 +1295,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                 : _privacyUrl,
                           ),
                           child: Text(
-                            _useEnglishLegalDocs
-                                ? 'Privacy Policy'
-                                : '개인정보 처리방침',
+                            _copy['privacyPolicy'],
                             style: const TextStyle(
                               color: Colors.white38,
                               fontSize: 11,
@@ -1294,7 +1308,7 @@ class _StoreMasterState extends State<StoreMaster> {
                             _useEnglishLegalDocs ? _termsEnglishUrl : _termsUrl,
                           ),
                           child: Text(
-                            _useEnglishLegalDocs ? 'Terms of Use' : '이용약관',
+                            _copy['termsOfUse'],
                             style: const TextStyle(
                               color: Colors.white38,
                               fontSize: 11,

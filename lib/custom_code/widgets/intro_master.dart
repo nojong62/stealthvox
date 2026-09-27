@@ -1208,8 +1208,10 @@ class _IntroMasterState extends State<IntroMaster>
             ),
           ),
           Positioned(
-            right: -17,
-            top: 3,
+            // 배지는 그대로 보이지만 터치 박스가 166×59로 커졌다. 중심점이
+            // 예전 126×27 배지와 같도록 위치를 절반 차이만큼 보정한다.
+            right: -37,
+            top: -13,
             child: _buildAnimatedDuoSnapshotBadge(),
           ),
         ],
@@ -1401,7 +1403,9 @@ class _IntroMasterState extends State<IntroMaster>
               1 - Curves.easeInCubic.transform((progress - 0.88) / 0.12);
         }
         return IgnorePointer(
-          ignoring: visibility < 0.5,
+          // 막 나타나거나 사라지는 동안에도 보이는 배지를 누를 수 있다.
+          // 완전히 숨은 구간만 입력을 통과시켜 뒤의 로고를 방해하지 않는다.
+          ignoring: visibility < 0.15,
           child: Opacity(
             opacity: visibility.clamp(0.0, 1.0),
             child: Transform.translate(
@@ -1418,28 +1422,39 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Widget _buildDuoSnapshotBadge() {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: _showDuoPromo,
-        borderRadius: BorderRadius.circular(5),
-        child: Ink(
-          width: 126,
-          height: 27,
-          decoration: BoxDecoration(
-            color: const Color(0xFF7661EA),
-            borderRadius: BorderRadius.circular(5),
-          ),
-          child: Center(
-            child: Text(
-              'AD · Duo Snapshot',
-              maxLines: 1,
-              textScaler: _cappedScaler(context, 1.0),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.1,
+    return Semantics(
+      button: true,
+      label: 'Open Duo Snapshot preview',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _showDuoPromo,
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            // 시각 배지는 126×27 그대로 두고 터치 영역만 넓힌다.
+            width: 166,
+            height: 59,
+            child: Center(
+              child: Ink(
+                width: 126,
+                height: 27,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF7661EA),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Center(
+                  child: Text(
+                    'AD · Duo Snapshot',
+                    maxLines: 1,
+                    textScaler: _cappedScaler(context, 1.0),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),

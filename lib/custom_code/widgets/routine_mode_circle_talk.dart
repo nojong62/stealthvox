@@ -52,6 +52,7 @@ import '/custom_code/services/dialog_brain_model.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/history_preview_summary.dart';
+import '/custom_code/services/talk_ui_localization.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/origin_language_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
@@ -294,6 +295,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   /// 순번을 못 받은 조각에 줄 예비 순번. 전사 순번은 소켓이 주는 것이 원본이고
   /// 이건 폴백(Deepgram 경로·이벤트 유실)일 뿐이다.
   int _fallbackSegmentOrder = 0;
+
   /// 🗣️ [SHORT-REPLY] 직전 발화의 소리 난 시간(서버 VAD). 잡음 게이트가 본다.
   int? _lastTurnVoicedMs;
 
@@ -943,6 +945,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   /// 전사기에 넘길 ORIGIN 언어 코드. 예열(`stealth_room_master`)이 쓰는 것과
   /// **같은 함수**라야 `take()`가 예열 세션을 채택한다.
   String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
+  TalkUiCopy get _uiCopy => TalkUiCopy.forLanguage(_nativeLangName());
 
   /// 첫 발화 전사에 넘길 언어 코드. 판정 전에는 **빈 문자열 = 자동 감지**다.
   /// 언어를 박아 두면 다른 언어 발화가 그 언어 문자로 음차되어 나와,
@@ -3034,9 +3037,10 @@ $userFixPolicy$finalLanguageRule''';
     // 🗣️ [SHORT-REPLY] 소리 난 시간은 전사기만 안다. itemId가 살아 있는
     //   여기서 잡아 둬야 잡음 게이트가 "네."를 대답으로 살릴 수 있다.
     _lastTurnVoicedMs = _streamingStt?.utteranceVoicedMsOf(itemId);
-    _log('[ANY-STT]',
+    _log(
+        '[ANY-STT]',
         'final_received item=$itemId order=$order generation=$_listenGeneration '
-        'len=${text.length} voicedMs=${_lastTurnVoicedMs ?? -1}');
+            'len=${text.length} voicedMs=${_lastTurnVoicedMs ?? -1}');
     unawaited(
         _processStreamingFinalTranscript(text, itemId: itemId, order: order));
   }
@@ -3115,10 +3119,11 @@ $userFixPolicy$finalLanguageRule''';
         // 🗣️ [SHORT-REPLY] 서버 VAD가 잰 소리 시간이 충분하면 대답으로 살린다.
         //   뒤따르는 모든 검사는 `_isNoiseTranscriptForTurn`으로 같은 판정을 본다.
         final bool rescued = shortReplyRescuedByVoice(_lastTurnVoicedMs);
-        _log('🔇 [NOISE-GATE]',
+        _log(
+            '🔇 [NOISE-GATE]',
             'mode=circle_talk dropped=${!rescued} len=${userOriginal.length} '
-            'voicedMs=${_lastTurnVoicedMs ?? -1} '
-            'minVoicedMs=$kShortReplyMinVoicedMs rescued=$rescued');
+                'voicedMs=${_lastTurnVoicedMs ?? -1} '
+                'minVoicedMs=$kShortReplyMinVoicedMs rescued=$rescued');
         if (!rescued) {
           _abortStreamingTurn(
             reason: 'noise_transcript',
@@ -3688,7 +3693,8 @@ $userFixPolicy$finalLanguageRule''';
         ),
         // 🧪 [LUNA] status·finish_reason·usage 수신 여부. 실패해도 이전
         //   모델로 다시 묻지 않으므로 400 본문이 여기로 올라와야 한다.
-        onLog: (message) => _log('🧪 [AI-HTTP]', 'turn=$currentTurnId $message'),
+        onLog: (message) =>
+            _log('🧪 [AI-HTTP]', 'turn=$currentTurnId $message'),
       )) {
         if (!firstTokenSeen) {
           firstTokenSeen = true;
@@ -3855,7 +3861,8 @@ $userFixPolicy$finalLanguageRule''';
       final hostLine = <String, dynamic>{
         'role': 'HOST',
         'original_text': userOriginal,
-        ...listeningStepFields(step, isAi: false, targetLang: _targetLangName()),
+        ...listeningStepFields(step,
+            isAi: false, targetLang: _targetLangName()),
         if (sttText != null) ...userLineFixFields(sttText: sttText),
       };
       final systemLine = <String, dynamic>{
@@ -4351,8 +4358,8 @@ $userFixPolicy$finalLanguageRule''';
     // [GHOST-EXACT] 통째로 추임새/고스트워드일 때만 증발시킨다. 판정 기준은
     //   _isNoiseTranscript 하나로 모은다 — 목록을 따로 두면 "음."이 빠져나가
     //   "Um."으로 번역된다(실기기에서 발생).
-    bool isGhost =
-        ignoreWithoutConsumingFirstTurn || _isNoiseTranscriptForTurn(finalTranscript);
+    bool isGhost = ignoreWithoutConsumingFirstTurn ||
+        _isNoiseTranscriptForTurn(finalTranscript);
 
     if (isGhost) {
       if (_turnCounter == currentTurnId && _turnCounter > 0) _turnCounter--;
@@ -5463,8 +5470,8 @@ $userFixPolicy$finalLanguageRule''';
           context.pushNamed(
             'ChatDetail',
             queryParameters: {
-              'historyRef': serializeParam(
-                  openStudyRoomRef, ParamType.DocumentReference),
+              'historyRef':
+                  serializeParam(openStudyRoomRef, ParamType.DocumentReference),
             }.withoutNulls,
           );
         }
@@ -5523,18 +5530,29 @@ $userFixPolicy$finalLanguageRule''';
     if (circle.isEmpty) return const SizedBox(height: 10);
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-      child: Text(
-        circle,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: Colors.white70,
-          fontSize: 13 * _fontScale,
-          fontWeight: FontWeight.w600,
-          height: 1.35,
-          letterSpacing: 0.2,
-        ),
+      child: Column(
+        children: [
+          Text(_uiCopy['circleTopic'],
+              style: TextStyle(
+                color: const Color(0xFFA855F7),
+                fontSize: 11 * _fontScale,
+                fontWeight: FontWeight.bold,
+              )),
+          const SizedBox(height: 3),
+          Text(
+            circle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 13 * _fontScale,
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -5563,7 +5581,7 @@ $userFixPolicy$finalLanguageRule''';
               Icons.arrow_back_ios_new_rounded,
               color: Colors.white70,
             ),
-            tooltip: '이전 단계',
+            tooltip: _uiCopy['back'],
             padding: EdgeInsets.zero,
             alignment: Alignment.centerLeft,
             constraints: const BoxConstraints(minWidth: 72, minHeight: 56),
@@ -5577,7 +5595,7 @@ $userFixPolicy$finalLanguageRule''';
                 IconButton(
                   icon: const Icon(Icons.menu_book_rounded,
                       color: Colors.white70, size: 22),
-                  tooltip: '공부방으로',
+                  tooltip: _uiCopy['studyRoom'],
                   padding: EdgeInsets.zero,
                   constraints:
                       const BoxConstraints(minWidth: 40, minHeight: 40),
@@ -5611,7 +5629,9 @@ $userFixPolicy$finalLanguageRule''';
                     size: const Size(26, 26),
                     painter: _LangIconPainter(active: _showOriginal),
                   ),
-                  tooltip: _showOriginal ? '원문 숨기기' : '원문 함께 보기',
+                  tooltip: _showOriginal
+                      ? _uiCopy['hideOriginal']
+                      : _uiCopy['showOriginal'],
                   onPressed: () =>
                       setState(() => _showOriginal = !_showOriginal),
                   padding: EdgeInsets.zero,
@@ -5735,11 +5755,11 @@ $userFixPolicy$finalLanguageRule''';
               // 서클 이름은 _buildCircleTitle로 상단에 올렸다. 여기에
               // 두 번 쓰면 같은 글자가 화면 위아래에 겹친다.
               // 📏 큰 글꼴에서 제목이 접히지 않게 남는 폭에 맞춰 줄인다.
-              const Expanded(
+              Expanded(
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
-                  child: Text("Circle Talk",
+                  child: Text(_uiCopy['circleTalk'],
                       maxLines: 1,
                       style: TextStyle(
                           color: Colors.white54,
@@ -6569,7 +6589,8 @@ Return only the line itself.'''
                 'role': turn['role'] == 'assistant' ? 'assistant' : 'user',
                 'content': turn['content'] ?? '',
               }),
-          if (trailingSystemNote != null && trailingSystemNote.trim().isNotEmpty)
+          if (trailingSystemNote != null &&
+              trailingSystemNote.trim().isNotEmpty)
             <String, String>{'role': 'system', 'content': trailingSystemNote},
           <String, String>{'role': 'user', 'content': userText.trim()},
         ],

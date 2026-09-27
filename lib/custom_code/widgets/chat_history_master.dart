@@ -458,6 +458,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 🔧 틱 방식: 1초마다 활동 여부 확인. 튜터링/녹음/오디오 재생 중엔 카운터 0 유지.
   @override
   String get billingModeName => 'history';
+  TalkUiCopy get _uiCopy => TalkUiCopy.forLanguage(
+        (_sessionNativeLang ?? '').trim().isNotEmpty
+            ? _sessionNativeLang!.trim()
+            : FFAppState().nativeLang,
+      );
 
   @override
   bool get isBillingBusy {
@@ -4961,8 +4966,9 @@ RULES — follow exactly:
                           strokeWidth: 2, color: Color(0xFF121212)))
                   : Icon(draft ? Icons.check_rounded : Icons.check_circle,
                       size: 18),
-              label: const Text('최종 수정 완료',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              label: Text(_uiCopy['finalizeEdits'],
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 15)),
               style: ElevatedButton.styleFrom(
                 // 앱의 기본 강조 버튼과 같은 옷을 입는다(튜터링 팝업·스토어).
                 backgroundColor: Colors.amber,
@@ -4980,7 +4986,9 @@ RULES — follow exactly:
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text(
-                  hasLines ? '완료 후에는 대화를 수정할 수 없습니다.' : '남은 대사가 없어 확정할 수 없습니다.',
+                  hasLines
+                      ? _uiCopy['cannotEditAfter']
+                      : _uiCopy['noLinesToFinalize'],
                   style: const TextStyle(color: Colors.white38, fontSize: 12)),
             ),
         ],
@@ -4993,8 +5001,8 @@ RULES — follow exactly:
     if (!canFinalizeHistory(_cachedRoomData)) return;
     _resumeHistoryFromUserAction();
     final bool ok = await _askFinalize(
-      title: '이 대화를 최종 확정할까요?',
-      body: '확정 후에는 Original 대사를 수정할 수 없습니다.',
+      title: _uiCopy['finalizeTitle'],
+      body: _uiCopy['finalizeBody'],
     );
     if (!ok) return;
     await _finalizeHistory();
@@ -5025,14 +5033,13 @@ RULES — follow exactly:
       _cachedDocs = docs;
     }
     if (docs.isEmpty) {
-      _showRoomEntryToast('남은 대사가 없어 확정할 수 없습니다.');
+      _showRoomEntryToast(_uiCopy['noLinesToFinalize']);
       return false;
     }
     final bool ok = await _askFinalize(
-      title: 'Practice를 시작할까요?',
-      body: '최종 확정하시면 더 이상 내용 수정을 할 수 없습니다.\n'
-          '고칠 대사가 남았다면 먼저 대사를 수정해 주세요.',
-      cancelLabel: '대사 수정하기',
+      title: _uiCopy['practiceTitle'],
+      body: _uiCopy['practiceBody'],
+      cancelLabel: _uiCopy['editLines'],
     );
     if (!ok) return false;
     await _finalizeHistory();
@@ -5046,7 +5053,7 @@ RULES — follow exactly:
   Future<bool> _askFinalize({
     required String title,
     required String body,
-    String cancelLabel = '취소',
+    String? cancelLabel,
   }) async {
     final bool? ok = await showDialog<bool>(
       context: context,
@@ -5059,13 +5066,13 @@ RULES — follow exactly:
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text(cancelLabel,
+            child: Text(cancelLabel ?? _uiCopy['cancel'],
                 style: const TextStyle(color: Colors.white54)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('최종 확정',
-                style: TextStyle(
+            child: Text(_uiCopy['finalConfirm'],
+                style: const TextStyle(
                     color: Colors.amber, fontWeight: FontWeight.bold)),
           ),
         ],
@@ -5109,10 +5116,10 @@ RULES — follow exactly:
           'msgs=${_cachedDocs.length}');
       // 여기서부터 생성이 열린다. 확정한 원문 하나만이 재료다.
       _scheduleMissingTargetGeneration(_cachedDocs);
-      _showRoomEntryToast('대화를 확정했습니다.');
+      _showRoomEntryToast(_uiCopy['finalized']);
     } catch (e) {
       debugPrint('[HISTORY-FINALIZE] $e');
-      _showRoomEntryToast('확정하지 못했습니다. 다시 시도해 주세요.');
+      _showRoomEntryToast(_uiCopy['finalizeFailed']);
     } finally {
       if (mounted) setState(() => _isFinalizing = false);
     }
