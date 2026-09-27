@@ -724,7 +724,7 @@ class _IntroMasterState extends State<IntroMaster>
           // 📐 높이를 못 박지 않는다. 기기 글자 배율이 크면 라벨이 두 줄이
           //   되면서 52를 넘는다(실기기 2.0배에서 가로 106px 초과,
           //   2026-08-27). 최소 높이만 두고 내용만큼 자라게 한다.
-          constraints: const BoxConstraints(minHeight: 52),
+          constraints: const BoxConstraints(minHeight: 48),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment(shift, 0),
@@ -751,7 +751,7 @@ class _IntroMasterState extends State<IntroMaster>
               onTap: _goToGuidePage,
               borderRadius: BorderRadius.circular(99),
               child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
@@ -764,16 +764,16 @@ class _IntroMasterState extends State<IntroMaster>
                         maxLines: 2,
                         style: TextStyle(
                           color: Color(0xFFF9FAFC),
-                          fontSize: 15.5,
+                          fontSize: 15,
                           fontWeight: FontWeight.w800,
                           letterSpacing: -0.35,
                         ),
                       ),
                     ),
-                    SizedBox(width: 12),
+                    SizedBox(width: 10),
                     Icon(
                       Icons.arrow_forward_rounded,
-                      size: 22,
+                      size: 20,
                       color: Color(0xFFF9FAFC),
                     ),
                   ],
@@ -1009,7 +1009,10 @@ class _IntroMasterState extends State<IntroMaster>
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             foregroundColor: const Color(0xFFD9DAE1),
-            side: BorderSide(color: Colors.white.withValues(alpha: 0.13)),
+            side: BorderSide(
+              color: const Color(0xFF756BE8).withValues(alpha: 0.72),
+              width: 1.15,
+            ),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -1604,9 +1607,9 @@ class _IntroMasterState extends State<IntroMaster>
                     style: TextStyle(
                       color: const Color(0xFFF7F8FA),
                       fontSize: headlineSize,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w900,
                       height: 1.38,
-                      letterSpacing: -0.55,
+                      letterSpacing: -0.8,
                     ),
                   ),
                   const Spacer(flex: 5),
@@ -1616,11 +1619,11 @@ class _IntroMasterState extends State<IntroMaster>
                   SizedBox(height: compact ? 6 : 10),
                   _buildWelcomeLoginAction(),
                   const Spacer(flex: 2),
-                  _buildLanguageFlagCluster(),
-                  SizedBox(height: compact ? 8 : 12),
                   Center(child: _buildPageIndicator(0, tealActive: true)),
                   const Spacer(flex: 2),
                   _buildWelcomePageFooter('Swipe to Continue'),
+                  SizedBox(height: compact ? 8 : 12),
+                  _buildLanguageFlagCluster(),
                   SizedBox(height: compact ? 2 : 6),
                 ],
               ),
