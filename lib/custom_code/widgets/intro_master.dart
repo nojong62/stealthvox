@@ -1176,32 +1176,26 @@ class _IntroMasterState extends State<IntroMaster>
 
   Widget _buildHtmlWelcomeHeader() {
     return SizedBox(
-      height: 142,
+      height: 94,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
           Positioned(
             left: 0,
             right: 0,
-            top: 0,
-            child: _buildLanguageFlagCluster(),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            top: 88,
+            top: 18,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _buildWelcomeWaveMark(),
-                const SizedBox(width: 15),
+                const SizedBox(width: 10),
                 Text(
                   'StealthVox',
                   maxLines: 1,
                   textScaler: _cappedScaler(context, 1.0),
                   style: const TextStyle(
                     color: Color(0xFFF7F7F8),
-                    fontSize: 36,
+                    fontSize: 34,
                     fontWeight: FontWeight.w900,
                     letterSpacing: -2.3,
                     height: 1,
@@ -1212,7 +1206,7 @@ class _IntroMasterState extends State<IntroMaster>
           ),
           Positioned(
             right: -17,
-            top: 73,
+            top: 3,
             child: Transform.rotate(
               angle: -math.pi / 4,
               child: _buildDuoSnapshotBadge(),
@@ -1223,9 +1217,8 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
-  /// 앱이 지원하는 열두 언어를 첫눈에 보여 주는 작은 국기 모음.
-  /// 한 줄을 길게 늘이지 않고 6개씩 두 줄로 묶어, 첨부된 아이콘 그룹처럼
-  /// 하나의 상단 비주얼로 읽히게 한다.
+  /// 앱이 지원하는 열두 언어. 첫 화면의 메시지를 먼저 읽을 수 있도록
+  /// 주요 행동 버튼 아래, 페이지 안내 바로 위에 둔다.
   Widget _buildLanguageFlagCluster() {
     return Semantics(
       label: 'Twelve supported languages',
@@ -1243,12 +1236,12 @@ class _IntroMasterState extends State<IntroMaster>
                   child: Tooltip(
                     message: _introLanguageNames[index],
                     child: Container(
-                      width: 34,
-                      height: 34,
+                      width: 30,
+                      height: 30,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: const Color(0xFF1B1E27),
-                        borderRadius: BorderRadius.circular(9),
+                        borderRadius: BorderRadius.circular(8),
                         border: Border.all(
                           color: Colors.white.withValues(alpha: 0.11),
                         ),
@@ -1265,7 +1258,7 @@ class _IntroMasterState extends State<IntroMaster>
                       child: Text(
                         _introLanguageFlags[index],
                         textScaler: TextScaler.noScaling,
-                        style: const TextStyle(fontSize: 21, height: 1),
+                        style: const TextStyle(fontSize: 18, height: 1),
                       ),
                     ),
                   ),
@@ -1278,39 +1271,18 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
-  /// 상단 마크. 막대 다섯이 브랜드 그러데이션(민트→보라)을 타고 숨 쉰다.
-  /// 파형은 소리를 뜻하니 멈춰 있으면 죽은 그림이 된다 — 다만 옆 워드마크를
-  /// 이기면 안 되므로 진폭은 얕게 두고, 시계는 타원과 같은 것을 쓴다.
+  /// 첨부 레퍼런스의 여러 겹 선형 음파를 작은 브랜드 마크로 재해석했다.
+  /// 선의 위상과 진폭이 천천히 이동해 말소리가 흐르는 인상을 준다.
   Widget _buildWelcomeWaveMark() {
-    const heights = <double>[11, 20, 30, 22, 13];
     return AnimatedBuilder(
       animation: _welcomeMotionController,
       builder: (context, _) {
-        final phase = _welcomeMotionController.value * math.pi * 2;
         return SizedBox(
-          width: 30,
-          height: 34,
-          child: ShaderMask(
-            blendMode: BlendMode.srcIn,
-            shaderCallback: (rect) => const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF52D4C3), Color(0xFF7661EA)],
-            ).createShader(rect),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: List.generate(heights.length, (index) {
-                final swing = math.sin(phase + index * 0.9) * 3;
-                return Container(
-                  width: 2.5,
-                  height: (heights[index] + swing).clamp(6.0, 34.0),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                );
-              }),
+          width: 92,
+          height: 58,
+          child: CustomPaint(
+            painter: _IntroFlowWavePainter(
+              progress: _welcomeMotionController.value,
             ),
           ),
         );
@@ -1604,6 +1576,8 @@ class _IntroMasterState extends State<IntroMaster>
                   SizedBox(height: compact ? 6 : 10),
                   _buildWelcomeLoginAction(),
                   const Spacer(flex: 2),
+                  _buildLanguageFlagCluster(),
+                  SizedBox(height: compact ? 8 : 12),
                   Center(child: _buildPageIndicator(0, tealActive: true)),
                   const Spacer(flex: 2),
                   _buildWelcomePageFooter('Swipe to Continue'),
@@ -3430,6 +3404,91 @@ class _IntroAmbientPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _IntroAmbientPainter oldDelegate) => false;
+}
+
+/// 첨부된 네온 음파처럼 여러 개의 가는 선이 한 덩어리로 흐르는 파형.
+/// 중심에서 멀수록 진폭이 조금씩 달라져 입체적인 리본 결을 만든다.
+class _IntroFlowWavePainter extends CustomPainter {
+  const _IntroFlowWavePainter({required this.progress});
+
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final phase = progress * math.pi * 2;
+    const strandCount = 15;
+    final gradient = const LinearGradient(
+      begin: Alignment.centerLeft,
+      end: Alignment.centerRight,
+      colors: [
+        Color(0xFF49E2D0),
+        Color(0xFF65D7E5),
+        Color(0xFF8970F4),
+        Color(0xFFB05BEE),
+      ],
+      stops: [0, 0.38, 0.7, 1],
+    ).createShader(rect);
+
+    // 한 겹의 흐린 빛을 먼저 깔아 작은 크기에서도 파형이 또렷하게 보인다.
+    final glowPath = _wavePath(size, phase, 0);
+    canvas.drawPath(
+      glowPath,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5
+        ..strokeCap = StrokeCap.round
+        ..shader = gradient
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8)
+        ..color = Colors.white.withValues(alpha: 0.22),
+    );
+
+    for (var strand = 0; strand < strandCount; strand++) {
+      final normalized = strand / (strandCount - 1);
+      final offset = (normalized - 0.5) * 18;
+      canvas.drawPath(
+        _wavePath(size, phase, offset),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = strand == strandCount ~/ 2 ? 1.35 : 0.75
+          ..strokeCap = StrokeCap.round
+          ..shader = gradient
+          ..color = Colors.white.withValues(
+            alpha: 0.34 + (1 - (normalized - 0.5).abs() * 2) * 0.54,
+          ),
+      );
+    }
+  }
+
+  Path _wavePath(Size size, double phase, double strandOffset) {
+    final path = Path();
+    const samples = 72;
+    for (var index = 0; index <= samples; index++) {
+      final t = index / samples;
+      final x = t * size.width;
+      // 가장자리는 잔잔하고 가운데에서 크게 솟는 레퍼런스의 실루엣.
+      final envelope = math.pow(math.sin(t * math.pi), 1.35).toDouble();
+      final breathing = 0.92 + math.sin(phase + t * math.pi * 2) * 0.08;
+      final carrier = math.sin(t * math.pi * 3.7 + phase * 0.34);
+      final detail = math.sin(t * math.pi * 7.2 - phase * 0.22) * 0.18;
+      final strandShape = strandOffset *
+          envelope *
+          (0.44 + 0.56 * math.sin(t * math.pi * 2.15 + phase * 0.12));
+      final y = size.height / 2 +
+          (carrier + detail) * size.height * 0.29 * envelope * breathing +
+          strandShape;
+      if (index == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    return path;
+  }
+
+  @override
+  bool shouldRepaint(covariant _IntroFlowWavePainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }
 
 class _IntroOrbitPainter extends CustomPainter {
