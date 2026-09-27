@@ -1188,7 +1188,7 @@ class _IntroMasterState extends State<IntroMaster>
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _buildWelcomeWaveMark(),
-                const SizedBox(width: 10),
+                const SizedBox(width: 15),
                 Text(
                   'StealthVox',
                   maxLines: 1,
@@ -1278,8 +1278,8 @@ class _IntroMasterState extends State<IntroMaster>
       animation: _welcomeMotionController,
       builder: (context, _) {
         return SizedBox(
-          width: 92,
-          height: 58,
+          width: 30,
+          height: 34,
           child: CustomPaint(
             painter: _IntroFlowWavePainter(
               progress: _welcomeMotionController.value,
