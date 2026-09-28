@@ -164,15 +164,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     if (!_kAiStyles.contains(FFAppState().aiStyle)) {
       setState(() => FFAppState().aiStyle = "Standard");
     }
-    // Chat Language와 Learn Language는 사용자가 직접 고른다. 빈 값을
-    // 임의의 언어로 채우지 않아야 로비가 선택 전 상태를 정확히 보여 준다.
-    if (FFAppState().nativeLang.isNotEmpty ||
-        FFAppState().targetLang.isNotEmpty) {
-      setState(() {
-        FFAppState().nativeLang = '';
-        FFAppState().targetLang = '';
-      });
-    }
+    // Chat Language와 Learn Language는 사용자가 다시 선택할 때만 바뀐다.
+    // 집 아이콘으로 Lobby에 재진입해도 직전 선택을 유지한다.
+    // Store를 포함한 로그인 이후 UI도 같은 언어를 계속 사용한다.
     // 로비에서 음성을 선택하지 않는다. 사용자 역할 음성이 필요한 기존
     // 화면(Duo/History Practice)은 항상 verse를 사용한다.
     if (FFAppState().aiVoice != "verse") {
@@ -849,6 +843,17 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                   ],
                 ),
                 const SizedBox(height: 4),
+                const Padding(
+                  padding: EdgeInsets.only(left: 4, bottom: 18),
+                  child: Text(
+                    'Select your language settings first, then adjust the AI settings below.',
+                    style: TextStyle(
+                      color: _kLobbyTextLow,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
                 // AI STYLE은 영어 대화에만 쓰는 설정이다. TARGET이 영어가
                 // 아니면 영역째 감춘다(선택지를 줄이지 않는다).
                 if (appState.targetLang == _kAiStyleTargetLang) ...[
@@ -859,18 +864,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                     (style) => apply(() => appState.aiStyle = style),
                   ),
                   const SizedBox(height: 22),
-                ] else ...[
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4, bottom: 18),
-                    child: Text(
-                      'AI STYLE applies only when TARGET is English.',
-                      style: TextStyle(
-                        color: _kLobbyTextLow,
-                        fontSize: 12,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
                 ],
                 _buildSectionLabel('AI TONE'),
                 _buildAiToneSelector(
