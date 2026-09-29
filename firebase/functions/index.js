@@ -16,6 +16,7 @@ const admin = require("firebase-admin");
 const crypto = require("crypto");
 const { defineSecret } = require("firebase-functions/params");
 const { resolveLegacyGoogleAccount } = require("./legacy_google_account");
+const { processRevenueCatPurchase } = require("./revenuecat_purchase");
 const revenueCatWebhookSecret = defineSecret("REVENUECAT_WEBHOOK_SECRET");
 
 // ----------------------------------------------------------------------------
@@ -385,7 +386,7 @@ exports.grantSignupBonus = functions.https.onCall(async (data, context) => {
 //   1. POST only.
 //   2. Authorization header must match the configured webhook secret.
 //   3. Only INITIAL_PURCHASE / NON_RENEWING_PURCHASE events are processed.
-//   4. Only PRODUCTION environment grants time (SANDBOX is acknowledged, ignored).
+//   4. PRODUCTION is accepted; SANDBOX requires a server-side UID allowlist.
 //   5. product_id must be in PRODUCTS map (unknown products ignored).
 //   6. Idempotent on event.id (RevenueCat may deliver the same event twice).
 //   7. Transactional credit (mirrors deductRemainingTime's pattern).
@@ -416,7 +417,9 @@ exports.revenueCatWebhook = functions
     const expectedAuth = revenueCatWebhookSecret.value();
     const gotAuth = req.headers["authorization"] || "";
     if (!expectedAuth || gotAuth !== expectedAuth) {
-      functions.logger.warn("revenueCatWebhook: unauthorized attempt");
+      functions.logger.warn("revenueCatWebhook: unauthorized", {
+        reason: "unauthorized",
+      });
       res.status(401).send("Unauthorized");
       return;
     }
@@ -446,97 +449,34 @@ exports.revenueCatWebhook = functions
       return;
     }
 
-    // 3b. Production only
-    if (environment !== "PRODUCTION") {
-      functions.logger.info("revenueCatWebhook: non-production event ignored", {
-        eventId: eventId,
-        environment: environment,
-      });
-      res.status(200).send("Ignored: non-production");
-      return;
-    }
-
-    // 3c. Known product only
-    const product = PRODUCTS[productId];
-    const seconds = product ? product.seconds : undefined;
-    if (!seconds) {
-      functions.logger.info("revenueCatWebhook: unknown product ignored", {
-        eventId: eventId,
-        productId: productId,
-      });
-      res.status(200).send("Ignored: unknown product");
-      return;
-    }
-
-    // 3d. Must have a user id
-    if (!appUserId || typeof appUserId !== "string") {
-      res.status(200).send("Ignored: missing app_user_id");
-      return;
-    }
-
-    // 4. Idempotent transactional credit
+    // 4. Validation, sandbox allowlist, and idempotent transactional credit.
     const firestore = admin.firestore();
-    const userRef = firestore.doc("users/" + appUserId);
-    const purchaseRef = userRef.collection("purchases").doc(eventId); // doc id = event id
 
     try {
-      const result = await firestore.runTransaction(async (tx) => {
-        // Idempotency: if this event was already processed, skip.
-        const existing = await tx.get(purchaseRef);
-        if (existing.exists) {
-          return { skipped: true, remainingTime: null };
-        }
-
-        const userSnap = await tx.get(userRef);
-        const current =
-          userSnap.exists && userSnap.data().remainingTime != null
-            ? userSnap.data().remainingTime
-            : 0;
-        const updated = current + seconds;
-
-        // Write only the canonical remainingTime field.
-        tx.set(
-          userRef,
-          {
-            remainingTime: updated,
-          },
-          { merge: true }
-        );
-
-        // Record the purchase (doubles as the idempotency marker).
-        tx.set(purchaseRef, {
-          rc_event_id: eventId,
-          product_id: productId,
-          // Purchase History reads this. Without it the app falls back to the
-          // product_id lookup, and older rows written before this field
-          // existed keep showing through that fallback.
-          product_title: product.title,
-          seconds_added: seconds,
-          source: "revenuecat_webhook",
-          event_type: eventType,
-          purchased_at: admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        return { skipped: false, remainingTime: updated };
+      const result = await processRevenueCatPurchase({
+        firestore,
+        event,
+        products: PRODUCTS,
+        serverTimestamp: () => admin.firestore.FieldValue.serverTimestamp(),
       });
-
-      if (result.skipped) {
-        functions.logger.info("revenueCatWebhook: duplicate event skipped", {
-          eventId: eventId,
-          appUserId: appUserId,
+      const logData = {
+        reason: result.reason,
+        eventId: result.eventId || eventId,
+        appUserId: result.appUserId || appUserId,
+        productId: result.productId || productId,
+        environment: result.environment || environment,
+      };
+      if (result.reason === "success") {
+        functions.logger.info("revenueCatWebhook: success", {
+          ...logData,
+          secondsAdded: result.secondsAdded,
+          remainingTime: result.remainingTime,
         });
-        res.status(200).send("OK: duplicate ignored");
+        res.status(200).send("OK: success");
         return;
       }
-
-      functions.logger.info("revenueCatWebhook: credited", {
-        eventId: eventId,
-        appUserId: appUserId,
-        productId: productId,
-        secondsAdded: seconds,
-        remainingTime: result.remainingTime,
-      });
-      res.status(200).send("OK");
+      functions.logger.info("revenueCatWebhook: " + result.reason, logData);
+      res.status(200).send("Ignored: " + result.reason);
     } catch (err) {
       functions.logger.error("revenueCatWebhook: transaction failed", {
         eventId: eventId,
