@@ -298,8 +298,8 @@ async function translateWithOpenAi({
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "gpt-6-luna",
-      reasoning_effort: "none",
+      model: "gpt-4o-mini",
+      temperature: 0,
       messages: [{ role: "user", content: buildTranslationPrompt({
         sourceText,
         sourceLanguage,

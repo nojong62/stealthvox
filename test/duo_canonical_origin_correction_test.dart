@@ -193,10 +193,10 @@ void main() {
       expect(src, contains('do not finish fragments, fix names or words'));
     });
 
-    test('교정 모델은 독립 상수로 GPT-6 Luna를 사용한다', () {
+    test('교정 모델은 구조 판정 모델과 다른 상수다', () {
       expect(kDuoOriginCorrectorModel, 'gpt-6-luna');
-      expect(kDuoCanonicalModel, 'gpt-6-luna');
-      expect(kHistoryRepairModel, 'gpt-6-luna');
+      expect(kDuoOriginCorrectorModel, isNot(kDuoCanonicalModel));
+      expect(kDuoOriginCorrectorModel, isNot(kHistoryRepairModel));
       expect(src, contains('String correctorModel = kDuoOriginCorrectorModel'));
     });
 

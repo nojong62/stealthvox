@@ -512,7 +512,7 @@ Return strict JSON only:
 Allowed states are included, echo, and duplicate. Return every source id exactly once.
 Do not include role or text.''';
 
-/// GPT-6 Luna로 한 번 정돈한다. 실패하면 null — 호출부가 폴백을 쓴다.
+/// GPT-4.1-mini로 한 번 정돈한다. 실패하면 null — 호출부가 폴백을 쓴다.
 Future<List<DuoCanonicalTurn>?> reconcileDuoConversation({
   required String apiKey,
   required String model,
@@ -540,8 +540,8 @@ Future<List<DuoCanonicalTurn>?> reconcileDuoConversation({
           },
           body: jsonEncode(<String, dynamic>{
             'model': model,
-            'reasoning_effort': 'none',
-            'max_completion_tokens': 4000,
+            'temperature': 0.1,
+            'max_tokens': 4000,
             'response_format': <String, String>{'type': 'json_object'},
             'messages': <Map<String, String>>[
               <String, String>{'role': 'system', 'content': _canonicalPrompt},

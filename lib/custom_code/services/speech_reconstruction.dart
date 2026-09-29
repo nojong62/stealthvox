@@ -249,7 +249,7 @@ Output only My English.${aiStylePromptBlock(targetLang: language, scope: 'the My
 class MySpeechBuilder {
   MySpeechBuilder._();
 
-  static const String model = 'gpt-6-luna';
+  static const String model = 'gpt-4.1-mini';
   static const Duration timeout = Duration(seconds: 25);
 
   static Future<SpeechBuildResult> build({
@@ -284,8 +284,11 @@ class MySpeechBuilder {
             },
             body: jsonEncode(<String, dynamic>{
               'model': model,
-              'reasoning_effort': 'none',
-              'max_completion_tokens': 600,
+              // 🌡️ 확장 생성이라 0.3은 원문에 붙어 버린다. 그렇다고 자유
+              //   창작도 아니라 0.7은 대화와 무관한 디테일을 늘린다.
+              //   0.6에서 시작하고 실기기 결과를 보고 조정한다(실장님 지시).
+              'temperature': 0.6,
+              'max_tokens': 600,
               'messages': <Map<String, String>>[
                 <String, String>{'role': 'system', 'content': sysPrompt},
                 <String, String>{
@@ -349,7 +352,7 @@ class NativeEnglishSpeechBuilder {
   NativeEnglishSpeechBuilder._();
 
   /// 다듬기가 아니라 재구성이라, 값싼 모델은 원문 배열을 그대로 돌려준다.
-  static const String model = 'gpt-6-luna';
+  static const String model = 'gpt-4.1-mini';
   static const Duration timeout = Duration(seconds: 25);
 
   static Future<SpeechBuildResult> build({
@@ -375,8 +378,8 @@ class NativeEnglishSpeechBuilder {
             },
             body: jsonEncode(<String, dynamic>{
               'model': model,
-              'reasoning_effort': 'none',
-              'max_completion_tokens': 600,
+              'temperature': 0.5,
+              'max_tokens': 600,
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',

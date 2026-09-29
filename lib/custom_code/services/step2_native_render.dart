@@ -62,8 +62,8 @@ Future<String?> renderStep2LineToNative({
           },
           body: jsonEncode(<String, dynamic>{
             'model': kHistoryRepairModel,
-            'reasoning_effort': 'none',
-            'max_completion_tokens': 220,
+            'temperature': 0.0,
+            'max_tokens': 220,
             'response_format': <String, String>{'type': 'json_object'},
             'messages': <Map<String, String>>[
               <String, String>{

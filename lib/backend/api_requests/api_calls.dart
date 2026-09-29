@@ -20,8 +20,7 @@ class SendChatCall {
   }) async {
     final ffApiRequestBody = '''
 {
-  "model": "gpt-6-luna",
-  "reasoning_effort": "none",
+  "model": "gpt-4o-mini",
   "messages": [
     {
       "role": "system",
