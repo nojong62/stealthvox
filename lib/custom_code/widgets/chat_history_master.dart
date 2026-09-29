@@ -1330,7 +1330,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   //     ② 공부방이 "번역할 게 없다"고 보고 원문을 복사했다
   //        → `by=copy`
   //     ③ 공부방이 번역을 불렀는데 원문 언어가 돌아왔다
-  //        → `by=gpt-4o-mini`
+  //        → `by=gpt-6-luna`
   //
   //   본문은 앞 24자까지만 찍는다 — 로그가 대화록이 되면 안 된다.
   // ══════════════════════════════════════════════════════════════════
@@ -1740,8 +1740,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
               },
               body: jsonEncode(<String, dynamic>{
                 'model': kHistoryRepairModel,
-                'temperature': 0.0,
-                'max_tokens': 220,
+                'reasoning_effort': 'none',
+                'max_completion_tokens': 220,
                 'response_format': <String, String>{'type': 'json_object'},
                 'messages': <Map<String, String>>[
                   <String, String>{

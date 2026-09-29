@@ -8219,8 +8219,8 @@ Return strict JSON only:
             },
             body: jsonEncode({
               'model': kDuoCanonicalModel,
-              'temperature': 0.1,
-              'max_tokens': 2400,
+              'reasoning_effort': 'none',
+              'max_completion_tokens': 2400,
               'response_format': {'type': 'json_object'},
               'messages': [
                 {'role': 'system', 'content': prompt},

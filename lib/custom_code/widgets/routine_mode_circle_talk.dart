@@ -2030,7 +2030,7 @@ $userFixPolicy$finalLanguageRule''';
   ///   한 번에 하나만 돈다 — 두 엔진에 동시에 마이크를 물리지 않는다.
   Future<bool> _startConfiguredListening({bool force = false}) async {
     // 🔇 [ECHO-GUARD] AI 첫 마디가 도는 동안에는 어떤 경로로 불려도 열지 않는다.
-    //   `_ttsAdapter.isBusy`만으로는 못 막는다 — 오프너 문장을 gpt-4o-mini가
+    //   `_ttsAdapter.isBusy`만으로는 못 막는다 — 오프너 문장을 gpt-6-luna가
     //   만드는 구간에는 아직 재생 전이라 isBusy가 false다. 그 틈이 실기기에서
     //   7.7초였다. Circle Talk은 echoCancel이 꺼져 있어 그대로 새어 들어간다.
     //   오프너의 finally가 이 플래그를 내린 뒤에 스스로 마이크를 연다.
@@ -3648,7 +3648,7 @@ $userFixPolicy$finalLanguageRule''';
       //   앞 조각을 다 먹였을 때 버퍼에 남는 오디오가 0.9~1.3초인데, 뒤 조각의
       //   TTS 요청은 그제서야 나가고 tts-1이 1.2~3.4초 걸린다. 재생기가
       //   말라붙어 "몇 마디 하고 뜨문뜨문" 끊겼다. 겹쳐서 아낀 시간은 겨우
-      //   37~66ms였다 — gpt-4o-mini는 첫 토큰까지 0.6~1.4초 침묵하다가
+      //   당시 모델은 첫 토큰까지 0.6~1.4초 침묵하다가
       //   나머지를 0.1~0.2초에 쏟아내서, 겹칠 구간 자체가 없다.
       //
       //   되살리려면 뒤 조각 TTS를 큐가 아니라 병렬로 미리 쏴야 한다
@@ -4032,7 +4032,7 @@ $userFixPolicy$finalLanguageRule''';
     }
     if (pipelineGeneration != _pipelineGeneration || !mounted) return;
 
-    // 모든 유저 턴 번역은 gpt-4o-mini 한 모델로 고정한다.
+    // 모든 유저 턴 번역은 공용 후처리 모델(gpt-6-luna)로 고정한다.
     const translationModel = kFreeTalkTranslateModelFast;
     _log('🧠 [TRANSLATE-ROUTE]',
         'model=$translationModel firstTurn=$isFirstTurn fixed=true');
@@ -5290,7 +5290,7 @@ $userFixPolicy$finalLanguageRule''';
         final int? pcmSeq = _stashTurnPcm(line);
         await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
-          // Target은 History가 gpt-4o-mini로 최초 1회 생성해 채운다.
+          // Target은 History가 gpt-6-luna로 최초 1회 생성해 채운다.
           'original_text': original,
           if (pcmSeq != null) 'pcm_seq': pcmSeq,
           // 🎧 [LISTENING] Step 2의 AI 줄은 배울 언어 그대로다. source_lang이
@@ -6548,7 +6548,7 @@ Return only the line itself.'''
   ///
   /// 2026-09-12: 모델만 [kCircleDialogBrainModel]로 옮겼다. `temperature`는 뺐고
   /// `max_tokens`는 `max_completion_tokens`로, 추론은 `reasoning_effort`로
-  /// 준다. 번역·교정 호출부는 그대로 gpt-4o-mini다.
+  /// 준다. 번역·교정은 공용 `gpt-6-luna` 후처리 모델을 쓴다.
   ///
   /// 실패해도 이전 모델로 다시 묻지 않는다. 400·파싱 오류를 그대로 봐야
   /// 하는 시험 단계라 [onLog]로 status와 본문을 올린다.

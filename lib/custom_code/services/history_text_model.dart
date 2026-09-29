@@ -24,8 +24,8 @@
 
 /// ② 듀오 통화 정돈(canonical reconciliation).
 ///
-/// 2026-08-28: `gpt-4o-mini` → `gpt-4.1-mini` 시험 중.
-const String kDuoCanonicalModel = 'gpt-4.1-mini';
+/// 2026-09-29: 공용 텍스트 모델과 함께 `gpt-6-luna`로 전환했다.
+const String kDuoCanonicalModel = 'gpt-6-luna';
 
 /// ②-a 통화 원문 문맥 교정(Duo Direct).
 ///
@@ -40,27 +40,25 @@ const String kDuoOriginCorrectorModel = 'gpt-6-luna';
 /// ③ 공부방 원문 교정 + 배울글.
 ///
 /// ②와 **일부러 따로 둔다.** 지금은 값이 같지만, 한쪽만 되돌릴 수 있어야 한다.
-const String kHistoryRepairModel = 'gpt-4.1-mini';
+const String kHistoryRepairModel = 'gpt-6-luna';
 
-/// 되돌릴 때 쓸 이전 값. 지우지 말 것 — A/B의 반대편이다.
-const String kTextModelPrevious = 'gpt-4o-mini';
 
 // ====================================================================
 // 🛠️ [POST-PROCESS] 위 ②③을 뺀 **나머지 후처리 전부**가 보는 모델.
 // --------------------------------------------------------------------
 // 번역·정돈·검증·요약·언어 판정·공부방 문장 생성 등, "이미 만들어진 말을
 // 다듬는" 28곳이 여기 한 상수를 본다. 2026-09-18 전까지는 파일마다
-// `'gpt-4o-mini'` 문자열이 박혀 있어 한 번에 바꿀 수도, 되돌릴 수도 없었다.
+// 모델 문자열이 파일마다 박혀 있어 한 번에 바꾸거나 되돌릴 수 없었다.
 //
 // 대사를 만드는 [kDialogBrainModel]과 값이 같아도 **합치지 않는다** — 두뇌를
 // 되돌릴 때 후처리까지 같이 되돌아가면 무엇이 달라졌는지 갈라 볼 수 없다.
 //
 // ⚠️ 현재 reasoning 모델 호출은 `temperature` 없이 `max_completion_tokens`와
 //   `reasoning_effort`를 사용한다. 호출부는 모두 이 형식으로 맞춰 두었으며,
-//   gpt-4o-mini로 되돌려도 이 요청 형식은 그대로 사용할 수 있다.
+//   GPT-6 Luna 호출은 모두 이 요청 형식을 공유한다.
 // ====================================================================
 
-/// 후처리 모델. 2026-09-29: `gpt-4o-mini` 계열에서 `gpt-6-luna`로 전환했다.
+/// 후처리 모델. 2026-09-29: 이전 소형 모델에서 `gpt-6-luna`로 전환했다.
 const String kPostProcessModel = 'gpt-6-luna';
 
 /// 후처리 `reasoning_effort`. 판정·번역은 첫 토큰이 먼저라 `none`으로 시작한다.

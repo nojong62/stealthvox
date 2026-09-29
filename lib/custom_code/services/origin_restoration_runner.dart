@@ -405,9 +405,9 @@ class OriginRestorationRunner {
           },
           body: jsonEncode(<String, dynamic>{
             'model': kHistoryRepairModel,
-            // 판정이라 흔들리면 안 된다. 같은 대화는 같은 의심점을 낸다.
-            'temperature': 0.0,
-            'max_tokens': 700,
+            // 지연을 줄이고 불필요한 추론 토큰을 만들지 않는다.
+            'reasoning_effort': 'none',
+            'max_completion_tokens': 700,
             'response_format': <String, String>{'type': 'json_object'},
             'messages': <Map<String, String>>[
               <String, String>{'role': 'system', 'content': instructions},

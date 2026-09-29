@@ -4220,7 +4220,7 @@ $finalLanguageRule''';
         final int? pcmSeq = _stashTurnPcm(line);
         final addedRef = await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
-          // Target은 History 진입 시 gpt-4o-mini로 최초 1회 생성한다.
+          // Target은 History 진입 시 gpt-6-luna로 최초 1회 생성한다.
           'original_text': original,
           if (pcmSeq != null) 'pcm_seq': pcmSeq,
           // 🎧 [LISTENING] Step 2의 AI 줄은 배울 언어 그대로다. source_lang이

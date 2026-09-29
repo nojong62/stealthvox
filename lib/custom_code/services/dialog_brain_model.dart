@@ -6,7 +6,7 @@
 // 섞지 않는다 — 두뇌를 바꿨을 때 대화가 달라진 건지 후처리가 달라진 건지
 // 갈라 볼 수 있어야 한다.
 //
-// 2026-09-12: `gpt-4o-mini`에서 Luna 계열 시험을 시작했다.
+// 2026-09-12: 이전 소형 모델에서 Luna 계열 시험을 시작했다.
 // 2026-09-29: Circle 검증 결과를 반영해 대화 두뇌를 `gpt-6-luna`로 통일했다.
 // 서클톡과 시나리오톡의 정규 턴·오프너 등 활성 대화 경로가 이 모델을 본다.
 // 번역·복원·기타 후처리는 별도 상수를 유지해 독립적으로 되돌릴 수 있다.
@@ -18,8 +18,6 @@ const String kCircleDialogBrainModel = 'gpt-6-luna';
 /// 시나리오톡과 공용 대화 경로의 기본 두뇌 모델.
 const String kDialogBrainModel = 'gpt-6-luna';
 
-/// 되돌릴 때 쓸 이전 값. 지우지 말 것 — A/B의 반대편이다.
-const String kDialogBrainModelPrevious = 'gpt-4o-mini';
 
 /// Chat Completions `reasoning_effort`. 실시간 회화는 깊은 추론보다 첫 토큰이
 /// 먼저라 `none`으로 고정하고 시작한다. 부족하면 `low`부터 올린다.
