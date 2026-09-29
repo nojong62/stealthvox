@@ -4056,8 +4056,8 @@ $userFixPolicy$finalLanguageRule''';
   // 추가 발화가 오면(합치기) 투기 번역을 취소하고 재시작하므로 짤림 위험이 없다.
   // (첫 턴 전용 — _stopMicAndProcess의 isFirstUtterance 가드에서만 호출)
   // ====================================================================
-  // 🎙️ [FIRST-TURN-REALTIME] 현재 호출부 없음 — 첫 대사를 Realtime이 맡으면서
-  //   투기 번역 선시작을 껐다. 롤백 시 _stopMicAndProcess에서 다시 호출하면 된다.
+  // 현재 호출부 없음. 첫 턴 투기 번역을 다시 시험할 때만
+  // _stopMicAndProcess에서 명시적으로 연결한다.
   // ignore: unused_element
   void _startSpeculativeTranslation(String text) {
     final clean = text.trim();

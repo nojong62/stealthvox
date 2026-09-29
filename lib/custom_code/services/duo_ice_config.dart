@@ -13,7 +13,7 @@
 // 🔒 **TURN 비밀키는 이 파일에 없다. 앱 어디에도 없다.**
 //   TURN 자격증명은 대역폭 과금이 붙으므로 APK에서 뽑히면 곧바로 요금 사고가
 //   된다. 그래서 Cloud Function이 짧은 만료로 발급한 것만 받아 쓴다.
-//   (같은 패턴의 선례: `createRealtimeClientSecret`)
+//   Cloud Function이 서버 비밀값으로 짧은 만료 자격증명만 발급한다.
 // ====================================================================
 
 import 'dart:async';
@@ -27,7 +27,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 /// 지어내지 않는다.
 const String kDuoTurnCredentialFunction = 'createTurnCredential';
 
-/// Cloud Function 리전. 기존 `createRealtimeClientSecret`과 같은 자리에 둔다.
+/// TURN 자격증명 Cloud Function 리전.
 const String kDuoTurnCredentialRegion = 'us-central1';
 
 /// 자격증명 발급 상한. 통화 시작을 여기서 오래 붙잡으면 안 된다 —

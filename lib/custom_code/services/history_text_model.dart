@@ -34,8 +34,8 @@ const String kDuoCanonicalModel = 'gpt-4.1-mini';
 /// [kDialogBrainModel]과도, 구조만 보는 [kDuoCanonicalModel]과도 합치지
 /// 않는다 — 셋 중 하나를 바꿨을 때 무엇이 달라졌는지 갈라 볼 수 있어야 한다.
 ///
-/// 2026-09-13: 문맥 교정층 신설과 함께 `gpt-5.6-luna`로 시작한다.
-const String kDuoOriginCorrectorModel = 'gpt-5.6-luna';
+/// 2026-09-29: Circle 검증 결과를 반영해 `gpt-6-luna`로 전환했다.
+const String kDuoOriginCorrectorModel = 'gpt-6-luna';
 
 /// ③ 공부방 원문 교정 + 배울글.
 ///
@@ -55,13 +55,13 @@ const String kTextModelPrevious = 'gpt-4o-mini';
 // 대사를 만드는 [kDialogBrainModel]과 값이 같아도 **합치지 않는다** — 두뇌를
 // 되돌릴 때 후처리까지 같이 되돌아가면 무엇이 달라졌는지 갈라 볼 수 없다.
 //
-// ⚠️ gpt-5 계열은 Chat Completions에서 `temperature`를 받지 않고 `max_tokens`
-//   대신 `max_completion_tokens`를 쓴다. 호출부는 전부 그 모양으로 맞춰
-//   두었다. 이 값을 gpt-4o-mini로 되돌려도 그 모양은 그대로 먹는다.
+// ⚠️ 현재 reasoning 모델 호출은 `temperature` 없이 `max_completion_tokens`와
+//   `reasoning_effort`를 사용한다. 호출부는 모두 이 형식으로 맞춰 두었으며,
+//   gpt-4o-mini로 되돌려도 이 요청 형식은 그대로 사용할 수 있다.
 // ====================================================================
 
-/// 후처리 모델. 2026-09-18: `gpt-4o-mini` → `gpt-5.6-luna`.
-const String kPostProcessModel = 'gpt-5.6-luna';
+/// 후처리 모델. 2026-09-29: `gpt-4o-mini` 계열에서 `gpt-6-luna`로 전환했다.
+const String kPostProcessModel = 'gpt-6-luna';
 
 /// 후처리 `reasoning_effort`. 판정·번역은 첫 토큰이 먼저라 `none`으로 시작한다.
 const String kPostProcessReasoningEffort = 'none';

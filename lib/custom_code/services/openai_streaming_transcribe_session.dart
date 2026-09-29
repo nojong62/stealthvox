@@ -8,7 +8,7 @@
 //
 //   그 소켓의 주소가 OpenAI 쪽 이름으로 `/v1/realtime`일 뿐이고,
 //   2026-08-08에 걷어낸 **Realtime 음성 대화(WebRTC, gpt-realtime)와는
-//   다른 물건이다.** AI 응답은 지금도 gpt-4o-mini + tts-1이 만든다.
+//   다른 물건이다.** AI 응답은 `gpt-6-luna`가 만들고 `tts-1`이 읽는다.
 //
 // 이 파일이 하는 일은 셋뿐이다.
 //   1. 유저 마이크 PCM을 OpenAI로 흘려보낸다

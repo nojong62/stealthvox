@@ -194,7 +194,7 @@ void main() {
     });
 
     test('교정 모델은 구조 판정 모델과 다른 상수다', () {
-      expect(kDuoOriginCorrectorModel, 'gpt-5.6-luna');
+      expect(kDuoOriginCorrectorModel, 'gpt-6-luna');
       expect(kDuoOriginCorrectorModel, isNot(kDuoCanonicalModel));
       expect(kDuoOriginCorrectorModel, isNot(kHistoryRepairModel));
       expect(src, contains('String correctorModel = kDuoOriginCorrectorModel'));
