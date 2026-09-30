@@ -145,9 +145,10 @@ exports.requestDuoBoardPost = functions.https.onCall(async (data, context) => {
   });
   const tokens = await db().collection('users').doc(ownerUid)
       .collection('fcm_tokens').get();
-  const tokenValues = tokens.docs.map(d => d.get('token')).filter(Boolean);
+  const tokenDocs = tokens.docs.filter(d => Boolean(d.get('token')));
+  const tokenValues = tokenDocs.map(d => d.get('token'));
   if (tokenValues.length) {
-    await admin.messaging().sendEachForMulticast({
+    const response = await admin.messaging().sendEachForMulticast({
       tokens: tokenValues,
       notification: {
         title: 'StealthVox · Duo 요청',
@@ -156,6 +157,15 @@ exports.requestDuoBoardPost = functions.https.onCall(async (data, context) => {
       data: {type: 'duo_board_request', requestId: postId},
       android: {priority: 'high'},
     });
+    const invalidCodes = new Set([
+      'messaging/invalid-registration-token',
+      'messaging/registration-token-not-registered',
+    ]);
+    const cleanup = response.responses
+        .map((item, index) => !item.success && invalidCodes.has(item.error?.code)
+          ? tokenDocs[index]?.ref.delete() : null)
+        .filter(Boolean);
+    await Promise.all(cleanup);
   }
   return {requestId: postId, expiresAtMillis: expiresAt.toMillis()};
 });
@@ -170,36 +180,57 @@ exports.openDuoBoardRequest = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('not-found', '요청자가 더 이상 기다리고 있지 않습니다.');
   }
   const requesterUid = before.get('requesterUid');
-  const presenceSnap = await admin.database()
-      .ref(`duo_board_waiting/${requestId}/${requesterUid}`).once('value');
-  if (!presenceSnap.exists()) {
+  const presenceRef = admin.database()
+      .ref(`duo_board_waiting/${requestId}/${requesterUid}`);
+  const gate = await presenceRef.transaction(current => {
+    if (!current || current.online !== true || current.matching === true) {
+      return;
+    }
+    return {...current, matching: true, matchingOwnerUid: uid,
+      matchingAt: admin.database.ServerValue.TIMESTAMP};
+  }, undefined, false);
+  if (!gate.committed) {
+    if (gate.snapshot.val()?.matching === true) {
+      throw new functions.https.HttpsError('already-exists', '요청을 확인하고 있습니다.');
+    }
     await requestRef.set({status: 'expired'}, {merge: true});
     await db().collection('duo_board_requesters').doc(requesterUid)
         .set({status: 'expired'}, {merge: true});
     throw new functions.https.HttpsError('not-found', '요청자가 더 이상 기다리고 있지 않습니다.');
   }
-  return db().runTransaction(async tx => {
-    const request = await tx.get(requestRef);
-    if (!request.exists || request.get('ownerUid') !== uid ||
-        request.get('status') !== 'waiting' ||
-        request.get('expiresAt').toMillis() <= Date.now()) {
-      throw new functions.https.HttpsError('not-found', '요청자가 더 이상 기다리고 있지 않습니다.');
-    }
-    const roomId = request.get('roomId');
-    const roomRef = db().collection('duo_sessions').doc(roomId);
-    const room = await tx.get(roomRef);
-    if (!room.exists || room.get('hostUid') !== uid ||
-        room.get('isDuoEnabled') !== true || room.get('isPartnerJoined') === true) {
-      throw new functions.https.HttpsError('failed-precondition', 'Duo 방을 다시 열 수 없습니다.');
-    }
-    tx.update(requestRef, {status: 'matched', matchedAt:
-      admin.firestore.FieldValue.serverTimestamp()});
-    tx.set(db().collection('duo_board_requesters').doc(request.get('requesterUid')),
-        {status: 'matched', updatedAt: admin.firestore.FieldValue.serverTimestamp()},
-        {merge: true});
-    return {roomId, requestId, mode: request.get('mode'),
-      historyPath: request.get('historyPath') || ''};
-  });
+  try {
+    return await db().runTransaction(async tx => {
+      const request = await tx.get(requestRef);
+      if (!request.exists || request.get('ownerUid') !== uid ||
+          request.get('status') !== 'waiting' ||
+          request.get('expiresAt').toMillis() <= Date.now()) {
+        throw new functions.https.HttpsError('not-found', '요청자가 더 이상 기다리고 있지 않습니다.');
+      }
+      const roomId = request.get('roomId');
+      const roomRef = db().collection('duo_sessions').doc(roomId);
+      const room = await tx.get(roomRef);
+      if (!room.exists || room.get('hostUid') !== uid ||
+          room.get('isDuoEnabled') !== true || room.get('isPartnerJoined') === true) {
+        throw new functions.https.HttpsError('failed-precondition', 'Duo 방을 다시 열 수 없습니다.');
+      }
+      tx.update(requestRef, {status: 'matched', matchedAt:
+        admin.firestore.FieldValue.serverTimestamp()});
+      tx.set(db().collection('duo_board_requesters').doc(request.get('requesterUid')),
+          {status: 'matched', updatedAt: admin.firestore.FieldValue.serverTimestamp()},
+          {merge: true});
+      return {roomId, requestId, mode: request.get('mode'),
+        historyPath: request.get('historyPath') || ''};
+    });
+  } catch (error) {
+    await presenceRef.transaction(current => {
+      if (!current || current.matchingOwnerUid !== uid) return current;
+      delete current.matching;
+      delete current.matchingOwnerUid;
+      delete current.matchingAt;
+      return current;
+    }, undefined, false);
+    throw error;
+  }
 });
 
 exports.cancelDuoBoardRequest = functions.https.onCall(async (data, context) => {

@@ -75,6 +75,35 @@ class DuoBoardPushService {
   static String _tokenDocumentId(String token) =>
       base64Url.encode(utf8.encode(token)).replaceAll('=', '');
 
+  static Future<void> removeTokenForCurrentMember() async {
+    final user = FirebaseAuth.instance.currentUser;
+    await _tokenSubscription?.cancel();
+    _tokenSubscription = null;
+    if (user == null || user.isAnonymous) return;
+    try {
+      final messaging = FirebaseMessaging.instance;
+      final token = await messaging.getToken();
+      if (token == null || token.isEmpty) return;
+      try {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('fcm_tokens')
+            .doc(_tokenDocumentId(token))
+            .delete();
+      } finally {
+        await messaging.deleteToken();
+      }
+    } catch (error) {
+      debugPrint('[DuoBoard] FCM token cleanup skipped: ${error.runtimeType}');
+    }
+  }
+
+  static Future<void> signOut() async {
+    await removeTokenForCurrentMember();
+    await FirebaseAuth.instance.signOut();
+  }
+
   static Future<void> initialize({
     required BuildContext Function() context,
     required DuoBoardRequestOpened onOpened,

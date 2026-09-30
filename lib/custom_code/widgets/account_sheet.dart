@@ -350,7 +350,7 @@ class _AccountSheetState extends State<_AccountSheet> {
     FFAppState().remainingTime = 0;
     FFAppState().remainingTimeLoaded = false;
     LobbyBrain.lastSyncedUid = null;
-    await FirebaseAuth.instance.signOut();
+    await authManager.signOut();
     if (!mounted) return;
     navigator.pop();
     if (!mounted) return;

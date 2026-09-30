@@ -17,6 +17,7 @@ import 'firebase_user_provider.dart';
 import 'google_auth.dart';
 import 'jwt_token_auth.dart';
 import 'github_auth.dart';
+import '/custom_code/services/duo_board_push_service.dart';
 
 export '../base_auth_user_provider.dart';
 
@@ -59,10 +60,10 @@ class FirebaseAuthManager extends AuthManager
   FirebasePhoneAuthManager phoneAuthManager = FirebasePhoneAuthManager();
 
   @override
-  Future signOut() {
+  Future signOut() async {
     FFAppState().remainingTime = 0;
     FFAppState().remainingTimeLoaded = false;
-    return FirebaseAuth.instance.signOut();
+    await DuoBoardPushService.signOut();
   }
 
   @override

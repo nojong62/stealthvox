@@ -1088,7 +1088,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                     FFAppState().remainingTime = 0;
                     FFAppState().remainingTimeLoaded = false;
                     LobbyBrain.lastSyncedUid = null;
-                    await FirebaseAuth.instance.signOut();
+                    await authManager.signOut();
                     if (!mounted) return;
                     context.goNamed('Intro');
                   },
