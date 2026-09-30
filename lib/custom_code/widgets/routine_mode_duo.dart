@@ -6368,14 +6368,16 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           throw StateError('history unavailable');
         }
         if (!mounted) return;
-        final posted = await showDuoBoardComposer(
+        await showDuoBoardSheet(
           context,
-          roomId: roomId,
-          historyPath: _myHistoryRef!.path,
-          mode: chosenMode,
-          directLanguage: _myNative(),
+          composeDraft: DuoBoardComposeDraft(
+            roomId: roomId,
+            historyPath: _myHistoryRef!.path,
+            mode: chosenMode,
+            directLanguage: _myNative(),
+          ),
         );
-        if (!posted || !mounted) return;
+        if (!mounted) return;
       }
       if (mounted) {
         // 방식 선택 팝업과 같은 로비 Chat Lang 문구를 쓴다.

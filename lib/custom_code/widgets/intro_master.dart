@@ -716,7 +716,7 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
-  Widget _buildWelcomeTrialAction() {
+  Widget _buildWelcomeDuoAction() {
     return AnimatedBuilder(
       animation: _welcomeMotionController,
       builder: (context, child) {
@@ -750,7 +750,7 @@ class _IntroMasterState extends State<IntroMaster>
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(99),
             child: InkWell(
-              onTap: _goToGuidePage,
+              onTap: _openDuoBoard,
               borderRadius: BorderRadius.circular(99),
               child: const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 18, vertical: 10),
@@ -762,7 +762,7 @@ class _IntroMasterState extends State<IntroMaster>
                     // 화살표는 크기가 정해져 있어 그대로 둔다.
                     Flexible(
                       child: Text(
-                        'Try Duo',
+                        'Duo Invite',
                         maxLines: 2,
                         style: TextStyle(
                           color: Color(0xFFF9FAFC),
@@ -1175,28 +1175,6 @@ class _IntroMasterState extends State<IntroMaster>
     FFAppState().update(() {});
     context.pushReplacementNamed('StealthRoom');
   }
-
-  Widget _buildDuoBoardAction() => OutlinedButton.icon(
-        onPressed: _openDuoBoard,
-        icon: const Icon(Icons.forum_outlined, size: 20),
-        label: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Duo 초대 코드 받기',
-                style: TextStyle(fontWeight: FontWeight.w800)),
-            SizedBox(height: 2),
-            Text('회원가입 없이도 참여할 수 있어요.',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w400)),
-          ],
-        ),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFFB7F7EE),
-          side: const BorderSide(color: Color(0xFF45CDBD)),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-          minimumSize: const Size.fromHeight(54),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
-        ),
-      );
 
   /// 페이지마다 스와이프로 갈 수 있는 방향이 달라서 안내 문구를 받아 쓴다.
   Widget _buildWelcomePageFooter(String hint) {
@@ -1665,9 +1643,7 @@ class _IntroMasterState extends State<IntroMaster>
                   const Spacer(flex: 5),
                   _showEnglishTesterGoogleEntry
                       ? _buildEnglishTesterGoogleAction()
-                      : _buildWelcomeTrialAction(),
-                  SizedBox(height: compact ? 6 : 10),
-                  _buildDuoBoardAction(),
+                      : _buildWelcomeDuoAction(),
                   SizedBox(height: compact ? 4 : 8),
                   _buildWelcomeLoginAction(),
                   const Spacer(flex: 2),
@@ -1742,7 +1718,7 @@ class _IntroMasterState extends State<IntroMaster>
                   ),
                   SizedBox(height: compact ? 24 : 36),
                   const Text(
-                    'Try It Without\nSigning Up',
+                    'Join Duo Without\nSigning Up',
                     style: TextStyle(
                       color: Color(0xFFF7F8FA),
                       fontSize: 30,
@@ -1755,14 +1731,9 @@ class _IntroMasterState extends State<IntroMaster>
                   // 제목 바로 아래가 시작 버튼이다. 사이에 있던 부제·소개
                   // 카드는 아래 안내 1·2·3과 같은 말을 반복하고 있었다.
                   _buildPrimaryAction(
-                    label: 'Try Duo',
-                    icon: Icons.mic_rounded,
-                    onPressed: () {
-                      debugPrint(
-                        '[TrialDebug] trial button tapped, time=${DateTime.now().toIso8601String()}',
-                      );
-                      _startTrial();
-                    },
+                    label: 'Open Duo Invite',
+                    icon: Icons.forum_outlined,
+                    onPressed: _openDuoBoard,
                   ),
                   SizedBox(height: compact ? 16 : 20),
                   _buildUsageGuideSection(),

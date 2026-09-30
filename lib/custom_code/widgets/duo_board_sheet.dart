@@ -7,7 +7,24 @@ import 'package:flutter/material.dart';
 import '/custom_code/services/duo_board_service.dart';
 import '/custom_code/services/duo_board_push_service.dart';
 
-Future<DuoBoardClaim?> showDuoBoardSheet(BuildContext context) async {
+class DuoBoardComposeDraft {
+  const DuoBoardComposeDraft({
+    required this.roomId,
+    required this.historyPath,
+    required this.mode,
+    required this.directLanguage,
+  });
+
+  final String roomId;
+  final String historyPath;
+  final String mode;
+  final String directLanguage;
+}
+
+Future<DuoBoardClaim?> showDuoBoardSheet(
+  BuildContext context, {
+  DuoBoardComposeDraft? composeDraft,
+}) async {
   await DuoBoardService.ensureParticipantIdentity();
   if (!context.mounted) return null;
   return showModalBottomSheet<DuoBoardClaim>(
@@ -15,7 +32,7 @@ Future<DuoBoardClaim?> showDuoBoardSheet(BuildContext context) async {
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: const Color(0xFF14171D),
-    builder: (_) => const DuoBoardSheet(),
+    builder: (_) => DuoBoardSheet(composeDraft: composeDraft),
   );
 }
 
@@ -155,7 +172,9 @@ Future<bool> showDuoBoardComposer(
 }
 
 class DuoBoardSheet extends StatefulWidget {
-  const DuoBoardSheet({super.key});
+  const DuoBoardSheet({super.key, this.composeDraft});
+
+  final DuoBoardComposeDraft? composeDraft;
   @override
   State<DuoBoardSheet> createState() => _DuoBoardSheetState();
 }
@@ -163,6 +182,29 @@ class DuoBoardSheet extends StatefulWidget {
 class _DuoBoardSheetState extends State<DuoBoardSheet> {
   String? _claiming;
   String? _error;
+
+  Future<void> _writePost() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) {
+      setState(() => _error = '게시글 작성은 로그인한 회원만 가능합니다.');
+      return;
+    }
+    final draft = widget.composeDraft;
+    if (draft == null) {
+      setState(() => _error = 'Duo 대화방의 초대 아이콘에서 글쓰기를 시작해 주세요.');
+      return;
+    }
+    final posted = await showDuoBoardComposer(
+      context,
+      roomId: draft.roomId,
+      historyPath: draft.historyPath,
+      mode: draft.mode,
+      directLanguage: draft.directLanguage,
+    );
+    if (posted && mounted) {
+      setState(() => _error = null);
+    }
+  }
 
   Future<void> _selectPost(String postId, String availability) async {
     setState(() {
@@ -212,16 +254,27 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
               decoration: BoxDecoration(
                   color: Colors.white24,
                   borderRadius: BorderRadius.circular(99))),
-          const Padding(
-              padding: EdgeInsets.fromLTRB(20, 18, 20, 4),
+          Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
               child: Row(children: [
-                Icon(Icons.forum_outlined, color: Color(0xFF52D4C3)),
-                SizedBox(width: 10),
-                Text('Duo 초대 게시판',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800)),
+                const Icon(Icons.forum_outlined, color: Color(0xFF52D4C3)),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text('Duo 초대 게시판',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800)),
+                ),
+                FilledButton.icon(
+                  onPressed: _writePost,
+                  icon: const Icon(Icons.edit_rounded, size: 17),
+                  label: const Text('글쓰기'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF2D8F83),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
               ])),
           const Padding(
               padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
@@ -234,6 +287,36 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Text(_error!,
                     style: const TextStyle(color: Color(0xFFFCA5A5)))),
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF191E27),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: const Row(children: [
+              Expanded(
+                flex: 5,
+                child: Text('대화 주제',
+                    style: TextStyle(
+                        color: Colors.white70, fontWeight: FontWeight.w700)),
+              ),
+              Expanded(
+                flex: 3,
+                child: Text('방식',
+                    style: TextStyle(
+                        color: Colors.white70, fontWeight: FontWeight.w700)),
+              ),
+              Expanded(
+                flex: 3,
+                child: Text('상태',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                        color: Colors.white70, fontWeight: FontWeight.w700)),
+              ),
+            ]),
+          ),
           Expanded(
               child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: DuoBoardService.watchPosts(),
@@ -264,29 +347,54 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                       data['availability']?.toString() ?? 'request';
                   final mine = data['ownerUid'] ==
                       FirebaseAuth.instance.currentUser?.uid;
+                  final enabled = !mine && _claiming == null;
                   return Card(
-                      color: const Color(0xFF202530),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
-                        title: Text(data['topic']?.toString() ?? '',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700)),
-                        subtitle: Text(
-                            mode == 'direct'
-                                ? 'Direct · ${data['directLanguage'] ?? ''}'
-                                : 'Interpreter',
-                            style: const TextStyle(color: Color(0xFF93C5FD))),
-                        trailing: Text(
-                            availability == 'now' ? '🟢 지금 가능' : '⚪ 요청 가능',
-                            style: const TextStyle(
-                                color: Colors.white70, fontSize: 12)),
-                        enabled: !mine && _claiming == null,
-                        onTap: mine
-                            ? null
-                            : () => _selectPost(doc.id, availability),
-                      ));
+                    color: const Color(0xFF202530),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: enabled
+                          ? () => _selectPost(doc.id, availability)
+                          : null,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 16),
+                        child: Row(children: [
+                          Expanded(
+                            flex: 5,
+                            child: Text(data['topic']?.toString() ?? '',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    color:
+                                        enabled ? Colors.white : Colors.white38,
+                                    fontWeight: FontWeight.w700)),
+                          ),
+                          Expanded(
+                            flex: 3,
+                            child: Text(
+                              mode == 'direct' ? 'Direct' : 'Interpreter',
+                              style: TextStyle(
+                                  color: enabled
+                                      ? const Color(0xFF93C5FD)
+                                      : Colors.white38,
+                                  fontSize: 12),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 3,
+                            child: Text(
+                              availability == 'now' ? '🟢 지금 가능' : '⚪ 요청 가능',
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                  color:
+                                      enabled ? Colors.white70 : Colors.white38,
+                                  fontSize: 11),
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ),
+                  );
                 },
               );
             },
