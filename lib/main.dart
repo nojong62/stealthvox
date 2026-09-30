@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:provider/provider.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/foundation.dart';
@@ -18,6 +20,7 @@ import 'index.dart';
 import 'flutter_flow/revenue_cat_util.dart' as revenue_cat;
 import '/custom_code/services/app_update_policy.dart';
 import '/custom_code/widgets/app_update_gate.dart';
+import '/custom_code/services/duo_board_push_service.dart';
 
 /// 🔍 [OVERFLOW-SCAN] 디버그 빌드 전용 — 레이아웃이 터진 **자리**를 남긴다.
 ///
@@ -205,6 +208,25 @@ class _MyAppState extends State<MyApp> {
       Duration(milliseconds: 1000),
       () => _appStateNotifier.stopShowingSplashImage(),
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(DuoBoardPushService.initialize(
+        context: () => appNavigatorKey.currentContext ?? context,
+        onOpened: (match) async {
+          if (_router.routeInformationProvider.value.uri.path ==
+              StealthRoomWidget.routePath) {
+            return;
+          }
+          _router.goNamed(
+            StealthRoomWidget.routeName,
+            queryParameters: {
+              'hostRoomId': serializeParam(match.roomId, ParamType.String),
+              'hostHistoryPath':
+                  serializeParam(match.historyPath, ParamType.String),
+            }.withoutNulls,
+          );
+        },
+      ));
+    });
   }
 
   @override

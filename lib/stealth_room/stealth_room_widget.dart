@@ -15,10 +15,14 @@ class StealthRoomWidget extends StatefulWidget {
     super.key,
     required this.historyRef,
     this.roomId,
+    this.hostRoomId,
+    this.hostHistoryPath,
   });
 
   final DocumentReference? historyRef;
   final String? roomId;
+  final String? hostRoomId;
+  final String? hostHistoryPath;
 
   static String routeName = 'StealthRoom';
   static String routePath = '/stealthRoom';
@@ -72,6 +76,8 @@ class _StealthRoomWidgetState extends State<StealthRoomWidget> {
                 child: custom_widgets.StealthRoomMaster(
                   width: MediaQuery.sizeOf(context).width * 1.0,
                   height: MediaQuery.sizeOf(context).height * 1.0,
+                  hostRoomId: widget.hostRoomId,
+                  hostHistoryPath: widget.hostHistoryPath,
                 ),
               ),
             ),

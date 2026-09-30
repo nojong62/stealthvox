@@ -743,10 +743,14 @@ class RoutineModeDuo extends StatefulWidget {
     this.width,
     this.height,
     this.roomId,
+    this.hostRoomId,
+    this.hostHistoryPath,
   });
   final double? width;
   final double? height;
   final String? roomId;
+  final String? hostRoomId;
+  final String? hostHistoryPath;
 
   @override
   State<RoutineModeDuo> createState() => _RoutineModeDuoState();
@@ -1828,6 +1832,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if ((widget.hostRoomId ?? '').isNotEmpty) {
+        unawaited(_restoreBoardHostRoom());
+        return;
+      }
       final String? pendingRoomId = _resolveGuestRoomId();
       if (pendingRoomId != null) {
         debugPrint(
@@ -1846,6 +1854,45 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         unawaited(_loadInvitedMode(pendingRoomId));
       }
     });
+  }
+
+  Future<void> _restoreBoardHostRoom() async {
+    final user = FirebaseAuth.instance.currentUser;
+    final roomId = widget.hostRoomId?.trim() ?? '';
+    if (user == null || user.isAnonymous || roomId.isEmpty) return;
+    try {
+      final roomRef =
+          FirebaseFirestore.instance.collection('duo_sessions').doc(roomId);
+      final snap = await roomRef.get();
+      final data = snap.data();
+      if (!snap.exists ||
+          data?['hostUid'] != user.uid ||
+          data?['isDuoEnabled'] != true) {
+        throw StateError('inactive host room');
+      }
+      _duoSessionRef = roomRef;
+      _myUid = user.uid;
+      final historyPath = widget.hostHistoryPath?.trim() ?? '';
+      if (historyPath.startsWith('users/${user.uid}/chat_history/')) {
+        _myHistoryRef = FirebaseFirestore.instance.doc(historyPath);
+      }
+      if (mounted) {
+        setState(() => _duoMode = _normalizeDuoMode(data?['mode']));
+      }
+      BillingTicker.instance.setSessionIdentifiers(
+        sessionDocId: _myHistoryRef?.id,
+        roomId: roomId,
+      );
+      _listenForPartnerJoined();
+      _listenForMessages();
+    } catch (error) {
+      _lgDuo('[BOARD]', 'host_restore_failed(${error.runtimeType})');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Duo 방을 다시 열 수 없습니다.')),
+        );
+      }
+    }
   }
 
   /// 초대받은 방의 대화 방식을 읽어 온다(게스트 입장 팝업용).
@@ -6316,8 +6363,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         await Share.share('${t['inviteShareText']}\n$inviteLink',
             subject: t['inviteShareSubject']);
       } else if (destination == 'board') {
-        final posted = await showDuoBoardComposer(context,
+        await _ensureHistoryRef();
+        if (_myHistoryRef == null) {
+          throw StateError('history unavailable');
+        }
+        if (!mounted) return;
+        final posted = await showDuoBoardComposer(
+          context,
           roomId: roomId,
+          historyPath: _myHistoryRef!.path,
           mode: chosenMode,
           directLanguage: _myNative(),
         );

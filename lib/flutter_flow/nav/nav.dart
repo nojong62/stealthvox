@@ -152,6 +152,14 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
               'roomId',
               ParamType.String,
             ),
+            hostRoomId: params.getParam(
+              'hostRoomId',
+              ParamType.String,
+            ),
+            hostHistoryPath: params.getParam(
+              'hostHistoryPath',
+              ParamType.String,
+            ),
           ),
         ),
         FFRoute(

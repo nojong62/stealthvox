@@ -34,6 +34,7 @@ import '/custom_code/services/guide_ui_localization.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/origin_pcm_store.dart';
 import 'p2_voice_lab.dart' show P2VoiceLabPage; // 관리자 전용 히든 화면
+import 'duo_board_sheet.dart';
 // LongPressGestureRecognizer는 material/widgets가 다시 내보내지 않는다.
 import 'package:flutter/gestures.dart' show LongPressGestureRecognizer;
 
@@ -1220,6 +1221,17 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     ).push(MaterialPageRoute<void>(builder: (_) => const P2VoiceLabPage()));
   }
 
+  Future<void> _openDuoBoardAsGuest() async {
+    final claim = await showDuoBoardSheet(context);
+    if (!mounted || claim == null) return;
+    FFAppState().isGuestSession = true;
+    FFAppState().inviterUid = claim.ownerUid;
+    FFAppState().duoRoomId = claim.roomId;
+    FFAppState().pendingInviteType = 'duo';
+    FFAppState().update(() {});
+    if (mounted) context.pushReplacementNamed('StealthRoom');
+  }
+
   /// 로비 본문 한 벌. 세로가 짧을 때 통째로 스크롤에 담기 위해 갈라 뒀다.
   Widget _buildLobbyBody(FFAppState appState, String displayTime) {
     return Column(
@@ -1263,6 +1275,25 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 ),
               ),
               const Spacer(),
+              Material(
+                color: _kLobbySurfaceHi,
+                shape: const CircleBorder(
+                  side: BorderSide(color: _kLobbyBorder),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: _openDuoBoardAsGuest,
+                  child: const Padding(
+                    padding: EdgeInsets.all(9),
+                    child: Icon(
+                      Icons.forum_outlined,
+                      color: _kLobbyCyan,
+                      size: 20,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
               // 👤 등록 정보 — 스텔스룸 아래 줄에 있는 것과 같은 시트다.
               Material(
                 color: _kLobbySurfaceHi,

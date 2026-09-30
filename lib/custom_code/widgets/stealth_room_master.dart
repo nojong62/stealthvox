@@ -41,10 +41,17 @@ import 'circle_talk_guide.dart';
 import 'scenario_talk_guide.dart';
 
 class StealthRoomMaster extends StatefulWidget {
-  const StealthRoomMaster({Key? key, this.width, this.height})
-      : super(key: key);
+  const StealthRoomMaster({
+    Key? key,
+    this.width,
+    this.height,
+    this.hostRoomId,
+    this.hostHistoryPath,
+  }) : super(key: key);
   final double? width;
   final double? height;
+  final String? hostRoomId;
+  final String? hostHistoryPath;
 
   static void Function()? exitCurrentMode;
 
@@ -125,6 +132,12 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
             _currentMode = 1;
           });
         }
+      });
+    }
+
+    if ((widget.hostRoomId ?? '').isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _currentMode = 1);
       });
     }
 
@@ -930,6 +943,8 @@ Return ONLY valid JSON: {"name":"..."}.
         width: widget.width,
         height: widget.height,
         roomId: _pendingDuoRoomId,
+        hostRoomId: widget.hostRoomId,
+        hostHistoryPath: widget.hostHistoryPath,
       );
     } else if (_currentMode == 3) {
       return RoutineModeScenarioTalk(

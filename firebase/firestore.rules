@@ -21,6 +21,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /duo_board_requests/{requestId} {
+      allow read: if isAuth() &&
+        (resource.data.ownerUid == request.auth.uid ||
+         resource.data.requesterUid == request.auth.uid);
+      allow write: if false;
+    }
+
     // User profile and user-owned subcollections.
     match /users/{uid} {
       allow read: if isOwner(uid);
@@ -81,6 +88,11 @@ service cloud.firestore {
       match /usage_logs/{logId} {
         allow read: if isOwner(uid);
         allow write: if false;
+      }
+
+      match /fcm_tokens/{installationId} {
+        allow read: if false;
+        allow create, update, delete: if isOwner(uid);
       }
     }
 

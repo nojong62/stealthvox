@@ -67,6 +67,9 @@ const duoBoard = require("./duo_board");
 exports.interpretUtterance = interpretUtterance;
 exports.publishDuoBoardPost = duoBoard.publishDuoBoardPost;
 exports.claimDuoBoardPost = duoBoard.claimDuoBoardPost;
+exports.requestDuoBoardPost = duoBoard.requestDuoBoardPost;
+exports.openDuoBoardRequest = duoBoard.openDuoBoardRequest;
+exports.cancelDuoBoardRequest = duoBoard.cancelDuoBoardRequest;
 
 
 async function verifyGoogleOAuthIdToken(idToken) {
