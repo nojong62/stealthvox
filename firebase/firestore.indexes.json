@@ -1,3 +1,12 @@
 {
-  "indexes": []
+  "indexes": [
+    {
+      "collectionGroup": "duo_board_posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    }
+  ]
 }

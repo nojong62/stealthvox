@@ -88,6 +88,7 @@ import '/custom_code/services/origin_restoration.dart';
 import '/custom_code/services/duo_guest_handoff.dart';
 // 통화가 끝난 게스트가 방금 한 대화를 보는 자리.
 import 'duo_guest_study_page.dart';
+import 'duo_board_sheet.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/duo_canonical.dart';
 
@@ -411,6 +412,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'note': '상대방도 선택한 방식으로 초대됩니다.',
     'cancel': '취소',
     'invite': '초대하기',
+    'inviteShareText': 'StealthVox Duo 초대 - 저와 함께 Duo 대화해요!',
+    'inviteShareSubject': 'StealthVox Duo 초대',
     'inviteDoneDirect': '직접 대화로 초대했습니다',
     'inviteDoneInterp': '만능 통역으로 초대했습니다',
     'inviteDoneDetail': '초대 링크를 복사해 뒀어요.',
@@ -430,6 +433,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'note': 'The guest will join in this mode.',
     'cancel': 'Cancel',
     'invite': 'Invite',
+    'inviteShareText':
+        'StealthVox Duo invitation - Join me for a Duo conversation!',
+    'inviteShareSubject': 'StealthVox Duo Invitation',
     'inviteDoneDirect': 'Invited to a Direct Call',
     'inviteDoneInterp': 'Invited to Live Interpreter',
     'inviteDoneDetail': 'The invite link is copied.',
@@ -449,6 +455,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'note': '相手も選んだ方法で招待されます。',
     'cancel': 'キャンセル',
     'invite': '招待する',
+    'inviteShareText': 'StealthVox Duoへの招待 - 一緒にDuoで会話しましょう！',
+    'inviteShareSubject': 'StealthVox Duoへの招待',
     'inviteDoneDirect': '直接通話で招待しました',
     'inviteDoneInterp': '万能通訳で招待しました',
     'inviteDoneDetail': '招待リンクをコピーしました。',
@@ -468,6 +476,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'note': '对方也会以所选方式收到邀请。',
     'cancel': '取消',
     'invite': '邀请',
+    'inviteShareText': 'StealthVox Duo邀请 - 和我一起进行Duo对话吧！',
+    'inviteShareSubject': 'StealthVox Duo邀请',
     'inviteDoneDirect': '已用直接通话发出邀请',
     'inviteDoneInterp': '已用万能翻译发出邀请',
     'inviteDoneDetail': '邀请链接已复制。',
@@ -487,6 +497,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'note': 'La persona invitada entra con el mismo tipo de llamada.',
     'cancel': 'Cancelar',
     'invite': 'Invitar',
+    'inviteShareText':
+        'Invitación a StealthVox Duo - ¡Conversemos juntos en Duo!',
+    'inviteShareSubject': 'Invitación a StealthVox Duo',
     'inviteDoneDirect': 'Invitación de llamada directa enviada',
     'inviteDoneInterp': 'Invitación de intérprete en vivo enviada',
     'inviteDoneDetail': 'El enlace de invitación está copiado.',
@@ -506,6 +519,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'note': 'La personne invitée rejoint avec le même type d\'appel.',
     'cancel': 'Annuler',
     'invite': 'Inviter',
+    'inviteShareText':
+        'Invitation StealthVox Duo - Discutons ensemble sur Duo !',
+    'inviteShareSubject': 'Invitation StealthVox Duo',
     'inviteDoneDirect': 'Invitation en appel direct envoyée',
     'inviteDoneInterp': 'Invitation avec interprète en direct envoyée',
     'inviteDoneDetail': "Le lien d'invitation est copié.",
@@ -525,6 +541,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'note': 'Die eingeladene Person nimmt mit derselben Gesprächsart teil.',
     'cancel': 'Abbrechen',
     'invite': 'Einladen',
+    'inviteShareText':
+        'StealthVox Duo-Einladung - Lass uns gemeinsam über Duo sprechen!',
+    'inviteShareSubject': 'StealthVox Duo-Einladung',
     'inviteDoneDirect': 'Zu einem direkten Gespräch eingeladen',
     'inviteDoneInterp': 'Zum Live-Dolmetscher eingeladen',
     'inviteDoneDetail': 'Der Einladungslink ist kopiert.',
@@ -544,6 +563,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'note': 'न्योता पाने वाला भी इसी तरीके से जुड़ेगा।',
     'cancel': 'रद्द करें',
     'invite': 'न्योता भेजें',
+    'inviteShareText': 'StealthVox Duo आमंत्रण - मेरे साथ Duo पर बातचीत करें!',
+    'inviteShareSubject': 'StealthVox Duo आमंत्रण',
     'inviteDoneDirect': 'सीधी कॉल का न्योता भेजा गया',
     'inviteDoneInterp': 'लाइव अनुवादक का न्योता भेजा गया',
     'inviteDoneDetail': 'न्योते का लिंक कॉपी हो गया।',
@@ -563,6 +584,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'note': 'Приглашённый присоединится с тем же типом звонка.',
     'cancel': 'Отмена',
     'invite': 'Пригласить',
+    'inviteShareText':
+        'Приглашение в StealthVox Duo — Давайте поговорим вместе в Duo!',
+    'inviteShareSubject': 'Приглашение в StealthVox Duo',
     'inviteDoneDirect': 'Приглашение на прямой звонок отправлено',
     'inviteDoneInterp': 'Приглашение с живым переводчиком отправлено',
     'inviteDoneDetail': 'Ссылка-приглашение скопирована.',
@@ -582,6 +606,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'note': 'A pessoa convidada entra com o mesmo tipo de chamada.',
     'cancel': 'Cancelar',
     'invite': 'Convidar',
+    'inviteShareText':
+        'Convite para o StealthVox Duo - Vamos conversar juntos no Duo!',
+    'inviteShareSubject': 'Convite para o StealthVox Duo',
     'inviteDoneDirect': 'Convite de chamada direta enviado',
     'inviteDoneInterp': 'Convite de intérprete ao vivo enviado',
     'inviteDoneDetail': 'O link do convite foi copiado.',
@@ -601,6 +628,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'note': 'La persona invitata entra con lo stesso tipo di chiamata.',
     'cancel': 'Annulla',
     'invite': 'Invita',
+    'inviteShareText': 'Invito a StealthVox Duo - Parliamo insieme su Duo!',
+    'inviteShareSubject': 'Invito a StealthVox Duo',
     'inviteDoneDirect': 'Invito a una chiamata diretta inviato',
     'inviteDoneInterp': 'Invito con interprete in diretta inviato',
     'inviteDoneDetail': "Il link dell'invito è stato copiato.",
@@ -620,6 +649,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'note': 'De uitgenodigde persoon doet mee met hetzelfde gesprekstype.',
     'cancel': 'Annuleren',
     'invite': 'Uitnodigen',
+    'inviteShareText':
+        'StealthVox Duo-uitnodiging - Laten we samen praten via Duo!',
+    'inviteShareSubject': 'StealthVox Duo-uitnodiging',
     'inviteDoneDirect': 'Uitnodiging voor direct gesprek verstuurd',
     'inviteDoneInterp': 'Uitnodiging voor live tolk verstuurd',
     'inviteDoneDetail': 'De uitnodigingslink is gekopieerd.',
@@ -6239,15 +6271,60 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
               .replace(queryParameters: params)
               .toString();
       debugPrint('[Duo] inviteLink: $inviteLink');
-      // 5) 클립보드 복사 + 공유 시트
-      await Clipboard.setData(ClipboardData(text: inviteLink));
-      await Share.share(
-        'StealthVox Duo 초대 - 저와 함께 Duo 대화해요!\n$inviteLink',
-        subject: 'StealthVox Duo 초대',
+      // 5) 배포 방법 선택. 시스템 공유 시트 안에는 앱 전용 버튼을 넣을 수
+      // 없으므로 복사·공유·Duo 게시판 등록을 먼저 앱 팝업에서 고른다.
+      final t = modePickerTextFor(FFAppState().nativeLang);
+      if (!mounted) return;
+      final destination = await showModalBottomSheet<String>(
+        context: context,
+        backgroundColor: const Color(0xFF1C2430),
+        builder: (sheetContext) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text('초대 방법', style: TextStyle(color: Colors.white,
+                  fontSize: 19, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.copy_rounded, color: Color(0xFF93C5FD)),
+                title: const Text('링크 복사', style: TextStyle(color: Colors.white)),
+                onTap: () => Navigator.pop(sheetContext, 'copy'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.share_rounded, color: Color(0xFF93C5FD)),
+                title: const Text('공유하기 · 카카오톡 포함',
+                    style: TextStyle(color: Colors.white)),
+                onTap: () => Navigator.pop(sheetContext, 'share'),
+              ),
+              if (FirebaseAuth.instance.currentUser?.isAnonymous == false)
+                ListTile(
+                  leading: const Icon(Icons.forum_outlined, color: Color(0xFF52D4C3)),
+                  title: const Text('Duo 게시판에 올리기',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                  subtitle: const Text('방은 유지되고 주제만 입력하면 됩니다.',
+                      style: TextStyle(color: Colors.white54)),
+                  onTap: () => Navigator.pop(sheetContext, 'board'),
+                ),
+            ]),
+          ),
+        ),
       );
+      if (!mounted || destination == null) return;
+      if (destination == 'copy') {
+        await Clipboard.setData(ClipboardData(text: inviteLink));
+      } else if (destination == 'share') {
+        await Share.share('${t['inviteShareText']}\n$inviteLink',
+            subject: t['inviteShareSubject']);
+      } else if (destination == 'board') {
+        final posted = await showDuoBoardComposer(context,
+          roomId: roomId,
+          mode: chosenMode,
+          directLanguage: _myNative(),
+        );
+        if (!posted || !mounted) return;
+      }
       if (mounted) {
         // 방식 선택 팝업과 같은 로비 Chat Lang 문구를 쓴다.
-        final t = modePickerTextFor(FFAppState().nativeLang);
         _showDuoSnack(
           icon: Icons.check_circle_rounded,
           accent: const Color(0xFF60A5FA),

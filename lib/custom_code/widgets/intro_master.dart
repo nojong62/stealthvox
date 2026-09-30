@@ -15,6 +15,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'trial/trial_flow_state.dart';
 import 'auth_progress_view.dart';
+import 'duo_board_sheet.dart';
 import '/auth/social_auth_service.dart';
 import '/auth/account_discovery_service.dart';
 // 익명으로 초대받아 대화한 뒤 기존 계정으로 돌아온 사람의 Duo 기록 복구.
@@ -1163,6 +1164,39 @@ class _IntroMasterState extends State<IntroMaster>
     });
   }
 
+  Future<void> _openDuoBoard() async {
+    final claim = await showDuoBoardSheet(context);
+    if (!context.mounted || claim == null) return;
+    FFAppState().isGuestSession = true;
+    FFAppState().inviterUid = claim.ownerUid;
+    FFAppState().duoRoomId = claim.roomId;
+    FFAppState().pendingInviteType = 'duo';
+    FFAppState().update(() {});
+    context.pushReplacementNamed('StealthRoom');
+  }
+
+  Widget _buildDuoBoardAction() => OutlinedButton.icon(
+        onPressed: _openDuoBoard,
+        icon: const Icon(Icons.forum_outlined, size: 20),
+        label: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Duo 초대 코드 받기',
+                style: TextStyle(fontWeight: FontWeight.w800)),
+            SizedBox(height: 2),
+            Text('회원가입 없이도 참여할 수 있어요.',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w400)),
+          ],
+        ),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFFB7F7EE),
+          side: const BorderSide(color: Color(0xFF45CDBD)),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          minimumSize: const Size.fromHeight(54),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
+        ),
+      );
+
   /// 페이지마다 스와이프로 갈 수 있는 방향이 달라서 안내 문구를 받아 쓴다.
   Widget _buildWelcomePageFooter(String hint) {
     return Center(
@@ -1632,6 +1666,8 @@ class _IntroMasterState extends State<IntroMaster>
                       ? _buildEnglishTesterGoogleAction()
                       : _buildWelcomeTrialAction(),
                   SizedBox(height: compact ? 6 : 10),
+                  _buildDuoBoardAction(),
+                  SizedBox(height: compact ? 4 : 8),
                   _buildWelcomeLoginAction(),
                   const Spacer(flex: 2),
                   Center(child: _buildPageIndicator(0, tealActive: true)),

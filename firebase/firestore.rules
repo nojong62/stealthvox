@@ -10,6 +10,17 @@ service cloud.firestore {
       return isAuth() && request.auth.uid == uid;
     }
 
+    // Duo 게시판은 인증된 익명 Guest도 읽을 수 있다. 작성과 선점은 서버
+    // callable만 수행하며, 초대 roomId가 있는 runtime은 클라이언트에 숨긴다.
+    match /duo_board_posts/{postId} {
+      allow read: if isAuth();
+      allow write: if false;
+    }
+
+    match /duo_board_runtime/{postId} {
+      allow read, write: if false;
+    }
+
     // User profile and user-owned subcollections.
     match /users/{uid} {
       allow read: if isOwner(uid);

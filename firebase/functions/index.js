@@ -59,11 +59,14 @@ function googleOAuthClient() {
 
 admin.initializeApp();
 const { interpretUtterance } = require("./duo_interpreter");
+const duoBoard = require("./duo_board");
 
 // Callable Interpreter v2 is deployed dark while the client rollout flag is
 // false. Existing direct/realtime functions keep their original regions and
 // implementations.
 exports.interpretUtterance = interpretUtterance;
+exports.publishDuoBoardPost = duoBoard.publishDuoBoardPost;
+exports.claimDuoBoardPost = duoBoard.claimDuoBoardPost;
 
 
 async function verifyGoogleOAuthIdToken(idToken) {
