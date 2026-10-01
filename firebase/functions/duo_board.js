@@ -44,7 +44,6 @@ exports.publishDuoBoardPost = functions.https.onCall(async (data, context) => {
   const topic = text(data.topic, 80);
   const topicLanguage = String(data.topicLanguage || '').trim();
   const directLanguage = '';
-  const discoverable = await isHostForeground(uid);
   if (!roomId || !historyPath.startsWith(`users/${uid}/chat_history/`) ||
       data.mode === 'direct' || !topicLanguage) {
     throw new functions.https.HttpsError('invalid-argument', '초대 방 정보가 올바르지 않습니다.');
@@ -60,7 +59,10 @@ exports.publishDuoBoardPost = functions.https.onCall(async (data, context) => {
     }
     tx.set(postRef, {
       ownerUid: uid, topic, topicLanguage, mode, directLanguage, availability,
-      active: true, state: 'active', discoverable,
+      // A successful callable invocation proves that the host app is in the
+      // foreground. RTDB presence keeps this synchronized after publishing,
+      // but it must not block creation of the post.
+      active: true, state: 'active', discoverable: true, ownerPaused: false,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, {merge: true});
@@ -292,7 +294,6 @@ exports.declineDuoBoardRequest = functions.https.onCall(async (data, context) =>
 exports.resumeDuoBoardPost = functions.https.onCall(async (data, context) => {
   const uid = uidOf(context);
   const postId = String(data.postId || '').trim();
-  const discoverable = await isHostForeground(uid);
   const postRef = db().collection('duo_board_posts').doc(postId);
   const roomRef = db().collection('duo_sessions').doc(postId);
   return db().runTransaction(async tx => {
@@ -307,10 +308,36 @@ exports.resumeDuoBoardPost = functions.https.onCall(async (data, context) => {
       return {resumed: false};
     }
     tx.update(roomRef, {partnerUid: null, boardReservedAt: null});
-    tx.update(postRef, {state: 'active', discoverable, reservedAt: null,
+    // The member explicitly continued the invitation while using the app.
+    tx.update(postRef, {state: 'active', discoverable: true, ownerPaused: false,
+      reservedAt: null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()});
     return {resumed: true};
   });
+});
+
+exports.setDuoBoardPostVisibility = functions.https.onCall(async (data, context) => {
+  const uid = uidOf(context);
+  const postId = String(data.postId || '').trim();
+  const enabled = data.enabled === true;
+  if (!postId) {
+    throw new functions.https.HttpsError('invalid-argument', 'postId가 필요합니다.');
+  }
+  const postRef = db().collection('duo_board_posts').doc(postId);
+  await db().runTransaction(async tx => {
+    const post = await tx.get(postRef);
+    if (!post.exists || post.get('ownerUid') !== uid ||
+        post.get('active') !== true || post.get('state') === 'reserved') {
+      throw new functions.https.HttpsError(
+          'failed-precondition', '상태를 변경할 수 있는 본인 초대글이 아닙니다.');
+    }
+    tx.update(postRef, {
+      ownerPaused: !enabled,
+      discoverable: enabled,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+  return {discoverable: enabled};
 });
 
 // Materialize RTDB foreground presence onto board posts so the public list can
@@ -326,7 +353,9 @@ exports.syncDuoBoardHostPresence = functions.database
       posts.docs.filter(doc => doc.get('active') === true).forEach(doc => {
         if (doc.get('state') !== 'reserved') {
           batch.update(doc.ref, {
-            discoverable,
+            discoverable: doc.get('ownerPaused') === true
+              ? false
+              : discoverable,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
         }

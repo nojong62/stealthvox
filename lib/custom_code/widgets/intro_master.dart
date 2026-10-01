@@ -22,6 +22,7 @@ import '/auth/account_discovery_service.dart';
 import '/custom_code/services/duo_guest_handoff.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/duo_board_push_service.dart';
+import '/custom_code/services/duo_board_intro_notice.dart';
 
 enum IntroScreen { welcome, auth, accountDiscovery }
 
@@ -1166,8 +1167,46 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Future<void> _openDuoBoard() async {
+    final notice = DuoBoardIntroNoticeCopy.forSystemLocale();
+    final continueToBoard = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Navigator.pop(dialogContext, true),
+        child: AlertDialog(
+          backgroundColor: const Color(0xFF1E1E22),
+          title: Text(
+            notice.title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          content: SingleChildScrollView(
+            child: Text(
+              notice.body,
+              style: const TextStyle(
+                color: Color(0xFFCFD2DA),
+                height: 1.55,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(notice.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(notice.openBoard),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (continueToBoard != true || !mounted) return;
     final claim = await showDuoBoardSheet(context);
-    if (!context.mounted || claim == null) return;
+    if (!mounted || claim == null) return;
     FFAppState().isGuestSession = true;
     FFAppState().inviterUid = claim.ownerUid;
     FFAppState().duoRoomId = claim.roomId;

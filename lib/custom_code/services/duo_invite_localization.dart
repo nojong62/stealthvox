@@ -61,6 +61,9 @@ class DuoInviteCopy {
     'endPost': 'End invitation',
     'active': 'Active',
     'inactive': 'Inactive',
+    'activatePost': 'Make invitation active',
+    'deactivatePost': 'Make invitation inactive',
+    'visibilityFailed': 'Could not change the invitation status.',
     'deletePost': 'Delete post',
   };
 
@@ -116,6 +119,9 @@ class DuoInviteCopy {
       'endPost': '초대 종료',
       'active': '활성',
       'inactive': '비활성',
+      'activatePost': '초대글 활성화',
+      'deactivatePost': '초대글 비활성화',
+      'visibilityFailed': '초대글 상태를 변경하지 못했습니다.',
       'deletePost': '게시글 삭제',
     },
     'Japanese': {

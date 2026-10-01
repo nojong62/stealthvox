@@ -73,6 +73,7 @@ exports.openDuoBoardRequest = duoBoard.openDuoBoardRequest;
 exports.cancelDuoBoardRequest = duoBoard.cancelDuoBoardRequest;
 exports.declineDuoBoardRequest = duoBoard.declineDuoBoardRequest;
 exports.resumeDuoBoardPost = duoBoard.resumeDuoBoardPost;
+exports.setDuoBoardPostVisibility = duoBoard.setDuoBoardPostVisibility;
 exports.syncDuoBoardHostPresence = duoBoard.syncDuoBoardHostPresence;
 exports.completeDuoBoardPostOnJoin = duoBoard.completeDuoBoardPostOnJoin;
 

@@ -70,7 +70,7 @@ class DuoBoardService {
       'mode': mode,
       'directLanguage': directLanguage,
       'availability': availability,
-    });
+    }).timeout(const Duration(seconds: 15));
     return Map<String, dynamic>.from(result.data as Map)['postId'].toString();
   }
 
@@ -85,6 +85,18 @@ class DuoBoardService {
         .httpsCallable('resumeDuoBoardPost')
         .call({'postId': postId});
     return Map<String, dynamic>.from(result.data as Map)['resumed'] == true;
+  }
+
+  static Future<bool> setPostVisibility(
+    String postId, {
+    required bool enabled,
+  }) async {
+    final result = await _functions
+        .httpsCallable('setDuoBoardPostVisibility')
+        .call({'postId': postId, 'enabled': enabled}).timeout(
+            const Duration(seconds: 12));
+    return Map<String, dynamic>.from(result.data as Map)['discoverable'] ==
+        true;
   }
 
   static Future<DuoBoardClaim> claimNow(String postId) async {

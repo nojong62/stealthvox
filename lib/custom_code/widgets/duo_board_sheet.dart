@@ -99,7 +99,20 @@ Future<bool> showDuoBoardComposer(
                           error = null;
                         });
                         try {
-                          await DuoBoardHostPresence.instance.ensureOnline();
+                          // Presence is best-effort. A slow/unavailable Realtime
+                          // Database must not prevent the Firestore post itself
+                          // from being created.
+                          try {
+                            await DuoBoardHostPresence.instance
+                                .ensureOnline()
+                                .timeout(const Duration(seconds: 5));
+                          } on TimeoutException {
+                            debugPrint(
+                                '[DuoBoard] host presence timed out before publish');
+                          } catch (presenceError) {
+                            debugPrint(
+                                '[DuoBoard] host presence unavailable before publish: $presenceError');
+                          }
                           await DuoBoardService.publishPost(
                               roomId: roomId,
                               historyPath: historyPath,
@@ -113,7 +126,11 @@ Future<bool> showDuoBoardComposer(
                           if (sheetContext.mounted) {
                             Navigator.pop(sheetContext, true);
                           }
-                        } catch (_) {
+                        } catch (publishError) {
+                          debugPrint(
+                              '[DuoBoard] post publish failed: $publishError');
+                          unawaited(DuoBoardHostPresence.instance.postEnded());
+                          if (!sheetContext.mounted) return;
                           setLocal(() {
                             saving = false;
                             error = copy['postFailed'];
@@ -225,6 +242,37 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
       }
     } catch (_) {
       if (mounted) setState(() => _error = 'Could not delete the post.');
+    } finally {
+      if (mounted) setState(() => _claiming = null);
+    }
+  }
+
+  Future<void> _togglePostVisibility(
+      String postId, bool currentlyVisible) async {
+    setState(() {
+      _claiming = postId;
+      _error = null;
+    });
+    try {
+      if (!currentlyVisible) {
+        try {
+          await DuoBoardHostPresence.instance
+              .ensureOnline()
+              .timeout(const Duration(seconds: 5));
+        } catch (error) {
+          debugPrint('[DuoBoard] presence refresh before activation: $error');
+        }
+      }
+      await DuoBoardService.setPostVisibility(
+        postId,
+        enabled: !currentlyVisible,
+      );
+    } on FirebaseFunctionsException catch (error) {
+      if (mounted) {
+        setState(() => _error = error.message ?? _copy['visibilityFailed']);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _error = _copy['visibilityFailed']);
     } finally {
       if (mounted) setState(() => _claiming = null);
     }
@@ -376,20 +424,42 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                                 ),
                                               ),
                                               const SizedBox(width: 12),
-                                              Tooltip(
-                                                message: available
-                                                    ? _copy['active']
-                                                    : _copy['inactive'],
-                                                child: Icon(
-                                                  Icons.circle,
-                                                  size: 15,
-                                                  color: available
-                                                      ? const Color(0xFF22C55E)
-                                                      : Colors.white30,
+                                              if (mine)
+                                                IconButton(
+                                                  tooltip: available
+                                                      ? _copy['deactivatePost']
+                                                      : _copy['activatePost'],
+                                                  onPressed: _claiming == null
+                                                      ? () =>
+                                                          _togglePostVisibility(
+                                                              doc.id, available)
+                                                      : null,
+                                                  icon: Icon(
+                                                    Icons.circle,
+                                                    size: 17,
+                                                    color: available
+                                                        ? const Color(
+                                                            0xFF22C55E)
+                                                        : Colors.white30,
+                                                  ),
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                )
+                                              else
+                                                Tooltip(
+                                                  message: available
+                                                      ? _copy['active']
+                                                      : _copy['inactive'],
+                                                  child: Icon(
+                                                    Icons.circle,
+                                                    size: 15,
+                                                    color: available
+                                                        ? const Color(
+                                                            0xFF22C55E)
+                                                        : Colors.white30,
+                                                  ),
                                                 ),
-                                              ),
                                               if (mine) ...[
-                                                const SizedBox(width: 8),
                                                 IconButton(
                                                   tooltip: _copy['deletePost'],
                                                   onPressed: _claiming == null
