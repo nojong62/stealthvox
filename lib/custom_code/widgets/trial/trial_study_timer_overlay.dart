@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 
 class TrialStudyTimerOverlay extends StatefulWidget {
   const TrialStudyTimerOverlay({
@@ -84,9 +86,10 @@ class _TrialStudyTimerOverlayState extends State<TrialStudyTimerOverlay> {
   }
 
   Widget _buildEndMessage() {
+    final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
     return Container(
       color: const Color(0xCC1A1A2E),
-      child: const Center(
+      child: Center(
         child: Padding(
           padding: EdgeInsets.symmetric(horizontal: 32),
           child: Column(
@@ -95,7 +98,7 @@ class _TrialStudyTimerOverlayState extends State<TrialStudyTimerOverlay> {
               Icon(Icons.bookmark_added, size: 48, color: Color(0xFFD4AF37)),
               SizedBox(height: 16),
               Text(
-                'Your 5-minute trial has ended.\nSign up to continue.',
+                copy['trialEnded'],
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white,
@@ -106,7 +109,7 @@ class _TrialStudyTimerOverlayState extends State<TrialStudyTimerOverlay> {
               ),
               SizedBox(height: 8),
               Text(
-                'Opening login options...',
+                copy['openingLogin'],
                 style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 13),
               ),
             ],

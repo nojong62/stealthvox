@@ -3204,25 +3204,57 @@ $finalLanguageRule''';
 //   STEP 6: AI 역번역 + Firestore 저장 (백그라운드)
 //   STEP 7: 마이크 재개방
 // ====================================================================
-  String _retryPhrase(String lang) {
-    switch (lang.toLowerCase()) {
-      case 'korean':
-        return '다시 말씀해 주세요.';
-      case 'japanese':
-        return 'もう一度お願いします。';
-      case 'chinese':
-        return '请再说一遍。';
-      case 'french':
-        return 'Pardon?';
-      case 'spanish':
-        return '¿Perdón?';
-      case 'german':
-        return 'Wie bitte?';
-      default:
-        return 'Pardon?';
-    }
+  String _scenarioSpokenPhrase(String kind, String language) {
+    const phrases = <String, Map<String, String>>{
+      'retry': {
+        'English': 'Please say that again.',
+        'Korean': '다시 말씀해 주세요.',
+        'Japanese': 'もう一度お願いします。',
+        'Chinese': '请再说一遍。',
+        'Spanish': 'Por favor, repítelo.',
+        'French': 'Veuillez répéter.',
+        'German': 'Bitte sagen Sie das noch einmal.',
+        'Hindi': 'कृपया फिर से कहें।',
+        'Russian': 'Пожалуйста, повторите.',
+        'Portuguese': 'Por favor, diga novamente.',
+        'Italian': 'Per favore, ripeti.',
+        'Dutch': 'Zeg dat alstublieft nog een keer.'
+      },
+      'misheard': {
+        'English': 'Sorry, I misheard you. Please say that again.',
+        'Korean': '아, 제가 잘못 들었어요. 다시 한 번 말씀해 주세요.',
+        'Japanese': 'すみません、聞き間違えました。もう一度お願いします。',
+        'Chinese': '抱歉，我听错了。请再说一遍。',
+        'Spanish': 'Perdón, entendí mal. Repítelo, por favor.',
+        'French': 'Désolé, j’ai mal entendu. Veuillez répéter.',
+        'German':
+            'Entschuldigung, ich habe Sie falsch verstanden. Bitte wiederholen Sie das.',
+        'Hindi': 'माफ़ कीजिए, मैंने गलत सुना। कृपया फिर से कहें।',
+        'Russian': 'Извините, я неправильно расслышал. Пожалуйста, повторите.',
+        'Portuguese': 'Desculpe, ouvi errado. Por favor, diga novamente.',
+        'Italian': 'Scusa, ho capito male. Per favore, ripeti.',
+        'Dutch': 'Sorry, ik heb je verkeerd verstaan. Zeg het nog eens.'
+      },
+      'regenerate': {
+        'English': 'Let me answer again.',
+        'Korean': '그럼 다시 답해 볼게요.',
+        'Japanese': 'では、もう一度答えます。',
+        'Chinese': '那我重新回答。',
+        'Spanish': 'Déjame responder de nuevo.',
+        'French': 'Je vais répondre à nouveau.',
+        'German': 'Dann antworte ich noch einmal.',
+        'Hindi': 'मैं फिर से जवाब देता हूँ।',
+        'Russian': 'Тогда я отвечу ещё раз.',
+        'Portuguese': 'Vou responder novamente.',
+        'Italian': 'Allora rispondo di nuovo.',
+        'Dutch': 'Dan antwoord ik opnieuw.'
+      },
+    };
+    final selected = phrases[kind] ?? phrases['retry']!;
+    return selected[language.trim()] ?? selected['English']!;
   }
 
+  String _retryPhrase(String lang) => _scenarioSpokenPhrase('retry', lang);
   Future<void> _speakRetryAndListen() async {
     if (!mounted || !_isConversationActive) return;
     final lang = FFAppState().targetLang.isNotEmpty
@@ -3529,7 +3561,7 @@ $finalLanguageRule''';
           isUser: false,
           onLog: _log,
         );
-        misheardTts.addText("아 제가 잘못 들었어요. 다시 한 번 말해주세요.");
+        misheardTts.addText(_scenarioSpokenPhrase('misheard', targetLangName));
         int misheardTicks = 0;
         while ((misheardTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
             mounted) {
@@ -3583,7 +3615,8 @@ $finalLanguageRule''';
           isUser: false,
           onLog: _log,
         );
-        regenPhraseTts.addText("그럼 다시 답해 볼게요.");
+        regenPhraseTts
+            .addText(_scenarioSpokenPhrase('regenerate', targetLangName));
         var regenMsgs = _localMessages.where((m) {
           if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
           final target = (m['target'] ?? '').toString().trim();
@@ -4419,8 +4452,14 @@ $finalLanguageRule''';
                     right: 0,
                     top: 12,
                     child: Center(
-                      child:
+                      child: Column(
+                        children: [
+                          SessionEndingSoonNotice(
+                            message: _uiCopy['sessionEndingSoon'],
+                          ),
                           SessionSavedNotice(visible: _rolloverNoticeVisible),
+                        ],
+                      ),
                     ),
                   ),
                 ],

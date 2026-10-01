@@ -6,6 +6,7 @@ import '/auth/social_auth_service.dart';
 import '/components/social_login_modal.dart';
 import '/custom_code/widgets/auth_progress_view.dart';
 import '/custom_code/widgets/shared_social_button.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 
@@ -37,6 +38,8 @@ class TrialSignupSheet extends StatefulWidget {
 }
 
 class _TrialSignupSheetState extends State<TrialSignupSheet> {
+  OriginSurfaceCopy get _copy =>
+      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -60,7 +63,7 @@ class _TrialSignupSheetState extends State<TrialSignupSheet> {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Unable to check your login status. Please try again.';
+        _errorMessage = _copy['loginStatusFailed'];
       });
     } catch (e) {
       debugPrint('[TrialSignupSheet] login error: $e');
@@ -90,12 +93,12 @@ class _TrialSignupSheetState extends State<TrialSignupSheet> {
   String _friendlyError(Object e) {
     final msg = e.toString();
     if (msg.contains('cancelled') || msg.contains('cancel')) {
-      return 'Login canceled.';
+      return _copy['loginCanceled'];
     }
     if (msg.contains('network')) {
-      return 'Network error.';
+      return _copy['networkError'];
     }
-    return 'Login failed. Please try again.';
+    return _copy['loginFailed'];
   }
 
   @override
@@ -124,7 +127,7 @@ class _TrialSignupSheetState extends State<TrialSignupSheet> {
             ),
             const SizedBox(height: 24),
             Text(
-              'Sign Up to Continue',
+              _copy['signupToContinue'],
               textAlign: TextAlign.center,
               style: theme.titleMedium.override(
                 fontFamily: theme.titleMediumFamily,
@@ -145,7 +148,7 @@ class _TrialSignupSheetState extends State<TrialSignupSheet> {
               )
             else ...[
               SharedSocialButton(
-                label: 'Continue with Kakao',
+                label: _copy['continueKakao'],
                 backgroundColor: const Color(0xFFFEE500),
                 textColor: const Color(0xFF191919),
                 icon: Image.asset(
@@ -162,7 +165,7 @@ class _TrialSignupSheetState extends State<TrialSignupSheet> {
               ),
               const SizedBox(height: 12),
               SharedSocialButton(
-                label: 'Continue with Google',
+                label: _copy['continueGoogle'],
                 backgroundColor: Colors.white,
                 textColor: Colors.black87,
                 border: Border.all(color: Colors.grey.shade300),
@@ -180,7 +183,7 @@ class _TrialSignupSheetState extends State<TrialSignupSheet> {
               ),
               const SizedBox(height: 12),
               SharedSocialButton(
-                label: 'Sign Up with Email',
+                label: _copy['signupEmail'],
                 backgroundColor: const Color(0xFF2C2C32),
                 textColor: Colors.white,
                 border: Border.all(color: Colors.white24),

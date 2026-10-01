@@ -20,6 +20,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '/custom_code/widgets/trial/trial_flow_state.dart';
 import '/custom_code/services/study_access.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 
 /// FlutterFlow Custom Action 등록용 더미 함수.
 Future billingTicker() async {}
@@ -732,16 +733,19 @@ void dismissRoutesAbove(BuildContext context) {
 /// 스토어로 보내는 길목에서는 꺼서 같은 버튼이 두 번 나오지 않게 한다.
 void showBillingBlockedNotice(
   BuildContext context, {
-  String message = '잔여 시간이 모두 소진되었습니다.',
+  String? message,
   bool offerStore = true,
 }) {
+  final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+  final effectiveMessage = message ?? copy['remainingTimeExhausted'];
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
       backgroundColor: const Color(0xFF1C1C1E),
-      content: Text(message, style: const TextStyle(color: Colors.white)),
+      content:
+          Text(effectiveMessage, style: const TextStyle(color: Colors.white)),
       action: offerStore
           ? SnackBarAction(
-              label: '충전',
+              label: copy['charge'],
               textColor: const Color(0xFF60A5FA),
               onPressed: () => context.pushNamed('Store'),
             )
@@ -922,8 +926,9 @@ class SessionSavedNotice extends StatelessWidget {
             color: Colors.black.withValues(alpha: 0.72),
             borderRadius: BorderRadius.circular(18),
           ),
-          child: const Text(
-            '대화가 저장되었습니다',
+          child: Text(
+            OriginSurfaceCopy.forLanguage(
+                FFAppState().chatLang)['sessionSaved'],
             style: TextStyle(
               color: Colors.white,
               fontSize: 13,
@@ -931,6 +936,54 @@ class SessionSavedNotice extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 10분 대화 세션의 마지막 구간에 보여 주는 종료 준비 안내.
+///
+/// 세션 카운트다운과 같은 notifier를 구독한다. 별도 타이머를 두면 idle·백그라운드
+/// 복귀 때 안내 시점이 실제 세션 시계와 어긋날 수 있다.
+class SessionEndingSoonNotice extends StatelessWidget {
+  const SessionEndingSoonNotice({
+    super.key,
+    required this.message,
+    this.showAtSeconds = 30,
+  });
+
+  final String message;
+  final int showAtSeconds;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: ValueListenableBuilder<int>(
+        valueListenable: BillingTicker.instance.sessionRemainingNotifier,
+        builder: (_, remaining, __) {
+          final visible = remaining > 0 && remaining <= showAtSeconds;
+          return AnimatedOpacity(
+            opacity: visible ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 220),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF92400E).withValues(alpha: 0.92),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                message,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

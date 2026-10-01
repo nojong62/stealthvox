@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '/custom_code/services/app_update_policy.dart';
 import '/flutter_flow/flutter_flow_util.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 
 /// 모든 라우트 위에서 동작하는 앱 Update 게이트.
 ///
@@ -26,7 +27,8 @@ class AppUpdateGate extends StatefulWidget {
 class _AppUpdateGateState extends State<AppUpdateGate> {
   bool _recommendedDismissedForSession = false;
 
-  bool get _english => FFAppState().chatLang.trim() != 'Korean';
+  OriginSurfaceCopy get _copy =>
+      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
 
   Future<void> _openStore() async {
     var opened = false;
@@ -53,11 +55,7 @@ class _AppUpdateGateState extends State<AppUpdateGate> {
     if (!opened && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            _english
-                ? 'Could not open the Play Store.'
-                : 'Play Store를 열 수 없습니다.',
-          ),
+          content: Text(_copy['playStoreUnavailable']),
         ),
       );
     }
@@ -91,14 +89,14 @@ class _AppUpdateGateState extends State<AppUpdateGate> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                     title: Text(
-                      _english ? 'Update Available' : '업데이트 안내',
+                      _copy['updateAvailable'],
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     content: Text(
-                      widget.decision.message,
+                      _copy['updateMessage'],
                       style: const TextStyle(color: Colors.white70),
                     ),
                     actions: [
@@ -108,14 +106,14 @@ class _AppUpdateGateState extends State<AppUpdateGate> {
                             () => _recommendedDismissedForSession = true,
                           ),
                           child: Text(
-                            _english ? 'Later' : '나중에',
+                            _copy['later'],
                             style: const TextStyle(color: Colors.white60),
                           ),
                         ),
                       TextButton(
                         onPressed: _openStore,
                         child: Text(
-                          _english ? 'Update' : '업데이트',
+                          _copy['update'],
                           style: const TextStyle(
                             color: Color(0xFF0A84FF),
                             fontWeight: FontWeight.bold,

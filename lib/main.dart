@@ -191,6 +191,12 @@ class _MyAppState extends State<MyApp> {
 
   final authUserSub = authenticatedUserStream.listen((user) {
     revenue_cat.login(user?.uid);
+    // A token may have been registered before the member changed Chat Lang.
+    // Refresh only for signed-in members; anonymous board visitors never own
+    // notification tokens.
+    if (user != null) {
+      unawaited(DuoBoardPushService.refreshChatLanguageForCurrentMember());
+    }
   });
 
   @override

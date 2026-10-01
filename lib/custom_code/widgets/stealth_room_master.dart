@@ -30,6 +30,7 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/dialog_brain_model.dart';
 import '/custom_code/services/talk_ui_localization.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/guide_ui_localization.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
@@ -93,6 +94,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       ? 'English'
       : FFAppState().chatLang.trim();
   TalkUiCopy get _setupCopy => TalkUiCopy.forLanguage(_chatLanguage);
+  OriginSurfaceCopy get _surfaceCopy =>
+      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
 
   final AudioRecorder _circleAudioRecorder = AudioRecorder();
   late Future<void> _circleAudioReady;
@@ -267,7 +270,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       dismissRoutesAbove(context);
       showBillingBlockedNotice(
         context,
-        message: '잔여 시간이 모두 소진되어 대화를 저장하고 종료했습니다.',
+        message: _surfaceCopy['timeExhaustedRoom'],
         offerStore: false,
       );
       context.pushNamed('Store');
@@ -1170,8 +1173,8 @@ Return ONLY valid JSON: {"name":"..."}.
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(color: const Color(0x33FFFFFF)),
                 ),
-                child: const Text(
-                  "STUDY ROOM",
+                child: Text(
+                  _surfaceCopy['studyRoom'].toUpperCase(),
                   maxLines: 1,
                   softWrap: false,
                   style: TextStyle(
@@ -1207,7 +1210,7 @@ Return ONLY valid JSON: {"name":"..."}.
   /// 뒤로가기와 사용설명서가 이미 양끝을 잡고 있어 자리가 좁아, 글자만 줄인다.
   Widget _buildStudyRoomChip() {
     return Tooltip(
-      message: '공부방 (Study Room)',
+      message: _surfaceCopy['studyRoom'],
       child: GestureDetector(
         onTap: () => context.pushNamed('ChatHistory'),
         behavior: HitTestBehavior.opaque,
@@ -1311,8 +1314,8 @@ Return ONLY valid JSON: {"name":"..."}.
                       minimumSize: const Size(0, 40),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
-                    child: const Text(
-                      'Guide',
+                    child: Text(
+                      _surfaceCopy['guide'],
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.bold,

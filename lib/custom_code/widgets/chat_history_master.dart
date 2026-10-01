@@ -50,6 +50,7 @@ import '/custom_code/services/speech_reconstruction.dart';
 import '/custom_code/services/duo_study_state.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/talk_ui_localization.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/duo_final_transcription.dart';
 import '/custom_code/services/duo_final_transcription_runner.dart';
@@ -140,6 +141,9 @@ class ChatHistoryMaster extends StatefulWidget {
 class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     with SingleTickerProviderStateMixin, BillingIdleMixin<ChatHistoryMaster> {
   // 📦 [Box 3: 상태 변수 - 기본 UI 및 로딩]
+  OriginSurfaceCopy get _surfaceCopy =>
+      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+
   bool isPracticeMode = false;
   bool isPaused = false;
   double _fontScale = 1.0;
@@ -498,7 +502,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     dismissRoutesAbove(context);
     showBillingBlockedNotice(
       context,
-      message: '잔여 시간이 모두 소진되어 공부방을 닫았습니다.',
+      message: _surfaceCopy['timeExhaustedStudy'],
       offerStore: false,
     );
     context.pushReplacementNamed('Store');
@@ -614,17 +618,20 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1C1C1E),
-        title: const Text('대화 삭제', style: TextStyle(color: Colors.white)),
-        content: const Text('이 대화 전체를 삭제할까요?\n복구할 수 없습니다.',
+        title: Text(_surfaceCopy['delete'],
+            style: const TextStyle(color: Colors.white)),
+        content: Text(_surfaceCopy['deleteConversationQuestion'],
             style: TextStyle(color: Colors.white70)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('취소', style: TextStyle(color: Colors.white54)),
+            child: Text(_surfaceCopy['cancel'],
+                style: const TextStyle(color: Colors.white54)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
+            child: Text(_surfaceCopy['delete'],
+                style: const TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -3123,7 +3130,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         size: 24,
       ),
       onPressed: () => _showTutoringPopup(docId, baseText),
-      tooltip: "실전 튜터링",
+      tooltip: _surfaceCopy['practicalTutoring'],
     );
   }
 
@@ -3254,8 +3261,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
             children: [
               const Icon(Icons.school_rounded, color: Colors.amber, size: 18),
               const SizedBox(width: 8),
-              const Text(
-                "실전 튜터링",
+              Text(
+                _surfaceCopy['practicalTutoring'],
                 style: TextStyle(
                     color: Colors.amber,
                     fontSize: 14,
@@ -3303,9 +3310,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
             ),
             const SizedBox(height: 6),
             Text(
-              '위 문장을 '
-              '${koreanLanguageDisplayName(_sessionTargetLangName())}로 '
-              '말해보세요',
+              _surfaceCopy['speakSentenceIn'].replaceAll('{language}',
+                  koreanLanguageDisplayName(_sessionTargetLangName())),
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white38, fontSize: 11),
             ),
@@ -3387,17 +3393,17 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
+                    Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Padding(
+                          const Padding(
                             padding: EdgeInsets.only(top: 1),
                             child: Icon(Icons.check_circle_outline,
                                 color: Colors.greenAccent, size: 14),
                           ),
                           SizedBox(width: 6),
                           Flexible(
-                            child: Text("Correction Result",
+                            child: Text(_surfaceCopy['correctionResult'],
                                 style: TextStyle(
                                     color: Colors.greenAccent,
                                     fontSize: 12,
@@ -3427,17 +3433,17 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Row(
+                      Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Padding(
+                            const Padding(
                               padding: EdgeInsets.only(top: 1),
                               child: Icon(Icons.lightbulb_outline,
                                   color: Colors.amber, size: 14),
                             ),
                             SizedBox(width: 6),
                             Flexible(
-                              child: Text("더 자연스러운 표현",
+                              child: Text(_surfaceCopy['moreNatural'],
                                   style: TextStyle(
                                       color: Colors.amber,
                                       fontSize: 12,
@@ -3520,7 +3526,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
               children: [
                 TextButton(
                   onPressed: _appIsRecording ? null : closeAccordion,
-                  child: const Text("Close",
+                  child: Text(_surfaceCopy['close'],
                       style: TextStyle(color: Colors.white54, fontSize: 14)),
                 ),
                 Flexible(
@@ -3537,7 +3543,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                             _generateAppText(baseText);
                           },
                     icon: const Icon(Icons.refresh, size: 15),
-                    label: const Text("Another Sentence",
+                    label: Text(_surfaceCopy['anotherSentence'],
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -3888,7 +3894,7 @@ RULES — follow exactly:
                 const SizedBox(height: 22),
                 OutlinedButton(
                   onPressed: _retryDuoPreparation,
-                  child: const Text('다시 시도'),
+                  child: Text(_surfaceCopy['retry']),
                 ),
               ],
             ],
@@ -3942,7 +3948,7 @@ RULES — follow exactly:
                     children: [
                       IconButton(
                         icon: const Icon(Icons.close, color: Colors.white70),
-                        tooltip: '다시 고르기',
+                        tooltip: _surfaceCopy['chooseAgain'],
                         onPressed: _backToStudySelect,
                         padding: EdgeInsets.zero,
                         constraints:
@@ -4020,7 +4026,7 @@ RULES — follow exactly:
                               const SizedBox(height: 14),
                               OutlinedButton(
                                 onPressed: _retryMessageLoad,
-                                child: const Text('다시 불러오기'),
+                                child: Text(_surfaceCopy['reload']),
                               ),
                             ],
                           ),
@@ -4045,8 +4051,8 @@ RULES — follow exactly:
                         padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
                         children: [
                           if (topicHeader != null) topicHeader,
-                          const Center(
-                            child: Text("데이터가 없습니다.",
+                          Center(
+                            child: Text(_surfaceCopy['noData'],
                                 style: TextStyle(color: Colors.white54)),
                           ),
                           const SizedBox(height: 24),
@@ -4219,7 +4225,7 @@ RULES — follow exactly:
             ),
             const SizedBox(width: 6),
             Flexible(
-              child: Text('번역 중',
+              child: Text(_surfaceCopy['translating'],
                   style: TextStyle(
                       color: Colors.white38, fontSize: 11 * _fontScale)),
             ),
@@ -4239,7 +4245,8 @@ RULES — follow exactly:
           const SizedBox(width: 4),
           Flexible(
             child: Text(
-              '원문 그대로 · ${_targetFailureLabel(failure)}',
+              _surfaceCopy['originalAsIs']
+                  .replaceAll('{reason}', _targetFailureLabel(failure)),
               style: TextStyle(color: warn, fontSize: 11 * _fontScale),
               overflow: TextOverflow.ellipsis,
             ),
@@ -4251,7 +4258,7 @@ RULES — follow exactly:
             child: Padding(
               // 배지 글씨가 작아서 그냥 두면 손가락으로 못 누른다.
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-              child: Text('다시 시도',
+              child: Text(_surfaceCopy['retry'],
                   style: TextStyle(
                       color: warn,
                       fontSize: 11 * _fontScale,
@@ -4629,7 +4636,7 @@ RULES — follow exactly:
                 onPressed: _isOpeningAdjacentHistory
                     ? null
                     : () => _openAdjacentHistoryInSameMode(-1),
-                tooltip: '같은 모드의 이전 대화',
+                tooltip: _surfaceCopy['previousConversation'],
                 icon: _isOpeningAdjacentHistory && _openingHistoryOffset == -1
                     ? const SizedBox(
                         width: 20,
@@ -4649,7 +4656,7 @@ RULES — follow exactly:
                 onPressed: _isOpeningAdjacentHistory
                     ? null
                     : () => _openAdjacentHistoryInSameMode(1),
-                tooltip: '같은 모드의 다음 대화',
+                tooltip: _surfaceCopy['nextConversation'],
                 icon: _isOpeningAdjacentHistory && _openingHistoryOffset == 1
                     ? const SizedBox(
                         width: 20,
@@ -4668,7 +4675,7 @@ RULES — follow exactly:
               const Spacer(),
               IconButton(
                 onPressed: _deleteHistoryRoom,
-                tooltip: '대화 삭제',
+                tooltip: _surfaceCopy['deleteConversation'],
                 icon: const Icon(
                   Icons.delete_outline_rounded,
                   color: Colors.white54,
@@ -4742,14 +4749,14 @@ RULES — follow exactly:
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1F2937),
-        title: Text('누구 얘기인가요?',
+        title: Text(_surfaceCopy['whoTalking'],
             style: TextStyle(color: Colors.white, fontSize: 16 * _fontScale)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '이 줄을 영어로 옮길 때 주어로 씁니다.\n말한 내용은 바뀌지 않습니다.',
+              _surfaceCopy['subjectExplanation'],
               style:
                   TextStyle(color: Colors.white70, fontSize: 13 * _fontScale),
             ),
@@ -4758,8 +4765,8 @@ RULES — follow exactly:
               controller: controller,
               autofocus: true,
               style: TextStyle(color: Colors.white, fontSize: 15 * _fontScale),
-              decoration: const InputDecoration(
-                hintText: '예: 그 학생은',
+              decoration: InputDecoration(
+                hintText: _surfaceCopy['whoHint'],
                 hintStyle: TextStyle(color: Colors.white38),
               ),
             ),
@@ -4768,11 +4775,12 @@ RULES — follow exactly:
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('취소', style: TextStyle(color: Colors.white54))),
+              child: Text(_surfaceCopy['cancel'],
+                  style: const TextStyle(color: Colors.white54))),
           TextButton(
               onPressed: () => Navigator.pop(ctx, controller.text),
-              child:
-                  const Text('저장', style: TextStyle(color: Color(0xFF60A5FA)))),
+              child: Text(_surfaceCopy['save'],
+                  style: const TextStyle(color: Color(0xFF60A5FA)))),
         ],
       ),
     );
@@ -4803,7 +4811,9 @@ RULES — follow exactly:
         size: 24,
       ),
       onPressed: editable ? () => _beginEditMessage(doc, rawOriginal) : null,
-      tooltip: editable ? '대사 수정' : '확정된 대화입니다',
+      tooltip: editable
+          ? _surfaceCopy['editLine']
+          : _surfaceCopy['finalizedConversation'],
     );
   }
 
@@ -4897,7 +4907,7 @@ RULES — follow exactly:
             isDense: true,
             border: InputBorder.none,
             contentPadding: EdgeInsets.zero,
-            hintText: '내용을 모두 지우면 이 대사가 삭제됩니다',
+            hintText: _surfaceCopy['deleteLineHint'],
             hintStyle:
                 TextStyle(color: Colors.white30, fontSize: 13 * _fontScale),
           ),
@@ -4908,7 +4918,7 @@ RULES — follow exactly:
           children: [
             TextButton(
               onPressed: _isSavingEdit ? null : _cancelEditMessage,
-              child: const Text('취소',
+              child: Text(_surfaceCopy['cancel'],
                   style: TextStyle(color: Colors.white54, fontSize: 13)),
             ),
             TextButton(
@@ -4919,7 +4929,7 @@ RULES — follow exactly:
                       height: 14,
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: Colors.amber))
-                  : const Text('저장',
+                  : Text(_surfaceCopy['save'],
                       style: TextStyle(
                           color: Colors.amber,
                           fontSize: 13,
@@ -5149,8 +5159,8 @@ RULES — follow exactly:
 
       if (existing.docs.isNotEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("이미 Keepers에 저장된 표현입니다.",
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(_surfaceCopy['keeperExists'],
                 style: TextStyle(fontWeight: FontWeight.bold)),
             backgroundColor: Color(0xFF6B7280),
             duration: Duration(seconds: 1),
@@ -5167,14 +5177,16 @@ RULES — follow exactly:
         'source_message_id': messageDocId,
         'source_room_id': widget.historyDoc.id,
         'source_room_name': roomName,
+        'native_lang': _sessionNativeLangName(),
+        'target_lang': _sessionTargetLangName(),
         'created_at': FieldValue.serverTimestamp(),
         'pinned_at': null,
         'is_deleted': false,
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("Keepers에 저장되었습니다. ⭐",
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_surfaceCopy['keeperSaved'],
               style: TextStyle(fontWeight: FontWeight.bold)),
           backgroundColor: Color(0xFFD97706),
           duration: Duration(seconds: 1),
@@ -5183,8 +5195,8 @@ RULES — follow exactly:
     } catch (e) {
       debugPrint('[saveToKeepers] $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("저장에 실패했습니다.",
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_surfaceCopy['saveFailed'],
               style: TextStyle(fontWeight: FontWeight.bold)),
           backgroundColor: Colors.redAccent,
           duration: Duration(seconds: 1),
@@ -5241,8 +5253,8 @@ RULES — follow exactly:
                 _buildStudyRoomPill(),
               ],
             ),
-            const Text(
-              "무엇으로 공부할까요?",
+            Text(
+              _surfaceCopy['chooseStudy'],
               textAlign: TextAlign.center,
               style: TextStyle(
                   color: Colors.white,
@@ -5258,7 +5270,7 @@ RULES — follow exactly:
                   children: [
                     _buildStudyPathCard(
                       title: "PRACTICE",
-                      subtitle: "역할을 바꿔 가며 대화 연습",
+                      subtitle: _surfaceCopy['rolePractice'],
                       icon: Icons.swap_horiz_rounded,
                       color: const Color(0xFF4ADE80),
                       locked: locked,
@@ -5272,11 +5284,13 @@ RULES — follow exactly:
                             ? ""
                             : "Larry King–style Plain Spoken English",
                         title: "Clear & Easy",
-                        subtitle: "대화 소재로 만든 말하기 연습문",
+                        subtitle: _surfaceCopy['speechPractice'],
                         icon: Icons.record_voice_over_rounded,
                         color: const Color(0xFF38BDF8),
                         preview: _mySpeech,
-                        emptyHint: locked ? access.gateLabel : "눌러서 만들기",
+                        emptyHint: locked
+                            ? access.gateLabel
+                            : _surfaceCopy['tapToCreate'],
                         error: _mySpeechError,
                         locked: locked,
                         isLoading: _isBuildingMySpeech,
@@ -5289,11 +5303,13 @@ RULES — follow exactly:
                             ? ""
                             : "Trevor Noah–style Natural Conversational English",
                         title: "Natural & Sharp",
-                        subtitle: "같은 생각을 맥락과 연결로 자연스럽게",
+                        subtitle: _surfaceCopy['naturalPractice'],
                         icon: Icons.auto_awesome,
                         color: const Color(0xFFFBBF24),
                         preview: _nativeEnglish,
-                        emptyHint: locked ? access.gateLabel : "눌러서 만들기",
+                        emptyHint: locked
+                            ? access.gateLabel
+                            : _surfaceCopy['tapToCreate'],
                         error: _nativeEnglishError,
                         locked: locked,
                         isLoading: _isBuildingNativeEnglish,
@@ -5308,7 +5324,7 @@ RULES — follow exactly:
             ),
             TextButton(
               onPressed: _exitShadowing,
-              child: const Text("나가기",
+              child: Text(_surfaceCopy['exit'],
                   style: TextStyle(color: Colors.white38, fontSize: 14)),
             ),
           ],
@@ -5402,7 +5418,7 @@ RULES — follow exactly:
                   style: const TextStyle(color: Colors.white38, fontSize: 12)),
               if (isLoading) ...[
                 const SizedBox(height: 10),
-                const Text("만드는 중...",
+                Text(_surfaceCopy['creating'],
                     style: TextStyle(color: Colors.white54, fontSize: 13)),
               ] else if (body.isNotEmpty) ...[
                 const SizedBox(height: 10),
@@ -5422,7 +5438,7 @@ RULES — follow exactly:
                     Icon(Icons.refresh_rounded, color: color, size: 15),
                     const SizedBox(width: 7),
                     Expanded(
-                      child: Text("$error — 눌러서 다시 시도",
+                      child: Text('$error — ${_surfaceCopy['tapToRetry']}',
                           style: const TextStyle(
                               color: Colors.white54,
                               fontSize: 12,
@@ -5618,7 +5634,7 @@ RULES — follow exactly:
                 children: [
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.white70),
-                    tooltip: '학습 경로 다시 고르기',
+                    tooltip: _surfaceCopy['chooseStudyAgain'],
                     onPressed: _backToStudySelect,
                   ),
                   Expanded(
@@ -5842,12 +5858,12 @@ RULES — follow exactly:
                                       !lineIsAi &&
                                       _isAutoRecording) ...[
                                     const SizedBox(height: 6),
-                                    Row(children: const [
+                                    Row(children: [
                                       Icon(Icons.graphic_eq,
                                           color: Colors.greenAccent, size: 15),
                                       SizedBox(width: 5),
                                       Flexible(
-                                        child: Text("녹음 중...",
+                                        child: Text(_surfaceCopy['recording'],
                                             style: TextStyle(
                                                 color: Colors.greenAccent,
                                                 fontSize: 11)),
@@ -5858,12 +5874,12 @@ RULES — follow exactly:
                                       !lineIsAi &&
                                       _showRetryHint) ...[
                                     const SizedBox(height: 6),
-                                    Row(children: const [
+                                    Row(children: [
                                       Icon(Icons.mic_off,
                                           color: Colors.orange, size: 15),
                                       SizedBox(width: 5),
                                       Flexible(
-                                        child: Text("끝까지 다시 읽어 주세요 🎙",
+                                        child: Text(_surfaceCopy['readToEnd'],
                                             style: TextStyle(
                                                 color: Colors.orange,
                                                 fontSize: 11)),
@@ -5872,12 +5888,12 @@ RULES — follow exactly:
                                   ],
                                   if (isCurrent && lineIsAi && isPlaying) ...[
                                     const SizedBox(height: 6),
-                                    Row(children: const [
+                                    Row(children: [
                                       Icon(Icons.volume_up,
                                           color: Colors.amber, size: 15),
                                       SizedBox(width: 5),
                                       Flexible(
-                                        child: Text("AI 재생 중...",
+                                        child: Text(_surfaceCopy['aiPlaying'],
                                             style: TextStyle(
                                                 color: Colors.amber,
                                                 fontSize: 11)),
@@ -5920,7 +5936,9 @@ RULES — follow exactly:
                               size: 18,
                             ),
                             label: Text(
-                              _tutorPlayingFullback ? "정지" : "Play all",
+                              _tutorPlayingFullback
+                                  ? _surfaceCopy['stop']
+                                  : _surfaceCopy['playAll'],
                               style:
                                   const TextStyle(fontWeight: FontWeight.bold),
                             ),
@@ -5940,7 +5958,7 @@ RULES — follow exactly:
                         Expanded(
                           child: ElevatedButton.icon(
                             icon: const Icon(Icons.replay_rounded, size: 18),
-                            label: const Text("Start over",
+                            label: Text(_surfaceCopy['startOver'],
                                 style: TextStyle(fontWeight: FontWeight.bold)),
                             style: ElevatedButton.styleFrom(
                               backgroundColor:
@@ -5989,7 +6007,7 @@ RULES — follow exactly:
                     const SizedBox(height: 10),
                     TextButton(
                       onPressed: _exitShadowing,
-                      child: const Text("종료",
+                      child: Text(_surfaceCopy['end'],
                           style:
                               TextStyle(color: Colors.white38, fontSize: 14)),
                     ),
@@ -7090,7 +7108,9 @@ RULES — follow exactly:
               //   도는 중에는 잠근다 — 모드·보이스와 같은 규칙이다.
               const SizedBox(height: 14),
               _p3PrimaryButton(
-                started ? '▶ Start again' : '▶ Start',
+                started
+                    ? '▶ ${_surfaceCopy['startAgain']}'
+                    : '▶ ${_surfaceCopy['start']}',
                 _p3Busy ? null : () => unawaited(_startP3Speaking()),
               ),
               const SizedBox(height: 14),
@@ -7106,8 +7126,8 @@ RULES — follow exactly:
                     //   귀로 따라오게 하는 연습이라 위쪽에 숫자가 있으면 눈이
                     //   먼저 간다. 호흡 위치는 문장 패널 안 카운터가 알린다.
                     if (_p3PracticeMode == P3PracticeMode.echoing)
-                      const Text(
-                        'Read it in one breath',
+                      Text(
+                        _surfaceCopy['readOneBreath'],
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: Colors.white54,
@@ -7276,8 +7296,8 @@ RULES — follow exactly:
                             color: _p3BreathAccentColor.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(99),
                           ),
-                          child: const Text(
-                            'READING',
+                          child: Text(
+                            _surfaceCopy['reading'].toUpperCase(),
                             style: TextStyle(
                               color: _p3BreathAccentColor,
                               fontSize: 9,
@@ -7332,8 +7352,8 @@ RULES — follow exactly:
       ),
       child: Row(
         children: [
-          const Text(
-            'VOICE',
+          Text(
+            _surfaceCopy['voice'].toUpperCase(),
             style: TextStyle(
               color: Colors.white38,
               fontSize: 10,
@@ -8318,7 +8338,7 @@ RULES — follow exactly:
   /// 돌아서, 방이 정리되어야 차감이 멈춘다.
   Widget _buildStudyRoomPill() {
     return Tooltip(
-      message: '공부방 (Study Room)',
+      message: _surfaceCopy['studyRoom'],
       child: GestureDetector(
         onTap: () => context.pushReplacementNamed('ChatHistory'),
         behavior: HitTestBehavior.opaque,

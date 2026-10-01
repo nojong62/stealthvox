@@ -4,6 +4,26 @@ const admin = require('firebase-admin');
 const db = () => admin.firestore();
 const badTopic = /(https?:\/\/|www\.|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b\d{2,3}[- .]?\d{3,4}[- .]?\d{4}\b|시발|씨발|섹스|강간|마약|살인|fuck|porn|rape)/iu;
 
+const duoRequestNotificationCopy = {
+  English: {title: 'StealthVox · Duo request', body: topic => `Someone is waiting to talk about “${topic}”.`},
+  Korean: {title: 'StealthVox · Duo 요청', body: topic => `“${topic}”를 원하는 사람이 기다리고 있습니다.`},
+  Japanese: {title: 'StealthVox · Duoリクエスト', body: topic => `「${topic}」について話したい人が待っています。`},
+  Chinese: {title: 'StealthVox · Duo 请求', body: topic => `有人正在等待讨论“${topic}”。`},
+  Spanish: {title: 'StealthVox · Solicitud Duo', body: topic => `Alguien espera para hablar sobre “${topic}”.`},
+  French: {title: 'StealthVox · Demande Duo', body: topic => `Quelqu’un attend pour parler de « ${topic} ».`},
+  German: {title: 'StealthVox · Duo-Anfrage', body: topic => `Jemand wartet, um über „${topic}“ zu sprechen.`},
+  Hindi: {title: 'StealthVox · Duo अनुरोध', body: topic => `कोई “${topic}” पर बात करने के लिए इंतज़ार कर रहा है।`},
+  Russian: {title: 'StealthVox · Duo-запрос', body: topic => `Кто-то ждёт, чтобы поговорить о «${topic}».`},
+  Portuguese: {title: 'StealthVox · Solicitação Duo', body: topic => `Alguém está esperando para falar sobre “${topic}”.`},
+  Italian: {title: 'StealthVox · Richiesta Duo', body: topic => `Qualcuno aspetta per parlare di “${topic}”.`},
+  Dutch: {title: 'StealthVox · Duo-verzoek', body: topic => `Iemand wacht om over “${topic}” te praten.`},
+};
+
+function notificationCopyFor(language) {
+  return duoRequestNotificationCopy[String(language || '').trim()] ||
+      duoRequestNotificationCopy.English;
+}
+
 function text(value, max) {
   const out = String(value || '').trim().replace(/\s+/g, ' ');
   if (out.length < 2 || out.length > max || badTopic.test(out)) {
@@ -51,6 +71,30 @@ exports.publishDuoBoardPost = functions.https.onCall(async (data, context) => {
     }, {merge: true});
   });
   return {postId: postRef.id};
+});
+
+exports.withdrawDuoBoardPost = functions.https.onCall(async (data, context) => {
+  const uid = uidOf(context);
+  const postId = String(data.postId || '').trim();
+  if (!postId) throw new functions.https.HttpsError('invalid-argument', 'postId가 필요합니다.');
+  const postRef = db().collection('duo_board_posts').doc(postId);
+  const runtimeRef = db().collection('duo_board_runtime').doc(postId);
+  const requestRef = db().collection('duo_board_requests').doc(postId);
+  await db().runTransaction(async tx => {
+    const [post, request] = await Promise.all([tx.get(postRef), tx.get(requestRef)]);
+    if (!post.exists || post.get('ownerUid') !== uid || post.get('active') !== true) {
+      throw new functions.https.HttpsError('not-found', '삭제할 수 있는 본인 글이 아닙니다.');
+    }
+    tx.update(postRef, {active: false, withdrawnAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()});
+    tx.delete(runtimeRef);
+    if (request.exists && request.get('status') === 'waiting') {
+      tx.update(requestRef, {status: 'cancelled', cancelledAt: admin.firestore.FieldValue.serverTimestamp()});
+      tx.set(db().collection('duo_board_requesters').doc(request.get('requesterUid')),
+          {status: 'cancelled', updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
+    }
+  });
+  return {withdrawn: true};
 });
 
 exports.claimDuoBoardPost = functions.https.onCall(async (data, context) => {
@@ -146,17 +190,20 @@ exports.requestDuoBoardPost = functions.https.onCall(async (data, context) => {
   const tokens = await db().collection('users').doc(ownerUid)
       .collection('fcm_tokens').get();
   const tokenDocs = tokens.docs.filter(d => Boolean(d.get('token')));
-  const tokenValues = tokenDocs.map(d => d.get('token'));
-  if (tokenValues.length) {
-    const response = await admin.messaging().sendEachForMulticast({
-      tokens: tokenValues,
-      notification: {
-        title: 'StealthVox · Duo 요청',
-        body: `“${topic}”를 원하는 사람이 기다리고 있습니다.`,
-      },
-      data: {type: 'duo_board_request', requestId: postId},
-      android: {priority: 'high'},
-    });
+  if (tokenDocs.length) {
+    const response = await admin.messaging().sendEach(
+        tokenDocs.map(doc => {
+          // chatLanguage is the Lobby setting. originLanguage is read only
+          // for previously registered installations.
+          const copy = notificationCopyFor(
+              doc.get('chatLanguage') || doc.get('originLanguage'));
+          return {
+            token: doc.get('token'),
+            notification: {title: copy.title, body: copy.body(topic)},
+            data: {type: 'duo_board_request', requestId: postId},
+            android: {priority: 'high'},
+          };
+        }));
     const invalidCodes = new Set([
       'messaging/invalid-registration-token',
       'messaging/registration-token-not-registered',

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class TermsResult {
@@ -57,6 +58,9 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
   bool _ageConfirmed = false;
   bool _marketingAccepted = false;
 
+  OriginSurfaceCopy get _copy =>
+      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+
   bool get _useEnglishLegalDocs => FFAppState().chatLang.trim() != 'Korean';
 
   Future<void> _openLegalDocument({required bool isTerms}) async {
@@ -71,8 +75,7 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
     if (!opened && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content:
-              Text(english ? 'Could not open the document.' : '문서를 열 수 없습니다.'),
+          content: Text(_copy['documentOpenFailed']),
         ),
       );
     }
@@ -138,7 +141,7 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
             ),
             const SizedBox(height: 28),
             Text(
-              'StealthVox 회원가입',
+              _copy['signUp'],
               style: theme.titleMedium.override(
                 fontFamily: theme.titleMediumFamily,
                 color: _primaryText,
@@ -149,7 +152,7 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
             ),
             const SizedBox(height: 8),
             Text(
-              '회원가입을 위하여 아래의 필수 약관에 동의해 주세요',
+              _copy['termsIntro'],
               style: theme.bodyMedium.override(
                 fontFamily: theme.bodyMediumFamily,
                 color: _secondaryText,
@@ -159,7 +162,7 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
             ),
             const SizedBox(height: 28),
             _AgreementRow(
-              label: '전체 동의',
+              label: _copy['agreeAll'],
               checked: _allAccepted,
               isPrimary: true,
               onChanged: _setAllAccepted,
@@ -168,9 +171,7 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
             const Divider(height: 1, thickness: 1, color: _dividerColor),
             const SizedBox(height: 18),
             _AgreementRow(
-              label: english
-                  ? '(Required) Agree to the Terms of Use'
-                  : '(필수) 서비스 이용약관 동의',
+              label: _copy['requiredTerms'],
               checked: _termsAccepted,
               showTrailingLink: true,
               onChanged: (value) => setState(() => _termsAccepted = value),
@@ -179,9 +180,7 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
               },
             ),
             _AgreementRow(
-              label: english
-                  ? '(Required) Agree to the Privacy Policy'
-                  : '(필수) 개인정보 수집 및 이용 동의',
+              label: _copy['requiredPrivacy'],
               checked: _privacyAccepted,
               showTrailingLink: true,
               onChanged: (value) => setState(() => _privacyAccepted = value),
@@ -190,12 +189,12 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
               },
             ),
             _AgreementRow(
-              label: '(필수) 만 14세 이상입니다',
+              label: _copy['ageConfirmed'],
               checked: _ageConfirmed,
               onChanged: (value) => setState(() => _ageConfirmed = value),
             ),
             _AgreementRow(
-              label: '(선택) 마케팅 정보 수신 동의',
+              label: _copy['marketingConsent'],
               checked: _marketingAccepted,
               onChanged: (value) => setState(() => _marketingAccepted = value),
             ),
@@ -217,7 +216,7 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
                   ),
                 ),
                 child: Text(
-                  '계속하기',
+                  _copy['continue'],
                   style: theme.titleSmall.override(
                     fontFamily: theme.titleSmallFamily,
                     color: Colors.white,
@@ -241,7 +240,7 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
                   useGoogleFonts: false,
                 ),
               ),
-              child: const Text('취소'),
+              child: Text(_copy['cancel']),
             ),
           ],
         ),
@@ -307,7 +306,8 @@ class _AgreementRow extends StatelessWidget {
                 color: const Color(0xFF8F8F98),
                 iconSize: 24,
                 visualDensity: VisualDensity.compact,
-                tooltip: '약관 보기',
+                tooltip: OriginSurfaceCopy.forLanguage(
+                    FFAppState().chatLang)['viewTerms'],
               ),
             ],
           ],

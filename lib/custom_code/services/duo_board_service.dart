@@ -57,6 +57,12 @@ class DuoBoardService {
     return Map<String, dynamic>.from(result.data as Map)['postId'].toString();
   }
 
+  static Future<void> withdrawPost(String postId) async {
+    await _functions
+        .httpsCallable('withdrawDuoBoardPost')
+        .call({'postId': postId});
+  }
+
   static Future<DuoBoardClaim> claimNow(String postId) async {
     await ensureParticipantIdentity();
     final result = await _functions

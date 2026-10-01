@@ -8,6 +8,9 @@
 
 import 'package:flutter/material.dart';
 
+import '/app_state.dart';
+import '/custom_code/services/origin_surface_localization.dart';
+
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/alt_style.dart';
 
@@ -24,13 +27,14 @@ Widget buildAltStyleButton({
   EdgeInsets padding = const EdgeInsets.all(8),
   double minTouchSize = 44,
 }) {
+  final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
   return IconButton(
     padding: padding,
     constraints:
         BoxConstraints(minWidth: minTouchSize, minHeight: minTouchSize),
     icon: Icon(Icons.swap_horiz_rounded, color: kAltStyleAccent, size: size),
     onPressed: onPressed,
-    tooltip: '다른 표현 보기',
+    tooltip: copy['alternativeExpressions'],
   );
 }
 
@@ -46,6 +50,7 @@ void showAltStylePopup({
   required String baseText,
   required String targetLang,
 }) {
+  final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
   final styles = otherAiStyles(targetLang);
   if (styles.isEmpty) return;
   final future = fetchAltStyleSentences(
@@ -97,8 +102,8 @@ void showAltStylePopup({
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      '다른 표현 보기',
+                    Text(
+                      copy['alternativeExpressions'],
                       style: TextStyle(
                         color: kAltStyleAccent,
                         fontSize: 15,
@@ -107,8 +112,8 @@ void showAltStylePopup({
                     ),
                     const SizedBox(height: 14),
                     if (data.isEmpty)
-                      const Text(
-                        '표현을 불러오지 못했습니다. 다시 시도해 주세요.',
+                      Text(
+                        copy['alternativesLoadFailed'],
                         style: TextStyle(color: Colors.white70, fontSize: 14),
                       )
                     else
@@ -152,9 +157,9 @@ void showAltStylePopup({
                         ),
                       ),
                     const SizedBox(height: 2),
-                    const Center(
+                    Center(
                       child: Text(
-                        '탭하면 닫힙니다',
+                        copy['tapToClose'],
                         style: TextStyle(color: Colors.white24, fontSize: 11),
                       ),
                     ),

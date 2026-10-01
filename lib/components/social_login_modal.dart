@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 
 import '/custom_code/widgets/auth_progress_view.dart';
 import '/custom_code/widgets/shared_social_button.dart';
+import '/custom_code/services/origin_surface_localization.dart';
+import '/flutter_flow/flutter_flow_util.dart';
 import '../auth/social_auth_service.dart';
 
 class SocialLoginModal extends StatefulWidget {
@@ -21,6 +23,8 @@ class SocialLoginModal extends StatefulWidget {
 }
 
 class _SocialLoginModalState extends State<SocialLoginModal> {
+  OriginSurfaceCopy get _copy =>
+      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
   bool _isLoading = false;
   bool _showEmailForm = false;
   bool _isSignUp = false;
@@ -67,27 +71,27 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
   String _friendlyError(Object e) {
     final msg = e.toString();
     if (msg.contains('cancelled') || msg.contains('cancel')) {
-      return 'Login canceled.';
+      return _copy['loginCanceled'];
     }
     if (msg.contains('network')) {
-      return 'Network error.';
+      return _copy['networkError'];
     }
     if (msg.contains('wrong-password') || msg.contains('invalid-credential')) {
-      return 'Incorrect email or password.';
+      return _copy['incorrectCredentials'];
     }
     if (msg.contains('user-not-found')) {
-      return 'Account not found.';
+      return _copy['accountNotFound'];
     }
     if (msg.contains('weak-password')) {
-      return 'Password must be at least 6 characters.';
+      return _copy['weakPassword'];
     }
     if (msg.contains('invalid-email')) {
-      return 'Check your email address.';
+      return _copy['invalidEmail'];
     }
     if (msg.contains('email-already-in-use')) {
-      return 'Email already registered. Please log in.';
+      return _copy['emailInUse'];
     }
-    return 'Login failed. Please try again.';
+    return _copy['loginFailed'];
   }
 
   @override
@@ -126,7 +130,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
     return Column(
       children: [
         SharedSocialButton(
-          label: 'Continue with Kakao',
+          label: _copy['continueKakao'],
           backgroundColor: const Color(0xFFFEE500),
           textColor: const Color(0xFF191919),
           icon: Image.asset(
@@ -143,7 +147,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
         ),
         const SizedBox(height: 12),
         SharedSocialButton(
-          label: 'Continue with Google',
+          label: _copy['continueGoogle'],
           backgroundColor: Colors.white,
           textColor: Colors.black87,
           border: Border.all(color: Colors.grey.shade300),
@@ -166,7 +170,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Text(
-                'Other Sign-Up Options',
+                _copy['otherSignupOptions'],
                 style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
               ),
             ),
@@ -175,7 +179,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
         ),
         const SizedBox(height: 12),
         SharedSocialButton(
-          label: 'Continue with Email',
+          label: _copy['continueEmail'],
           backgroundColor: Colors.grey.shade100,
           textColor: Colors.black87,
           icon: const Icon(
@@ -196,11 +200,11 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
           }),
           child: RichText(
             text: TextSpan(
-              text: 'Already have an account? ',
+              text: _copy['alreadyAccount'] + ' ',
               style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-              children: const [
+              children: [
                 TextSpan(
-                  text: 'Log in.',
+                  text: _copy['logIn'],
                   style: TextStyle(
                     color: Colors.blue,
                     fontWeight: FontWeight.bold,
@@ -222,13 +226,13 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
         Row(
           children: [
             _tabButton(
-              'Log In',
+              _copy['logIn'],
               !_isSignUp,
               () => setState(() => _isSignUp = false),
             ),
             const SizedBox(width: 8),
             _tabButton(
-              'Sign Up',
+              _copy['signUp'],
               _isSignUp,
               () => setState(() => _isSignUp = true),
             ),
@@ -238,8 +242,8 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
         TextField(
           controller: _emailCtrl,
           keyboardType: TextInputType.emailAddress,
-          decoration: const InputDecoration(
-            labelText: 'Email',
+          decoration: InputDecoration(
+            labelText: _copy['email'],
             border: OutlineInputBorder(),
           ),
         ),
@@ -247,8 +251,8 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
         TextField(
           controller: _passwordCtrl,
           obscureText: true,
-          decoration: const InputDecoration(
-            labelText: 'Password',
+          decoration: InputDecoration(
+            labelText: _copy['password'],
             border: OutlineInputBorder(),
           ),
         ),
@@ -261,11 +265,11 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
               isSignUp: _isSignUp,
             ),
           ),
-          child: Text(_isSignUp ? 'Sign Up' : 'Log In'),
+          child: Text(_isSignUp ? _copy['signUp'] : _copy['logIn']),
         ),
         TextButton(
           onPressed: () => setState(() => _showEmailForm = false),
-          child: const Text('Back'),
+          child: Text(_copy['back']),
         ),
       ],
     );

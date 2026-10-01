@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 
 class LearningPrepOverlay {
   static Future<void> show(
@@ -60,6 +62,7 @@ class _LearningPrepContentState extends State<_LearningPrepContent>
 
   @override
   Widget build(BuildContext context) {
+    final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 40),
@@ -68,8 +71,8 @@ class _LearningPrepContentState extends State<_LearningPrepContent>
           children: [
             const Icon(Icons.auto_stories, size: 48, color: Color(0xFFD4AF37)),
             const SizedBox(height: 20),
-            const Text(
-              'Building your study room...',
+            Text(
+              copy['buildingStudyRoom'],
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.white,
@@ -78,8 +81,8 @@ class _LearningPrepContentState extends State<_LearningPrepContent>
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Your conversation is being prepared as practice material.',
+            Text(
+              copy['preparingPractice'],
               textAlign: TextAlign.center,
               style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 13),
             ),

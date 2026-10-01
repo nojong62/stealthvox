@@ -22,7 +22,7 @@ class FFAppState extends ChangeNotifier {
     prefs = await SharedPreferences.getInstance();
     _safeInit(() {
       final saved = prefs.getString('ff_targetLang')?.trim() ?? '';
-      _targetLang = saved.isEmpty ? 'English' : saved;
+      _targetLang = saved;
     });
     _safeInit(() {
       _tone = prefs.getString('ff_tone') ?? _tone;
@@ -144,7 +144,9 @@ class FFAppState extends ChangeNotifier {
     _selectedEpisode = value;
   }
 
-  String _targetLang = 'English';
+  /// 빈 값은 아직 선택하지 않은 상태이며, 로비에서 Select로 표시한다.
+  /// 사용자가 고른 값은 setter를 통해 SharedPreferences에 보존된다.
+  String _targetLang = '';
   String get targetLang => _targetLang;
   set targetLang(String value) {
     _targetLang = value;

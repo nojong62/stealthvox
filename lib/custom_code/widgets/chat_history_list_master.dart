@@ -34,10 +34,11 @@ import '/custom_code/services/openai_transcribe_service.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart'
     show deepgramLanguageCode;
 import '/custom_code/services/origin_language_session.dart'
-    show kOriginLanguageOptions, koreanLanguageDisplayName;
+    show koreanLanguageDisplayName;
 // 직접 통화 방을 가리는 필드 이름. 목록이 Replay 표를 붙일 때 본다.
 import '/custom_code/services/duo_canonical.dart';
 import '/custom_code/services/history_text_model.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 
 const String _historyListTtsModel = 'tts-1';
 const String _historyListTtsVoice = 'nova';
@@ -256,6 +257,8 @@ class ChatHistoryListMaster extends StatefulWidget {
 
 class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     with BillingIdleMixin<ChatHistoryListMaster> {
+  OriginSurfaceCopy get _surfaceCopy =>
+      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
   String _selectedFilter = 'All';
   Set<String> _selectedDocIds = {};
   Set<String> _visibleHistoryDocIds = {};
@@ -356,18 +359,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   // 🆕 Another Sentence 중복 회피: 최근 생성한 문제 문장(최대 6개) 기억
   final List<String> _keeperRecentPrompts = [];
 
-  // 🎓 [TUTORING-LANG] 키퍼는 여러 방에서 모인 목록이라 **방 문서가 없다.**
-  //   그래서 언어 짝을 읽어올 데가 없어 예전에는 한국어→영어로 박아 두었다.
-  //   이제 **줄마다 한 번** 배울 언어를 고르게 하고 그 값만 적어 둔다 —
-  //   다음부터는 안 묻는다. 원문 언어는 이 사람의 말이라 줄에 매지 않고
-  //   로비 설정에서 그때그때 읽는다.
-  static const String kKeeperTargetLangField = 'tutoring_target_lang';
+  // Keeper 카드의 큰 글씨는 Target, 작은 글씨는 Origin이다. 튜터링도
+  // 저장 당시 히스토리의 언어 짝을 그대로 이어받아 별도 선택 없이 시작한다.
   String _keeperTutoringNative = '';
   String _keeperTutoringTarget = '';
-
-  /// 이 줄의 언어 짝을 아직 모른다 — 시트 첫 단계에서 고르게 한다.
-  bool _keeperTutoringNeedsLangPick = false;
-  String _keeperTutoringDocId = '';
   bool _keeperIsRecording = false;
   AudioRecorder? _keeperRecorder;
   Uint8List? _keeperCorrectedAudio;
@@ -531,10 +526,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   @override
   Widget build(BuildContext context) {
     if (currentUserReference == null) {
-      return const Scaffold(
+      return Scaffold(
         backgroundColor: Colors.black,
         body: Center(
-          child: Text("로그인이 필요합니다.", style: TextStyle(color: Colors.white)),
+          child: Text(_surfaceCopy['loginRequired'],
+              style: TextStyle(color: Colors.white)),
         ),
       );
     }
@@ -552,7 +548,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           children: [
             IconButton(
               padding: EdgeInsets.zero,
-              tooltip: '스텔스룸',
+              tooltip: _surfaceCopy['back'],
               icon: const Icon(Icons.security, color: Colors.white70),
               onPressed: () {
                 if (!guardBillingEntry(context)) return;
@@ -564,7 +560,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             ),
             IconButton(
               padding: EdgeInsets.zero,
-              tooltip: _selectedFilter == 'Keepers' ? '전체 대화 보기' : 'Keepers',
+              tooltip: _selectedFilter == 'Keepers'
+                  ? _surfaceCopy['viewAllConversations']
+                  : 'Keepers',
               icon: Icon(
                 Icons.bookmark_rounded,
                 // 켜져 있을 때는 아래 필터칩과 같은 색으로 물든다. 지금 무엇을
@@ -587,7 +585,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           behavior: HitTestBehavior.opaque,
           onTap: _selectedFilter == 'All' ? null : () => _switchFilter('All'),
           child: Tooltip(
-            message: _selectedFilter == 'All' ? '전체 대화' : '전체 대화 보기',
+            message: _selectedFilter == 'All'
+                ? _surfaceCopy['allConversations']
+                : _surfaceCopy['viewAllConversations'],
             // 📏 AppBar title 슬롯은 leading(96)과 actions를 뺀 나머지로 폭이
             //   고정된다. 폰 글꼴을 키워 둔 기기에서는 이 칩이 그 폭을 넘어
             //   노란 줄무늬(overflow)가 떴다. 글자를 자르는 대신 슬롯에 맞게
@@ -622,8 +622,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                       ),
                       const SizedBox(width: 5),
                     ],
-                    const Text(
-                      "Study Room",
+                    Text(
+                      _surfaceCopy['studyRoom'],
                       style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
@@ -660,7 +660,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               color: Colors.amber.withValues(alpha: 0.75),
               size: 20,
             ),
-            tooltip: "사용설명서",
+            tooltip: _surfaceCopy['userGuide'],
             padding: const EdgeInsets.symmetric(horizontal: 8),
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             onPressed: _showStudyRoomManual,
@@ -715,13 +715,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    '히스토리를 불러오지 못했습니다.',
+                    _surfaceCopy['historyLoadFailed'],
                     style: GoogleFonts.notoSans(color: Colors.white70),
                   ),
                   const SizedBox(height: 12),
                   OutlinedButton(
                     onPressed: _retryHistoryLoad,
-                    child: const Text('다시 시도'),
+                    child: Text(_surfaceCopy['retry']),
                   ),
                 ],
               ),
@@ -777,7 +777,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  "해당 모드의 기록이 없습니다.",
+                  _surfaceCopy['noModeRecords'],
                   style: GoogleFonts.notoSans(color: Colors.white54),
                 ),
               ],
@@ -826,12 +826,12 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  "Keepers를 불러오지 못했습니다.",
+                  _surfaceCopy['keepersLoadFailed'],
                   style: GoogleFonts.notoSans(color: Colors.white70),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  "오류: ${snapshot.error}",
+                  '${_surfaceCopy['error']}: ${snapshot.error}',
                   style: GoogleFonts.notoSans(
                     color: Colors.redAccent.withValues(alpha: 0.8),
                     fontSize: 11,
@@ -840,7 +840,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  "잠시 후 다시 시도해 주세요.",
+                  _surfaceCopy['tryAgainLater'],
                   style: GoogleFonts.notoSans(
                     color: Colors.white30,
                     fontSize: 12,
@@ -877,12 +877,12 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  "저장된 표현이 없습니다.",
+                  _surfaceCopy['noSavedExpressions'],
                   style: GoogleFonts.notoSans(color: Colors.white54),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  "대화 기록에서 대사를 길게 누르면 여기에 저장됩니다.",
+                  _surfaceCopy['longPressToSave'],
                   style: GoogleFonts.notoSans(
                     color: Colors.white30,
                     fontSize: 12,
@@ -929,12 +929,12 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             ),
             const SizedBox(height: 20),
             Text(
-              "저장된 표현이 없습니다.",
+              _surfaceCopy['noSavedExpressions'],
               style: GoogleFonts.notoSans(color: Colors.white54),
             ),
             const SizedBox(height: 8),
             Text(
-              "대화 기록에서 대사를 탭하면 여기에 저장됩니다.",
+              _surfaceCopy['tapToSave'],
               style: GoogleFonts.notoSans(color: Colors.white30, fontSize: 12),
             ),
           ],
@@ -1070,8 +1070,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 color: Color(0xFFBDBDBD),
               ),
               const SizedBox(width: 3),
-              const Text(
-                '취소',
+              Text(
+                _surfaceCopy['cancel'],
                 style: TextStyle(
                   color: Color(0xFFBDBDBD),
                   fontSize: 13,
@@ -1162,7 +1162,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             const SizedBox(width: 6),
             Flexible(
               child: Text(
-                "선택삭제",
+                _surfaceCopy['deleteSelected'],
                 style: TextStyle(
                   color: _selectedDocIds.isNotEmpty
                       ? const Color(0xFF9E9E9E)
@@ -1567,35 +1567,35 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                     ? Icons.stop_circle_rounded
                     : Icons.play_circle_rounded,
                 color: Colors.amberAccent,
-                tooltip: '소리 듣기',
+                tooltip: _surfaceCopy['listen'],
                 onTap: () => _playKeeperAudio(doc.id, translated),
               ),
               // 2) 튜터링
               _buildKeeperAction(
                 icon: Icons.school_rounded,
                 color: Colors.deepPurpleAccent,
-                tooltip: '실전 튜터링',
+                tooltip: _surfaceCopy['practicalTutoring'],
                 onTap: () => _showKeeperTutoringPopup(doc.id, data, translated),
               ),
               // 3) 다른 표현 보기 — 히스토리 말풍선과 같은 팝업이다
               _buildKeeperAction(
                 icon: Icons.swap_horiz_rounded,
                 color: kAltStyleAccent,
-                tooltip: '다른 표현 보기',
+                tooltip: _surfaceCopy['alternativeExpressions'],
                 onTap: () => _showKeeperAltStylePopup(translated),
               ),
               // 4) 맨 위로 올리기
               _buildKeeperAction(
                 icon: Icons.keyboard_double_arrow_up_rounded,
                 color: _keepersColor,
-                tooltip: '맨 위로 올리기',
+                tooltip: _surfaceCopy['back'],
                 onTap: () => _togglePinKeeper(doc),
               ),
               // 5) 삭제
               _buildKeeperAction(
                 icon: Icons.delete_outline_rounded,
                 color: Colors.redAccent.withValues(alpha: 0.7),
-                tooltip: '삭제',
+                tooltip: _surfaceCopy['delete'],
                 onTap: () => _showDeleteKeeperDialog(doc),
               ),
             ],
@@ -1755,9 +1755,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
       await doc.reference.update({'pinned_at': FieldValue.serverTimestamp()});
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              "맨 위로 올렸습니다.",
+              _surfaceCopy['movedToTop'],
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             backgroundColor: _keepersColor,
@@ -1836,9 +1836,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   void _showKeeperAltStylePopup(String baseText) {
     if (_apiKey.isEmpty || baseText.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            '다른 표현을 불러올 수 없습니다.',
+            _surfaceCopy['alternativesUnavailable'],
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           backgroundColor: Colors.orangeAccent,
@@ -1858,16 +1858,80 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   //  Keepers 튜터링 팝업 (chat_history_master의 패턴 재사용)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  void _showKeeperTutoringPopup(
+  Future<List<String>> _keeperTutoringLanguages(
+    String keeperId,
+    Map<String, dynamic> keeperData,
+  ) async {
+    String native = (keeperData['native_lang'] ?? '').toString().trim();
+    String target = (keeperData['target_lang'] ?? '').toString().trim();
+
+    // 구버전 Keeper에는 언어 필드가 없다. 저장 출처인 히스토리 방에는
+    // 대화 당시 로비의 Origin/Target이 남아 있으므로 그 값을 복원한다.
+    final String sourceRoomId =
+        (keeperData['source_room_id'] ?? '').toString().trim();
+    if ((native.isEmpty || target.isEmpty) &&
+        sourceRoomId.isNotEmpty &&
+        currentUserReference != null) {
+      try {
+        final sourceRoom = await currentUserReference!
+            .collection('chat_history')
+            .doc(sourceRoomId)
+            .get();
+        final sourceData = sourceRoom.data() as Map<String, dynamic>?;
+        if (sourceData != null) {
+          native = native.isNotEmpty
+              ? native
+              : (sourceData['native_lang'] ?? '').toString().trim();
+          target = target.isNotEmpty
+              ? target
+              : (sourceData['target_lang'] ?? '').toString().trim();
+        }
+      } catch (e) {
+        debugPrint(
+            '[KEEPER-TUTORING] source_lang_read_failed(${e.runtimeType})');
+      }
+    }
+
+    // 원본 방이 삭제된 아주 오래된 Keeper만 현재 로비 설정을 최종 기본값으로
+    // 쓴다. 일반 경로에서는 저장 당시 언어가 항상 우선한다.
+    native = native.isNotEmpty
+        ? native
+        : (FFAppState().chatLang.isNotEmpty
+            ? FFAppState().chatLang
+            : 'English');
+    target = target.isNotEmpty
+        ? target
+        : (FFAppState().targetLang.isNotEmpty
+            ? FFAppState().targetLang
+            : 'English');
+
+    // 복원한 언어를 Keeper에도 채워 다음부터 원본 방 조회 없이 바로 연다.
+    if (currentUserReference != null &&
+        ((keeperData['native_lang'] ?? '').toString().trim().isEmpty ||
+            (keeperData['target_lang'] ?? '').toString().trim().isEmpty)) {
+      try {
+        await currentUserReference!.collection('keepers').doc(keeperId).update({
+          'native_lang': native,
+          'target_lang': target,
+        });
+      } catch (e) {
+        debugPrint('[KEEPER-TUTORING] lang_backfill_failed(${e.runtimeType})');
+      }
+    }
+
+    return <String>[native, target];
+  }
+
+  Future<void> _showKeeperTutoringPopup(
     String keeperId,
     Map<String, dynamic> keeperData,
     String baseText,
-  ) {
+  ) async {
     if (baseText.trim().isEmpty || _apiKey.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            "튜터링을 시작할 수 없습니다.",
+            _surfaceCopy['tutoringStartFailed'],
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           backgroundColor: Colors.orangeAccent,
@@ -1876,26 +1940,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
       return;
     }
 
-    // 🎓 [TUTORING-LANG] 이 줄에 적혀 있으면 그대로 쓰고, 없으면 첫 단계에서
-    //   고르게 한다. 로비 설정은 **기본값일 뿐**이다 — 그 키퍼를 담던 시절과
-    //   지금 설정이 다를 수 있어서 고른 값을 줄에 남긴다.
-    _keeperTutoringDocId = keeperId;
-    // 🗣️ 문제를 낼 언어는 **이 사람의 말**이다. 줄마다 달라지는 값이 아니라
-    //   묻지 않는다 — 로비 설정에서 그때그때 읽는다. 설정을 바꾸면 피드백
-    //   언어도 같이 따라가는 것이 맞다.
-    _keeperTutoringNative = FFAppState().chatLang.isNotEmpty
-        ? FFAppState().chatLang
-        : 'English';
-    // 🎯 배울 언어만 줄에 매인다. 한 키퍼를 영어로 연습하다 일본어로 바꾸는
-    //   일은 있어도, 내 모국어가 줄마다 바뀌지는 않는다.
-    final String savedTarget =
-        (keeperData[kKeeperTargetLangField] ?? '').toString().trim();
-    _keeperTutoringTarget = savedTarget.isNotEmpty
-        ? savedTarget
-        : (FFAppState().targetLang.isNotEmpty
-            ? FFAppState().targetLang
-            : 'English');
-    _keeperTutoringNeedsLangPick = savedTarget.isEmpty;
+    final languages = await _keeperTutoringLanguages(keeperId, keeperData);
+    if (!mounted) return;
+    _keeperTutoringNative = languages[0];
+    _keeperTutoringTarget = languages[1];
 
     // 상태 초기화
     _keeperTutoringPrompt = '';
@@ -1907,13 +1955,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     _keeperIsRecording = false;
     _keeperCorrectedAudio = null;
     _keeperIsPlayingCorrected = false;
-    // 언어를 아직 모르면 생성부터 하지 않는다. 모르는 짝으로 만든 문제는
-    // 버려야 하고, 버릴 것을 만드는 동안 과금이 돈다.
-    _keeperTutoringLoading = !_keeperTutoringNeedsLangPick;
+    _keeperTutoringLoading = true;
     _keeperDialogSetState = null;
 
     // STEP 1: 응용 문장 생성
-    if (!_keeperTutoringNeedsLangPick) _generateKeeperAppText(baseText);
+    _generateKeeperAppText(baseText);
 
     BillingTicker.instance.setRate(BillingRate.full);
 
@@ -2024,205 +2070,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     }
   }
 
-  /// 🎓 [TUTORING-LANG] 시트의 첫 단계. **줄마다 한 번만** 지나간다 —
-  /// 고른 값을 키퍼 문서에 적어 두므로 다음에 같은 줄을 열면 안 나온다.
-  Widget _buildKeeperLangPickBody(String baseText, {VoidCallback? onClose}) {
-    Widget picker({
-      required String label,
-      required String value,
-      required void Function(String) onPick,
-    }) =>
-        Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 76,
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    color: Colors.white54,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: kOriginLanguageOptions.contains(value)
-                          ? value
-                          : kOriginLanguageOptions.first,
-                      isExpanded: true,
-                      dropdownColor: const Color(0xFF2A2A2A),
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                      icon: const Icon(
-                        Icons.expand_more_rounded,
-                        color: Colors.white38,
-                      ),
-                      items: kOriginLanguageOptions
-                          .map(
-                            (String lang) => DropdownMenuItem<String>(
-                              value: lang,
-                              child: Text(koreanLanguageDisplayName(lang)),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (String? v) {
-                        if (v == null) return;
-                        onPick(v);
-                        _keeperDialogSetState?.call(() {});
-                      },
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1E),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _keepersColor.withValues(alpha: 0.25)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.school_rounded, color: _keepersColor, size: 20),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  "Keepers 실전 튜터링",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                  ),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close, color: Colors.white38, size: 20),
-                onPressed: onClose,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              baseText,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 13,
-                height: 1.4,
-              ),
-            ),
-          ),
-          const Divider(color: Colors.white12, height: 24),
-          _buildStepHeader('STEP 0', '언어', _keepersColor),
-          const SizedBox(height: 4),
-          Text(
-            '이 줄은 처음입니다. 어느 말로 말해 볼지 한 번만 정해 주세요.\n'
-            '문제는 ${koreanLanguageDisplayName(_keeperTutoringNative)}로 나옵니다.',
-            style: const TextStyle(
-              color: Colors.white38,
-              fontSize: 11,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 12),
-          picker(
-            label: '배울 언어',
-            value: _keeperTutoringTarget,
-            onPick: (String v) => _keeperTutoringTarget = v,
-          ),
-          // 같은 언어끼리는 옮길 것이 없다. 시작을 막고 이유를 적는다.
-          if (_keeperTutoringNative == _keeperTutoringTarget)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 8),
-              child: Text(
-                '두 언어가 같으면 옮겨 말할 것이 없습니다.',
-                style: TextStyle(
-                  color: Colors.orangeAccent,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _keepersColor,
-                disabledBackgroundColor: Colors.white12,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              onPressed: _keeperTutoringNative == _keeperTutoringTarget
-                  ? null
-                  : () => _startKeeperTutoringWithLangs(baseText),
-              child: const Text(
-                '이 짝으로 시작',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 고른 짝을 **줄에 적고** 문제 만들기로 넘어간다. 적어 두는 것이 곧
-  /// "다음부터 안 묻는다"이다.
-  Future<void> _startKeeperTutoringWithLangs(String baseText) async {
-    final String docId = _keeperTutoringDocId;
-    _keeperTutoringNeedsLangPick = false;
-    _keeperTutoringLoading = true;
-    _keeperDialogSetState?.call(() {});
-    _generateKeeperAppText(baseText);
-    if (docId.isEmpty) return;
-    try {
-      // 배울 언어만 적는다. 원문은 로비 설정에서 읽으므로 줄에 매어 두면
-      // 나중에 설정을 바꿨을 때 옛 값이 발목을 잡는다.
-      await currentUserReference!.collection('keepers').doc(docId).update({
-        kKeeperTargetLangField: _keeperTutoringTarget,
-      });
-    } catch (e) {
-      // 못 적어도 이번 연습은 그대로 돈다. 다음에 한 번 더 물을 뿐이다.
-      debugPrint('[KEEPER-TUTORING] lang_save_failed(${e.runtimeType})');
-    }
-  }
-
   Widget _buildKeeperTutoringBody(String baseText, {VoidCallback? onClose}) {
-    if (_keeperTutoringNeedsLangPick) {
-      return _buildKeeperLangPickBody(baseText, onClose: onClose);
-    }
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(16),
@@ -2239,9 +2087,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             children: [
               const Icon(Icons.school_rounded, color: _keepersColor, size: 20),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  "Keepers 실전 튜터링",
+                  _surfaceCopy['keepersTutoring'],
                   style: TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -2311,8 +2159,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               ),
             )
           else
-            const Text(
-              "생성 실패 — 다시 시도해주세요.",
+            Text(
+              _surfaceCopy['generationFailed'],
               style: TextStyle(color: Colors.redAccent, fontSize: 13),
             ),
           const SizedBox(height: 16),
@@ -2381,7 +2229,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                "내 답변: $_keeperTutoringTranscript",
+                '${_surfaceCopy['myAnswer']}: $_keeperTutoringTranscript',
                 style: const TextStyle(color: Colors.white54, fontSize: 13),
               ),
             ),
@@ -2444,10 +2292,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
+                    Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Padding(
+                        const Padding(
                           padding: EdgeInsets.only(top: 1),
                           child: Icon(
                             Icons.lightbulb_outline,
@@ -2458,7 +2306,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                         SizedBox(width: 6),
                         Flexible(
                           child: Text(
-                            "더 자연스러운 표현",
+                            _surfaceCopy['moreNatural'],
                             style: TextStyle(
                               color: Colors.amber,
                               fontSize: 12,
@@ -2551,8 +2399,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                   color: Colors.white38,
                   size: 18,
                 ),
-                label: const Text(
-                  "다시 하기",
+                label: Text(
+                  _surfaceCopy['tryAgain'],
                   style: TextStyle(color: Colors.white38, fontSize: 13),
                 ),
               ),
@@ -2948,8 +2796,8 @@ RULES — follow exactly:
             const SizedBox(height: 20),
             ListTile(
               leading: const Icon(Icons.edit, color: Colors.amber),
-              title: const Text(
-                "제목 수정 (상단 고정)",
+              title: Text(
+                _surfaceCopy['editTitlePinned'],
                 style: TextStyle(color: Colors.white),
               ),
               onTap: () {
@@ -2959,7 +2807,8 @@ RULES — follow exactly:
             ),
             ListTile(
               leading: const Icon(Icons.delete, color: Colors.redAccent),
-              title: const Text("삭제하기", style: TextStyle(color: Colors.white)),
+              title: Text(_surfaceCopy['delete'],
+                  style: const TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
                 _showDeleteDialog(doc);
@@ -2980,12 +2829,13 @@ RULES — follow exactly:
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF333333),
-        title: const Text("제목 수정", style: TextStyle(color: Colors.white)),
+        title: Text(_surfaceCopy['editTitle'],
+            style: const TextStyle(color: Colors.white)),
         content: TextField(
           controller: controller,
           style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: "예: 영어 면접 연습",
+          decoration: InputDecoration(
+            hintText: _surfaceCopy['titleHint'],
             hintStyle: TextStyle(color: Colors.white30),
             enabledBorder: UnderlineInputBorder(
               borderSide: BorderSide(color: Colors.white30),
@@ -2998,7 +2848,8 @@ RULES — follow exactly:
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("취소", style: TextStyle(color: Colors.grey)),
+            child: Text(_surfaceCopy['cancel'],
+                style: const TextStyle(color: Colors.grey)),
           ),
           TextButton(
             onPressed: () async {
@@ -3016,8 +2867,8 @@ RULES — follow exactly:
                 });
               }
             },
-            child: const Text(
-              "저장",
+            child: Text(
+              _surfaceCopy['save'],
               style: TextStyle(
                 color: Colors.amber,
                 fontWeight: FontWeight.bold,

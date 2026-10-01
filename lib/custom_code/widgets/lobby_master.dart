@@ -33,6 +33,8 @@ import '/custom_code/services/admin_gate.dart'; // 관리자 판별(UID)
 import '/custom_code/services/guide_ui_localization.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/origin_pcm_store.dart';
+import '/custom_code/services/origin_surface_localization.dart';
+import '/custom_code/services/duo_board_push_service.dart';
 import 'p2_voice_lab.dart' show P2VoiceLabPage; // 관리자 전용 히든 화면
 import 'duo_board_sheet.dart';
 // LongPressGestureRecognizer는 material/widgets가 다시 내보내지 않는다.
@@ -105,6 +107,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     'Italian',
     'Dutch',
   ];
+
+  OriginSurfaceCopy get _surfaceCopy =>
+      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
 
   bool isLoading = false;
   String _apiKey = "";
@@ -267,8 +272,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     try {
       FocusScope.of(context).unfocus();
       final missingLanguages = <String>[
-        if (!languages.contains(FFAppState().chatLang)) 'Chat Language',
-        if (!languages.contains(FFAppState().targetLang)) 'Learn Language',
+        if (!languages.contains(FFAppState().chatLang))
+          _surfaceCopy['languageLabelOrigin'],
+        if (!languages.contains(FFAppState().targetLang))
+          _surfaceCopy['languageLabelLearning'],
       ];
       if (missingLanguages.isNotEmpty) {
         ScaffoldMessenger.of(context)
@@ -276,7 +283,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           ..showSnackBar(
             SnackBar(
               content: Text(
-                'Please select your languages: ${missingLanguages.join(' / ')}',
+                '${_surfaceCopy['languageSettingsRequired']} ${missingLanguages.join(' / ')}',
               ),
             ),
           );
@@ -369,12 +376,12 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         backgroundColor: const Color(0xFF1C1C1E),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
-          children: const [
+          children: [
             Icon(Icons.warning_amber_rounded, color: Color(0xFFFF453A)),
             SizedBox(width: 8),
             Flexible(
               child: Text(
-                "Delete Account",
+                _surfaceCopy['deleteAccount'],
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 16,
@@ -384,15 +391,15 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
             ),
           ],
         ),
-        content: const Text(
-          "Delete your account?\nAll data, including remaining time and history, will be permanently deleted.",
+        content: Text(
+          _surfaceCopy['deleteAccountQuestion'],
           style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text(
-              "Cancel",
+            child: Text(
+              _surfaceCopy['cancel'],
               style: TextStyle(
                 color: Colors.white54,
                 fontWeight: FontWeight.bold,
@@ -410,9 +417,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 } on FirebaseAuthException {
                   if (!mounted || !lobbyContext.mounted) return;
                   ScaffoldMessenger.of(lobbyContext).showSnackBar(
-                    const SnackBar(
+                    SnackBar(
                       content: Text(
-                        "For security, log in again before deleting your account.",
+                        _surfaceCopy['securityRelogin'],
                         style: TextStyle(fontWeight: FontWeight.bold),
                       ),
                       backgroundColor: Color(0xFFFF453A),
@@ -432,8 +439,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 _isActionLocked = false;
               }
             },
-            child: const Text(
-              "Delete",
+            child: Text(
+              _surfaceCopy['delete'],
               style: TextStyle(
                 color: Color(0xFFFF453A),
                 fontWeight: FontWeight.bold,
@@ -509,7 +516,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           Expanded(
             child: _buildSegment(
               icon: Icons.auto_stories_rounded,
-              label: 'Study Room',
+              label: _surfaceCopy['studyRoom'],
               highlighted: true,
               onTap: () => context.pushNamed('ChatHistory'),
             ),
@@ -518,7 +525,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           Expanded(
             child: _buildSegment(
               icon: Icons.storefront_rounded,
-              label: 'Store',
+              label: _surfaceCopy['store'],
               highlighted: false,
               onTap: () => context.pushNamed('Store'),
             ),
@@ -635,7 +642,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
-              'TIME LEFT',
+              _surfaceCopy['timeLeft'].toUpperCase(),
               maxLines: 1,
               style: GoogleFonts.orbitron(
                 color: _kLobbyTextMid,
@@ -823,9 +830,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Flexible(
+                    Flexible(
                       child: Text(
-                        'AI SETTINGS',
+                        _surfaceCopy['aiSettings'].toUpperCase(),
                         style: TextStyle(
                           color: _kLobbyTextHi,
                           fontSize: 16,
@@ -844,10 +851,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                   ],
                 ),
                 const SizedBox(height: 4),
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(left: 4, bottom: 18),
                   child: Text(
-                    'Select your language settings first, then adjust the AI settings below.',
+                    _surfaceCopy['languageSettingsHint'],
                     style: TextStyle(
                       color: _kLobbyTextLow,
                       fontSize: 12,
@@ -1030,12 +1037,12 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           child: InkWell(
             onTap: () => _handleEnterRoom(context),
             borderRadius: BorderRadius.circular(18),
-            child: const Center(
+            child: Center(
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'ENTER',
+                    _surfaceCopy['enter'].toUpperCase(),
                     maxLines: 1,
                     style: TextStyle(
                       color: Colors.white,
@@ -1262,7 +1269,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                     colors: [_kLobbyCyan, _kLobbyViolet],
                   ).createShader(rect),
                   blendMode: BlendMode.srcIn,
-                  child: const Text(
+                  child: Text(
                     'StealthVox',
                     maxLines: 1,
                     style: TextStyle(
@@ -1350,7 +1357,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                               minWidth: 48,
                               minHeight: 48,
                             ),
-                            tooltip: 'AI Settings',
+                            tooltip: _surfaceCopy['aiSettings'],
                             icon: const Icon(
                               Icons.settings_outlined,
                               color: _kLobbyTextMid,
@@ -1373,10 +1380,14 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                       //   (실기기 확인, 2026-08-27). 방향은 가운데 화살표가
                       //   말한다 — 아래를 가리키면 원어 → 배울 말이다.
                       _buildLangField(
-                        'Origin (Chat Lang)',
+                        'Chat Lang',
                         'Select',
                         appState.chatLang,
-                        (val) => setState(() => appState.chatLang = val!),
+                        (val) {
+                          setState(() => appState.chatLang = val!);
+                          unawaited(DuoBoardPushService
+                              .refreshChatLanguageForCurrentMember());
+                        },
                       ),
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 6),

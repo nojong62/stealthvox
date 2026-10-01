@@ -4,6 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import '/app_state.dart';
+import '/custom_code/services/duo_invite_localization.dart';
 import '/custom_code/services/duo_board_service.dart';
 import '/custom_code/services/duo_board_push_service.dart';
 
@@ -43,6 +45,7 @@ Future<bool> showDuoBoardComposer(
   required String mode,
   required String directLanguage,
 }) async {
+  final copy = DuoInviteCopy.forLanguage(FFAppState().chatLang);
   final topic = TextEditingController();
   var saving = false;
   String? error;
@@ -57,13 +60,16 @@ Future<bool> showDuoBoardComposer(
         padding: EdgeInsets.fromLTRB(
             22, 22, 22, 22 + MediaQuery.viewInsetsOf(context).bottom),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Duo 게시판에 올리기',
-              style: TextStyle(
+          Text(copy['composerTitle'],
+              style: const TextStyle(
                   color: Colors.white,
                   fontSize: 21,
                   fontWeight: FontWeight.w800)),
           const SizedBox(height: 8),
-          Text(mode == 'direct' ? 'Direct · $directLanguage' : 'Interpreter',
+          Text(
+              mode == 'direct'
+                  ? '${copy['direct']} · $directLanguage'
+                  : copy['interpreter'],
               style: const TextStyle(color: Color(0xFF93C5FD))),
           const SizedBox(height: 18),
           TextField(
@@ -72,8 +78,8 @@ Future<bool> showDuoBoardComposer(
             maxLength: 80,
             style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
-              labelText: '대화 주제',
-              hintText: '예: 여행 이야기',
+              labelText: copy['topic'],
+              hintText: copy['topicHint'],
               errorText: error,
               filled: true,
               fillColor: const Color(0xFF232833),
@@ -82,9 +88,9 @@ Future<bool> showDuoBoardComposer(
             ),
           ),
           SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'now', label: Text('🟢 지금 가능')),
-              ButtonSegment(value: 'request', label: Text('⚪ 요청 가능')),
+            segments: [
+              ButtonSegment(value: 'now', label: Text(copy['now'])),
+              ButtonSegment(value: 'request', label: Text(copy['request'])),
             ],
             selected: {availability},
             onSelectionChanged: saving
@@ -98,20 +104,18 @@ Future<bool> showDuoBoardComposer(
                         final enable = await showDialog<bool>(
                           context: sheetContext,
                           builder: (dialogContext) => AlertDialog(
-                            title: const Text('Duo 요청을 알려드릴까요?'),
-                            content: const Text(
-                              '앱을 나가도 대화를 원하는 사람이 생기면 알려드릴 수 있습니다. StealthVox 알림을 허용해 주세요.',
-                            ),
+                            title: Text(copy['notifyTitle']),
+                            content: Text(copy['notifyBody']),
                             actions: [
                               TextButton(
                                 onPressed: () =>
                                     Navigator.pop(dialogContext, false),
-                                child: const Text('나중에'),
+                                child: Text(copy['later']),
                               ),
                               FilledButton(
                                 onPressed: () =>
                                     Navigator.pop(dialogContext, true),
-                                child: const Text('알림 켜기'),
+                                child: Text(copy['enable']),
                               ),
                             ],
                           ),
@@ -136,7 +140,7 @@ Future<bool> showDuoBoardComposer(
                     : () async {
                         final value = topic.text.trim();
                         if (value.length < 2) {
-                          setLocal(() => error = '주제를 두 글자 이상 입력해 주세요.');
+                          setLocal(() => error = copy['topicMinimum']);
                           return;
                         }
                         setLocal(() {
@@ -157,11 +161,11 @@ Future<bool> showDuoBoardComposer(
                         } catch (_) {
                           setLocal(() {
                             saving = false;
-                            error = '등록하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+                            error = copy['postFailed'];
                           });
                         }
                       },
-                child: Text(saving ? '등록 중…' : '게시하기'),
+                child: Text(saving ? copy['posting'] : copy['post']),
               )),
         ]),
       ),
@@ -182,16 +186,17 @@ class DuoBoardSheet extends StatefulWidget {
 class _DuoBoardSheetState extends State<DuoBoardSheet> {
   String? _claiming;
   String? _error;
+  DuoInviteCopy get _copy => DuoInviteCopy.forLanguage(FFAppState().chatLang);
 
   Future<void> _writePost() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.isAnonymous) {
-      setState(() => _error = '게시글 작성은 로그인한 회원만 가능합니다.');
+      setState(() => _error = _copy['loginOnly']);
       return;
     }
     final draft = widget.composeDraft;
     if (draft == null) {
-      setState(() => _error = 'Duo 대화방의 초대 아이콘에서 글쓰기를 시작해 주세요.');
+      setState(() => _error = _copy['writeFromRoom']);
       return;
     }
     final posted = await showDuoBoardComposer(
@@ -236,10 +241,36 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
         setState(() {
           _claiming = null;
           _error = availability == 'now'
-              ? '이미 다른 사용자가 선점했거나 초대가 만료되었습니다.'
-              : '다른 요청자가 기다리는 중이거나 요청을 보낼 수 없습니다.';
+              ? _copy['claimFailed']
+              : _copy['requestFailed'];
         });
       }
+    }
+  }
+
+  Future<void> _withdrawPost(String postId) async {
+    final ok = await showDialog<bool>(
+        context: context,
+        builder: (d) => AlertDialog(
+                title: const Text('Delete post?'),
+                content:
+                    const Text('Remove your Duo invitation from the board?'),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(d, false),
+                      child: const Text('Cancel')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(d, true),
+                      child: const Text('Delete'))
+                ]));
+    if (ok != true || !mounted) return;
+    setState(() => _claiming = postId);
+    try {
+      await DuoBoardService.withdrawPost(postId);
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Could not delete the post.');
+    } finally {
+      if (mounted) setState(() => _claiming = null);
     }
   }
 
@@ -259,29 +290,20 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
               child: Row(children: [
                 const Icon(Icons.forum_outlined, color: Color(0xFF52D4C3)),
                 const SizedBox(width: 10),
-                const Expanded(
-                  child: Text('Duo 초대 게시판',
-                      style: TextStyle(
+                Expanded(
+                  child: Text(_copy['boardTitle'],
+                      style: const TextStyle(
                           color: Colors.white,
                           fontSize: 22,
                           fontWeight: FontWeight.w800)),
                 ),
-                FilledButton.icon(
-                  onPressed: _writePost,
-                  icon: const Icon(Icons.edit_rounded, size: 17),
-                  label: const Text('글쓰기'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF2D8F83),
-                    foregroundColor: Colors.white,
-                  ),
-                ),
               ])),
-          const Padding(
+          Padding(
               padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
               child: Align(
                   alignment: Alignment.centerLeft,
-                  child: Text('상대를 찾은 뒤 기존 Duo 통화로 연결됩니다.',
-                      style: TextStyle(color: Colors.white54)))),
+                  child: Text(_copy['boardSubtitle'],
+                      style: const TextStyle(color: Colors.white54)))),
           if (_error != null)
             Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -295,24 +317,24 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.white12),
             ),
-            child: const Row(children: [
+            child: Row(children: [
               Expanded(
                 flex: 5,
-                child: Text('대화 주제',
-                    style: TextStyle(
+                child: Text(_copy['topic'],
+                    style: const TextStyle(
                         color: Colors.white70, fontWeight: FontWeight.w700)),
               ),
               Expanded(
                 flex: 3,
-                child: Text('방식',
-                    style: TextStyle(
+                child: Text(_copy['mode'],
+                    style: const TextStyle(
                         color: Colors.white70, fontWeight: FontWeight.w700)),
               ),
               Expanded(
                 flex: 3,
-                child: Text('상태',
+                child: Text(_copy['status'],
                     textAlign: TextAlign.right,
-                    style: TextStyle(
+                    style: const TextStyle(
                         color: Colors.white70, fontWeight: FontWeight.w700)),
               ),
             ]),
@@ -322,18 +344,18 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
             stream: DuoBoardService.watchPosts(),
             builder: (context, snapshot) {
               if (snapshot.hasError) {
-                return const Center(
-                    child: Text('게시글을 불러오지 못했습니다.',
-                        style: TextStyle(color: Colors.white70)));
+                return Center(
+                    child: Text(_copy['loadFailed'],
+                        style: const TextStyle(color: Colors.white70)));
               }
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
               final docs = snapshot.data!.docs;
               if (docs.isEmpty) {
-                return const Center(
-                    child: Text('아직 올라온 초대가 없습니다.',
-                        style: TextStyle(color: Colors.white54)));
+                return Center(
+                    child: Text(_copy['empty'],
+                        style: const TextStyle(color: Colors.white54)));
               }
               return ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -372,7 +394,9 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                           Expanded(
                             flex: 3,
                             child: Text(
-                              mode == 'direct' ? 'Direct' : 'Interpreter',
+                              mode == 'direct'
+                                  ? _copy['direct']
+                                  : _copy['interpreter'],
                               style: TextStyle(
                                   color: enabled
                                       ? const Color(0xFF93C5FD)
@@ -383,7 +407,9 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                           Expanded(
                             flex: 3,
                             child: Text(
-                              availability == 'now' ? '🟢 지금 가능' : '⚪ 요청 가능',
+                              availability == 'now'
+                                  ? _copy['now']
+                                  : _copy['request'],
                               textAlign: TextAlign.right,
                               style: TextStyle(
                                   color:
@@ -391,6 +417,16 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                   fontSize: 11),
                             ),
                           ),
+                          if (mine)
+                            IconButton(
+                                tooltip: 'Delete post',
+                                onPressed: _claiming == null
+                                    ? () => _withdrawPost(doc.id)
+                                    : null,
+                                icon: const Icon(Icons.delete_outline_rounded,
+                                    size: 19),
+                                color: const Color(0xFFFCA5A5),
+                                visualDensity: VisualDensity.compact),
                         ]),
                       ),
                     ),
@@ -399,6 +435,29 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
               );
             },
           )),
+          // Only a Duo host has a private room draft to publish. Intro and
+          // Lobby open the board for joining, so they intentionally have no
+          // write action.
+          if (widget.composeDraft != null)
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: _writePost,
+                    icon: const Icon(Icons.edit_rounded, size: 18),
+                    label: Text(_copy['write']),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF2D8F83),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ]),
       );
 }
@@ -453,21 +512,24 @@ class _DuoWaitingDialogState extends State<_DuoWaitingDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Duo 요청을 보냈습니다'),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 18),
-            Text('작성자가 돌아오기를 기다리고 있습니다.\n대기 시간은 최대 5분입니다.'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('대기 취소'),
-          ),
+  Widget build(BuildContext context) {
+    final copy = DuoInviteCopy.forLanguage(FFAppState().chatLang);
+    return AlertDialog(
+      title: Text(copy['requestSent']),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 18),
+          Text(copy['waiting']),
         ],
-      );
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(copy['cancelWaiting']),
+        ),
+      ],
+    );
+  }
 }

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 
 class OnboardingGuideSection extends StatelessWidget {
   const OnboardingGuideSection({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
@@ -22,8 +25,8 @@ class OnboardingGuideSection extends StatelessWidget {
               color: const Color(0xFF2A2A3E),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: const Text(
-              'New Here?',
+            child: Text(
+              copy['newHere'],
               style: TextStyle(
                 color: Color(0xFF5DCAA5),
                 fontSize: 12,
@@ -32,8 +35,8 @@ class OnboardingGuideSection extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          const Text(
-            'Try a 10-minute\nDuo call with\na friend',
+          Text(
+            copy['tryDuoTrial'],
             style: TextStyle(
               color: Colors.white,
               fontSize: 17,
@@ -42,17 +45,17 @@ class OnboardingGuideSection extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'After the call, review it for 5 minutes.\nOne trial per device.',
+          Text(
+            copy['trialReview'],
             style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 13),
           ),
           const SizedBox(height: 10),
-          const Row(
+          Row(
             children: [
-              Icon(Icons.mic_none, size: 14, color: Color(0xFF999999)),
+              const Icon(Icons.mic_none, size: 14, color: Color(0xFF999999)),
               SizedBox(width: 6),
               Text(
-                'Microphone Required',
+                copy['microphoneRequired'],
                 style: TextStyle(color: Color(0xFF999999), fontSize: 12),
               ),
             ],

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../auth_manager.dart';
 import '../base_auth_user_provider.dart';
 import '../../flutter_flow/flutter_flow_util.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 
 import '/backend/backend.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -79,8 +80,8 @@ class FirebaseAuthManager extends AuthManager
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text(
-                  'Too long since most recent sign in. Sign in again before deleting your account.')),
+              content: Text(OriginSurfaceCopy.forLanguage(
+                  FFAppState().chatLang)['recentLoginDelete'])),
         );
       }
     }
@@ -103,8 +104,8 @@ class FirebaseAuthManager extends AuthManager
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text(
-                  'Too long since most recent sign in. Sign in again before updating your email.')),
+              content: Text(OriginSurfaceCopy.forLanguage(
+                  FFAppState().chatLang)['recentLoginEmail'])),
         );
       }
     }
@@ -125,7 +126,9 @@ class FirebaseAuthManager extends AuthManager
       if (e.code == 'requires-recent-login') {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: ${e.message!}')),
+          SnackBar(
+              content: Text(
+                  '${OriginSurfaceCopy.forLanguage(FFAppState().chatLang)['error']}: ${e.message!}')),
         );
       }
     }
@@ -141,12 +144,16 @@ class FirebaseAuthManager extends AuthManager
     } on FirebaseAuthException catch (e) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${e.message!}')),
+        SnackBar(
+            content: Text(
+                '${OriginSurfaceCopy.forLanguage(FFAppState().chatLang)['error']}: ${e.message!}')),
       );
       return null;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Password reset email sent')),
+      SnackBar(
+          content: Text(OriginSurfaceCopy.forLanguage(
+              FFAppState().chatLang)['passwordResetSent'])),
     );
   }
 
@@ -212,7 +219,8 @@ class FirebaseAuthManager extends AuthManager
       } else if (phoneAuthManager.phoneAuthError != null) {
         final e = phoneAuthManager.phoneAuthError!;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Error: ${e.message!}'),
+          content: Text(
+              '${OriginSurfaceCopy.forLanguage(FFAppState().chatLang)['error']}: ${e.message!}'),
         ));
         phoneAuthManager.update(() => phoneAuthManager.phoneAuthError = null);
       }

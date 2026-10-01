@@ -7,7 +7,9 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '/app_state.dart';
 import 'duo_board_service.dart';
+import 'duo_invite_localization.dart';
 
 typedef DuoBoardRequestOpened = Future<void> Function(DuoBoardHostMatch match);
 
@@ -68,8 +70,18 @@ class DuoBoardPushService {
         .set({
       'token': token,
       'platform': defaultTargetPlatform.name,
+      'chatLanguage': FFAppState().chatLang,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  /// Keeps notification language in sync when Lobby Chat Lang changes.
+  static Future<void> refreshChatLanguageForCurrentMember() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) return;
+    final token = await FirebaseMessaging.instance.getToken();
+    if (token == null || token.isEmpty) return;
+    await _saveToken(user.uid, token);
   }
 
   static String _tokenDocumentId(String token) =>
@@ -118,12 +130,13 @@ class DuoBoardPushService {
       final requestId = message.data['requestId']?.toString();
       if (requestId == null || requestId.isEmpty) return;
       final current = context();
+      final copy = DuoInviteCopy.forLanguage(FFAppState().chatLang);
       // The callback returns the navigator's current, mounted context.
       // ignore: use_build_context_synchronously
       ScaffoldMessenger.maybeOf(current)?.showSnackBar(SnackBar(
-        content: Text(message.notification?.body ?? 'Duo 대화 요청이 도착했습니다.'),
+        content: Text(message.notification?.body ?? copy['requestArrived']),
         action: SnackBarAction(
-          label: '열기',
+          label: copy['open'],
           onPressed: () => _open(requestId, current),
         ),
       ));
@@ -151,7 +164,9 @@ class DuoBoardPushService {
     } catch (_) {
       if (!context.mounted) return;
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(content: Text('요청자가 더 이상 기다리고 있지 않습니다.')),
+        SnackBar(
+            content: Text(DuoInviteCopy.forLanguage(
+                FFAppState().chatLang)['requestGone'])),
       );
     }
   }

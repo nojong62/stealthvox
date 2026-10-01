@@ -2,6 +2,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '/app_state.dart';
+import '/custom_code/services/origin_surface_localization.dart';
+
 class AuthProgressView extends StatefulWidget {
   const AuthProgressView({
     super.key,
@@ -22,10 +25,13 @@ class _AuthProgressViewState extends State<AuthProgressView>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
-  static const _steps = [
-    '계정 확인중',
-    '학습 기록 연결 중',
-  ];
+  OriginSurfaceCopy get _copy =>
+      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+
+  List<String> get _steps => [
+        _copy['checkingAccount'],
+        _copy['connectingLearning'],
+      ];
 
   @override
   void initState() {
@@ -102,7 +108,7 @@ class _AuthProgressViewState extends State<AuthProgressView>
                 const SizedBox(height: 8),
               ],
               Text(
-                '잠시만 기다려 주세요',
+                _copy['pleaseWait'],
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: mutedColor,

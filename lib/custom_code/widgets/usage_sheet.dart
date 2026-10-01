@@ -13,6 +13,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '/auth/firebase_auth/auth_util.dart';
+import '/app_state.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 
 const Color _kUsageAccent = Color(0xFF60A5FA);
 
@@ -36,14 +38,15 @@ String usageModeGroup(String mode) {
   return talkModes.contains(mode) ? 'talk' : 'study';
 }
 
-String usageModeGroupName(String mode) =>
-    usageModeGroup(mode) == 'talk' ? 'Talk Room' : 'Study Room';
+String usageModeGroupName(String mode, OriginSurfaceCopy copy) =>
+    usageModeGroup(mode) == 'talk' ? copy['talkRoom'] : copy['studyRoom'];
 
 /// Today / This Week 요약 카드 한 장.
 Widget _summaryCard({
   required String title,
   required int talkSeconds,
   required int studySeconds,
+  required OriginSurfaceCopy copy,
 }) {
   // 글꼴 배율이 큰 기기에서는 라벨과 값이 한 줄을 같이 못 쓴다. 둘 다
   // Flexible로 묶어 남는 폭을 나눠 쓰게 한다.
@@ -86,9 +89,9 @@ Widget _summaryCard({
                 fontWeight: FontWeight.w600,
                 letterSpacing: 1.2)),
         const SizedBox(height: 10),
-        row('Talk Room', talkSeconds),
+        row(copy['talkRoom'], talkSeconds),
         const SizedBox(height: 6),
-        row('Study Room', studySeconds),
+        row(copy['studyRoom'], studySeconds),
       ],
     ),
   );
@@ -101,6 +104,7 @@ void showUsageSheet(BuildContext context) {
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (sheetContext) {
+      final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
       return Container(
         height: MediaQuery.of(sheetContext).size.height * 0.75,
         padding: const EdgeInsets.all(24),
@@ -115,7 +119,7 @@ void showUsageSheet(BuildContext context) {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Flexible(
-                  child: Text("📊 Usage",
+                  child: Text('📊 ${copy['usage']}',
                       style: GoogleFonts.orbitron(
                           color: Colors.white,
                           fontSize: 18,
@@ -130,8 +134,8 @@ void showUsageSheet(BuildContext context) {
             const Divider(color: Colors.white12, height: 24),
             Expanded(
               child: currentUserReference == null
-                  ? const Center(
-                      child: Text("Log in to view usage.",
+                  ? Center(
+                      child: Text(copy['loginToViewUsage'],
                           style: TextStyle(color: Colors.white54)))
                   : StreamBuilder<QuerySnapshot>(
                       stream: currentUserReference!
@@ -162,7 +166,7 @@ void showUsageSheet(BuildContext context) {
                           //   끊겼다(실기기 2.0배 확인, 2026-08-27).
                           //   제목 줄은 FittedBox로 줄여 한 줄에 담고, 설명
                           //   줄은 폭을 좁혀 끊기는 자리를 낫게 만든다.
-                          return const Center(
+                          return Center(
                             child: Padding(
                               padding: EdgeInsets.all(24.0),
                               child: Column(
@@ -173,7 +177,7 @@ void showUsageSheet(BuildContext context) {
                                   SizedBox(height: 16),
                                   FittedBox(
                                     fit: BoxFit.scaleDown,
-                                    child: Text("No usage yet.",
+                                    child: Text(copy['noUsage'],
                                         maxLines: 1,
                                         style: TextStyle(
                                             color: Colors.white54,
@@ -181,7 +185,7 @@ void showUsageSheet(BuildContext context) {
                                   ),
                                   SizedBox(height: 8),
                                   Text(
-                                    "Your usage will appear here.",
+                                    copy['usageAppearsHere'],
                                     style: TextStyle(
                                         color: Colors.white38, fontSize: 12),
                                     textAlign: TextAlign.center,
@@ -222,19 +226,21 @@ void showUsageSheet(BuildContext context) {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _summaryCard(
-                                title: 'Today',
+                                title: copy['today'],
                                 talkSeconds: sumGroup('talk', todayStart),
                                 studySeconds: sumGroup('study', todayStart),
+                                copy: copy,
                               ),
                               const SizedBox(height: 10),
                               _summaryCard(
-                                title: 'This Week',
+                                title: copy['thisWeek'],
                                 talkSeconds: sumGroup('talk', weekStart),
                                 studySeconds: sumGroup('study', weekStart),
+                                copy: copy,
                               ),
                               const SizedBox(height: 20),
-                              const Text(
-                                'Recent Sessions',
+                              Text(
+                                copy['recentSessions'],
                                 style: TextStyle(
                                     color: Colors.white54,
                                     fontSize: 12,
@@ -252,7 +258,7 @@ void showUsageSheet(BuildContext context) {
                                 final String modeRaw =
                                     (d['mode'] as String?) ?? '';
                                 final String groupName =
-                                    usageModeGroupName(modeRaw);
+                                    usageModeGroupName(modeRaw, copy);
                                 final int actualSec =
                                     (d['actual_seconds'] as int?) ??
                                         (d['seconds_used'] as int?) ??
@@ -282,7 +288,7 @@ void showUsageSheet(BuildContext context) {
                                       children: [
                                         Text(
                                           isDiff
-                                              ? '$groupName  ·  ${formatUsageDuration(actualSec)} actual  ·  ${formatUsageDuration(usedSec)} deducted'
+                                              ? '$groupName  ·  ${formatUsageDuration(actualSec)} ${copy['actual']}  ·  ${formatUsageDuration(usedSec)} ${copy['deducted']}'
                                               : '$groupName  ·  ${formatUsageDuration(actualSec)}',
                                           style: const TextStyle(
                                               color: _kUsageAccent,

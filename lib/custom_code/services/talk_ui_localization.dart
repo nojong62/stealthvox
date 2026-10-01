@@ -20,7 +20,7 @@ class TalkUiCopy {
   static const Map<String, Map<String, String>> _copies = {
     'English': {
       'modesTitle': 'Choose a Talk Mode',
-      'duoMenuSubtitle': 'Talk with a Friend\nLive Interpretation',
+      'duoMenuSubtitle': 'Choose: Duo / Interpretation',
       'circleMenuSubtitle': 'Group Conversation',
       'scenarioMenuSubtitle': 'Real-Life Scenarios',
       'navModes': 'Modes',
@@ -59,7 +59,7 @@ class TalkUiCopy {
     },
     'Korean': {
       'modesTitle': '대화 모드 선택',
-      'duoMenuSubtitle': '초청 직접 대화\n초청 만능 통역',
+      'duoMenuSubtitle': 'Duo / 통역 중 선택',
       'circleMenuSubtitle': '서클 구성원 대화',
       'scenarioMenuSubtitle': '실전 상황 대화',
       'navModes': '모드',
@@ -492,6 +492,8 @@ class TalkUiCopy {
   // 로그인 뒤 공통 화면은 로비의 Original(Chat Language)을 그대로 따른다.
   static const Map<String, Map<String, String>> _sharedCopies = {
     'English': {
+      'sessionEndingSoon':
+          'The 10-minute session is almost over. Please wrap up the conversation.',
       'purchaseHistory': 'Purchase History',
       'accessDenied': 'Access denied.',
       'noPurchases': 'No purchases yet.',
@@ -528,6 +530,7 @@ class TalkUiCopy {
       'circleTalk': 'Circle Talk',
     },
     'Korean': {
+      'sessionEndingSoon': '10분 세션이 다 돼가니 대화를 마무리해 주시기 바랍니다.',
       'purchaseHistory': '구매 내역',
       'accessDenied': '접근할 수 없습니다.',
       'noPurchases': '구매 내역이 없습니다.',
@@ -564,6 +567,7 @@ class TalkUiCopy {
       'circleTalk': '서클톡',
     },
     'Japanese': {
+      'sessionEndingSoon': '10分間のセッションがまもなく終了します。会話をまとめてください。',
       'purchaseHistory': '購入履歴',
       'accessDenied': 'アクセスできません。',
       'noPurchases': '購入履歴はありません。',
@@ -599,6 +603,7 @@ class TalkUiCopy {
       'circleTalk': 'サークルトーク',
     },
     'Chinese': {
+      'sessionEndingSoon': '10分钟的会话即将结束，请准备结束本次对话。',
       'purchaseHistory': '购买记录',
       'accessDenied': '无法访问。',
       'noPurchases': '暂无购买记录。',
@@ -634,6 +639,8 @@ class TalkUiCopy {
       'circleTalk': '社群对话',
     },
     'Spanish': {
+      'sessionEndingSoon':
+          'La sesión de 10 minutos está por terminar. Finaliza la conversación.',
       'purchaseHistory': 'Historial de compras',
       'accessDenied': 'Acceso denegado.',
       'noPurchases': 'Aún no hay compras.',
@@ -670,6 +677,8 @@ class TalkUiCopy {
       'circleTalk': 'Conversación de círculo',
     },
     'French': {
+      'sessionEndingSoon':
+          'La session de 10 minutes touche à sa fin. Veuillez conclure la conversation.',
       'purchaseHistory': 'Historique des achats',
       'accessDenied': 'Accès refusé.',
       'noPurchases': 'Aucun achat pour le moment.',
@@ -707,6 +716,8 @@ class TalkUiCopy {
       'circleTalk': 'Dialogue de groupe',
     },
     'German': {
+      'sessionEndingSoon':
+          'Die 10-minütige Sitzung endet gleich. Bitte schließen Sie das Gespräch ab.',
       'purchaseHistory': 'Kaufverlauf',
       'accessDenied': 'Zugriff verweigert.',
       'noPurchases': 'Noch keine Käufe.',
@@ -745,6 +756,8 @@ class TalkUiCopy {
       'circleTalk': 'Gruppengespräch',
     },
     'Hindi': {
+      'sessionEndingSoon':
+          '10 मिनट का सत्र समाप्त होने वाला है। कृपया बातचीत पूरी करें।',
       'purchaseHistory': 'खरीद इतिहास',
       'accessDenied': 'पहुँच अस्वीकृत।',
       'noPurchases': 'अभी कोई खरीद नहीं।',
@@ -781,6 +794,8 @@ class TalkUiCopy {
       'circleTalk': 'समूह वार्ता',
     },
     'Russian': {
+      'sessionEndingSoon':
+          '10-минутный сеанс скоро закончится. Пожалуйста, завершите разговор.',
       'purchaseHistory': 'История покупок',
       'accessDenied': 'Доступ запрещён.',
       'noPurchases': 'Покупок пока нет.',
@@ -818,6 +833,8 @@ class TalkUiCopy {
       'circleTalk': 'Групповой разговор',
     },
     'Portuguese': {
+      'sessionEndingSoon':
+          'A sessão de 10 minutos está quase terminando. Finalize a conversa.',
       'purchaseHistory': 'Histórico de compras',
       'accessDenied': 'Acesso negado.',
       'noPurchases': 'Ainda não há compras.',
@@ -854,6 +871,8 @@ class TalkUiCopy {
       'circleTalk': 'Conversa em grupo',
     },
     'Italian': {
+      'sessionEndingSoon':
+          'La sessione di 10 minuti sta per terminare. Concludi la conversazione.',
       'purchaseHistory': 'Cronologia acquisti',
       'accessDenied': 'Accesso negato.',
       'noPurchases': 'Nessun acquisto.',
@@ -890,6 +909,8 @@ class TalkUiCopy {
       'circleTalk': 'Dialogo di gruppo',
     },
     'Dutch': {
+      'sessionEndingSoon':
+          'De sessie van 10 minuten is bijna afgelopen. Rond het gesprek af.',
       'purchaseHistory': 'Aankoopgeschiedenis',
       'accessDenied': 'Toegang geweigerd.',
       'noPurchases': 'Nog geen aankopen.',

@@ -91,6 +91,8 @@ import 'duo_guest_study_page.dart';
 import 'duo_board_sheet.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/duo_canonical.dart';
+import '/custom_code/services/origin_surface_localization.dart';
+import '/custom_code/services/duo_invite_localization.dart';
 
 // ============================================================================
 // 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다. **통신 로직 자체가 다르다** —
@@ -391,7 +393,7 @@ const String kDuoModeInterpreter = 'interpreter';
 /// 호스트가 초대를 만드는 동안 보는 문구 — 대화 방식 선택 시트와,
 /// 그 직후 화면 밑에서 올라오는 초대 완료·실패 알림([_showDuoSnack]).
 ///
-/// **로비의 ORIGIN(대화 언어 = `FFAppState().chatLang`)으로 고른다.**
+/// **로비의 Chat Lang(대화 언어)으로 고른다.**
 /// 초대를 만드는 사람이 실제로 말하고 듣는 언어가 ORIGIN이라서, 배우는
 /// 언어(TARGET)가 아니라 이쪽을 기준으로 잡는다.
 ///
@@ -2313,6 +2315,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     unawaited(_startDirectCall());
   }
 
+  OriginSurfaceCopy get _surfaceCopy =>
+      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+
   Future<void> _startDirectCall() async {
     if (_directCallActive || _directStarting || _directStopping || _isExiting) {
       return;
@@ -2322,8 +2327,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (!_useWebrtcTransport && _relayUrl.trim().isEmpty) {
       _lgDuo('[DIRECT]', 'start_blocked reason=no_relay_url');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('직접 대화 서버 주소가 설정되지 않았습니다.'),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_surfaceCopy['directServerMissing']),
         ));
       }
       return;
@@ -2598,8 +2603,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _lgDuo('[DIRECT]', 'start_failed reason=pcm_player_unavailable');
       await _stopDirectCall('pcm_player_unavailable');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('이 기기에서는 아직 직접 대화를 지원하지 않습니다.'),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_surfaceCopy['directUnsupported']),
         ));
       }
       return false;
@@ -6321,6 +6326,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       // 5) 배포 방법 선택. 시스템 공유 시트 안에는 앱 전용 버튼을 넣을 수
       // 없으므로 복사·공유·Duo 게시판 등록을 먼저 앱 팝업에서 고른다.
       final t = modePickerTextFor(FFAppState().chatLang);
+      final inviteCopy = DuoInviteCopy.forLanguage(FFAppState().chatLang);
       if (!mounted) return;
       final destination = await showModalBottomSheet<String>(
         context: context,
@@ -6329,27 +6335,35 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           child: Padding(
             padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Text('초대 방법', style: TextStyle(color: Colors.white,
-                  fontSize: 19, fontWeight: FontWeight.w800)),
+              Text(inviteCopy['inviteMethod'],
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800)),
               const SizedBox(height: 12),
               ListTile(
-                leading: const Icon(Icons.copy_rounded, color: Color(0xFF93C5FD)),
-                title: const Text('링크 복사', style: TextStyle(color: Colors.white)),
+                leading:
+                    const Icon(Icons.copy_rounded, color: Color(0xFF93C5FD)),
+                title: Text(inviteCopy['copyLink'],
+                    style: const TextStyle(color: Colors.white)),
                 onTap: () => Navigator.pop(sheetContext, 'copy'),
               ),
               ListTile(
-                leading: const Icon(Icons.share_rounded, color: Color(0xFF93C5FD)),
-                title: const Text('공유하기 · 카카오톡 포함',
-                    style: TextStyle(color: Colors.white)),
+                leading:
+                    const Icon(Icons.share_rounded, color: Color(0xFF93C5FD)),
+                title: Text(inviteCopy['share'],
+                    style: const TextStyle(color: Colors.white)),
                 onTap: () => Navigator.pop(sheetContext, 'share'),
               ),
               if (FirebaseAuth.instance.currentUser?.isAnonymous == false)
                 ListTile(
-                  leading: const Icon(Icons.forum_outlined, color: Color(0xFF52D4C3)),
-                  title: const Text('Duo 게시판에 올리기',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-                  subtitle: const Text('방은 유지되고 주제만 입력하면 됩니다.',
-                      style: TextStyle(color: Colors.white54)),
+                  leading: const Icon(Icons.forum_outlined,
+                      color: Color(0xFF52D4C3)),
+                  title: Text(inviteCopy['postToBoard'],
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w700)),
+                  subtitle: Text(inviteCopy['postToBoardDetail'],
+                      style: const TextStyle(color: Colors.white54)),
                   onTap: () => Navigator.pop(sheetContext, 'board'),
                 ),
             ]),
@@ -6360,7 +6374,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       if (destination == 'copy') {
         await Clipboard.setData(ClipboardData(text: inviteLink));
       } else if (destination == 'share') {
-        await Share.share('${t['inviteShareText']}\n$inviteLink',
+        // 직접 대화 초대는 호스트(ORIGIN) 언어의 안내문을 그대로 쓴다.
+        // 만능 통역 초대만은 초대받는 사람이 먼저 읽을 문구이므로, 호스트가
+        // 고른 TARGET 언어로 코드 위의 안내문을 만든다.
+        final shareIntro = chosenMode == kDuoModeInterpreter
+            ? modePickerTextFor(_myTarget())['inviteShareText']
+            : t['inviteShareText'];
+        await Share.share('$shareIntro\n$inviteLink',
             subject: t['inviteShareSubject']);
       } else if (destination == 'board') {
         await _ensureHistoryRef();
@@ -6473,7 +6493,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             // 게스트 입장 경로의 안내는 팝업과 같은 영어로 맞춘다.
-            const SnackBar(content: Text("We couldn't find that room.")),
+            SnackBar(content: Text(_surfaceCopy['roomNotFound'])),
           );
           StealthRoomMaster.exitCurrentMode?.call();
         }
@@ -6487,8 +6507,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('This room is not available right now.')),
+            SnackBar(content: Text(_surfaceCopy['roomUnavailable'])),
           );
           StealthRoomMaster.exitCurrentMode?.call();
         }
@@ -6603,9 +6622,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       debugPrint('[Duo] Guest join error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Something went wrong while connecting. '
-                  'Please try again.')),
+          SnackBar(content: Text(_surfaceCopy['connectionFailed'])),
         );
         StealthRoomMaster.exitCurrentMode?.call();
       }
@@ -7224,11 +7241,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         child: AbsorbPointer(
           child: Container(
             color: const Color(0xFF121212).withValues(alpha: 0.72),
-            child: const Center(
+            child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  SizedBox(
+                  const SizedBox(
                     width: 28,
                     height: 28,
                     child: CircularProgressIndicator(
@@ -7236,7 +7253,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                   ),
                   SizedBox(height: 16),
                   Text(
-                    'Wrapping up…',
+                    _surfaceCopy['wrappingUp'],
                     style: TextStyle(
                         color: Colors.white70,
                         fontSize: 13,
@@ -7574,6 +7591,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   Widget _buildInvitedModeBadge() {
     final bool loading = _pendingModeLoading;
     final bool direct = _duoMode == kDuoModeDirect;
+    final t = modePickerTextFor(FFAppState().chatLang);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
@@ -7587,18 +7605,19 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         const SizedBox(width: 12),
         Expanded(
           child: loading
-              ? const Text('Checking the invitation…',
+              ? Text(_surfaceCopy['checkingInvitation'],
                   style: TextStyle(color: Colors.white54, fontSize: 13))
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('${_modeTitleEn(_duoMode)} invitation',
+                    Text(
+                        '${direct ? t['directTitle'] : t['interpTitle']} ${_surfaceCopy['invitation']}',
                         style: const TextStyle(
                             color: Colors.white,
                             fontSize: 15,
                             fontWeight: FontWeight.bold)),
                     const SizedBox(height: 3),
-                    Text(_modeDescEn(_duoMode),
+                    Text(direct ? t['directDesc']! : t['interpDesc']!,
                         style: const TextStyle(
                             color: Colors.white38, fontSize: 12, height: 1.3)),
                   ],
@@ -7705,12 +7724,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                         style: const TextStyle(
                             color: Colors.white54, fontSize: 13, height: 1.35)),
                     const SizedBox(height: 22),
-                    dropdown("Original", native, const Color(0xFF93C5FD),
-                        (val) {
+                    dropdown(_surfaceCopy['languageLabelOrigin'], native,
+                        const Color(0xFF93C5FD), (val) {
                       if (val != null) setLocal(() => native = val);
                     }),
                     const SizedBox(height: 18),
-                    dropdown("Target", target, const Color(0xFF4ADE80), (val) {
+                    dropdown(_surfaceCopy['languageLabelLearning'], target,
+                        const Color(0xFF4ADE80), (val) {
                       if (val == null) return;
                       setLocal(() {
                         target = val;
@@ -7727,7 +7747,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                       // 만지지 않은 Target은 넘기지 않는다(null = 그대로 둔다).
                       onPressed: () => unawaited(_applyOriginChange(
                           native, targetTouched ? target : null)),
-                      child: const Text("Apply",
+                      child: Text(_surfaceCopy['apply'],
                           style: TextStyle(
                               color: Colors.white,
                               fontSize: 16,
@@ -7736,7 +7756,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                     const SizedBox(height: 10),
                     TextButton(
                       onPressed: _keepCurrentOrigin,
-                      child: const Text("Keep Current",
+                      child: Text(_surfaceCopy['keepCurrent'],
                           style:
                               TextStyle(color: Colors.white70, fontSize: 15)),
                     ),
@@ -7859,29 +7879,30 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text("Conversation Languages",
+                  Text(_surfaceCopy['conversationLanguages'],
                       style: TextStyle(
                           color: Colors.white,
                           fontSize: 20,
                           fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
-                  const Text(
-                      "Check how you were invited, then choose your languages.",
+                  Text(_surfaceCopy['guestLanguageHint'],
                       style: TextStyle(color: Colors.white54, fontSize: 13)),
                   const SizedBox(height: 20),
                   _buildInvitedModeBadge(),
                   const SizedBox(height: 22),
-                  dropdown("Original", native, const Color(0xFF93C5FD), (val) {
+                  dropdown(_surfaceCopy['languageLabelOrigin'], native,
+                      const Color(0xFF93C5FD), (val) {
                     if (val != null) {
                       setState(() => FFAppState().chatLang = val);
                     }
-                  }, subtitle: "(Chat Lang)", subtitleBelow: false),
+                  }, subtitleBelow: false),
                   const SizedBox(height: 18),
-                  dropdown("Target", target, const Color(0xFF4ADE80), (val) {
+                  dropdown(_surfaceCopy['languageLabelLearning'], target,
+                      const Color(0xFF4ADE80), (val) {
                     if (val != null) {
                       setState(() => FFAppState().targetLang = val);
                     }
-                  }, subtitle: "(Learn Lang)", subtitleBelow: true),
+                  }, subtitleBelow: true),
                   const SizedBox(height: 28),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
@@ -7904,7 +7925,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                         _joinAsGuest(roomId);
                       }
                     },
-                    child: const Text("Enter",
+                    child: Text(_surfaceCopy['enter'],
                         style: TextStyle(
                             color: Colors.white,
                             fontSize: 16,
@@ -7954,7 +7975,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
               IconButton(
                   icon: const Icon(Icons.arrow_back_ios_new_rounded,
                       color: Colors.white70),
-                  tooltip: '이전 단계',
+                  tooltip: _surfaceCopy['back'],
                   padding: EdgeInsets.zero,
                   alignment: Alignment.centerLeft,
                   // 아이콘 모양은 그대로 두고 오른쪽의 빈 공간까지 눌리게 한다.
@@ -7990,7 +8011,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                       size: 24,
                     ),
                   ),
-                  tooltip: 'Duo 초대장 발행',
+                  tooltip: _surfaceCopy['issueDuoInvite'],
                   onPressed: _shareInviteCode,
                   padding: EdgeInsets.zero,
                   constraints:
@@ -8055,7 +8076,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 아래에 살려 둔 채 위에 얹고, 뒤로 나오면 하던 통화가 그 자리에 있다.
   Widget _buildStudyRoomPill() {
     return Tooltip(
-      message: '공부방 (Study Room)',
+      message: _surfaceCopy['studyRoom'],
       child: GestureDetector(
         onTap: () => context.pushNamed('ChatHistory'),
         behavior: HitTestBehavior.opaque,
@@ -8208,7 +8229,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 minimumSize: const Size(0, 44),
               ),
-              child: const Text('다시 시도',
+              child: Text(_surfaceCopy['retry'],
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
             ),
           ],

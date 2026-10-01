@@ -17,6 +17,8 @@
 // ====================================================================
 
 import 'package:flutter/material.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import 'origin_surface_localization.dart';
 
 import 'origin_language_session.dart'
     show detectOriginScript, textContradictsLanguage;
@@ -178,7 +180,11 @@ class ListeningStepSwitch extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool step2 = step == ListeningStep.step2;
     return Tooltip(
-      message: step2 ? 'Step 2 · 배울 언어로 듣기' : 'Step 1 · 대화 언어',
+      message: step2
+          ? OriginSurfaceCopy.forLanguage(
+              FFAppState().chatLang)['listeningStep2']
+          : OriginSurfaceCopy.forLanguage(
+              FFAppState().chatLang)['listeningStep1'],
       child: Opacity(
         opacity: enabled ? 1.0 : 0.35,
         child: GestureDetector(

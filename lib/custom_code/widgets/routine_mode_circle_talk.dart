@@ -5510,7 +5510,14 @@ $userFixPolicy$finalLanguageRule''';
                 right: 0,
                 top: 12,
                 child: Center(
-                  child: SessionSavedNotice(visible: _rolloverNoticeVisible),
+                  child: Column(
+                    children: [
+                      SessionEndingSoonNotice(
+                        message: _uiCopy['sessionEndingSoon'],
+                      ),
+                      SessionSavedNotice(visible: _rolloverNoticeVisible),
+                    ],
+                  ),
                 ),
               ),
             ]),

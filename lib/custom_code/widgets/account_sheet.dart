@@ -15,6 +15,8 @@ import 'package:intl/intl.dart';
 
 import '/auth/firebase_auth/auth_util.dart';
 import '/flutter_flow/flutter_flow_util.dart';
+import '/app_state.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 import 'lobby_master.dart' show LobbyBrain;
 
 const Color _kSheetBg = Color(0xFF222222);
@@ -22,11 +24,11 @@ const Color _kRowBg = Colors.black;
 const Color _kAccent = Color(0xFF22D3EE);
 
 /// 로그인 방법을 사람 말로 옮긴다. 제공자 id는 Firebase가 정한 값이다.
-String describeSignInMethod(User? user) {
-  if (user == null) return 'Not Logged In';
-  if (user.isAnonymous) return 'Guest (Trial)';
+String describeSignInMethod(User? user, OriginSurfaceCopy copy) {
+  if (user == null) return copy['notLoggedIn'];
+  if (user.isAnonymous) return copy['guestTrial'];
   final ids = user.providerData.map((p) => p.providerId).toList();
-  if (ids.isEmpty) return 'Unknown';
+  if (ids.isEmpty) return copy['unknown'];
   return ids
       .map((id) {
         switch (id) {
@@ -69,6 +71,9 @@ class _AccountSheetState extends State<_AccountSheet> {
   bool _editing = false;
   bool _saving = false;
 
+  OriginSurfaceCopy get _copy =>
+      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -80,7 +85,7 @@ class _AccountSheetState extends State<_AccountSheet> {
   Future<void> _saveDisplayName() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      _toast('Enter a name.');
+      _toast(_copy['enterName']);
       return;
     }
     if (name == currentUserDisplayName) {
@@ -98,11 +103,11 @@ class _AccountSheetState extends State<_AccountSheet> {
         _editing = false;
         _saving = false;
       });
-      _toast('Name updated.');
+      _toast(_copy['nameUpdated']);
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      _toast('Unable to update the name. Please try again.');
+      _toast(_copy['nameUpdateFailed']);
     }
   }
 
@@ -152,8 +157,8 @@ class _AccountSheetState extends State<_AccountSheet> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Flexible(
-                    child: Text('Account Info',
+                  Flexible(
+                    child: Text(_copy['accountInfo'],
                         style: TextStyle(
                             color: Colors.white,
                             fontSize: 18,
@@ -181,15 +186,15 @@ class _AccountSheetState extends State<_AccountSheet> {
               const SizedBox(height: 18),
 
               // ── 로그인 정보 (바꿀 수 없는 것들) ──
-              _infoRow(Icons.mail_outline_rounded, 'Email',
+              _infoRow(Icons.mail_outline_rounded, _copy['email'],
                   currentUserEmail.isEmpty ? '-' : currentUserEmail),
               const SizedBox(height: 8),
-              _infoRow(Icons.vpn_key_outlined, 'Login Method',
-                  describeSignInMethod(user)),
+              _infoRow(Icons.vpn_key_outlined, _copy['loginMethod'],
+                  describeSignInMethod(user, _copy)),
               const SizedBox(height: 8),
               _infoRow(
                 Icons.event_outlined,
-                'Joined',
+                _copy['joined'],
                 createdAt == null
                     ? '-'
                     : DateFormat('yyyy.MM.dd').format(createdAt.toLocal()),
@@ -205,7 +210,7 @@ class _AccountSheetState extends State<_AccountSheet> {
                     foregroundColor: Colors.white60,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  label: const Text('Log Out'),
+                  label: Text(_copy['logOut']),
                 ),
               ),
             ],
@@ -237,7 +242,7 @@ class _AccountSheetState extends State<_AccountSheet> {
       children: [
         Expanded(
           child: Text(
-            name.isEmpty ? 'No Name' : name,
+            name.isEmpty ? _copy['noName'] : name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -247,7 +252,7 @@ class _AccountSheetState extends State<_AccountSheet> {
           ),
         ),
         IconButton(
-          tooltip: 'Change Name',
+          tooltip: _copy['changeName'],
           icon: const Icon(Icons.edit_outlined, color: _kAccent, size: 19),
           onPressed: () => setState(() => _editing = true),
         ),
@@ -266,7 +271,7 @@ class _AccountSheetState extends State<_AccountSheet> {
             style: const TextStyle(color: Colors.white, fontSize: 16),
             decoration: InputDecoration(
               isDense: true,
-              hintText: 'Display Name',
+              hintText: _copy['displayName'],
               hintStyle: const TextStyle(color: Colors.white24),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -296,7 +301,7 @@ class _AccountSheetState extends State<_AccountSheet> {
                 child:
                     CircularProgressIndicator(strokeWidth: 2, color: _kAccent))
             : IconButton(
-                tooltip: 'Save',
+                tooltip: _copy['save'],
                 icon: const Icon(Icons.check_rounded, color: _kAccent),
                 onPressed: _saveDisplayName,
               ),

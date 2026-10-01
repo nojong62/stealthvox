@@ -26,6 +26,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/components/social_login_modal.dart';
 import '/custom_code/services/talk_ui_localization.dart';
+import '/custom_code/services/origin_surface_localization.dart';
 // 💡 에러의 원인이었던 외부 패키지 삭제 완료! Firebase로 대체합니다.
 
 /// 스토어 상품 정의. **상품 ID·제목·초의 유일한 출처다.**
@@ -144,6 +145,8 @@ class _StoreMasterState extends State<StoreMaster> {
   bool _priceLookupComplete = false;
   bool get _useEnglishLegalDocs => FFAppState().chatLang.trim() != 'Korean';
   TalkUiCopy get _copy => TalkUiCopy.forLanguage(FFAppState().chatLang);
+  OriginSurfaceCopy get _surfaceCopy =>
+      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
   String _versionText = '';
 
   // [v4.0] 서버 증액 감지용 Firestore 리스너
@@ -186,7 +189,8 @@ class _StoreMasterState extends State<StoreMaster> {
           });
           BillingTicker.instance.remainingSecondsNotifier.value = serverTime;
         }
-        _showFeedback("✅ Time added! ($planTitle)", const Color(0xFF34D399));
+        _showFeedback('✅ ' + _surfaceCopy['timeAdded'] + ' ($planTitle)',
+            const Color(0xFF34D399));
       }
     });
 
@@ -196,7 +200,7 @@ class _StoreMasterState extends State<StoreMaster> {
       _remainingTimeSub?.cancel();
       _log('LISTEN', 'timeout server credit not detected within 20s');
       _showFeedback(
-        "Payment complete. Your time may take a moment to update.",
+        _surfaceCopy['paymentUpdateDelay'],
         const Color(0xFFFBBF24),
       );
     });
@@ -349,7 +353,7 @@ class _StoreMasterState extends State<StoreMaster> {
         _log('OFFERINGS', 'no current or default offering → abort');
         debugPrint('[RevenueCat] No current or default offering found');
         _showFeedback(
-          "Products are not available yet. Please try again.",
+          _surfaceCopy['productsUnavailable'],
           const Color(0xFFF87171),
         );
         return;
@@ -385,7 +389,7 @@ class _StoreMasterState extends State<StoreMaster> {
           '[RevenueCat] available store product identifiers: ${offering.availablePackages.map((p) => p.storeProduct.identifier).toList()}',
         );
         _showFeedback(
-          "Products are not available yet. Please try again.",
+          _surfaceCopy['productsUnavailable'],
           const Color(0xFFF87171),
         );
         return;
@@ -412,7 +416,7 @@ class _StoreMasterState extends State<StoreMaster> {
 
       _onPurchaseSuccess(plan, clientTxId);
       _showFeedback(
-        "✅ Payment complete. Adding time...",
+        '✅ ' + _surfaceCopy['paymentCompleteAdding'],
         const Color(0xFF60A5FA),
       );
     } on PlatformException catch (e) {
@@ -422,27 +426,27 @@ class _StoreMasterState extends State<StoreMaster> {
         'platform code=$errorCode message=${e.message} details=${e.details}',
       );
       if (errorCode == PurchasesErrorCode.purchaseCancelledError) {
-        _showFeedback("Payment canceled.", Colors.white54);
+        _showFeedback(_surfaceCopy['paymentCanceled'], Colors.white54);
       } else if (errorCode == PurchasesErrorCode.purchaseNotAllowedError) {
         _showFeedback(
-          "Payments are not available on this device.",
+          _surfaceCopy['paymentsUnavailable'],
           const Color(0xFFF87171),
         );
       } else if (errorCode == PurchasesErrorCode.paymentPendingError) {
-        _showFeedback("Payment pending.", const Color(0xFFFBBF24));
+        _showFeedback(_surfaceCopy['paymentPending'], const Color(0xFFFBBF24));
       } else if (errorCode == PurchasesErrorCode.networkError) {
         _showFeedback(
-          "Check your internet connection.",
+          _surfaceCopy['paymentFailed'],
           const Color(0xFFF87171),
         );
       } else if (errorCode == PurchasesErrorCode.storeProblemError) {
         _showFeedback(
-          "The store is unavailable. Please try again.",
+          _surfaceCopy['paymentFailed'],
           const Color(0xFFF87171),
         );
       } else {
         _showFeedback(
-          "Payment failed. Please try again.",
+          _surfaceCopy['paymentFailed'],
           const Color(0xFFF87171),
         );
       }
@@ -454,7 +458,7 @@ class _StoreMasterState extends State<StoreMaster> {
         'stack: ${stackStr.substring(0, stackStr.length > 200 ? 200 : stackStr.length)}',
       );
       _showFeedback(
-        "Payment failed. Please try again.",
+        _surfaceCopy['paymentFailed'],
         const Color(0xFFF87171),
       );
     } finally {
@@ -500,7 +504,7 @@ class _StoreMasterState extends State<StoreMaster> {
   Future<void> _launchURL(String urlString) async {
     final Uri url = Uri.parse(urlString);
     if (!await launchUrl(url, mode: LaunchMode.inAppBrowserView)) {
-      _showFeedback('Could not open the link.', const Color(0xFFF87171));
+      _showFeedback(_surfaceCopy['linkOpenFailed'], const Color(0xFFF87171));
     }
   }
 
@@ -1041,7 +1045,7 @@ class _StoreMasterState extends State<StoreMaster> {
                             color: Colors.white,
                             size: 20,
                           ),
-                          tooltip: 'Back',
+                          tooltip: _surfaceCopy['back'],
                           padding: EdgeInsets.zero,
                           alignment: Alignment.centerLeft,
                           constraints: const BoxConstraints(
