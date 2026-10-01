@@ -66,6 +66,7 @@ const duoBoard = require("./duo_board");
 // implementations.
 exports.interpretUtterance = interpretUtterance;
 exports.publishDuoBoardPost = duoBoard.publishDuoBoardPost;
+exports.withdrawDuoBoardPost = duoBoard.withdrawDuoBoardPost;
 exports.claimDuoBoardPost = duoBoard.claimDuoBoardPost;
 exports.requestDuoBoardPost = duoBoard.requestDuoBoardPost;
 exports.openDuoBoardRequest = duoBoard.openDuoBoardRequest;

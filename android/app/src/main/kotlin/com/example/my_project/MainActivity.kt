@@ -12,6 +12,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 // 🔊 재생기가 오디오 세션을 어디까지 건드리는가. 셋을 **이름으로** 갈라 둔다 —
 //   예전에는 `voiceCall: Boolean` 하나였고, 통역을 끼우려면 그 의미를 바꿔야
@@ -81,24 +82,37 @@ class MainActivity: FlutterActivity() {
             }
 
             val client = InstallReferrerClient.newBuilder(this).build()
+            val replied = AtomicBoolean(false)
+            fun completeSuccess(value: String?) {
+                if (replied.compareAndSet(false, true)) result.success(value)
+            }
+            fun completeError(code: String, message: String?) {
+                if (replied.compareAndSet(false, true)) result.error(code, message, null)
+            }
             client.startConnection(object : InstallReferrerStateListener {
                 override fun onInstallReferrerSetupFinished(responseCode: Int) {
                     if (responseCode == InstallReferrerClient.InstallReferrerResponse.OK) {
                         try {
-                            result.success(client.installReferrer.installReferrer)
+                            completeSuccess(client.installReferrer.installReferrer)
                         } catch (error: Exception) {
-                            result.error("INSTALL_REFERRER_READ", error.message, null)
+                            completeError("INSTALL_REFERRER_READ", error.message)
                         } finally {
                             client.endConnection()
                         }
                     } else {
                         client.endConnection()
-                        result.success(null)
+                        completeSuccess(null)
                     }
                 }
 
                 override fun onInstallReferrerServiceDisconnected() {
-                    // A later app launch retries; do not fail startup for this.
+                    // Dart의 Future를 끝내지 않으면 최초 진입이 무한 대기한다.
+                    // 이후 setup 콜백이 와도 AtomicBoolean이 중복 응답을 막는다.
+                    try {
+                        client.endConnection()
+                    } finally {
+                        completeSuccess(null)
+                    }
                 }
             })
         }

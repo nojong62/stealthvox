@@ -187,32 +187,41 @@ exports.requestDuoBoardPost = functions.https.onCall(async (data, context) => {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   });
-  const tokens = await db().collection('users').doc(ownerUid)
-      .collection('fcm_tokens').get();
-  const tokenDocs = tokens.docs.filter(d => Boolean(d.get('token')));
-  if (tokenDocs.length) {
-    const response = await admin.messaging().sendEach(
-        tokenDocs.map(doc => {
-          // chatLanguage is the Lobby setting. originLanguage is read only
-          // for previously registered installations.
-          const copy = notificationCopyFor(
-              doc.get('chatLanguage') || doc.get('originLanguage'));
-          return {
-            token: doc.get('token'),
-            notification: {title: copy.title, body: copy.body(topic)},
-            data: {type: 'duo_board_request', requestId: postId},
-            android: {priority: 'high'},
-          };
-        }));
-    const invalidCodes = new Set([
-      'messaging/invalid-registration-token',
-      'messaging/registration-token-not-registered',
-    ]);
-    const cleanup = response.responses
-        .map((item, index) => !item.success && invalidCodes.has(item.error?.code)
-          ? tokenDocs[index]?.ref.delete() : null)
-        .filter(Boolean);
-    await Promise.all(cleanup);
+  try {
+    const tokens = await db().collection('users').doc(ownerUid)
+        .collection('fcm_tokens').get();
+    const tokenDocs = tokens.docs.filter(d => Boolean(d.get('token')));
+    if (tokenDocs.length) {
+      const response = await admin.messaging().sendEach(
+          tokenDocs.map(doc => {
+            // chatLanguage is the Lobby setting. originLanguage is read only
+            // for previously registered installations.
+            const copy = notificationCopyFor(
+                doc.get('chatLanguage') || doc.get('originLanguage'));
+            return {
+              token: doc.get('token'),
+              notification: {title: copy.title, body: copy.body(topic)},
+              data: {type: 'duo_board_request', requestId: postId},
+              android: {priority: 'high'},
+            };
+          }));
+      const invalidCodes = new Set([
+        'messaging/invalid-registration-token',
+        'messaging/registration-token-not-registered',
+      ]);
+      const cleanup = response.responses
+          .map((item, index) => !item.success && invalidCodes.has(item.error?.code)
+            ? tokenDocs[index]?.ref.delete() : null)
+          .filter(Boolean);
+      await Promise.all(cleanup);
+    }
+  } catch (error) {
+    // The transaction above is authoritative. Notification delivery is
+    // best-effort and must not turn a saved request into a visible failure.
+    console.error('Duo request notification failed', {
+      requestId: postId,
+      code: error?.code || 'unknown',
+    });
   }
   return {requestId: postId, expiresAtMillis: expiresAt.toMillis()};
 });

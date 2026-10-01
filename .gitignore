@@ -53,3 +53,10 @@ tool/replay_samples/real_*
 
 # 규칙 검증 하네스가 받아 오는 것. 소스만 커밋한다.
 tool/rules_test/node_modules/
+# Local Firebase account audits and cleanup results (may contain UIDs).
+/.codex-*-audit*.json
+/anonymous_account_audit.json
+/anonymous_account_candidates.csv
+/anonymous_cleanup_*.json
+/designated_google_cleanup_*.json
+/test_account_cleanup_*.json

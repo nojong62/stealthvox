@@ -118,6 +118,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   // 💡 [핵심 뼈대] 버튼 연속 클릭 방지용 잠금장치
   bool _isActionLocked = false;
 
+  // Install Referrer와 AppsFlyer가 같은 초대를 동시에 전달해도 한 번만 라우팅한다.
+  bool _routingDuoInvite = false;
+
   // 🧭 Duo 초대 pending 상태 시 Lobby UI 차단용
   bool get _isDuoInvitePending =>
       FFAppState().isGuestSession &&
@@ -134,30 +137,47 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     // (모드별 TtsCache가 같은 tts_cache 폴더를 공유하므로 한 번이면 된다.)
     unawaited(TtsCache.cleanupOnce());
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Duo 초대 pending 상태이면 Lobby 스킵하고 바로 StealthRoom으로
-      debugPrint(
-        '[Lobby] isGuestSession=${FFAppState().isGuestSession}, pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}',
-      );
-      if (FFAppState().isGuestSession &&
-          FFAppState().pendingInviteType == 'duo' &&
-          FFAppState().duoRoomId.isNotEmpty) {
-        debugPrint('[Lobby] routing to StealthRoom for Duo invite');
-        if (mounted) context.pushReplacementNamed('StealthRoom');
-        return;
-      }
-      _initAppState();
-      _initializeLobbyData();
+      unawaited(_initializeEntry());
     });
+  }
+
+  /// Lobby가 첫 화면인 기존 회원도 다른 Lobby 초기화보다 먼저 referrer를 복구한다.
+  Future<void> _initializeEntry() async {
+    await AppsFlyerManager.recoverPlayInstallInvite();
+    if (!mounted) return;
+    if (await _routeToPendingDuoInvite()) return;
+
+    // 잔여시간·Remote Config·RevenueCat보다 먼저 콜백을 등록한다.
+    await AppsFlyerManager.initialize(
+      devKey: 'SQUmDTB2VzuPjrJGiy5SSC',
+      appId: 'com.aienglishpractice.stealthvox',
+    );
+    if (!mounted || await _routeToPendingDuoInvite()) return;
+    _initAppState();
+    unawaited(_initializeLobbyData());
+  }
+
+  /// Install Referrer와 AppsFlyer 콜백 양쪽에서 호출해도 한 번만 이동한다.
+  Future<bool> _routeToPendingDuoInvite() async {
+    if (!mounted || _routingDuoInvite || !_isDuoInvitePending) return false;
+    _routingDuoInvite = true;
+    final roomId = FFAppState().duoRoomId;
+    final valid = await AppsFlyerManager.validatePendingDuoInvite();
+    if (!mounted ||
+        !valid ||
+        FFAppState().pendingInviteType != 'duo' ||
+        FFAppState().duoRoomId != roomId) {
+      _routingDuoInvite = false;
+      return false;
+    }
+    debugPrint('[Lobby] routing to StealthRoom for Duo invite');
+    context.pushReplacementNamed('StealthRoom');
+    return true;
   }
 
   void _onDuoInviteSignal() {
     if (!mounted) return;
-    if (FFAppState().isGuestSession &&
-        FFAppState().pendingInviteType == 'duo' &&
-        FFAppState().duoRoomId.isNotEmpty) {
-      debugPrint('[Lobby] duoInviteSignal - routing to StealthRoom');
-      context.pushReplacementNamed('StealthRoom');
-    }
+    unawaited(_routeToPendingDuoInvite());
   }
 
   void _initAppState() {
@@ -1547,8 +1567,10 @@ class AppsFlyerManager {
   static Future<bool> recoverPlayInstallInvite() async {
     if (!Platform.isAndroid) return false;
     try {
+      // Play Store 서비스가 응답하지 않아도 첫 화면 진입을 영구히 막지 않는다.
       final String? referrer = await _installReferrerChannel
-          .invokeMethod<String>('getInstallReferrer');
+          .invokeMethod<String>('getInstallReferrer')
+          .timeout(const Duration(seconds: 5), onTimeout: () => null);
       if (referrer == null || referrer.isEmpty) return false;
 
       final params = Uri.splitQueryString(referrer);
