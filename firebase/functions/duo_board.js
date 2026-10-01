@@ -4,26 +4,6 @@ const admin = require('firebase-admin');
 const db = () => admin.firestore();
 const badTopic = /(https?:\/\/|www\.|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b\d{2,3}[- .]?\d{3,4}[- .]?\d{4}\b|시발|씨발|섹스|강간|마약|살인|fuck|porn|rape)/iu;
 
-const duoRequestNotificationCopy = {
-  English: {title: 'StealthVox · Duo request', body: topic => `Someone is waiting to talk about “${topic}”.`},
-  Korean: {title: 'StealthVox · Duo 요청', body: topic => `“${topic}”를 원하는 사람이 기다리고 있습니다.`},
-  Japanese: {title: 'StealthVox · Duoリクエスト', body: topic => `「${topic}」について話したい人が待っています。`},
-  Chinese: {title: 'StealthVox · Duo 请求', body: topic => `有人正在等待讨论“${topic}”。`},
-  Spanish: {title: 'StealthVox · Solicitud Duo', body: topic => `Alguien espera para hablar sobre “${topic}”.`},
-  French: {title: 'StealthVox · Demande Duo', body: topic => `Quelqu’un attend pour parler de « ${topic} ».`},
-  German: {title: 'StealthVox · Duo-Anfrage', body: topic => `Jemand wartet, um über „${topic}“ zu sprechen.`},
-  Hindi: {title: 'StealthVox · Duo अनुरोध', body: topic => `कोई “${topic}” पर बात करने के लिए इंतज़ार कर रहा है।`},
-  Russian: {title: 'StealthVox · Duo-запрос', body: topic => `Кто-то ждёт, чтобы поговорить о «${topic}».`},
-  Portuguese: {title: 'StealthVox · Solicitação Duo', body: topic => `Alguém está esperando para falar sobre “${topic}”.`},
-  Italian: {title: 'StealthVox · Richiesta Duo', body: topic => `Qualcuno aspetta per parlare di “${topic}”.`},
-  Dutch: {title: 'StealthVox · Duo-verzoek', body: topic => `Iemand wacht om over “${topic}” te praten.`},
-};
-
-function notificationCopyFor(language) {
-  return duoRequestNotificationCopy[String(language || '').trim()] ||
-      duoRequestNotificationCopy.English;
-}
-
 function text(value, max) {
   const out = String(value || '').trim().replace(/\s+/g, ' ');
   if (out.length < 2 || out.length > max || badTopic.test(out)) {
@@ -37,6 +17,21 @@ function uidOf(context) {
   return context.auth.uid;
 }
 
+const hostPresenceRef = uid => admin.database().ref(`duo_board_hosts/${uid}`);
+
+async function isHostForeground(uid) {
+  const snapshot = await hostPresenceRef(uid).once('value');
+  const cutoff = Date.now() - 60 * 1000;
+  let online = false;
+  snapshot.forEach(child => {
+    const value = child.val() || {};
+    if (value.foreground === true && Number(value.lastSeen || 0) >= cutoff) {
+      online = true;
+    }
+  });
+  return online;
+}
+
 exports.publishDuoBoardPost = functions.https.onCall(async (data, context) => {
   const uid = uidOf(context);
   if (context.auth.token.firebase?.sign_in_provider === 'anonymous') {
@@ -44,12 +39,14 @@ exports.publishDuoBoardPost = functions.https.onCall(async (data, context) => {
   }
   const roomId = String(data.roomId || '').trim();
   const historyPath = String(data.historyPath || '').trim();
-  const mode = data.mode === 'direct' ? 'direct' : 'interpreter';
-  const availability = data.availability === 'request' ? 'request' : 'now';
+  const mode = 'interpreter';
+  const availability = 'request';
   const topic = text(data.topic, 80);
-  const directLanguage = mode === 'direct' ? String(data.directLanguage || '').trim() : '';
+  const topicLanguage = String(data.topicLanguage || '').trim();
+  const directLanguage = '';
+  const discoverable = await isHostForeground(uid);
   if (!roomId || !historyPath.startsWith(`users/${uid}/chat_history/`) ||
-      (mode === 'direct' && !directLanguage)) {
+      data.mode === 'direct' || !topicLanguage) {
     throw new functions.https.HttpsError('invalid-argument', '초대 방 정보가 올바르지 않습니다.');
   }
   const roomRef = db().collection('duo_sessions').doc(roomId);
@@ -57,12 +54,14 @@ exports.publishDuoBoardPost = functions.https.onCall(async (data, context) => {
   const runtimeRef = db().collection('duo_board_runtime').doc(roomId);
   await db().runTransaction(async tx => {
     const room = await tx.get(roomRef);
-    if (!room.exists || room.get('hostUid') !== uid || room.get('isDuoEnabled') !== true) {
+    if (!room.exists || room.get('hostUid') !== uid ||
+        room.get('isDuoEnabled') !== true || room.get('mode') !== 'interpreter') {
       throw new functions.https.HttpsError('failed-precondition', '활성화된 본인 Duo 방이 아닙니다.');
     }
     tx.set(postRef, {
-      ownerUid: uid, topic, mode, directLanguage, availability,
-      active: true, createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      ownerUid: uid, topic, topicLanguage, mode, directLanguage, availability,
+      active: true, state: 'active', discoverable,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, {merge: true});
     tx.set(runtimeRef, {
@@ -105,6 +104,10 @@ exports.claimDuoBoardPost = functions.https.onCall(async (data, context) => {
   const runtimeRef = db().collection('duo_board_runtime').doc(postId);
   const now = admin.firestore.Timestamp.now();
   const expires = admin.firestore.Timestamp.fromMillis(Date.now() + 5 * 60 * 1000);
+  const initialPost = await postRef.get();
+  if (!initialPost.exists || !await isHostForeground(initialPost.get('ownerUid'))) {
+    throw new functions.https.HttpsError('failed-precondition', '초대자가 현재 앱에 없습니다.');
+  }
   return db().runTransaction(async tx => {
     const [post, runtime] = await Promise.all([tx.get(postRef), tx.get(runtimeRef)]);
     if (!post.exists || !runtime.exists || post.get('active') !== true ||
@@ -139,19 +142,17 @@ exports.requestDuoBoardPost = functions.https.onCall(async (data, context) => {
   const runtimeRef = db().collection('duo_board_runtime').doc(postId);
   const requestRef = db().collection('duo_board_requests').doc(postId);
   const requesterRef = db().collection('duo_board_requesters').doc(uid);
-  const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 5 * 60 * 1000);
+  const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 30 * 1000);
   let ownerUid;
-  let topic;
   await db().runTransaction(async tx => {
     const [post, runtime, previous, requester] = await Promise.all([
       tx.get(postRef), tx.get(runtimeRef), tx.get(requestRef), tx.get(requesterRef),
     ]);
     if (!post.exists || !runtime.exists || post.get('active') !== true ||
-        post.get('availability') !== 'request') {
+        post.get('discoverable') !== true) {
       throw new functions.https.HttpsError('failed-precondition', '요청을 받을 수 없는 글입니다.');
     }
     ownerUid = post.get('ownerUid');
-    topic = post.get('topic');
     if (ownerUid === uid) throw new functions.https.HttpsError('failed-precondition', '본인 글에는 요청할 수 없습니다.');
     if (previous.exists && ['waiting', 'matched'].includes(previous.get('status')) &&
         previous.get('expiresAt')?.toMillis() > Date.now()) {
@@ -187,42 +188,15 @@ exports.requestDuoBoardPost = functions.https.onCall(async (data, context) => {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   });
-  try {
-    const tokens = await db().collection('users').doc(ownerUid)
-        .collection('fcm_tokens').get();
-    const tokenDocs = tokens.docs.filter(d => Boolean(d.get('token')));
-    if (tokenDocs.length) {
-      const response = await admin.messaging().sendEach(
-          tokenDocs.map(doc => {
-            // chatLanguage is the Lobby setting. originLanguage is read only
-            // for previously registered installations.
-            const copy = notificationCopyFor(
-                doc.get('chatLanguage') || doc.get('originLanguage'));
-            return {
-              token: doc.get('token'),
-              notification: {title: copy.title, body: copy.body(topic)},
-              data: {type: 'duo_board_request', requestId: postId},
-              android: {priority: 'high'},
-            };
-          }));
-      const invalidCodes = new Set([
-        'messaging/invalid-registration-token',
-        'messaging/registration-token-not-registered',
-      ]);
-      const cleanup = response.responses
-          .map((item, index) => !item.success && invalidCodes.has(item.error?.code)
-            ? tokenDocs[index]?.ref.delete() : null)
-          .filter(Boolean);
-      await Promise.all(cleanup);
-    }
-  } catch (error) {
-    // The transaction above is authoritative. Notification delivery is
-    // best-effort and must not turn a saved request into a visible failure.
-    console.error('Duo request notification failed', {
-      requestId: postId,
-      code: error?.code || 'unknown',
-    });
+  if (!await isHostForeground(ownerUid)) {
+    await requestRef.set({status: 'expired', expiredAt:
+      admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
+    await requesterRef.set({status: 'expired', updatedAt:
+      admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
+    throw new functions.https.HttpsError('failed-precondition', '초대자가 현재 앱에 없습니다.');
   }
+  // Host requests are deliberately in-app only. The foreground Firestore
+  // listener shows the dialog; no FCM notification is sent to a background app.
   return {requestId: postId, expiresAtMillis: expiresAt.toMillis()};
 });
 
@@ -264,9 +238,11 @@ exports.openDuoBoardRequest = functions.https.onCall(async (data, context) => {
       }
       const roomId = request.get('roomId');
       const roomRef = db().collection('duo_sessions').doc(roomId);
-      const room = await tx.get(roomRef);
+      const postRef = db().collection('duo_board_posts').doc(requestId);
+      const [room, post] = await Promise.all([tx.get(roomRef), tx.get(postRef)]);
       if (!room.exists || room.get('hostUid') !== uid ||
-          room.get('isDuoEnabled') !== true || room.get('isPartnerJoined') === true) {
+          room.get('isDuoEnabled') !== true || room.get('isPartnerJoined') === true ||
+          !post.exists || post.get('active') !== true) {
         throw new functions.https.HttpsError('failed-precondition', 'Duo 방을 다시 열 수 없습니다.');
       }
       tx.update(requestRef, {status: 'matched', matchedAt:
@@ -274,6 +250,11 @@ exports.openDuoBoardRequest = functions.https.onCall(async (data, context) => {
       tx.set(db().collection('duo_board_requesters').doc(request.get('requesterUid')),
           {status: 'matched', updatedAt: admin.firestore.FieldValue.serverTimestamp()},
           {merge: true});
+      tx.update(roomRef, {partnerUid: request.get('requesterUid'),
+        boardReservedAt: admin.firestore.FieldValue.serverTimestamp()});
+      tx.update(postRef, {state: 'reserved', discoverable: false,
+        reservedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()});
       return {roomId, requestId, mode: request.get('mode'),
         historyPath: request.get('historyPath') || ''};
     });
@@ -288,6 +269,87 @@ exports.openDuoBoardRequest = functions.https.onCall(async (data, context) => {
     throw error;
   }
 });
+
+exports.declineDuoBoardRequest = functions.https.onCall(async (data, context) => {
+  const uid = uidOf(context);
+  const requestId = String(data.requestId || '').trim();
+  const reason = data.reason === 'timeout' ? 'timeout' : 'busy';
+  if (!requestId) throw new functions.https.HttpsError('invalid-argument', 'requestId가 필요합니다.');
+  const requestRef = db().collection('duo_board_requests').doc(requestId);
+  await db().runTransaction(async tx => {
+    const request = await tx.get(requestRef);
+    if (!request.exists || request.get('ownerUid') !== uid ||
+        request.get('status') !== 'waiting') return;
+    tx.update(requestRef, {status: reason, respondedAt:
+      admin.firestore.FieldValue.serverTimestamp()});
+    tx.set(db().collection('duo_board_requesters').doc(request.get('requesterUid')),
+        {status: reason, updatedAt: admin.firestore.FieldValue.serverTimestamp()},
+        {merge: true});
+  });
+  return {declined: true, reason};
+});
+
+exports.resumeDuoBoardPost = functions.https.onCall(async (data, context) => {
+  const uid = uidOf(context);
+  const postId = String(data.postId || '').trim();
+  const discoverable = await isHostForeground(uid);
+  const postRef = db().collection('duo_board_posts').doc(postId);
+  const roomRef = db().collection('duo_sessions').doc(postId);
+  return db().runTransaction(async tx => {
+    const [post, room] = await Promise.all([tx.get(postRef), tx.get(roomRef)]);
+    if (!post.exists || post.get('ownerUid') !== uid || post.get('active') !== true) {
+      return {resumed: false};
+    }
+    if (!room.exists || room.get('hostUid') !== uid ||
+        room.get('isDuoEnabled') !== true || room.get('isPartnerJoined') === true) {
+      tx.update(postRef, {active: false, discoverable: false, state: 'expired',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()});
+      return {resumed: false};
+    }
+    tx.update(roomRef, {partnerUid: null, boardReservedAt: null});
+    tx.update(postRef, {state: 'active', discoverable, reservedAt: null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()});
+    return {resumed: true};
+  });
+});
+
+// Materialize RTDB foreground presence onto board posts so the public list can
+// hide an invitation without opening one RTDB listener per card.
+exports.syncDuoBoardHostPresence = functions.database
+    .ref('/duo_board_hosts/{uid}/{connectionId}')
+    .onWrite(async (change, context) => {
+      const uid = context.params.uid;
+      const discoverable = await isHostForeground(uid);
+      const posts = await db().collection('duo_board_posts')
+          .where('ownerUid', '==', uid).get();
+      const batch = db().batch();
+      posts.docs.filter(doc => doc.get('active') === true).forEach(doc => {
+        if (doc.get('state') !== 'reserved') {
+          batch.update(doc.ref, {
+            discoverable,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      });
+      await batch.commit();
+      return null;
+    });
+
+// The session document is the authoritative proof that the requester really
+// entered. Keep the post for audit, but remove it from the board permanently.
+exports.completeDuoBoardPostOnJoin = functions.firestore
+    .document('duo_sessions/{roomId}')
+    .onUpdate(async (change, context) => {
+      if (change.before.get('isPartnerJoined') === true ||
+          change.after.get('isPartnerJoined') !== true) return null;
+      const postRef = db().collection('duo_board_posts').doc(context.params.roomId);
+      const post = await postRef.get();
+      if (!post.exists || post.get('active') !== true) return null;
+      await postRef.update({active: false, discoverable: false, state: 'matched',
+        matchedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()});
+      return null;
+    });
 
 exports.cancelDuoBoardRequest = functions.https.onCall(async (data, context) => {
   const uid = uidOf(context);

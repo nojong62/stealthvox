@@ -17,6 +17,24 @@
           }
         }
       }
+    },
+    "duo_board_hosts": {
+      "$uid": {
+        "$connectionId": {
+          ".read": "auth != null && auth.uid == $uid",
+          ".write": "auth != null && auth.uid == $uid",
+          ".validate": "newData.val() == null || newData.hasChildren(['foreground', 'lastSeen'])",
+          "foreground": {
+            ".validate": "newData.val() == true"
+          },
+          "lastSeen": {
+            ".validate": "newData.isNumber()"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
     }
   }
 }

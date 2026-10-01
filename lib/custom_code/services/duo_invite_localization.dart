@@ -49,6 +49,19 @@ class DuoInviteCopy {
     'requestGone': 'The requester is no longer waiting.',
     'requestArrived': 'A Duo conversation request arrived.',
     'open': 'Open',
+    'acceptDuo': 'Accept Duo invite',
+    'busyNow': 'I’m in another conversation',
+    'hostBusy': 'The host is in another conversation.',
+    'hostNoResponse': 'The host did not respond. Please try again later.',
+    'waitingShort': 'Waiting for the host. This request closes in 30 seconds.',
+    'restorePostTitle': 'Continue your Duo invitation?',
+    'restorePostBody':
+        'Your previous invitation can be shown again while you use the app.',
+    'continuePost': 'Continue',
+    'endPost': 'End invitation',
+    'active': 'Active',
+    'inactive': 'Inactive',
+    'deletePost': 'Delete post',
   };
 
   static const _copies = <String, Map<String, String>>{
@@ -92,6 +105,18 @@ class DuoInviteCopy {
       'requestGone': '요청자가 더 이상 기다리고 있지 않습니다.',
       'requestArrived': 'Duo 대화 요청이 도착했습니다.',
       'open': '열기',
+      'acceptDuo': 'Duo 초대 응함',
+      'busyNow': '지금 다른 대화 중',
+      'hostBusy': '초대자가 지금 다른 대화 중입니다.',
+      'hostNoResponse': '초대자가 응답하지 않았습니다. 잠시 후 다시 시도해 주세요.',
+      'waitingShort': '초대자의 응답을 기다리고 있습니다. 30초 후 자동 종료됩니다.',
+      'restorePostTitle': '이전 Duo 초대를 계속할까요?',
+      'restorePostBody': '앱을 사용하는 동안 이전 초대글을 다시 게시판에 표시합니다.',
+      'continuePost': '계속하기',
+      'endPost': '초대 종료',
+      'active': '활성',
+      'inactive': '비활성',
+      'deletePost': '게시글 삭제',
     },
     'Japanese': {
       'inviteMethod': '招待方法',

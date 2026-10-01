@@ -21,6 +21,8 @@ import 'flutter_flow/revenue_cat_util.dart' as revenue_cat;
 import '/custom_code/services/app_update_policy.dart';
 import '/custom_code/widgets/app_update_gate.dart';
 import '/custom_code/services/duo_board_push_service.dart';
+import '/custom_code/services/duo_board_host_presence.dart';
+import '/custom_code/widgets/stealth_room_master.dart';
 
 /// 🔍 [OVERFLOW-SCAN] 디버그 빌드 전용 — 레이아웃이 터진 **자리**를 남긴다.
 ///
@@ -220,6 +222,8 @@ class _MyAppState extends State<MyApp> {
         onOpened: (match) async {
           if (_router.routeInformationProvider.value.uri.path ==
               StealthRoomWidget.routePath) {
+            final openInsideRoom = StealthRoomMaster.openBoardHostMatch;
+            if (openInsideRoom != null) await openInsideRoom(match);
             return;
           }
           _router.goNamed(
@@ -231,6 +235,9 @@ class _MyAppState extends State<MyApp> {
             }.withoutNulls,
           );
         },
+      ));
+      unawaited(DuoBoardHostPresence.instance.initialize(
+        () => appNavigatorKey.currentContext ?? context,
       ));
     });
   }

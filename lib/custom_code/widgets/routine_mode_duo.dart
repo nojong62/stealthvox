@@ -6928,6 +6928,18 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         widget.roomId ??
         _pendingJoinRoomId ??
         (FFAppState().duoRoomId.isNotEmpty ? FFAppState().duoRoomId : null);
+    bool preservePublishedRoom = false;
+    if (!isInviteGuest && guestRoomId != null) {
+      try {
+        final post = await FirebaseFirestore.instance
+            .collection('duo_board_posts')
+            .doc(guestRoomId)
+            .get();
+        preservePublishedRoom = post.exists && post.data()?['active'] == true;
+      } catch (_) {
+        // If this check fails, retain the existing room cleanup behavior.
+      }
+    }
     if (isInviteGuest) {
       await AppsFlyerManager.markDuoInviteCompleted(guestRoomId);
       _rememberGuestHandoffClaim(guestRoomId);
@@ -7022,7 +7034,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (mounted) setState(() => _isConversationActive = false);
 
     // 호스트/게스트 분기: duo_sessions 처리
-    if (_duoSessionRef != null) {
+    if (_duoSessionRef != null && !preservePublishedRoom) {
       try {
         final snap = await _duoSessionRef!.get();
         if (snap.exists) {
@@ -7056,7 +7068,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       }
     }
 
-    if (_myHistoryRef != null) {
+    if (_myHistoryRef != null && !preservePublishedRoom) {
       // 두 방식 다 말풍선을 만들지 않는다. 실제로 저장한 메시지 수로만
       // 판단해야 히스토리가 통째로 지워지지 않는다.
       if (_historyMessageCount == 0 && !(isTrialHost && trialWasConsumed)) {

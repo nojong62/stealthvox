@@ -33,6 +33,21 @@ class DuoBoardService {
           .limit(50)
           .snapshots();
 
+  static Future<QueryDocumentSnapshot<Map<String, dynamic>>?>
+      findOwnActivePost() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) return null;
+    final result = await FirebaseFirestore.instance
+        .collection('duo_board_posts')
+        .where('ownerUid', isEqualTo: user.uid)
+        .limit(10)
+        .get();
+    for (final doc in result.docs) {
+      if (doc.data()['active'] == true) return doc;
+    }
+    return null;
+  }
+
   static Future<User> ensureParticipantIdentity() async {
     final current = FirebaseAuth.instance.currentUser;
     if (current != null) return current;
@@ -43,6 +58,7 @@ class DuoBoardService {
       {required String roomId,
       required String historyPath,
       required String topic,
+      required String topicLanguage,
       required String mode,
       required String directLanguage,
       required String availability}) async {
@@ -50,6 +66,7 @@ class DuoBoardService {
       'roomId': roomId,
       'historyPath': historyPath,
       'topic': topic,
+      'topicLanguage': topicLanguage,
       'mode': mode,
       'directLanguage': directLanguage,
       'availability': availability,
@@ -61,6 +78,13 @@ class DuoBoardService {
     await _functions
         .httpsCallable('withdrawDuoBoardPost')
         .call({'postId': postId});
+  }
+
+  static Future<bool> resumePost(String postId) async {
+    final result = await _functions
+        .httpsCallable('resumeDuoBoardPost')
+        .call({'postId': postId});
+    return Map<String, dynamic>.from(result.data as Map)['resumed'] == true;
   }
 
   static Future<DuoBoardClaim> claimNow(String postId) async {
@@ -119,5 +143,13 @@ class DuoBoardService {
     await _functions
         .httpsCallable('cancelDuoBoardRequest')
         .call({'requestId': requestId});
+  }
+
+  static Future<void> declineRequest(String requestId,
+      {required String reason}) async {
+    await _functions.httpsCallable('declineDuoBoardRequest').call({
+      'requestId': requestId,
+      'reason': reason,
+    });
   }
 }

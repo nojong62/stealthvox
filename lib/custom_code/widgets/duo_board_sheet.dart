@@ -7,7 +7,8 @@ import 'package:flutter/material.dart';
 import '/app_state.dart';
 import '/custom_code/services/duo_invite_localization.dart';
 import '/custom_code/services/duo_board_service.dart';
-import '/custom_code/services/duo_board_push_service.dart';
+import '/custom_code/services/duo_board_host_presence.dart';
+import '/custom_code/services/duo_board_topic_translation.dart';
 
 class DuoBoardComposeDraft {
   const DuoBoardComposeDraft({
@@ -49,7 +50,6 @@ Future<bool> showDuoBoardComposer(
   final topic = TextEditingController();
   var saving = false;
   String? error;
-  var availability = 'now';
   final saved = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
@@ -65,12 +65,6 @@ Future<bool> showDuoBoardComposer(
                   color: Colors.white,
                   fontSize: 21,
                   fontWeight: FontWeight.w800)),
-          const SizedBox(height: 8),
-          Text(
-              mode == 'direct'
-                  ? '${copy['direct']} · $directLanguage'
-                  : copy['interpreter'],
-              style: const TextStyle(color: Color(0xFF93C5FD))),
           const SizedBox(height: 18),
           TextField(
             controller: topic,
@@ -87,51 +81,7 @@ Future<bool> showDuoBoardComposer(
                   OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
             ),
           ),
-          SegmentedButton<String>(
-            segments: [
-              ButtonSegment(value: 'now', label: Text(copy['now'])),
-              ButtonSegment(value: 'request', label: Text(copy['request'])),
-            ],
-            selected: {availability},
-            onSelectionChanged: saving
-                ? null
-                : (value) async {
-                    final next = value.first;
-                    if (next == 'request') {
-                      var enableNotifications =
-                          await DuoBoardPushService.isAuthorized;
-                      if (!enableNotifications && sheetContext.mounted) {
-                        final enable = await showDialog<bool>(
-                          context: sheetContext,
-                          builder: (dialogContext) => AlertDialog(
-                            title: Text(copy['notifyTitle']),
-                            content: Text(copy['notifyBody']),
-                            actions: [
-                              TextButton(
-                                onPressed: () =>
-                                    Navigator.pop(dialogContext, false),
-                                child: Text(copy['later']),
-                              ),
-                              FilledButton(
-                                onPressed: () =>
-                                    Navigator.pop(dialogContext, true),
-                                child: Text(copy['enable']),
-                              ),
-                            ],
-                          ),
-                        );
-                        enableNotifications = enable == true;
-                      }
-                      if (enableNotifications) {
-                        await DuoBoardPushService.enableForCurrentMember();
-                      }
-                    }
-                    if (sheetContext.mounted) {
-                      setLocal(() => availability = next);
-                    }
-                  },
-          ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 8),
           SizedBox(
               width: double.infinity,
               child: ElevatedButton(
@@ -148,13 +98,17 @@ Future<bool> showDuoBoardComposer(
                           error = null;
                         });
                         try {
+                          await DuoBoardHostPresence.instance.ensureOnline();
                           await DuoBoardService.publishPost(
                               roomId: roomId,
                               historyPath: historyPath,
                               topic: value,
-                              mode: mode,
-                              directLanguage: directLanguage,
-                              availability: availability);
+                              topicLanguage: FFAppState().chatLang.isNotEmpty
+                                  ? FFAppState().chatLang
+                                  : duoBoardViewerLanguage(),
+                              mode: 'interpreter',
+                              directLanguage: '',
+                              availability: 'request');
                           if (sheetContext.mounted) {
                             Navigator.pop(sheetContext, true);
                           }
@@ -186,7 +140,8 @@ class DuoBoardSheet extends StatefulWidget {
 class _DuoBoardSheetState extends State<DuoBoardSheet> {
   String? _claiming;
   String? _error;
-  DuoInviteCopy get _copy => DuoInviteCopy.forLanguage(FFAppState().chatLang);
+  DuoInviteCopy get _copy =>
+      DuoInviteCopy.forLanguage(duoBoardViewerLanguage());
 
   Future<void> _writePost() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -195,7 +150,7 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
       return;
     }
     final draft = widget.composeDraft;
-    if (draft == null) {
+    if (draft == null || draft.mode != 'interpreter') {
       setState(() => _error = _copy['writeFromRoom']);
       return;
     }
@@ -218,11 +173,6 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
     });
     DatabaseReference? presence;
     try {
-      if (availability == 'now') {
-        final claim = await DuoBoardService.claimNow(postId);
-        if (mounted) Navigator.pop(context, claim);
-        return;
-      }
       presence = await DuoBoardService.startWaitingPresence(postId);
       final requestId = await DuoBoardService.requestPost(postId);
       if (!mounted) return;
@@ -267,6 +217,7 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
     setState(() => _claiming = postId);
     try {
       await DuoBoardService.withdrawPost(postId);
+      await DuoBoardHostPresence.instance.postEnded();
     } catch (_) {
       if (mounted) setState(() => _error = 'Could not delete the post.');
     } finally {
@@ -322,10 +273,15 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final docs = snapshot.data!.docs;
+                final allDocs = snapshot.data!.docs;
                 final uid = FirebaseAuth.instance.currentUser?.uid;
+                final docs = allDocs
+                    .where((doc) =>
+                        doc.data()['discoverable'] == true ||
+                        doc.data()['ownerUid'] == uid)
+                    .toList();
                 final hasOwnActivePost =
-                    docs.any((doc) => doc.data()['ownerUid'] == uid);
+                    allDocs.any((doc) => doc.data()['ownerUid'] == uid);
 
                 return Column(
                   children: [
@@ -344,14 +300,10 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                               itemBuilder: (_, index) {
                                 final doc = docs[index];
                                 final data = doc.data();
-                                final mode =
-                                    data['mode']?.toString() ?? 'interpreter';
-                                final availability =
-                                    data['availability']?.toString() ??
-                                        'request';
                                 final mine = data['ownerUid'] == uid;
                                 final enabled = !mine && _claiming == null;
                                 final readable = mine || _claiming == null;
+                                final available = data['discoverable'] == true;
                                 return Card(
                                   color: const Color(0xFF202530),
                                   margin: EdgeInsets.zero,
@@ -360,69 +312,95 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                       InkWell(
                                         borderRadius: BorderRadius.circular(12),
                                         onTap: enabled
-                                            ? () => _selectPost(
-                                                doc.id, availability)
+                                            ? () =>
+                                                _selectPost(doc.id, 'request')
                                             : null,
                                         child: Padding(
-                                          padding: EdgeInsets.fromLTRB(
-                                              14, 14, mine ? 46 : 14, 14),
+                                          padding: const EdgeInsets.all(14),
                                           child: Row(
                                             children: [
-                                              _BoardPostField(
-                                                label: _copy['topic'],
-                                                value:
-                                                    data['topic']?.toString() ??
-                                                        '',
-                                                flex: 5,
-                                                maxLines: 2,
-                                                valueColor: readable
-                                                    ? Colors.white
-                                                    : Colors.white38,
-                                                valueWeight: FontWeight.w700,
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(_copy['topic'],
+                                                        style: const TextStyle(
+                                                            color:
+                                                                Colors.white54,
+                                                            fontSize: 10,
+                                                            fontWeight:
+                                                                FontWeight
+                                                                    .w700)),
+                                                    const SizedBox(height: 5),
+                                                    _TranslatedBoardTopic(
+                                                      text: data['topic']
+                                                              ?.toString() ??
+                                                          '',
+                                                      sourceLanguage:
+                                                          data['topicLanguage']
+                                                                  ?.toString() ??
+                                                              '',
+                                                      color: readable
+                                                          ? Colors.white
+                                                          : Colors.white38,
+                                                    ),
+                                                    if ((data['topicLanguage']
+                                                                ?.toString() ??
+                                                            '') !=
+                                                        duoBoardViewerLanguage())
+                                                      const Padding(
+                                                        padding:
+                                                            EdgeInsets.only(
+                                                                top: 4),
+                                                        child: Text(
+                                                          'Powered by Google Translate',
+                                                          style: TextStyle(
+                                                            color:
+                                                                Colors.white38,
+                                                            fontSize: 8,
+                                                            height: 1.1,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                  ],
+                                                ),
                                               ),
-                                              const _BoardPostDivider(),
-                                              _BoardPostField(
-                                                label: _copy['mode'],
-                                                value: mode == 'direct'
-                                                    ? _copy['direct']
-                                                    : _copy['interpreter'],
-                                                flex: 3,
-                                                valueColor: readable
-                                                    ? const Color(0xFF93C5FD)
-                                                    : Colors.white38,
+                                              const SizedBox(width: 12),
+                                              Tooltip(
+                                                message: available
+                                                    ? _copy['active']
+                                                    : _copy['inactive'],
+                                                child: Icon(
+                                                  Icons.circle,
+                                                  size: 15,
+                                                  color: available
+                                                      ? const Color(0xFF22C55E)
+                                                      : Colors.white30,
+                                                ),
                                               ),
-                                              const _BoardPostDivider(),
-                                              _BoardPostField(
-                                                label: _copy['status'],
-                                                value: availability == 'now'
-                                                    ? _copy['now']
-                                                    : _copy['request'],
-                                                flex: 3,
-                                                valueColor: readable
-                                                    ? const Color(0xFF86EFAC)
-                                                    : Colors.white38,
-                                              ),
+                                              if (mine) ...[
+                                                const SizedBox(width: 8),
+                                                IconButton(
+                                                  tooltip: _copy['deletePost'],
+                                                  onPressed: _claiming == null
+                                                      ? () =>
+                                                          _withdrawPost(doc.id)
+                                                      : null,
+                                                  icon: const Icon(
+                                                      Icons
+                                                          .delete_outline_rounded,
+                                                      size: 21),
+                                                  color:
+                                                      const Color(0xFFFCA5A5),
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                ),
+                                              ],
                                             ],
                                           ),
                                         ),
                                       ),
-                                      if (mine)
-                                        Positioned(
-                                          top: 2,
-                                          right: 0,
-                                          child: IconButton(
-                                            tooltip: 'Delete post',
-                                            onPressed: _claiming == null
-                                                ? () => _withdrawPost(doc.id)
-                                                : null,
-                                            icon: const Icon(
-                                                Icons.delete_outline_rounded,
-                                                size: 18),
-                                            color: const Color(0xFFFCA5A5),
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                          ),
-                                        ),
                                     ],
                                   ),
                                 );
@@ -430,7 +408,8 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                             ),
                     ),
                     // A host can publish only while no active own post exists.
-                    if (widget.composeDraft != null && !hasOwnActivePost)
+                    if (widget.composeDraft?.mode == 'interpreter' &&
+                        !hasOwnActivePost)
                       SafeArea(
                         top: false,
                         child: Padding(
@@ -460,61 +439,40 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
       );
 }
 
-class _BoardPostDivider extends StatelessWidget {
-  const _BoardPostDivider();
-
-  @override
-  Widget build(BuildContext context) => const SizedBox(
-        height: 44,
-        child: VerticalDivider(
-          width: 17,
-          thickness: 1,
-          color: Colors.white12,
-        ),
-      );
-}
-
-class _BoardPostField extends StatelessWidget {
-  const _BoardPostField({
-    required this.label,
-    required this.value,
-    required this.flex,
-    required this.valueColor,
-    this.maxLines = 1,
-    this.valueWeight = FontWeight.w600,
+class _TranslatedBoardTopic extends StatelessWidget {
+  const _TranslatedBoardTopic({
+    required this.text,
+    required this.sourceLanguage,
+    required this.color,
   });
 
-  final String label;
-  final String value;
-  final int flex;
-  final Color valueColor;
-  final int maxLines;
-  final FontWeight valueWeight;
+  final String text;
+  final String sourceLanguage;
+  final Color color;
 
   @override
-  Widget build(BuildContext context) => Expanded(
-        flex: flex,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(label,
-                style: const TextStyle(
-                    color: Colors.white54,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            Text(value,
-                maxLines: maxLines,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    color: valueColor,
-                    fontSize: 13,
-                    height: 1.2,
-                    fontWeight: valueWeight)),
-          ],
+  Widget build(BuildContext context) {
+    final targetLanguage = duoBoardViewerLanguage();
+    return FutureBuilder<String>(
+      initialData: text,
+      future: DuoBoardTopicTranslation.translate(
+        text: text,
+        sourceLanguage: sourceLanguage,
+        targetLanguage: targetLanguage,
+      ),
+      builder: (_, snapshot) => Text(
+        snapshot.data ?? text,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: color,
+          fontSize: 14,
+          height: 1.3,
+          fontWeight: FontWeight.w700,
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _DuoWaitingDialog extends StatefulWidget {
@@ -541,17 +499,32 @@ class _DuoWaitingDialogState extends State<_DuoWaitingDialog> {
     _subscription =
         DuoBoardService.watchRequest(widget.requestId).listen((snap) {
       final data = snap.data();
-      if (!mounted || data?['status'] != 'matched') return;
-      _matched = true;
-      Navigator.pop(
-        context,
-        DuoBoardClaim(
-          roomId: data?['roomId']?.toString() ?? '',
-          ownerUid: data?['ownerUid']?.toString() ?? '',
-        ),
-      );
+      if (!mounted) return;
+      final status = data?['status']?.toString();
+      if (status == 'matched') {
+        _matched = true;
+        Navigator.pop(
+          context,
+          DuoBoardClaim(
+            roomId: data?['roomId']?.toString() ?? '',
+            ownerUid: data?['ownerUid']?.toString() ?? '',
+          ),
+        );
+      } else if (status == 'busy' ||
+          status == 'timeout' ||
+          status == 'expired' ||
+          status == 'cancelled') {
+        Navigator.pop(context);
+        final copy = DuoInviteCopy.forLanguage(duoBoardViewerLanguage());
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(
+              content: Text(status == 'busy'
+                  ? copy['hostBusy']
+                  : copy['hostNoResponse'])),
+        );
+      }
     });
-    _timer = Timer(const Duration(minutes: 5), () {
+    _timer = Timer(const Duration(seconds: 35), () {
       if (mounted) Navigator.pop(context);
     });
   }
@@ -568,7 +541,7 @@ class _DuoWaitingDialogState extends State<_DuoWaitingDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final copy = DuoInviteCopy.forLanguage(FFAppState().chatLang);
+    final copy = DuoInviteCopy.forLanguage(duoBoardViewerLanguage());
     return AlertDialog(
       title: Text(copy['requestSent']),
       content: Column(
@@ -576,7 +549,7 @@ class _DuoWaitingDialogState extends State<_DuoWaitingDialog> {
         children: [
           CircularProgressIndicator(),
           SizedBox(height: 18),
-          Text(copy['waiting']),
+          Text(copy['waitingShort']),
         ],
       ),
       actions: [

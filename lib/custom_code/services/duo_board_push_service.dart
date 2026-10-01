@@ -19,7 +19,11 @@ class DuoBoardPushService {
   static StreamSubscription<RemoteMessage>? _openedSubscription;
   static StreamSubscription<RemoteMessage>? _foregroundSubscription;
   static StreamSubscription<String>? _tokenSubscription;
+  static StreamSubscription<User?>? _authSubscription;
+  static StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+      _requestSubscription;
   static DuoBoardRequestOpened? _onOpened;
+  static final Set<String> _handledRequests = <String>{};
 
   static Future<bool> get isAuthorized async {
     final settings = await FirebaseMessaging.instance.getNotificationSettings();
@@ -129,18 +133,13 @@ class DuoBoardPushService {
     _foregroundSubscription = FirebaseMessaging.onMessage.listen((message) {
       final requestId = message.data['requestId']?.toString();
       if (requestId == null || requestId.isEmpty) return;
-      final current = context();
-      final copy = DuoInviteCopy.forLanguage(FFAppState().chatLang);
-      // The callback returns the navigator's current, mounted context.
-      // ignore: use_build_context_synchronously
-      ScaffoldMessenger.maybeOf(current)?.showSnackBar(SnackBar(
-        content: Text(message.notification?.body ?? copy['requestArrived']),
-        action: SnackBarAction(
-          label: copy['open'],
-          onPressed: () => _open(requestId, current),
-        ),
-      ));
+      unawaited(_prompt(requestId, context()));
     });
+    await _authSubscription?.cancel();
+    _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
+      unawaited(_watchRequests(user, context));
+    });
+    await _watchRequests(FirebaseAuth.instance.currentUser, context);
 
     final initial = await FirebaseMessaging.instance.getInitialMessage();
     if (initial != null) {
@@ -154,7 +153,71 @@ class DuoBoardPushService {
     if (message.data['type'] != 'duo_board_request') return;
     final requestId = message.data['requestId']?.toString();
     if (requestId == null || requestId.isEmpty) return;
-    await _open(requestId, context);
+    await _prompt(requestId, context);
+  }
+
+  static Future<void> _watchRequests(
+      User? user, BuildContext Function() context) async {
+    await _requestSubscription?.cancel();
+    _requestSubscription = null;
+    if (user == null || user.isAnonymous) return;
+    _requestSubscription = FirebaseFirestore.instance
+        .collection('duo_board_requests')
+        .where('ownerUid', isEqualTo: user.uid)
+        .snapshots()
+        .listen((snapshot) {
+      for (final change in snapshot.docChanges) {
+        if (change.type == DocumentChangeType.removed) continue;
+        final data = change.doc.data();
+        final expires = data?['expiresAt'];
+        if (data?['status'] == 'waiting' &&
+            expires is Timestamp &&
+            expires.toDate().isAfter(DateTime.now())) {
+          unawaited(_prompt(change.doc.id, context()));
+        }
+      }
+    });
+  }
+
+  static Future<void> _prompt(String requestId, BuildContext context) async {
+    if (_handledRequests.contains(requestId) || !context.mounted) return;
+    _handledRequests.add(requestId);
+    final copy = DuoInviteCopy.forLanguage(FFAppState().chatLang);
+    Timer? timeout;
+    final choice = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        timeout = Timer(const Duration(seconds: 25), () {
+          if (dialogContext.mounted) Navigator.pop(dialogContext, 'timeout');
+        });
+        return AlertDialog(
+          title: Text(copy['requestArrived']),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'busy'),
+              child: Text(copy['busyNow']),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, 'accept'),
+              child: Text(copy['acceptDuo']),
+            ),
+          ],
+        );
+      },
+    );
+    timeout?.cancel();
+    try {
+      if (choice == 'accept') {
+        if (!context.mounted) return;
+        await _open(requestId, context);
+      } else {
+        await DuoBoardService.declineRequest(requestId,
+            reason: choice == 'busy' ? 'busy' : 'timeout');
+      }
+    } finally {
+      // Keep the id for this process: FCM and Firestore can deliver the same request.
+    }
   }
 
   static Future<void> _open(String requestId, BuildContext context) async {

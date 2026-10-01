@@ -71,6 +71,10 @@ exports.claimDuoBoardPost = duoBoard.claimDuoBoardPost;
 exports.requestDuoBoardPost = duoBoard.requestDuoBoardPost;
 exports.openDuoBoardRequest = duoBoard.openDuoBoardRequest;
 exports.cancelDuoBoardRequest = duoBoard.cancelDuoBoardRequest;
+exports.declineDuoBoardRequest = duoBoard.declineDuoBoardRequest;
+exports.resumeDuoBoardPost = duoBoard.resumeDuoBoardPost;
+exports.syncDuoBoardHostPresence = duoBoard.syncDuoBoardHostPresence;
+exports.completeDuoBoardPostOnJoin = duoBoard.completeDuoBoardPostOnJoin;
 
 
 async function verifyGoogleOAuthIdToken(idToken) {

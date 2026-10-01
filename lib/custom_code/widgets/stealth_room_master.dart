@@ -35,6 +35,7 @@ import '/custom_code/services/guide_ui_localization.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
+import '/custom_code/services/duo_board_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'trial/trial_flow_state.dart';
@@ -62,6 +63,7 @@ class StealthRoomMaster extends StatefulWidget {
   /// 닫을 때 히스토리 저장과 빈 방 삭제가 통째로 빠진다. 잔여시간 소진처럼
   /// 바깥에서 방을 닫아야 할 때는 각 모드가 스스로 등록해 둔 이 경로를 쓴다.
   static Future<void> Function()? saveAndExitCurrentMode;
+  static Future<void> Function(DuoBoardHostMatch match)? openBoardHostMatch;
 
   @override
   _StealthRoomMasterState createState() => _StealthRoomMasterState();
@@ -104,6 +106,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   //   유저 음성 청취와 AI 첫 마디를 시작한다.
   // 초대 링크에서 소비한 roomId (1회용 — build에서 Duo 생성자에 전달)
   String? _pendingDuoRoomId;
+  String? _boardHostRoomId;
+  String? _boardHostHistoryPath;
+  bool _openingBoardMatch = false;
 
   @override
   void initState() {
@@ -118,6 +123,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       });
       unawaited(_refreshCirclePrewarmAfterExit());
     };
+    StealthRoomMaster.openBoardHostMatch = _openBoardHostMatch;
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
     BillingTicker.instance.balanceExhausted.addListener(_onBalanceExhausted);
     _circleAudioReady = _prepareCircleAudioInput();
@@ -164,6 +170,28 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     unawaited(_prepareFirstUserResponse());
   }
 
+  Future<void> _openBoardHostMatch(DuoBoardHostMatch match) async {
+    if (!mounted || _openingBoardMatch) return;
+    _openingBoardMatch = true;
+    try {
+      if (_currentMode != null) {
+        final saveAndExit = StealthRoomMaster.saveAndExitCurrentMode;
+        if (saveAndExit != null) await saveAndExit();
+      }
+      if (!mounted) return;
+      dismissRoutesAbove(context);
+      setState(() {
+        _boardHostRoomId = match.roomId;
+        _boardHostHistoryPath = match.historyPath;
+        _circleSetupOpen = false;
+        _scenarioSetupOpen = false;
+        _currentMode = 1;
+      });
+    } finally {
+      _openingBoardMatch = false;
+    }
+  }
+
   /// StealthRoom 메뉴를 보는 동안 첫 유저 번역/TTS용 OpenAI 연결을 준비한다.
   /// UI나 모드 진입을 막지 않으며, 준비 실패 시 각 모드의 기존 요청이 동작한다.
   Future<void> _prepareFirstUserResponse() async {
@@ -185,9 +213,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
 
     // 🔥 [STT-PREWARM] 켜진 엔진 **하나만** 예열한다. 둘 다 열면 소켓도 비용도
     //   이중이 된다 (Circle Talk의 전사 경로는 한 턴에 하나뿐이다).
-    final nativeLanguage = FFAppState().chatLang.isNotEmpty
-        ? FFAppState().chatLang
-        : 'English';
+    final nativeLanguage =
+        FFAppState().chatLang.isNotEmpty ? FFAppState().chatLang : 'English';
     if (kFreeTalkUseStreamingStt) {
       if (openAiKey.isNotEmpty) {
         unawaited(
@@ -299,6 +326,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     BillingTicker.instance.balanceExhausted.removeListener(_onBalanceExhausted);
     WidgetsBinding.instance.removeObserver(this);
     StealthRoomMaster.exitCurrentMode = null;
+    StealthRoomMaster.openBoardHostMatch = null;
     _circleController.dispose();
     _situationController.dispose();
     _aiRoleController.dispose();
@@ -946,8 +974,8 @@ Return ONLY valid JSON: {"name":"..."}.
         width: widget.width,
         height: widget.height,
         roomId: _pendingDuoRoomId,
-        hostRoomId: widget.hostRoomId,
-        hostHistoryPath: widget.hostHistoryPath,
+        hostRoomId: _boardHostRoomId ?? widget.hostRoomId,
+        hostHistoryPath: _boardHostHistoryPath ?? widget.hostHistoryPath,
       );
     } else if (_currentMode == 3) {
       return RoutineModeScenarioTalk(
