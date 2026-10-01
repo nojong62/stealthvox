@@ -6355,7 +6355,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                     style: const TextStyle(color: Colors.white)),
                 onTap: () => Navigator.pop(sheetContext, 'share'),
               ),
-              if (FirebaseAuth.instance.currentUser?.isAnonymous == false)
+              if (chosenMode == kDuoModeInterpreter &&
+                  FirebaseAuth.instance.currentUser?.isAnonymous == false)
                 ListTile(
                   leading: const Icon(Icons.forum_outlined,
                       color: Color(0xFF52D4C3)),

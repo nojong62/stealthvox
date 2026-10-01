@@ -45,6 +45,16 @@ String duoBoardViewerLanguage() {
   return _languageCodeToName[code] ?? 'English';
 }
 
+/// Only show translation attribution when this card can genuinely be translated.
+/// Older board posts did not persist their source language and remain original.
+bool duoBoardNeedsTranslation({
+  required String sourceLanguage,
+  required String targetLanguage,
+}) =>
+    sourceLanguage != targetLanguage &&
+    _translateLanguages.containsKey(sourceLanguage) &&
+    _translateLanguages.containsKey(targetLanguage);
+
 class DuoBoardTopicTranslation {
   DuoBoardTopicTranslation._();
 

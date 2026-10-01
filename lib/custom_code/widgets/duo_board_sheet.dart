@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
@@ -218,6 +219,10 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
     try {
       await DuoBoardService.withdrawPost(postId);
       await DuoBoardHostPresence.instance.postEnded();
+    } on FirebaseFunctionsException catch (error) {
+      if (mounted) {
+        setState(() => _error = error.message ?? 'Could not delete the post.');
+      }
     } catch (_) {
       if (mounted) setState(() => _error = 'Could not delete the post.');
     } finally {
@@ -345,10 +350,14 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                                           ? Colors.white
                                                           : Colors.white38,
                                                     ),
-                                                    if ((data['topicLanguage']
-                                                                ?.toString() ??
-                                                            '') !=
-                                                        duoBoardViewerLanguage())
+                                                    if (duoBoardNeedsTranslation(
+                                                      sourceLanguage:
+                                                          data['topicLanguage']
+                                                                  ?.toString() ??
+                                                              '',
+                                                      targetLanguage:
+                                                          duoBoardViewerLanguage(),
+                                                    ))
                                                       const Padding(
                                                         padding:
                                                             EdgeInsets.only(

@@ -20,7 +20,7 @@ class TalkUiCopy {
   static const Map<String, Map<String, String>> _copies = {
     'English': {
       'modesTitle': 'Choose a Talk Mode',
-      'duoMenuSubtitle': 'Choose: Duo / Interpretation',
+      'duoMenuSubtitle': 'Direct Call / Interpreted Call',
       'circleMenuSubtitle': 'Group Conversation',
       'scenarioMenuSubtitle': 'Real-Life Scenarios',
       'navModes': 'Modes',
@@ -59,7 +59,7 @@ class TalkUiCopy {
     },
     'Korean': {
       'modesTitle': '대화 모드 선택',
-      'duoMenuSubtitle': 'Duo / 통역 중 선택',
+      'duoMenuSubtitle': '직접통화 / 통역통화',
       'circleMenuSubtitle': '서클 구성원 대화',
       'scenarioMenuSubtitle': '실전 상황 대화',
       'navModes': '모드',
