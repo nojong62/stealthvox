@@ -5,7 +5,7 @@ import '/custom_code/services/guide_ui_localization.dart';
 const Color kScenarioGuideAccent = Color(0xFF4ADE80);
 
 Future<void> showScenarioTalkGuide(BuildContext context) {
-  final copy = GuideUiCopy.forLanguage(FFAppState().nativeLang);
+  final copy = GuideUiCopy.forLanguage(FFAppState().chatLang);
   return showDialog<void>(
     context: context,
     builder: (dialogContext) => AlertDialog(

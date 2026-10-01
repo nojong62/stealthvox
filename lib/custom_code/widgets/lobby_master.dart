@@ -267,7 +267,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     try {
       FocusScope.of(context).unfocus();
       final missingLanguages = <String>[
-        if (!languages.contains(FFAppState().nativeLang)) 'Chat Language',
+        if (!languages.contains(FFAppState().chatLang)) 'Chat Language',
         if (!languages.contains(FFAppState().targetLang)) 'Learn Language',
       ];
       if (missingLanguages.isNotEmpty) {
@@ -307,7 +307,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
 
   // 📦 [Box 6: 시스템 알림 팝업]
   void _showUsageGuideDialog(BuildContext context) {
-    final guideCopy = GuideUiCopy.forLanguage(FFAppState().nativeLang);
+    final guideCopy = GuideUiCopy.forLanguage(FFAppState().chatLang);
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -1375,8 +1375,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                       _buildLangField(
                         'Origin (Chat Lang)',
                         'Select',
-                        appState.nativeLang,
-                        (val) => setState(() => appState.nativeLang = val!),
+                        appState.chatLang,
+                        (val) => setState(() => appState.chatLang = val!),
                       ),
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 6),
@@ -1472,7 +1472,7 @@ class LobbyBrain {
       'created_at': FieldValue.serverTimestamp(),
       'is_pinned': false,
       // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
-      'native_lang': FFAppState().nativeLang,
+      'native_lang': FFAppState().chatLang,
       'target_lang': FFAppState().targetLang,
       // 📝 새 방은 검수 대기다(`history_finalize.dart`).
       ...historyDraftSeed(),

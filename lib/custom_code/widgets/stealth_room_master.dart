@@ -89,9 +89,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   final TextEditingController _userRoleController = TextEditingController();
 
   /// 설정 화면과 추천 결과는 로비 Chat Lang 하나만 따른다.
-  String get _chatLanguage => FFAppState().nativeLang.trim().isEmpty
+  String get _chatLanguage => FFAppState().chatLang.trim().isEmpty
       ? 'English'
-      : FFAppState().nativeLang.trim();
+      : FFAppState().chatLang.trim();
   TalkUiCopy get _setupCopy => TalkUiCopy.forLanguage(_chatLanguage);
 
   final AudioRecorder _circleAudioRecorder = AudioRecorder();
@@ -182,8 +182,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
 
     // 🔥 [STT-PREWARM] 켜진 엔진 **하나만** 예열한다. 둘 다 열면 소켓도 비용도
     //   이중이 된다 (Circle Talk의 전사 경로는 한 턴에 하나뿐이다).
-    final nativeLanguage = FFAppState().nativeLang.isNotEmpty
-        ? FFAppState().nativeLang
+    final nativeLanguage = FFAppState().chatLang.isNotEmpty
+        ? FFAppState().chatLang
         : 'English';
     if (kFreeTalkUseStreamingStt) {
       if (openAiKey.isNotEmpty) {
@@ -628,7 +628,7 @@ Return ONLY valid JSON: {"name":"..."}.
   // 스텔스 훈련소 가이드 팝업창 및 설명 텍스트 렌더링
   // ============================================================================
   void _showManualDialog() {
-    final copy = GuideUiCopy.forLanguage(FFAppState().nativeLang);
+    final copy = GuideUiCopy.forLanguage(FFAppState().chatLang);
     final modeBody = copy['modeBody'];
     // Last block is the billing legend (title plus two status lines).
     final legendStart = modeBody.lastIndexOf('\n\n');

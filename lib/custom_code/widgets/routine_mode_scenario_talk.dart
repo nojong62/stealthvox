@@ -308,7 +308,7 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   ///   유저가 첫 마디를 로비 설정과 다른 언어로 했으면 그 언어가 여기서
   ///   나온다. 세션 한정이라 방을 나가면 로비값으로 돌아간다.
   String _nativeLangName() => resolveNativeLanguageName(
-      OriginLanguageSession.instance.resolve(FFAppState().nativeLang));
+      OriginLanguageSession.instance.resolve(FFAppState().chatLang));
 
   String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
   TalkUiCopy get _uiCopy => TalkUiCopy.forLanguage(_nativeLangName());
@@ -343,7 +343,7 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   Future<void> _settleOriginLanguage(String transcript) async {
     final session = OriginLanguageSession.instance;
     if (session.settled) return;
-    final lobbyOrigin = resolveNativeLanguageName(FFAppState().nativeLang);
+    final lobbyOrigin = resolveNativeLanguageName(FFAppState().chatLang);
     final detected = await resolveOriginFromFirstUtterance(
       apiKey: _openAiKey,
       transcript: transcript,
@@ -379,12 +379,12 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
     final result = await showOriginLanguageRecheckDialog(
       context: context,
       detected: detectedLanguage,
-      currentNative: resolveNativeLanguageName(FFAppState().nativeLang),
+      currentNative: resolveNativeLanguageName(FFAppState().chatLang),
       currentTarget: _targetLangName(),
     );
     if (result == null || !result.applied) {
       _log('🌐 [ORIGIN-RECHECK]',
-          'keep_current lobby=${FFAppState().nativeLang} session=$detectedLanguage');
+          'keep_current lobby=${FFAppState().chatLang} session=$detectedLanguage');
       return;
     }
     await _applyOriginRecheck(result.native, result.target);
@@ -396,8 +396,8 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   /// [target]이 null이면 배울 언어는 손대지 않는다 — 유저가 그 드롭다운을
   /// 만졌을 때만 값이 넘어온다.
   Future<void> _applyOriginRecheck(String native, String? target) async {
-    final String previous = FFAppState().nativeLang;
-    FFAppState().nativeLang = native;
+    final String previous = FFAppState().chatLang;
+    FFAppState().chatLang = native;
     if (target != null) FFAppState().targetLang = target;
     // 이 방의 ORIGIN도 고른 값으로 다시 잡는다 — 판정과 다른 언어를 고를 수
     // 있고, 그러면 전사기도 히스토리도 그 값을 따라야 한다.

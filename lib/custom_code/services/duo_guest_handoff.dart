@@ -484,7 +484,7 @@ Future<DuoRestoreOutcome> _restore({
     'msg_count': visible.length,
     'last_message': visible.isEmpty ? '' : visible.last.text,
     'native_lang':
-        claim.nativeLang.isEmpty ? FFAppState().nativeLang : claim.nativeLang,
+        claim.nativeLang.isEmpty ? FFAppState().chatLang : claim.nativeLang,
     'target_lang':
         claim.targetLang.isEmpty ? FFAppState().targetLang : claim.targetLang,
     kDuoRoomIdField: claim.roomId,

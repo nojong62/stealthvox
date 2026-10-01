@@ -176,8 +176,8 @@ class _IntroMasterState extends State<IntroMaster>
       'Chinese',
       'Spanish',
     ];
-    _trialNativeLang = trialLanguages.contains(FFAppState().nativeLang)
-        ? FFAppState().nativeLang
+    _trialNativeLang = trialLanguages.contains(FFAppState().chatLang)
+        ? FFAppState().chatLang
         : 'English';
     _trialTargetLang = trialLanguages.contains(FFAppState().targetLang)
         ? FFAppState().targetLang
@@ -367,7 +367,7 @@ class _IntroMasterState extends State<IntroMaster>
       debugPrint(
         '[TrialDebug] anonymous auth ready, uid=${FirebaseAuth.instance.currentUser?.uid}, stateMounted=$mounted',
       );
-      FFAppState().nativeLang = _trialNativeLang;
+      FFAppState().chatLang = _trialNativeLang;
       FFAppState().targetLang = _trialTargetLang;
 
       await _enterTrialCircleTalk(requestGeneration);
@@ -413,7 +413,7 @@ class _IntroMasterState extends State<IntroMaster>
       'duo_mode': 'direct',
       'trial_preview': true,
       // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
-      'native_lang': FFAppState().nativeLang,
+      'native_lang': FFAppState().chatLang,
       'target_lang': FFAppState().targetLang,
       // 📝 새 방은 검수 대기다(`history_finalize.dart`).
       ...historyDraftSeed(),

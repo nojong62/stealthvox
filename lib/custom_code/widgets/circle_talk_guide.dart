@@ -6,7 +6,7 @@ import '/app_state.dart';
 import '/custom_code/services/guide_ui_localization.dart';
 
 Future<void> showCircleTalkGuide(BuildContext context) {
-  final copy = GuideUiCopy.forLanguage(FFAppState().nativeLang);
+  final copy = GuideUiCopy.forLanguage(FFAppState().chatLang);
   return showDialog<void>(
     context: context,
     barrierDismissible: true,

@@ -142,8 +142,8 @@ class _StoreMasterState extends State<StoreMaster> {
   bool isProcessing = false;
   Map<String, String> _localizedPrices = const {};
   bool _priceLookupComplete = false;
-  bool get _useEnglishLegalDocs => FFAppState().nativeLang.trim() != 'Korean';
-  TalkUiCopy get _copy => TalkUiCopy.forLanguage(FFAppState().nativeLang);
+  bool get _useEnglishLegalDocs => FFAppState().chatLang.trim() != 'Korean';
+  TalkUiCopy get _copy => TalkUiCopy.forLanguage(FFAppState().chatLang);
   String _versionText = '';
 
   // [v4.0] 서버 증액 감지용 Firestore 리스너
@@ -631,7 +631,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                                 data,
                                                 storePlans,
                                                 language:
-                                                    FFAppState().nativeLang,
+                                                    FFAppState().chatLang,
                                               ),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,

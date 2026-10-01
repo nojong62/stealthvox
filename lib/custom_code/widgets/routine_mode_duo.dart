@@ -391,7 +391,7 @@ const String kDuoModeInterpreter = 'interpreter';
 /// 호스트가 초대를 만드는 동안 보는 문구 — 대화 방식 선택 시트와,
 /// 그 직후 화면 밑에서 올라오는 초대 완료·실패 알림([_showDuoSnack]).
 ///
-/// **로비의 ORIGIN(대화 언어 = `FFAppState().nativeLang`)으로 고른다.**
+/// **로비의 ORIGIN(대화 언어 = `FFAppState().chatLang`)으로 고른다.**
 /// 초대를 만드는 사람이 실제로 말하고 듣는 언어가 ORIGIN이라서, 배우는
 /// 언어(TARGET)가 아니라 이쪽을 기준으로 잡는다.
 ///
@@ -1203,19 +1203,19 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 한 번도 고른 적이 없으면 저장 키 자체가 없다. 그때만 폰 언어를 따른다
     // — 앱 초기값('Korean')은 유저가 고른 값과 구분되지 않으므로, 저장 키가
     // 있으면(=직접 골랐거나 이미 쓰던 값이면) 건드리지 않는다.
-    final bool neverChoseNative = !app.prefs.containsKey('ff_nativeLang');
-    if (neverChoseNative || !_kGuestLangs.contains(app.nativeLang)) {
-      app.nativeLang = _guestNativeFromDevice();
+    final bool neverChoseNative = !app.prefs.containsKey('ff_chatLang');
+    if (neverChoseNative || !_kGuestLangs.contains(app.chatLang)) {
+      app.chatLang = _guestNativeFromDevice();
     }
     // TARGET은 ORIGIN과 같으면 안 된다. 배울 언어가 모국어가 되면 두 줄이
     // 같은 글이 된다.
     if (!_kGuestLangs.contains(app.targetLang) ||
-        app.targetLang == app.nativeLang) {
-      app.targetLang = _guestTargetFor(app.nativeLang);
+        app.targetLang == app.chatLang) {
+      app.targetLang = _guestTargetFor(app.chatLang);
     }
     _lgDuo(
         '[GUEST-LANG]',
-        'origin=${app.nativeLang} target=${app.targetLang} '
+        'origin=${app.chatLang} target=${app.targetLang} '
             'device=${WidgetsBinding.instance.platformDispatcher.locale.languageCode} '
             'firstTime=$neverChoseNative');
   }
@@ -1772,7 +1772,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   String _myTarget() =>
       FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
   String _myNative() =>
-      FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'English';
+      FFAppState().chatLang.isNotEmpty ? FFAppState().chatLang : 'English';
 
   // ──────────────────────────────────────────────────────────────────────────
 
@@ -4841,14 +4841,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// Apply — 새 언어를 **영구 반영**하고 통화는 그대로 잇는다.
   ///
   /// 사용자가 직접 누른 것이므로 다음 Duo에서 같은 문제가 되풀이되지 않도록
-  /// 로비 설정(`FFAppState().nativeLang`)까지 바꾼다. 세션 한정으로 두면
+  /// 로비 설정(`FFAppState().chatLang`)까지 바꾼다. 세션 한정으로 두면
   /// 방을 나갈 때마다 같은 경고를 다시 보게 된다.
   /// [target]이 null이면 **배울 언어는 손대지 않는다.** 사용자가 그 드롭다운을
   /// 만졌을 때만 값이 넘어온다 — 이 창은 ORIGIN을 고치자고 띄운 것이지 배울
   /// 언어를 건드리자는 것이 아니다.
   Future<void> _applyOriginChange(String native, String? target) async {
     final String previous = _myNative();
-    FFAppState().nativeLang = native;
+    FFAppState().chatLang = native;
     if (target != null) FFAppState().targetLang = target;
     // 이 방의 ORIGIN도 고른 값으로 다시 잡는다 — 판정과 다른 언어를 고를 수
     // 있고(일부러 다른 언어를 연습하는 경우), 그러면 전사기가 판정값에
@@ -6000,7 +6000,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       uid: user.uid,
       role: _myRole,
       savedAtMs: DateTime.now().millisecondsSinceEpoch,
-      nativeLang: FFAppState().nativeLang,
+      nativeLang: FFAppState().chatLang,
       targetLang: FFAppState().targetLang,
     ));
   }
@@ -6320,7 +6320,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       debugPrint('[Duo] inviteLink: $inviteLink');
       // 5) 배포 방법 선택. 시스템 공유 시트 안에는 앱 전용 버튼을 넣을 수
       // 없으므로 복사·공유·Duo 게시판 등록을 먼저 앱 팝업에서 고른다.
-      final t = modePickerTextFor(FFAppState().nativeLang);
+      final t = modePickerTextFor(FFAppState().chatLang);
       if (!mounted) return;
       final destination = await showModalBottomSheet<String>(
         context: context,
@@ -6393,7 +6393,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     } catch (e) {
       debugPrint('[Duo] Share invite error: $e');
       if (mounted) {
-        final t = modePickerTextFor(FFAppState().nativeLang);
+        final t = modePickerTextFor(FFAppState().chatLang);
         _showDuoSnack(
           icon: Icons.error_outline_rounded,
           accent: const Color(0xFFF87171),
@@ -7271,7 +7271,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 📡 상대가 아직 안 들어왔다. 두 방식 모두 같은 화면을 쓴다 — 기다리는
   ///   동안에는 직접 대화든 통역이든 유저가 할 일이 똑같이 없다.
   Widget _buildWaitingStage(String backdropAsset) {
-    final t = modePickerTextFor(FFAppState().nativeLang);
+    final t = modePickerTextFor(FFAppState().chatLang);
     return Column(
       children: [
         Expanded(child: DuoWaitingStage(backdropAsset: backdropAsset)),
@@ -7323,7 +7323,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     String picked = _duoMode;
     // 글자는 로비 Chat Lang을 따른다 — 초대 흐름 셋이 같은 말을
     // 쓴다(팝업 · 초대 완료 알림 · 실패 알림).
-    final Map<String, String> t = modePickerTextFor(FFAppState().nativeLang);
+    final Map<String, String> t = modePickerTextFor(FFAppState().chatLang);
     return showDialog<String>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.72),
@@ -7618,8 +7618,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// ⚠️ 통화를 끊지 않는다. 이 막 뒤에서 마이크도 재생도 계속 돈다.
   Widget _buildOriginMismatchOverlay(String detected) {
     const List<String> langs = _kGuestLangs;
-    String native = langs.contains(FFAppState().nativeLang)
-        ? FFAppState().nativeLang
+    String native = langs.contains(FFAppState().chatLang)
+        ? FFAppState().chatLang
         : _kGuestDefaultNativeLang;
     String target = langs.contains(FFAppState().targetLang)
         ? FFAppState().targetLang
@@ -7753,8 +7753,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   Widget _buildGuestLangOverlay() {
     const List<String> langs = _kGuestLangs;
     // 열릴 때 이미 보정했지만, 다른 경로로 값이 바뀐 채 다시 그려질 수도 있다.
-    String native = langs.contains(FFAppState().nativeLang)
-        ? FFAppState().nativeLang
+    String native = langs.contains(FFAppState().chatLang)
+        ? FFAppState().chatLang
         : _kGuestDefaultNativeLang;
     String target = langs.contains(FFAppState().targetLang)
         ? FFAppState().targetLang
@@ -7873,7 +7873,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                   const SizedBox(height: 22),
                   dropdown("Original", native, const Color(0xFF93C5FD), (val) {
                     if (val != null) {
-                      setState(() => FFAppState().nativeLang = val);
+                      setState(() => FFAppState().chatLang = val);
                     }
                   }, subtitle: "(Chat Lang)", subtitleBelow: false),
                   const SizedBox(height: 18),
@@ -7892,7 +7892,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                     onPressed: () {
                       final String? roomId = _pendingJoinRoomId;
                       // 손대지 않은 드롭다운의 표시값을 그대로 확정한다.
-                      FFAppState().nativeLang = native;
+                      FFAppState().chatLang = native;
                       FFAppState().targetLang = target;
                       _lgDuo('[GUEST-LANG]',
                           'entered origin=$native target=$target sttLang=${_mapLanguageToCode(native)}');
@@ -8124,7 +8124,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   내준다 — 그만두기. 위 `<`와 같은 곳으로 가지만, 기다리는 화면에서
     //   구석의 화살표는 눈에 잘 안 띈다.
     if (!_hasConversationPartner) {
-      final t = modePickerTextFor(FFAppState().nativeLang);
+      final t = modePickerTextFor(FFAppState().chatLang);
       return Container(
         padding: EdgeInsets.fromLTRB(24, 8, 24, bottomPadding),
         decoration: const BoxDecoration(color: Color(0xFF121212)),

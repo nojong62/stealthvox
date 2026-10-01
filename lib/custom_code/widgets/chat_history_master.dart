@@ -461,7 +461,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   TalkUiCopy get _uiCopy => TalkUiCopy.forLanguage(
         (_sessionNativeLang ?? '').trim().isNotEmpty
             ? _sessionNativeLang!.trim()
-            : FFAppState().nativeLang,
+            : FFAppState().chatLang,
       );
 
   @override

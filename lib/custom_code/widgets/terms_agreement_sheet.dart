@@ -57,7 +57,7 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
   bool _ageConfirmed = false;
   bool _marketingAccepted = false;
 
-  bool get _useEnglishLegalDocs => FFAppState().nativeLang.trim() != 'Korean';
+  bool get _useEnglishLegalDocs => FFAppState().chatLang.trim() != 'Korean';
 
   Future<void> _openLegalDocument({required bool isTerms}) async {
     final bool english = _useEnglishLegalDocs;

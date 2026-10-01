@@ -1774,7 +1774,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   //  Keepers 삭제 (소프트 삭제)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   void _showDeleteKeeperDialog(DocumentSnapshot doc) {
-    final copy = _DeletionUiCopy.forLanguage(FFAppState().nativeLang);
+    final copy = _DeletionUiCopy.forLanguage(FFAppState().chatLang);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1883,8 +1883,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     // 🗣️ 문제를 낼 언어는 **이 사람의 말**이다. 줄마다 달라지는 값이 아니라
     //   묻지 않는다 — 로비 설정에서 그때그때 읽는다. 설정을 바꾸면 피드백
     //   언어도 같이 따라가는 것이 맞다.
-    _keeperTutoringNative = FFAppState().nativeLang.isNotEmpty
-        ? FFAppState().nativeLang
+    _keeperTutoringNative = FFAppState().chatLang.isNotEmpty
+        ? FFAppState().chatLang
         : 'English';
     // 🎯 배울 언어만 줄에 매인다. 한 키퍼를 영어로 연습하다 일본어로 바꾸는
     //   일은 있어도, 내 모국어가 줄마다 바뀌지는 않는다.
@@ -2802,7 +2802,7 @@ RULES — follow exactly:
   }
 
   void _showBatchDeleteDialog() {
-    final copy = _DeletionUiCopy.forLanguage(FFAppState().nativeLang);
+    final copy = _DeletionUiCopy.forLanguage(FFAppState().chatLang);
     if (_selectedDocIds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -3030,7 +3030,7 @@ RULES — follow exactly:
   }
 
   void _showDeleteDialog(DocumentSnapshot doc) {
-    final copy = _DeletionUiCopy.forLanguage(FFAppState().nativeLang);
+    final copy = _DeletionUiCopy.forLanguage(FFAppState().chatLang);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -3076,7 +3076,7 @@ RULES — follow exactly:
 
   // 📦 [Box 1: 사용설명서 팝업]
   void _showStudyRoomManual() {
-    final guideCopy = GuideUiCopy.forLanguage(FFAppState().nativeLang);
+    final guideCopy = GuideUiCopy.forLanguage(FFAppState().chatLang);
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(

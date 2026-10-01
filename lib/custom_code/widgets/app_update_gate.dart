@@ -26,7 +26,7 @@ class AppUpdateGate extends StatefulWidget {
 class _AppUpdateGateState extends State<AppUpdateGate> {
   bool _recommendedDismissedForSession = false;
 
-  bool get _english => FFAppState().nativeLang.trim() != 'Korean';
+  bool get _english => FFAppState().chatLang.trim() != 'Korean';
 
   Future<void> _openStore() async {
     var opened = false;
