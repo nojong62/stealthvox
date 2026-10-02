@@ -174,6 +174,12 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     if (!mounted || _openingBoardMatch) return;
     _openingBoardMatch = true;
     try {
+      // The board post belongs to the Duo room that is already open. Closing
+      // that room before accepting would invalidate the match we just made.
+      if (_currentMode == 1) {
+        dismissRoutesAbove(context);
+        return;
+      }
       if (_currentMode != null) {
         final saveAndExit = StealthRoomMaster.saveAndExitCurrentMode;
         if (saveAndExit != null) await saveAndExit();

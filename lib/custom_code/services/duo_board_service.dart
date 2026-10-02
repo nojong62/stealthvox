@@ -114,7 +114,7 @@ class DuoBoardService {
     await ensureParticipantIdentity();
     final result = await _functions
         .httpsCallable('requestDuoBoardPost')
-        .call({'postId': postId});
+        .call({'postId': postId}).timeout(const Duration(seconds: 15));
     return Map<String, dynamic>.from(result.data as Map)['requestId']
         .toString();
   }
@@ -131,11 +131,11 @@ class DuoBoardService {
     final user = await ensureParticipantIdentity();
     final ref = FirebaseDatabase.instance
         .ref('duo_board_waiting/$requestId/${user.uid}');
-    await ref.onDisconnect().remove();
+    await ref.onDisconnect().remove().timeout(const Duration(seconds: 5));
     await ref.set({
       'online': true,
       'updatedAt': ServerValue.timestamp,
-    });
+    }).timeout(const Duration(seconds: 8));
     return ref;
   }
 

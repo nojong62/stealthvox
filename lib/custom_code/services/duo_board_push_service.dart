@@ -186,30 +186,29 @@ class DuoBoardPushService {
     _handledRequests.add(requestId);
     final copy = DuoInviteCopy.forLanguage(FFAppState().chatLang);
     Timer? timeout;
-    final choice = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        timeout = Timer(const Duration(seconds: 25), () {
-          if (dialogContext.mounted) Navigator.pop(dialogContext, 'timeout');
-        });
-        return AlertDialog(
-          title: Text(copy['requestArrived']),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, 'busy'),
-              child: Text(copy['busyNow']),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, 'accept'),
-              child: Text(copy['acceptDuo']),
-            ),
-          ],
-        );
-      },
-    );
-    timeout?.cancel();
     try {
+      final choice = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          timeout = Timer(const Duration(seconds: 25), () {
+            if (dialogContext.mounted) Navigator.pop(dialogContext, 'timeout');
+          });
+          return AlertDialog(
+            title: Text(copy['requestArrived']),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, 'busy'),
+                child: Text(copy['busyNow']),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, 'accept'),
+                child: Text(copy['acceptDuo']),
+              ),
+            ],
+          );
+        },
+      );
       if (choice == 'accept') {
         if (!context.mounted) return;
         await _open(requestId, context);
@@ -218,7 +217,10 @@ class DuoBoardPushService {
             reason: choice == 'busy' ? 'busy' : 'timeout');
       }
     } finally {
-      // Keep the id for this process: FCM and Firestore can deliver the same request.
+      timeout?.cancel();
+      // FCM and Firestore can deliver the same live request. Once it has been
+      // handled, allow a later request for the same board post to be shown.
+      _handledRequests.remove(requestId);
     }
   }
 

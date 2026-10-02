@@ -196,14 +196,28 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
       if (!mounted) return;
       final claim = await showDialog<DuoBoardClaim>(
         context: context,
-        barrierDismissible: true,
+        barrierDismissible: false,
         builder: (_) => _DuoWaitingDialog(
           requestId: requestId,
           presence: presence!,
         ),
       );
-      if (claim != null && mounted) Navigator.pop(context, claim);
-    } catch (_) {
+      if (claim != null && mounted) {
+        Navigator.pop(context, claim);
+        return;
+      }
+      if (mounted) setState(() => _claiming = null);
+    } on FirebaseFunctionsException catch (error) {
+      debugPrint('[DuoBoard] request failed: ${error.code} ${error.message}');
+      await presence?.remove();
+      if (mounted) {
+        setState(() {
+          _claiming = null;
+          _error = error.message ?? _copy['requestFailed'];
+        });
+      }
+    } catch (error) {
+      debugPrint('[DuoBoard] request failed: $error');
       await presence?.remove();
       if (mounted) {
         setState(() {
@@ -446,6 +460,15 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                                   ),
                                                   visualDensity:
                                                       VisualDensity.compact,
+                                                )
+                                              else if (_claiming == doc.id)
+                                                const SizedBox(
+                                                  width: 18,
+                                                  height: 18,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                  ),
                                                 )
                                               else
                                                 Tooltip(
