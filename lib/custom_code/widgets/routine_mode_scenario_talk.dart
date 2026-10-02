@@ -82,6 +82,7 @@ import '/custom_code/services/pcm_audio_utils.dart';
 import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/tts_adapter.dart';
+import '/custom_code/services/tts_model_policy.dart';
 import '/custom_code/services/user_line_fix.dart';
 import '/custom_code/services/short_reply_gate.dart';
 import 'first_utterance_context_judge.dart'; // 3모드 공통 응답 길이 규칙
@@ -4065,7 +4066,9 @@ $finalLanguageRule''';
   // 🔧 [v3.7] 유저 통문장 TtsCache 백그라운드 저장 헬퍼
   void _saveUserFullSentenceToCache(String text) {
     if (text.isEmpty) return;
-    TtsCache.get(text, 'nova').then((existing) {
+    TtsCache.get(text,
+            TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, 'nova'))
+        .then((existing) {
       if (existing != null) return;
       http
           .post(
@@ -4074,16 +4077,19 @@ $finalLanguageRule''';
           'Authorization': 'Bearer $_openAiKey',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({
-          'model': 'tts-1',
-          'input': text,
-          'voice': 'nova',
-          'speed': 1.0,
-        }),
+        body: jsonEncode(
+          TtsModelPolicy.conversation.speechPayload(
+            input: text,
+            voice: 'nova',
+          ),
+        ),
       )
           .then((res) {
         if (res.statusCode == 200) {
-          TtsCache.put(text, 'nova', res.bodyBytes);
+          TtsCache.put(
+              text,
+              TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, 'nova'),
+              res.bodyBytes);
         }
       }).catchError((e) {
         debugPrint('[_saveUserFullSentenceToCache] $e');
@@ -5723,7 +5729,8 @@ class ChunkedTtsFetcher {
 
   Future<void> _fetch(int id, String text) async {
     // [1단계] 로컬 캐시 확인 (히트 시 즉시 반환)
-    final cached = await TtsCache.get(text, voice);
+    final cached = await TtsCache.get(
+        text, TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, voice));
     if (cached != null && cached.isNotEmpty) {
       _buffer[id] = cached;
       _pendingCount--;
@@ -5744,13 +5751,13 @@ class ChunkedTtsFetcher {
                 'Authorization': 'Bearer $apiKey',
                 'Content-Type': 'application/json',
               },
-              body: jsonEncode({
-                'model': 'tts-1',
-                'input': text,
-                'voice': voice,
-                'speed': 1.0,
-                'response_format': 'mp3',
-              }),
+              body: jsonEncode(
+                TtsModelPolicy.conversation.speechPayload(
+                  input: text,
+                  voice: voice,
+                  responseFormat: 'mp3',
+                ),
+              ),
             )
             .timeout(Duration(seconds: timeoutLadderSec[attempt]));
 
@@ -5760,7 +5767,10 @@ class ChunkedTtsFetcher {
           onLog?.call('🔊 [TTS-02]',
               '[$turnTag] API OK (${result.length}B) for "$text"');
           // [3단계] 캐시 저장 (백그라운드)
-          TtsCache.put(text, voice, result);
+          TtsCache.put(
+              text,
+              TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, voice),
+              result);
           break;
         } else {
           onLog?.call('❌ [TTS-API-ERR]',
@@ -6061,7 +6071,8 @@ class HybridTtsPlayer {
   // _cacheFullSentenceInBackground: 통문장 캐시 저장을 await하지 않는 백그라운드 작업.
   Future<void> _cacheFullSentenceInBackground(String fullSentence) async {
     try {
-      final cached = await TtsCache.get(fullSentence, voice);
+      final cached = await TtsCache.get(fullSentence,
+          TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, voice));
       if (cached != null && cached.isNotEmpty) {
         lastCacheHit = true;
         lastCacheSaveMs = 0;
@@ -6081,13 +6092,13 @@ class HybridTtsPlayer {
                   'Authorization': 'Bearer $apiKey',
                   'Content-Type': 'application/json',
                 },
-                body: jsonEncode({
-                  'model': 'tts-1',
-                  'input': fullSentence,
-                  'voice': voice,
-                  'speed': 1.0,
-                  'response_format': 'mp3',
-                }),
+                body: jsonEncode(
+                  TtsModelPolicy.conversation.speechPayload(
+                    input: fullSentence,
+                    voice: voice,
+                    responseFormat: 'mp3',
+                  ),
+                ),
               )
               .timeout(const Duration(seconds: 25));
           if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
@@ -6101,7 +6112,10 @@ class HybridTtsPlayer {
         }
       }
       if (bytes != null) {
-        await TtsCache.put(fullSentence, voice, bytes);
+        await TtsCache.put(
+            fullSentence,
+            TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, voice),
+            bytes);
         lastCacheSaveMs = sw.elapsedMilliseconds;
         onLog?.call(
             '[HYB-04-SAVED]', '${lastCacheSaveMs}ms (${bytes.length}B)');

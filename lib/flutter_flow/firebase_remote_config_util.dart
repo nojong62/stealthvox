@@ -19,6 +19,13 @@ Future<bool> initializeFirebaseRemoteConfig() async {
     ));
     await remoteConfig.setDefaults(const {
       'OpenAIAPIKey': '',
+      // TTS 모델 교체는 앱 배포 없이 이 키들로 전환한다. 값이 비어 있으면
+      // 코드의 검증된 기본 프로필(tts-1 / gpt-4o-mini-tts)을 유지한다.
+      'OpenAITtsConversationModel': '',
+      'OpenAITtsConversationOptionMode': '',
+      'OpenAITtsExpressiveModel': '',
+      'OpenAITtsExpressiveOptionMode': '',
+      'OpenAITtsCacheVersion': '',
       'android_min_version': 0,
       'android_latest_version': 0,
       'android_update_message': kDefaultAndroidUpdateMessage,

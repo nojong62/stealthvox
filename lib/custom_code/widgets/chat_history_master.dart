@@ -38,6 +38,7 @@ import '/custom_code/services/origin_language_session.dart'
     show detectOriginScript, koreanLanguageDisplayName, textContradictsLanguage;
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
+import '/custom_code/services/tts_model_policy.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart'
     show deepgramLanguageCode;
 import '/custom_code/services/transcript_repair_guard.dart';
@@ -78,12 +79,14 @@ P2VoiceStyle _p3StyleFor(P3PracticeMode mode) =>
 /// 훈련 전용 캐시 칸. 스타일 id가 달라 Lab이 만들어 둔 소리와도, 두 모드끼리도
 /// 섞이지 않는다.
 String _p3CacheNamespaceFor(P3PracticeMode mode, String voice) =>
-    'p2_wav_${_historyPracticeTtsModel}_${_p3StyleFor(mode).id}'
-    '_${kP2StyleInstructionVersion}_$voice';
+    TtsModelPolicy.cacheNamespace(
+      TtsWorkload.expressiveStudy,
+      'p2_wav_${_p3StyleFor(mode).id}_${kP2StyleInstructionVersion}_$voice',
+    );
 
-const String _historyListenTtsModel = 'tts-1';
+String get _historyListenTtsModel => TtsModelPolicy.conversation.model;
 const String _historyListenTtsVoice = 'nova';
-const String _historyPracticeTtsModel = 'gpt-4o-mini-tts';
+String get _historyPracticeTtsModel => TtsModelPolicy.expressiveStudy.model;
 const String _historyPracticeAiVoice = 'nova';
 const String _historyPracticeUserVoice = 'verse';
 const Color _p3ShadowingAccentColor = Color(0xFF818CF8);
@@ -2540,7 +2543,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       final uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
       final request = http.MultipartRequest('POST', uri);
       request.headers['Authorization'] = 'Bearer $_apiKey';
-      request.fields['model'] = 'whisper-1';
+      // 앱의 다른 파일 전사 경로와 같은 현행 모델을 사용한다.
+      // whisper-1은 2027-02-26 종료 예정이며, 이 호출은 JSON의 text만
+      // 소비하므로 gpt-transcribe로 응답 계약을 바꾸지 않고 이전할 수 있다.
+      request.fields['model'] = OpenAiTranscribeService.model;
       request.fields['language'] = 'en';
       request.fields['prompt'] = targetText;
       request.files.add(await http.MultipartFile.fromPath('file', path));
@@ -3010,7 +3016,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       }
     }
     final historyId = widget.historyDoc.id;
-    final cacheKey = 'tts1_nova_native_$msgId.mp3';
+    final cacheKey =
+        '${TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, 'native_$_historyListenTtsVoice')}_$msgId.mp3';
     final diskHit = await _AudioDiskCache.read(historyId, cacheKey);
     if (diskHit != null) {
       await audioPlayer.play(BytesSource(diskHit));
@@ -3023,8 +3030,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   }
 
   // OpenAI TTS 헬퍼
-  String _practiceCacheVoice(String voice) =>
-      '${_historyPracticeTtsModel}_$voice';
+  String _practiceCacheVoice(String voice) => TtsModelPolicy.cacheNamespace(
+        TtsWorkload.expressiveStudy,
+        voice,
+      );
 
   Future<Uint8List?> _fetchPracticeTTS(String text, String voice) =>
       _fetchOpenAITTS(
@@ -3052,11 +3061,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   }
 
   Future<Uint8List?> _fetchOpenAITTS(String text, double speed, String voice,
-      {String model = _historyListenTtsModel,
-      String? instructions,
-      String? instructionTag}) {
+      {String? model, String? instructions, String? instructionTag}) {
+    final resolvedModel = model ?? _historyListenTtsModel;
     final requestKey = jsonEncode([
-      model,
+      resolvedModel,
       text.trim(),
       voice,
       speed,
@@ -3068,7 +3076,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       text,
       speed,
       voice,
-      model: model,
+      model: resolvedModel,
       instructions: instructions,
       instructionTag: instructionTag,
     );
@@ -3081,7 +3089,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     String text,
     double speed,
     String voice, {
-    String model = _historyListenTtsModel,
+    String? model,
     String? instructions,
     String? instructionTag,
     String? responseFormat,
@@ -3091,6 +3099,11 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     if (!_paidStudySilentlyAllowed('tts_generate')) return null;
     if (_apiKey.isEmpty || text.trim().isEmpty) return null;
     try {
+      final resolvedModel = model ?? _historyListenTtsModel;
+      final workload = resolvedModel == TtsModelPolicy.expressiveStudy.model ||
+              (instructions != null && instructions.trim().isNotEmpty)
+          ? TtsWorkload.expressiveStudy
+          : TtsWorkload.conversation;
       var response = await http
           .post(
             Uri.parse('https://api.openai.com/v1/audio/speech'),
@@ -3098,15 +3111,15 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
               'Authorization': 'Bearer $_apiKey',
               'Content-Type': 'application/json'
             },
-            body: jsonEncode({
-              'model': model,
-              'input': text,
-              'voice': voice,
-              if (model == _historyListenTtsModel) 'speed': speed,
-              if (responseFormat != null) 'response_format': responseFormat,
-              if (instructions != null && instructions.trim().isNotEmpty)
-                'instructions': instructions,
-            }),
+            body: jsonEncode(
+              TtsModelPolicy.forWorkload(workload).speechPayload(
+                input: text,
+                voice: voice,
+                speed: speed,
+                instructions: instructions,
+                responseFormat: responseFormat,
+              )..['model'] = resolvedModel,
+            ),
           )
           // PCM은 mp3보다 응답이 커서 10초로는 모자랄 수 있다.
           .timeout(Duration(seconds: responseFormat == 'pcm' ? 30 : 10));

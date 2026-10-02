@@ -24,6 +24,7 @@ import 'package:http/http.dart' as http;
 
 import 'openai_connection_pool.dart';
 import 'pcm_audio_utils.dart';
+import 'tts_model_policy.dart';
 
 // ====================================================================
 // 설정 — 모델 교체는 이 클래스만 수정한다
@@ -39,7 +40,7 @@ class TtsAdapterConfig {
   /// 한국어를 또박또박 읽어 영어보다 눈에 띄게 처졌다. tts-1은 가볍고 빠르며
   /// `speed` 파라미터가 실제로 먹는다(gpt-4o-mini-tts는 `instructions`로만
   /// 움직인다). 바꾸려면 speed/instructions 지원 여부부터 확인할 것.
-  static const String model = 'tts-1';
+  static String get model => TtsModelPolicy.conversation.model;
 
   /// OpenAI /v1/audio/speech 의 pcm 출력 규격: 24kHz, 16-bit LE, mono.
   static const String outputFormat = 'pcm';
@@ -492,6 +493,7 @@ class TtsAdapter {
     this.onPlaybackEnd,
     this.onHistoryAudioReady,
     this.onPrerollReport,
+
     /// 🔊 소리를 어디로 낼 것인가. 넘기지 않으면 지금까지와 같은
     /// flutter_sound 재생기다 — 서클톡·시나리오톡·로봇은 손대지 않는다.
     /// 듀오 통역만 통화 경로 백엔드를 넘긴다([TtsPcmSink] 주석).
@@ -795,14 +797,14 @@ class TtsAdapter {
       'Authorization': 'Bearer $apiKey',
       'Content-Type': 'application/json',
     });
-    httpRequest.body = jsonEncode({
-      'model': TtsAdapterConfig.model,
-      'input': request.text,
-      'voice': voice,
-      'response_format': TtsAdapterConfig.outputFormat,
-      if ((request.speakingInstruction ?? '').trim().isNotEmpty)
-        'instructions': request.speakingInstruction!.trim(),
-    });
+    httpRequest.body = jsonEncode(
+      TtsModelPolicy.conversation.speechPayload(
+        input: request.text,
+        voice: voice,
+        responseFormat: TtsAdapterConfig.outputFormat,
+        instructions: request.speakingInstruction,
+      ),
+    );
     return httpRequest;
   }
 

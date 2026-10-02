@@ -5,6 +5,7 @@ import '../schema/structs/index.dart';
 import 'package:flutter/foundation.dart';
 
 import '/flutter_flow/flutter_flow_util.dart';
+import '/custom_code/services/tts_model_policy.dart';
 import 'api_manager.dart';
 
 export 'api_manager.dart' show ApiCallResponse;
@@ -60,7 +61,7 @@ class TextToSpeechCall {
   }) async {
     final ffApiRequestBody = '''
 {
-  "model": "tts-1",
+  "model": "${TtsModelPolicy.conversation.model}",
   "input":"${escapeStringForJson(text)}",
   "voice": "alloy"
 }''';

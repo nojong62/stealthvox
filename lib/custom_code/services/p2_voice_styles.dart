@@ -1,3 +1,5 @@
+import 'tts_model_policy.dart';
+
 // 🔬 [P2-VOICE-LAB] P2 음성 Pattern 후보의 재료 정의.
 //
 //   여기 있는 건 **상수뿐이다.** 로직도 상태도 없다. 관리자 Voice Lab이
@@ -43,7 +45,7 @@ const String kP2StyleInstructionVersion = 'v1';
 
 /// Lab이 쓰는 TTS 모델. 실사용 P2(`_historyPracticeTtsModel`)와 같은 값이다.
 /// `instructions`가 실제로 먹는 모델이어야 하므로 tts-1로 내리면 안 된다.
-const String kP2LabTtsModel = 'gpt-4o-mini-tts';
+String get kP2LabTtsModel => TtsModelPolicy.expressiveStudy.model;
 
 /// 모든 조합이 공유하는 단 하나의 비교용 문장.
 ///
@@ -260,7 +262,10 @@ Emotional range: Moderate, subtle, expressive''',
 ///
 /// 예) `p2lab_gpt-4o-mini-tts_style_musical_natural_v1_nova`
 String p2LabCacheNamespace(P2VoiceStyle style, String voice) =>
-    'p2lab_${kP2LabTtsModel}_${style.id}_${kP2StyleInstructionVersion}_$voice';
+    TtsModelPolicy.cacheNamespace(
+      TtsWorkload.expressiveStudy,
+      'p2lab_${style.id}_${kP2StyleInstructionVersion}_$voice',
+    );
 
 /// Breath Analyzer 전용 네임스페이스. 위 mp3 캐시와 **완전히 다른 키**다.
 ///
@@ -272,4 +277,7 @@ String p2LabCacheNamespace(P2VoiceStyle style, String voice) =>
 /// `TtsCache`는 확장자를 해석하지 않고 바이트만 다루므로 동작에는 문제가
 /// 없다. 이 이유만으로 실사용이 의존하는 `TtsCache`를 뜯지 않는다.
 String p2LabWavCacheNamespace(P2VoiceStyle style, String voice) =>
-    'p2lab_wav_${kP2LabTtsModel}_${style.id}_${kP2StyleInstructionVersion}_$voice';
+    TtsModelPolicy.cacheNamespace(
+      TtsWorkload.expressiveStudy,
+      'p2lab_wav_${style.id}_${kP2StyleInstructionVersion}_$voice',
+    );

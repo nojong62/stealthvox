@@ -31,6 +31,7 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/study_access.dart';
 import '/custom_code/services/guide_ui_localization.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
+import '/custom_code/services/tts_model_policy.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart'
     show deepgramLanguageCode;
 import '/custom_code/services/origin_language_session.dart'
@@ -40,7 +41,6 @@ import '/custom_code/services/duo_canonical.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 
-const String _historyListTtsModel = 'tts-1';
 const String _historyListTtsVoice = 'nova';
 
 // Deletion dialogs follow the Original language selected in the lobby.
@@ -236,8 +236,11 @@ class _DeletionUiCopy {
 // 의미단위 리듬을 말로 지시하려면 instructions를 받는 모델이어야 한다.
 // tts-1은 instructions 자리가 없고, gpt-4o-mini-tts는 대신 speed를 무시한다.
 // 캐시 키에 모델명을 박아 tts-1 시절 음성이 섞여 나오지 않게 한다.
-const String _keeperPlayTtsModel = 'gpt-4o-mini-tts';
-const String _keeperPlayTtsCacheVoice = 'keeper-4omini-nova';
+String get _keeperPlayTtsModel => TtsModelPolicy.expressiveStudy.model;
+String get _keeperPlayTtsCacheVoice => TtsModelPolicy.cacheNamespace(
+      TtsWorkload.expressiveStudy,
+      'keeper-nova',
+    );
 const String _keeperPlayInstruction = '''
 Read the line in natural meaning units — breath groups of roughly five to seven words.
 Leave a brief pause at each unit boundary and hold a steady, rhythmic cadence throughout.
@@ -1715,13 +1718,18 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   }) async {
     if (_apiKey.isEmpty || text.trim().isEmpty) return null;
     try {
-      final payload = <String, dynamic>{
-        'model': model ?? _historyListTtsModel,
-        'input': text,
-        'voice': voice,
-      };
-      if (instructions != null && instructions.trim().isNotEmpty) {
-        payload['instructions'] = instructions.trim();
+      final workload = instructions != null && instructions.trim().isNotEmpty
+          ? TtsWorkload.expressiveStudy
+          : TtsWorkload.conversation;
+      final profile = TtsModelPolicy.forWorkload(workload);
+      final payload = profile.speechPayload(
+        input: text,
+        voice: voice,
+        speed: speed,
+        instructions: instructions,
+      );
+      if (model != null && model.trim().isNotEmpty) {
+        payload['model'] = model.trim();
       } else {
         payload['speed'] = speed;
       }
