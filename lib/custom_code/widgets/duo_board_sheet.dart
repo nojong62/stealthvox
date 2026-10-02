@@ -269,7 +269,9 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
       );
     } on FirebaseFunctionsException catch (error) {
       if (mounted) {
-        setState(() => _error = error.message ?? _copy['visibilityFailed']);
+        debugPrint(
+            '[DuoBoard] visibility update failed: ${error.code} ${error.message}');
+        setState(() => _error = _copy['visibilityFailed']);
       }
     } catch (_) {
       if (mounted) setState(() => _error = _copy['visibilityFailed']);
@@ -303,7 +305,7 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                 ),
               ])),
           Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
               child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(_copy['boardSubtitle'],
@@ -626,8 +628,8 @@ class _DuoWaitingDialogState extends State<_DuoWaitingDialog> {
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          CircularProgressIndicator(),
-          SizedBox(height: 18),
+          const CircularProgressIndicator(),
+          const SizedBox(height: 18),
           Text(copy['waitingShort']),
         ],
       ),
