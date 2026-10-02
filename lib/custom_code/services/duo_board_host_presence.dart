@@ -134,8 +134,32 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     final ref = _connection;
     _connection = null;
     if (ref != null) {
-      await ref.onDisconnect().cancel();
       await ref.remove();
+      await ref.onDisconnect().cancel();
+    }
+  }
+
+  /// Hides an owned board post while Firebase authentication is still valid.
+  ///
+  /// Authentication listeners run after sign-out, which is too late to make
+  /// authenticated Realtime Database and callable-function writes reliably.
+  Future<void> prepareForSignOut() async {
+    try {
+      final post = await DuoBoardService.findOwnActivePost();
+      if (post != null) {
+        await DuoBoardService.setPostVisibility(post.id, enabled: false);
+      }
+    } catch (error) {
+      debugPrint(
+          '[DuoBoard] post visibility cleanup before sign-out failed: $error');
+    }
+
+    try {
+      await stop();
+    } catch (error) {
+      // Keep onDisconnect armed when the explicit remove fails. It can still
+      // clean up the presence record when the RTDB connection drops.
+      debugPrint('[DuoBoard] presence cleanup before sign-out failed: $error');
     }
   }
 

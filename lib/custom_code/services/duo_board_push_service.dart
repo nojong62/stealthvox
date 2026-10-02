@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '/app_state.dart';
+import 'duo_board_host_presence.dart';
 import 'duo_board_service.dart';
 import 'duo_invite_localization.dart';
 
@@ -116,6 +117,7 @@ class DuoBoardPushService {
   }
 
   static Future<void> signOut() async {
+    await DuoBoardHostPresence.instance.prepareForSignOut();
     await removeTokenForCurrentMember();
     await FirebaseAuth.instance.signOut();
   }
