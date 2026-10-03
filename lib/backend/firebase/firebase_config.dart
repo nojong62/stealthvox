@@ -7,6 +7,8 @@ Future initFirebase() async {
         options: FirebaseOptions(
             apiKey: "AIzaSyCDEDlP9kQltGL38V0f7qS0GYjLzsq86bA",
             authDomain: "stealth-vox-3p3rq3.firebaseapp.com",
+            databaseURL:
+                "https://stealth-vox-3p3rq3-default-rtdb.asia-southeast1.firebasedatabase.app",
             projectId: "stealth-vox-3p3rq3",
             storageBucket: "stealth-vox-3p3rq3.firebasestorage.app",
             messagingSenderId: "450483026108",

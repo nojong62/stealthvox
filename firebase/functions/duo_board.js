@@ -139,10 +139,16 @@ exports.claimDuoBoardPost = functions.https.onCall(async (data, context) => {
 exports.requestDuoBoardPost = functions.https.onCall(async (data, context) => {
   const uid = uidOf(context);
   const postId = String(data.postId || '').trim();
+  const rawAttemptId = String(data.attemptId || '').trim();
+  const attemptId = /^[A-Za-z0-9_-]{8,80}$/.test(rawAttemptId)
+    ? rawAttemptId : '';
   if (!postId) throw new functions.https.HttpsError('invalid-argument', 'postId가 필요합니다.');
   const postRef = db().collection('duo_board_posts').doc(postId);
+  // New clients supply an auto-id per tap. Legacy clients remain on postId so
+  // their existing presence path continues to work until they update.
+  const requestId = attemptId || postId;
   const runtimeRef = db().collection('duo_board_runtime').doc(postId);
-  const requestRef = db().collection('duo_board_requests').doc(postId);
+  const requestRef = db().collection('duo_board_requests').doc(requestId);
   const requesterRef = db().collection('duo_board_requesters').doc(uid);
   const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 30 * 1000);
   let ownerUid;
@@ -156,6 +162,18 @@ exports.requestDuoBoardPost = functions.https.onCall(async (data, context) => {
     }
     ownerUid = post.get('ownerUid');
     if (ownerUid === uid) throw new functions.https.HttpsError('failed-precondition', '본인 글에는 요청할 수 없습니다.');
+    const pendingRequestId = runtime.get('pendingRequestId') || '';
+    const pendingExpiresAt = runtime.get('pendingRequestExpiresAt');
+    if (pendingRequestId && pendingExpiresAt?.toMillis() > Date.now()) {
+      const pending = await tx.get(
+          db().collection('duo_board_requests').doc(pendingRequestId));
+      if (pending.exists && ['waiting', 'matched'].includes(pending.get('status'))) {
+        if (pending.get('requesterUid') === uid) {
+          throw new functions.https.HttpsError('already-exists', '이미 기다리고 있습니다.');
+        }
+        throw new functions.https.HttpsError('resource-exhausted', '다른 요청자가 기다리고 있습니다.');
+      }
+    }
     if (previous.exists && ['waiting', 'matched'].includes(previous.get('status')) &&
         previous.get('expiresAt')?.toMillis() > Date.now()) {
       if (previous.get('requesterUid') === uid) {
@@ -180,15 +198,19 @@ exports.requestDuoBoardPost = functions.https.onCall(async (data, context) => {
     }
     tx.set(requestRef, {
       postId, ownerUid, requesterUid: uid, status: 'waiting',
+      attemptId,
       mode: post.get('mode'), directLanguage: post.get('directLanguage') || '',
       createdAt: admin.firestore.FieldValue.serverTimestamp(), expiresAt,
       roomId,
       historyPath: runtime.get('historyPath') || '',
     });
     tx.set(requesterRef, {
-      requestId: postId, status: 'waiting', expiresAt,
+      requestId, attemptId, status: 'waiting', expiresAt,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+    tx.update(runtimeRef, {pendingRequestId: requestId,
+      pendingRequestExpiresAt: expiresAt,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()});
   });
   if (!await isHostForeground(ownerUid)) {
     await requestRef.set({status: 'expired', expiredAt:
@@ -199,7 +221,8 @@ exports.requestDuoBoardPost = functions.https.onCall(async (data, context) => {
   }
   // Host requests are deliberately in-app only. The foreground Firestore
   // listener shows the dialog; no FCM notification is sent to a background app.
-  return {requestId: postId, expiresAtMillis: expiresAt.toMillis()};
+  return {requestId, attemptId,
+    expiresAtMillis: expiresAt.toMillis()};
 });
 
 exports.openDuoBoardRequest = functions.https.onCall(async (data, context) => {
@@ -215,10 +238,8 @@ exports.openDuoBoardRequest = functions.https.onCall(async (data, context) => {
   const presenceRef = admin.database()
       .ref(`duo_board_waiting/${requestId}/${requesterUid}`);
   const gate = await presenceRef.transaction(current => {
-    if (!current || current.online !== true || current.matching === true) {
-      return;
-    }
-    return {...current, matching: true, matchingOwnerUid: uid,
+    if (current?.matching === true) return;
+    return {...(current || {}), matching: true, matchingOwnerUid: uid,
       matchingAt: admin.database.ServerValue.TIMESTAMP};
   }, undefined, false);
   if (!gate.committed) {
@@ -240,7 +261,7 @@ exports.openDuoBoardRequest = functions.https.onCall(async (data, context) => {
       }
       const roomId = request.get('roomId');
       const roomRef = db().collection('duo_sessions').doc(roomId);
-      const postRef = db().collection('duo_board_posts').doc(requestId);
+      const postRef = db().collection('duo_board_posts').doc(request.get('postId'));
       const [room, post] = await Promise.all([tx.get(roomRef), tx.get(postRef)]);
       if (!room.exists || room.get('hostUid') !== uid ||
           room.get('isDuoEnabled') !== true || room.get('isPartnerJoined') === true ||
@@ -384,12 +405,17 @@ exports.cancelDuoBoardRequest = functions.https.onCall(async (data, context) => 
   const uid = uidOf(context);
   const requestId = String(data.requestId || '').trim();
   if (!requestId) throw new functions.https.HttpsError('invalid-argument', 'requestId가 필요합니다.');
+  const attemptId = String(data.attemptId || '').trim();
   const requestRef = db().collection('duo_board_requests').doc(requestId);
   const requesterRef = db().collection('duo_board_requesters').doc(uid);
   await db().runTransaction(async tx => {
     const request = await tx.get(requestRef);
     if (!request.exists || request.get('requesterUid') !== uid ||
         request.get('status') !== 'waiting') return;
+    const currentAttemptId = request.get('attemptId') || '';
+    // A disposed dialog from an earlier attempt must never cancel a newer
+    // request that reused the board post document id.
+    if (currentAttemptId !== attemptId) return;
     tx.update(requestRef, {status: 'cancelled',
       cancelledAt: admin.firestore.FieldValue.serverTimestamp()});
     tx.set(requesterRef, {status: 'cancelled',

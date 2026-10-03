@@ -1702,6 +1702,7 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Widget _buildWelcomeGuidePage() {
+    final copy = DuoBoardGuidePageCopy.forSystemLocale();
     return LayoutBuilder(
       key: const ValueKey('welcome-guide'),
       builder: (context, constraints) {
@@ -1726,7 +1727,7 @@ class _IntroMasterState extends State<IntroMaster>
                     children: [
                       IconButton(
                         onPressed: _goBackToStory,
-                        tooltip: 'Back',
+                        tooltip: copy['back'],
                         style: IconButton.styleFrom(
                           foregroundColor: const Color(0xFFE6E7EA),
                           backgroundColor: Colors.white.withValues(
@@ -1745,9 +1746,9 @@ class _IntroMasterState extends State<IntroMaster>
                           minimumSize: const Size(44, 44),
                           foregroundColor: const Color(0xFFBFC1C9),
                         ),
-                        child: const Text(
-                          'Log In',
-                          style: TextStyle(
+                        child: Text(
+                          copy['login']!,
+                          style: const TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w700,
                           ),
@@ -1756,9 +1757,9 @@ class _IntroMasterState extends State<IntroMaster>
                     ],
                   ),
                   SizedBox(height: compact ? 24 : 36),
-                  const Text(
-                    'Join Duo Without\nSigning Up',
-                    style: TextStyle(
+                  Text(
+                    copy['headline']!,
+                    style: const TextStyle(
                       color: Color(0xFFF7F8FA),
                       fontSize: 30,
                       fontWeight: FontWeight.w800,
@@ -1768,18 +1769,18 @@ class _IntroMasterState extends State<IntroMaster>
                   ),
                   SizedBox(height: compact ? 22 : 30),
                   // 제목 바로 아래가 시작 버튼이다. 사이에 있던 부제·소개
-                  // 카드는 아래 안내 1·2·3과 같은 말을 반복하고 있었다.
+                  // 카드는 아래 단계 안내와 같은 말을 반복하고 있었다.
                   _buildPrimaryAction(
-                    label: 'Open Duo Invite',
+                    label: copy['browse']!,
                     icon: Icons.forum_outlined,
                     onPressed: _openDuoBoard,
                   ),
                   SizedBox(height: compact ? 16 : 20),
-                  _buildUsageGuideSection(),
+                  _buildUsageGuideSection(copy),
                   const Spacer(),
                   SizedBox(height: compact ? 18 : 28),
                   _buildSecondaryAction(
-                    label: 'Forgot how you logged in? Find Your Account',
+                    label: copy['findAccount']!,
                     icon: Icons.manage_search_rounded,
                     onPressed: () => setState(() {
                       _currentScreen = IntroScreen.accountDiscovery;
@@ -1788,23 +1789,24 @@ class _IntroMasterState extends State<IntroMaster>
                     }),
                   ),
                   const SizedBox(height: 10),
-                  const Text(
-                    'If you changed phones, please finish setting up your Google Account and KakaoTalk on your new phone before trying to find your account.',
+                  Text(
+                    copy['phoneSetup']!,
                     textAlign: TextAlign.center,
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: Color(0xFF9297A5),
                       fontSize: 11.5,
                       height: 1.45,
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Microphone access is required.',
+                  Text(
+                    copy['microphone']!,
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Color(0xFF737680), fontSize: 11.5),
+                    style: const TextStyle(
+                        color: Color(0xFF737680), fontSize: 11.5),
                   ),
                   const SizedBox(height: 10),
-                  _buildWelcomePageFooter('Swipe to Go Back'),
+                  _buildWelcomePageFooter(copy['swipeBack']!),
                 ],
               ),
             ),
@@ -1814,8 +1816,8 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
-  /// Duo Trial Call 안내. 팝업이 아니라 가이드 페이지에 그대로 얹는다.
-  Widget _buildUsageGuideSection() {
+  /// 회원이 올린 Duo 초대글을 비회원도 찾아 참여하는 게시판 흐름.
+  Widget _buildUsageGuideSection(Map<String, String> copy) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
@@ -1830,22 +1832,26 @@ class _IntroMasterState extends State<IntroMaster>
         children: [
           _buildGuideStep(
             number: 1,
-            title: 'Invite a Friend',
-            description: 'Anyone can join with an invite link.',
+            title: copy['step1Title']!,
+            description: copy['step1Body']!,
           ),
           const SizedBox(height: 16),
           _buildGuideStep(
             number: 2,
-            title: 'Talk for 10 Minutes',
-            description:
-                'Your one-time trial starts when your guest joins the Duo room.',
+            title: copy['step2Title']!,
+            description: copy['step2Body']!,
           ),
           const SizedBox(height: 16),
           _buildGuideStep(
             number: 3,
-            title: 'Review for 5 Minutes',
-            description:
-                'After the call, review the conversation in the study room for 5 minutes.',
+            title: copy['step3Title']!,
+            description: copy['step3Body']!,
+          ),
+          const SizedBox(height: 16),
+          _buildGuideStep(
+            number: 4,
+            title: copy['step4Title']!,
+            description: copy['step4Body']!,
           ),
         ],
       ),

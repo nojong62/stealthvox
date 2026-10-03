@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -228,7 +229,17 @@ class DuoBoardPushService {
     try {
       final match = await DuoBoardService.openRequest(requestId);
       await _onOpened?.call(match);
-    } catch (_) {
+    } on FirebaseFunctionsException catch (error) {
+      debugPrint(
+          '[DuoBoard] open request failed: ${error.code} ${error.message}');
+      if (!context.mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+            content: Text(DuoInviteCopy.forLanguage(
+                FFAppState().chatLang)['requestGone'])),
+      );
+    } catch (error) {
+      debugPrint('[DuoBoard] open request failed: $error');
       if (!context.mounted) return;
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         SnackBar(

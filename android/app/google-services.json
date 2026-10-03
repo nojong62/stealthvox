@@ -2,6 +2,7 @@
   "project_info": {
     "project_number": "450483026108",
     "project_id": "stealth-vox-3p3rq3",
+    "firebase_url": "https://stealth-vox-3p3rq3-default-rtdb.asia-southeast1.firebasedatabase.app",
     "storage_bucket": "stealth-vox-3p3rq3.firebasestorage.app"
   },
   "client": [

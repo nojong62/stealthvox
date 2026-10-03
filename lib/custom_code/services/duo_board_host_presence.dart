@@ -88,9 +88,18 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       ),
     );
     if (keep == true) {
-      await ensureOnline();
       final resumed = await DuoBoardService.resumePost(post!.id);
-      if (!resumed) await postEnded();
+      if (!resumed) {
+        await postEnded();
+      } else {
+        // Reactivate the Firestore post first. Presence synchronization is
+        // best-effort and must not leave the post permanently paused.
+        try {
+          await ensureOnline().timeout(const Duration(seconds: 8));
+        } catch (error) {
+          debugPrint('[DuoBoard] presence restore failed: $error');
+        }
+      }
     } else if (post != null) {
       await DuoBoardService.withdrawPost(post.id);
       _ownsActivePost = false;
@@ -109,10 +118,17 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     if (_connection == null) {
       final id = '${DateTime.now().millisecondsSinceEpoch}';
       _connection =
-          FirebaseDatabase.instance.ref('duo_board_hosts/${user.uid}/$id');
-      await _connection!.onDisconnect().remove();
+          DuoBoardService.database.ref('duo_board_hosts/${user.uid}/$id');
+      try {
+        await _connection!
+            .onDisconnect()
+            .remove()
+            .timeout(const Duration(seconds: 5));
+      } catch (error) {
+        debugPrint('[DuoBoard] host onDisconnect unavailable: $error');
+      }
     }
-    await _writeHeartbeat();
+    await _writeHeartbeat().timeout(const Duration(seconds: 8));
     _heartbeat ??= Timer.periodic(
       const Duration(seconds: 20),
       (_) => unawaited(_writeHeartbeat()),

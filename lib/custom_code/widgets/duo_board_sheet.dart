@@ -190,15 +190,17 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
       _error = null;
     });
     DatabaseReference? presence;
+    final attemptId = DuoBoardService.createRequestAttemptId();
     try {
-      presence = await DuoBoardService.startWaitingPresence(postId);
-      final requestId = await DuoBoardService.requestPost(postId);
+      presence = await DuoBoardService.startWaitingPresence(attemptId);
+      final requestId = await DuoBoardService.requestPost(postId, attemptId);
       if (!mounted) return;
       final claim = await showDialog<DuoBoardClaim>(
         context: context,
         barrierDismissible: false,
         builder: (_) => _DuoWaitingDialog(
           requestId: requestId,
+          attemptId: attemptId,
           presence: presence!,
         ),
       );
@@ -582,10 +584,12 @@ class _TranslatedBoardTopic extends StatelessWidget {
 class _DuoWaitingDialog extends StatefulWidget {
   const _DuoWaitingDialog({
     required this.requestId,
+    required this.attemptId,
     required this.presence,
   });
 
   final String requestId;
+  final String attemptId;
   final DatabaseReference presence;
 
   @override
@@ -604,6 +608,7 @@ class _DuoWaitingDialogState extends State<_DuoWaitingDialog> {
         DuoBoardService.watchRequest(widget.requestId).listen((snap) {
       final data = snap.data();
       if (!mounted) return;
+      if (data?['attemptId']?.toString() != widget.attemptId) return;
       final status = data?['status']?.toString();
       if (status == 'matched') {
         _matched = true;
@@ -639,7 +644,10 @@ class _DuoWaitingDialogState extends State<_DuoWaitingDialog> {
     _subscription?.cancel();
     unawaited(widget.presence.onDisconnect().cancel());
     unawaited(widget.presence.remove());
-    if (!_matched) unawaited(DuoBoardService.cancelRequest(widget.requestId));
+    if (!_matched) {
+      unawaited(
+          DuoBoardService.cancelRequest(widget.requestId, widget.attemptId));
+    }
     super.dispose();
   }
 

@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart';
 
 class DuoBoardClaim {
   const DuoBoardClaim({required this.roomId, required this.ownerUid});
@@ -24,6 +26,15 @@ class DuoBoardHostMatch {
 class DuoBoardService {
   DuoBoardService._();
   static final FirebaseFunctions _functions = FirebaseFunctions.instance;
+  static const String _databaseUrl =
+      'https://stealth-vox-3p3rq3-default-rtdb.asia-southeast1.firebasedatabase.app';
+
+  /// The project database lives in asia-southeast1, while the URL inferred by
+  /// older Android Firebase configuration points at the US endpoint.
+  static FirebaseDatabase get database => FirebaseDatabase.instanceFor(
+        app: Firebase.app(),
+        databaseURL: _databaseUrl,
+      );
 
   static Stream<QuerySnapshot<Map<String, dynamic>>> watchPosts() =>
       FirebaseFirestore.instance
@@ -110,11 +121,17 @@ class DuoBoardService {
         ownerUid: data['ownerUid'].toString());
   }
 
-  static Future<String> requestPost(String postId) async {
+  static String createRequestAttemptId() => FirebaseFirestore.instance
+      .collection('duo_board_request_attempts')
+      .doc()
+      .id;
+
+  static Future<String> requestPost(String postId, String attemptId) async {
     await ensureParticipantIdentity();
     final result = await _functions
         .httpsCallable('requestDuoBoardPost')
-        .call({'postId': postId}).timeout(const Duration(seconds: 15));
+        .call({'postId': postId, 'attemptId': attemptId}).timeout(
+            const Duration(seconds: 15));
     return Map<String, dynamic>.from(result.data as Map)['requestId']
         .toString();
   }
@@ -126,16 +143,20 @@ class DuoBoardService {
           .doc(requestId)
           .snapshots();
 
-  static Future<DatabaseReference> startWaitingPresence(
-      String requestId) async {
+  static Future<DatabaseReference> startWaitingPresence(String requestId) async {
     final user = await ensureParticipantIdentity();
-    final ref = FirebaseDatabase.instance
-        .ref('duo_board_waiting/$requestId/${user.uid}');
-    await ref.onDisconnect().remove().timeout(const Duration(seconds: 5));
+    final ref = database.ref('duo_board_waiting/$requestId/${user.uid}');
     await ref.set({
       'online': true,
       'updatedAt': ServerValue.timestamp,
     }).timeout(const Duration(seconds: 8));
+    // The Firestore request expires independently after 30 seconds, so a slow
+    // onDisconnect registration must not prevent the request from being sent.
+    try {
+      await ref.onDisconnect().remove().timeout(const Duration(seconds: 5));
+    } catch (error) {
+      debugPrint('[DuoBoard] waiting onDisconnect unavailable: $error');
+    }
     return ref;
   }
 
@@ -151,10 +172,10 @@ class DuoBoardService {
     );
   }
 
-  static Future<void> cancelRequest(String requestId) async {
+  static Future<void> cancelRequest(String requestId, String attemptId) async {
     await _functions
         .httpsCallable('cancelDuoBoardRequest')
-        .call({'requestId': requestId});
+        .call({'requestId': requestId, 'attemptId': attemptId});
   }
 
   static Future<void> declineRequest(String requestId,
