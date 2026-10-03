@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
@@ -21,6 +22,8 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
   bool _ownsActivePost = false;
   bool _promptedThisLaunch = false;
   String? _checkingUid;
+  BuildContext? _restoreDialogContext;
+  String? _pausedForIncomingInvitePostId;
 
   Future<void> initialize(BuildContext Function() context) async {
     _context = context;
@@ -49,7 +52,18 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       _promptedThisLaunch = false;
     }
     _uid = user.uid;
-    final post = await DuoBoardService.findOwnActivePost();
+    QueryDocumentSnapshot<Map<String, dynamic>>? post;
+    try {
+      post = await DuoBoardService.findOwnActivePost()
+          .timeout(const Duration(seconds: 5));
+    } catch (error) {
+      // 게시글 복원 확인은 앱 진입을 막는 절차가 아니다. 로그아웃 직후처럼
+      // 인증이 바뀌는 순간 조회가 실패해도 다음 auth/lifecycle 신호에서 다시
+      // 확인할 수 있으므로 여기서는 조용히 빠진다.
+      debugPrint('[DuoBoard] active post lookup failed: $error');
+      _checkingUid = null;
+      return;
+    }
     _ownsActivePost = post != null;
     if (!_ownsActivePost) {
       _checkingUid = null;
@@ -62,6 +76,10 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     }
     _promptedThisLaunch = true;
     await Future<void>.delayed(const Duration(milliseconds: 500));
+    if (_pausedForIncomingInvitePostId == post?.id) {
+      _checkingUid = null;
+      return;
+    }
     final context = _context?.call();
     if (context == null || !context.mounted) {
       _promptedThisLaunch = false;
@@ -69,25 +87,33 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       return;
     }
     final copy = DuoInviteCopy.forLanguage(FFAppState().chatLang);
-    final keep = await showDialog<bool>(
+    final choice = await showDialog<String>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(copy['restorePostTitle']),
-        content: Text(copy['restorePostBody']),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text(copy['endPost']),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(copy['continuePost']),
-          ),
-        ],
-      ),
+      builder: (dialogContext) {
+        _restoreDialogContext = dialogContext;
+        return AlertDialog(
+          title: Text(copy['restorePostTitle']),
+          content: Text(copy['restorePostBody']),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'end'),
+              child: Text(copy['endPost']),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, 'continue'),
+              child: Text(copy['continuePost']),
+            ),
+          ],
+        );
+      },
     );
-    if (keep == true) {
+    _restoreDialogContext = null;
+    if (choice == 'incoming_invite') {
+      _checkingUid = null;
+      return;
+    }
+    if (choice == 'continue') {
       final resumed = await DuoBoardService.resumePost(post!.id);
       if (!resumed) {
         await postEnded();
@@ -105,6 +131,41 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       _ownsActivePost = false;
     }
     _checkingUid = null;
+  }
+
+  /// 다른 사람의 Duo 방으로 들어갈 때 내 게시글이 다시 노출되지 않게 한다.
+  /// 글은 삭제하지 않고 비공개로 두므로 받은 통화가 끝난 뒤 다시 켤 수 있다.
+  Future<void> prepareForIncomingInvite(String incomingRoomId) async {
+    final roomId = incomingRoomId.trim();
+    if (roomId.isEmpty) return;
+
+    // 받은 초대가 최우선이다. 게시글 조회가 끝나기를 기다렸다가 닫으면 앱이
+    // 먼저 띄운 "기존 초대를 유지할까요?" 팝업이 딥링크 위를 가릴 수 있다.
+    final dialogContext = _restoreDialogContext;
+    if (dialogContext != null && dialogContext.mounted) {
+      Navigator.pop(dialogContext, 'incoming_invite');
+    }
+
+    try {
+      final post = await DuoBoardService.findOwnActivePost()
+          .timeout(const Duration(seconds: 5));
+      if (post == null || post.id == roomId) return;
+
+      _pausedForIncomingInvitePostId = post.id;
+      // 위 첫 dismiss와 조회 사이에 복원 팝업이 새로 뜬 경합도 닫는다.
+      final lateDialogContext = _restoreDialogContext;
+      if (lateDialogContext != null && lateDialogContext.mounted) {
+        Navigator.pop(lateDialogContext, 'incoming_invite');
+      }
+      await DuoBoardService.setPostVisibility(post.id, enabled: false)
+          .timeout(const Duration(seconds: 5));
+      _ownsActivePost = false;
+      await stop().timeout(const Duration(seconds: 5));
+    } catch (error) {
+      // 내 게시글 숨김은 best-effort다. 실패했다고 받은 초대의 room 상태를
+      // 설정하지 않으면 첫 클릭은 앱만 열고 두 번째 클릭에야 입장하게 된다.
+      debugPrint('[DuoBoard] incoming invite pause failed: $error');
+    }
   }
 
   Future<void> ensureOnline() async {

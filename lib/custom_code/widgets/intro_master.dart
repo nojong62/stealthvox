@@ -16,6 +16,7 @@ import 'dart:math' as math;
 import 'trial/trial_flow_state.dart';
 import 'auth_progress_view.dart';
 import 'duo_board_sheet.dart';
+import '/custom_code/services/duo_board_host_presence.dart';
 import '/auth/social_auth_service.dart';
 import '/auth/account_discovery_service.dart';
 // 익명으로 초대받아 대화한 뒤 기존 계정으로 돌아온 사람의 Duo 기록 복구.
@@ -120,6 +121,10 @@ class _IntroMasterState extends State<IntroMaster>
 
   bool isLoginMode = true;
   bool isLoading = false;
+  // Cold-start deep links arrive asynchronously. Keep the welcome/Duo-board
+  // surface covered until the saved invite, Play referrer, and AppsFlyer
+  // callbacks have had their first routing opportunity.
+  bool _checkingEntryStatus = true;
   IntroScreen _currentScreen = IntroScreen.welcome;
   int _welcomePage = 0;
   bool _welcomeForward = true;
@@ -169,7 +174,7 @@ class _IntroMasterState extends State<IntroMaster>
         (_) => _showTrialCompletedNotice(),
       );
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _runEntryStatusCheck());
     const trialLanguages = [
       'Korean',
       'English',
@@ -244,6 +249,18 @@ class _IntroMasterState extends State<IntroMaster>
     emailController.dispose();
     passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _runEntryStatusCheck() async {
+    try {
+      await _checkEntryStatus();
+    } catch (error) {
+      debugPrint('[Intro] entry status check failed: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _checkingEntryStatus = false);
+      }
+    }
   }
 
   Future<void> _checkEntryStatus() async {
@@ -1109,7 +1126,7 @@ class _IntroMasterState extends State<IntroMaster>
           fit: StackFit.expand,
           children: [
             const _IntroAmbientBackground(),
-            if (isLoading)
+            if (isLoading || _checkingEntryStatus)
               const SafeArea(
                 child: Center(
                   child: Padding(
@@ -1207,6 +1224,9 @@ class _IntroMasterState extends State<IntroMaster>
     if (continueToBoard != true || !mounted) return;
     final claim = await showDuoBoardSheet(context);
     if (!mounted || claim == null) return;
+    unawaited(
+      DuoBoardHostPresence.instance.prepareForIncomingInvite(claim.roomId),
+    );
     FFAppState().isGuestSession = true;
     FFAppState().inviterUid = claim.ownerUid;
     FFAppState().duoRoomId = claim.roomId;

@@ -35,6 +35,7 @@ import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/origin_pcm_store.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/duo_board_push_service.dart';
+import '/custom_code/services/duo_board_host_presence.dart';
 import 'p2_voice_lab.dart' show P2VoiceLabPage; // 관리자 전용 히든 화면
 import 'duo_board_sheet.dart';
 // LongPressGestureRecognizer는 material/widgets가 다시 내보내지 않는다.
@@ -1251,6 +1252,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   Future<void> _openDuoBoardAsGuest() async {
     final claim = await showDuoBoardSheet(context);
     if (!mounted || claim == null) return;
+    unawaited(
+      DuoBoardHostPresence.instance.prepareForIncomingInvite(claim.roomId),
+    );
     FFAppState().isGuestSession = true;
     FFAppState().inviterUid = claim.ownerUid;
     FFAppState().duoRoomId = claim.roomId;
@@ -1777,6 +1781,9 @@ class AppsFlyerManager {
       if (FirebaseAuth.instance.currentUser == null) {
         await FirebaseAuth.instance.signInAnonymously();
       }
+      unawaited(
+        DuoBoardHostPresence.instance.prepareForIncomingInvite(roomId),
+      );
       FFAppState().isGuestSession = true;
       FFAppState().inviterUid = inviterId;
       FFAppState().duoRoomId = roomId;

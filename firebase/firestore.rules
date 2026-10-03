@@ -145,15 +145,31 @@ service cloud.firestore {
       function interpreterNegotiationCreateValid() {
         return !request.resource.data.keys().hasAny([
             'partnerInterpreterCallablePcV2',
+            'partnerSameOriginDirectV1',
             'interpreterProtocol',
-            'interpreterProtocolLockedAt'
+            'interpreterProtocolLockedAt',
+            'resolvedMode',
+            'resolvedModeLockedAt',
+            'resolutionReason'
           ])
           && (!request.resource.data.keys().hasAny([
                 'hostInterpreterCallablePcV2'
               ])
               || (request.resource.data.get('mode', '') == 'interpreter'
                   && request.resource.data.hostInterpreterCallablePcV2
-                      is bool));
+                      is bool))
+          && (!request.resource.data.keys().hasAny([
+                'hostSameOriginDirectV1'
+              ])
+              || (request.resource.data.get('mode', '') == 'interpreter'
+                  && request.resource.data.hostSameOriginDirectV1 is bool));
+      }
+
+      function isResolvableDuoOrigin(value) {
+        return value in [
+          'English', 'Japanese', 'Chinese', 'Spanish', 'French', 'German',
+          'Korean', 'Hindi', 'Russian', 'Portuguese', 'Italian', 'Dutch'
+        ];
       }
 
       function interpreterNegotiationUpdateValid() {
@@ -162,11 +178,64 @@ service cloud.firestore {
           'interpreterProtocol',
           'interpreterProtocolLockedAt'
         ]);
-        return !changed.hasAny(['hostInterpreterCallablePcV2'])
+        let resolutionWrite = changed.hasAny([
+          'resolvedMode',
+          'resolvedModeLockedAt',
+          'resolutionReason'
+        ]);
+        return !changed.hasAny([
+            'hostInterpreterCallablePcV2',
+            'hostSameOriginDirectV1'
+          ])
           && (!changed.hasAny(['partnerInterpreterCallablePcV2'])
               || (isTakingFreeSeat()
                   && request.resource.data.partnerInterpreterCallablePcV2
                       is bool))
+          && (!changed.hasAny(['partnerSameOriginDirectV1'])
+              || (isTakingFreeSeat()
+                  && request.resource.data.partnerSameOriginDirectV1 is bool))
+          && (!resolutionWrite
+              || (request.auth.uid == resource.data.get('hostUid', '')
+                  && resource.data.get('mode', '') == 'interpreter'
+                  && resource.data.get('isPartnerJoined', false) == true
+                  && !resource.data.keys().hasAny([
+                    'resolvedMode',
+                    'resolvedModeLockedAt',
+                    'resolutionReason'
+                  ])
+                  && request.resource.data.resolvedMode in [
+                    'direct', 'interpreter'
+                  ]
+                  && request.resource.data.resolvedModeLockedAt is timestamp
+                  && request.resource.data.resolutionReason in [
+                    'same_origin',
+                    'translation_required',
+                    'compatibility_fallback',
+                    'language_unavailable'
+                  ]
+                  && ((request.resource.data.resolvedMode == 'direct'
+                        && request.resource.data.resolutionReason ==
+                          'same_origin'
+                        && resource.data.get(
+                            'hostSameOriginDirectV1', false) == true
+                        && resource.data.get(
+                            'partnerSameOriginDirectV1', false) == true
+                        && isResolvableDuoOrigin(
+                            resource.data.get('hostLang', ''))
+                        && resource.data.get('hostLang', '') ==
+                          resource.data.get('partnerLang', '')
+                        && !protocolWrite
+                        && !resource.data.keys().hasAny([
+                          'interpreterProtocol',
+                          'interpreterProtocolLockedAt'
+                        ]))
+                      || (request.resource.data.resolvedMode == 'interpreter'
+                        && request.resource.data.resolutionReason !=
+                          'same_origin'
+                        && (resource.data.get('interpreterProtocol', '') in [
+                              'legacy_webrtc_v1', 'callable_pc_v2'
+                            ]
+                            || protocolWrite)))))
           && (!protocolWrite
               || (request.auth.uid ==
                     resource.data.get('hostUid', '')
@@ -182,6 +251,8 @@ service cloud.firestore {
                   ]
                   && request.resource.data.interpreterProtocolLockedAt
                       is timestamp
+                  && request.resource.data.get(
+                      'resolvedMode', 'interpreter') == 'interpreter'
                   && (request.resource.data.interpreterProtocol ==
                         'legacy_webrtc_v1'
                       || (resource.data.get(

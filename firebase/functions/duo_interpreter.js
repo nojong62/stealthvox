@@ -8,6 +8,7 @@ const openAiApiKey = defineSecret("OPENAI_API_KEY");
 
 const CALLABLE_PROTOCOL = "callable_pc_v2";
 const INTERPRETER_MODE = "interpreter";
+const DIRECT_MODE = "direct";
 const PROCESSING = "processing";
 const READY = "ready";
 const FAILED = "failed";
@@ -64,6 +65,12 @@ function deriveDirection(room, uid) {
 function assertAcceptingRoom(room, uid) {
   if (!room || String(room.mode || "") !== INTERPRETER_MODE) {
     throw callableError("failed-precondition", "This is not an interpreter room.");
+  }
+  if (String(room.resolvedMode || "") === DIRECT_MODE) {
+    throw callableError(
+      "failed-precondition",
+      "This interpreter invitation resolved to a direct call."
+    );
   }
   const closed = ["endedAt", "callStoppedAt", "finalizedAt"].some(
     (field) => room[field] != null

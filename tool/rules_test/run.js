@@ -215,6 +215,134 @@ async function main() {
         interpreterProtocolLockedAt: serverTimestamp(),
       })));
 
+  // ── ③-C Interpreter invitation runtime resolution ───────────────
+  section('Interpreter invitation — same ORIGIN runtime resolution');
+  await check('same-language resolution room을 만든다', async () => {
+    await assertSucceeds(setDoc(protocolRoom(host, 'same-origin-room'), {
+      hostUid: HOST,
+      isDuoEnabled: true,
+      isPartnerJoined: false,
+      mode: 'interpreter',
+      hostLang: 'Korean',
+      hostInterpreterCallablePcV2: false,
+      hostSameOriginDirectV1: true,
+    }));
+    await assertSucceeds(updateDoc(protocolRoom(guest, 'same-origin-room'), {
+      isPartnerJoined: true,
+      partnerUid: GUEST,
+      partnerLang: 'Korean',
+      partnerInterpreterCallablePcV2: false,
+      partnerSameOriginDirectV1: true,
+    }));
+  });
+  await check('guest는 resolvedMode를 lock하지 못한다',
+      () => assertFails(updateDoc(protocolRoom(guest, 'same-origin-room'), {
+        resolvedMode: 'direct',
+        resolvedModeLockedAt: serverTimestamp(),
+        resolutionReason: 'same_origin',
+      })));
+  await check('host는 같은 유효 언어를 Direct로 한 번 lock한다',
+      () => assertSucceeds(updateDoc(protocolRoom(host, 'same-origin-room'), {
+        resolvedMode: 'direct',
+        resolvedModeLockedAt: serverTimestamp(),
+        resolutionReason: 'same_origin',
+      })));
+  await check('Direct lock 뒤 Interpreter로 변경하지 못한다',
+      () => assertFails(updateDoc(protocolRoom(host, 'same-origin-room'), {
+        resolvedMode: 'interpreter',
+        resolvedModeLockedAt: serverTimestamp(),
+        resolutionReason: 'translation_required',
+        interpreterProtocol: 'legacy_webrtc_v1',
+        interpreterProtocolLockedAt: serverTimestamp(),
+      })));
+  await check('same-origin host capability는 방 생성 뒤 바꾸지 못한다',
+      () => assertFails(updateDoc(protocolRoom(host, 'same-origin-room'), {
+        hostSameOriginDirectV1: false,
+      })));
+
+  await check('different-language resolution room을 만든다', async () => {
+    await assertSucceeds(setDoc(protocolRoom(host, 'different-origin-room'), {
+      hostUid: HOST,
+      isDuoEnabled: true,
+      isPartnerJoined: false,
+      mode: 'interpreter',
+      hostLang: 'Korean',
+      hostInterpreterCallablePcV2: false,
+      hostSameOriginDirectV1: true,
+    }));
+    await assertSucceeds(updateDoc(
+        protocolRoom(guest, 'different-origin-room'), {
+      isPartnerJoined: true,
+      partnerUid: GUEST,
+      partnerLang: 'English',
+      partnerInterpreterCallablePcV2: false,
+      partnerSameOriginDirectV1: true,
+    }));
+  });
+  await check('서로 다른 언어는 Direct lock을 거부한다',
+      () => assertFails(updateDoc(protocolRoom(host, 'different-origin-room'), {
+        resolvedMode: 'direct',
+        resolvedModeLockedAt: serverTimestamp(),
+        resolutionReason: 'same_origin',
+      })));
+  await check('서로 다른 언어는 Interpreter와 protocol을 함께 lock한다',
+      () => assertSucceeds(updateDoc(
+          protocolRoom(host, 'different-origin-room'), {
+        resolvedMode: 'interpreter',
+        resolvedModeLockedAt: serverTimestamp(),
+        resolutionReason: 'translation_required',
+        interpreterProtocol: 'legacy_webrtc_v1',
+        interpreterProtocolLockedAt: serverTimestamp(),
+      })));
+
+  await check('capability 없는 같은 언어 방은 Direct를 거부한다', async () => {
+    await assertSucceeds(setDoc(protocolRoom(host, 'no-resolution-cap-room'), {
+      hostUid: HOST,
+      isDuoEnabled: true,
+      isPartnerJoined: false,
+      mode: 'interpreter',
+      hostLang: 'Korean',
+      hostInterpreterCallablePcV2: false,
+    }));
+    await assertSucceeds(updateDoc(
+        protocolRoom(guest, 'no-resolution-cap-room'), {
+      isPartnerJoined: true,
+      partnerUid: GUEST,
+      partnerLang: 'Korean',
+      partnerInterpreterCallablePcV2: false,
+    }));
+    await assertFails(updateDoc(protocolRoom(host, 'no-resolution-cap-room'), {
+      resolvedMode: 'direct',
+      resolvedModeLockedAt: serverTimestamp(),
+      resolutionReason: 'same_origin',
+    }));
+  });
+
+  await check('목록 밖의 같은 언어 문자열은 Direct를 거부한다', async () => {
+    await assertSucceeds(setDoc(protocolRoom(host, 'unknown-origin-room'), {
+      hostUid: HOST,
+      isDuoEnabled: true,
+      isPartnerJoined: false,
+      mode: 'interpreter',
+      hostLang: 'Esperanto',
+      hostInterpreterCallablePcV2: false,
+      hostSameOriginDirectV1: true,
+    }));
+    await assertSucceeds(updateDoc(
+        protocolRoom(guest, 'unknown-origin-room'), {
+      isPartnerJoined: true,
+      partnerUid: GUEST,
+      partnerLang: 'Esperanto',
+      partnerInterpreterCallablePcV2: false,
+      partnerSameOriginDirectV1: true,
+    }));
+    await assertFails(updateDoc(protocolRoom(host, 'unknown-origin-room'), {
+      resolvedMode: 'direct',
+      resolvedModeLockedAt: serverTimestamp(),
+      resolutionReason: 'same_origin',
+    }));
+  });
+
   // ── ④ 발화 저장 ──────────────────────────────────────────────────
   section('messages — 통화 중 발화 저장');
   await check('호스트가 자기 발화를 올린다', () => assertSucceeds(

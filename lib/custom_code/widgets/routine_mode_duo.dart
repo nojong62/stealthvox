@@ -28,6 +28,7 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 import 'package:flutter/foundation.dart' as foundation;
 import '/custom_code/services/duo_direct_audio.dart';
 import '/custom_code/services/duo_partner_echo.dart';
+import '/custom_code/services/duo_call_resolution.dart';
 import '/custom_code/services/duo_interpreter_protocol.dart';
 import '/custom_code/services/duo_interpreter_callable.dart';
 import '/custom_code/services/history_finalize.dart';
@@ -133,8 +134,8 @@ const String kDuoModeDirect = 'direct';
 //
 // Remote Config `DuoDirectTransport`가 정한다. **값이 없으면 webrtc다.**
 //
-// 🚫 자동 폴백은 없다. WebRTC가 실패해도 몰래 릴레이로 넘어가지 않는다 —
-//   실패는 실패로 드러나야 한다.
+// TURN이 없는 운영 환경에서 WebRTC가 붙지 않으면 기존 PCM 릴레이로 한 번
+// 전환한다. 전환은 로그에 남기며, 어느 쪽이든 번역 없는 Direct 원음 통화다.
 // ============================================================================
 const String kDuoTransportRelay = 'relay';
 const String kDuoTransportWebrtc = 'webrtc';
@@ -779,7 +780,18 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   //   `mode`가 정하고, 그 해석은 `_normalizeDuoMode`가 전담한다 — `mode`가
   //   없는 옛 방은 지금도 만능 통역으로 읽힌다.
   String _duoMode = kDuoModeDirect;
-  bool get _isDirectMode => _duoMode == kDuoModeDirect;
+  String? _resolvedDuoMode;
+  String? _duoResolutionReason;
+
+  /// `mode`는 초대 방식이고 `resolvedMode`는 실제 오디오 경로다.
+  ///
+  /// 원래 Direct 초대는 별도 협상 없이 Direct다. Interpreter 초대만 게스트
+  /// 입장 뒤 동일 ORIGIN 여부를 호스트가 한 번 잠그며, 잠기기 전에는 기존
+  /// Interpreter로 보되 어떤 마이크도 시작하지 않는다.
+  String get _effectiveDuoMode => _duoMode == kDuoModeDirect
+      ? kDuoModeDirect
+      : (_resolvedDuoMode ?? kDuoModeInterpreter);
+  bool get _isDirectMode => _effectiveDuoMode == kDuoModeDirect;
 
   /// 게스트가 입장 팝업에서 초대 방식을 읽어오는 중인지.
   bool _pendingModeLoading = false;
@@ -803,15 +815,23 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// Remote Config `DuoDirectTransport`에 `'relay'`를 넣으면 옛 WebSocket PCM
   /// 릴레이로 되돌아간다. **그건 긴급 롤백 손잡이일 뿐 정상 경로가 아니다.**
   ///
-  /// 🚫 **자동 폴백은 없다.** WebRTC가 실패해도 몰래 릴레이로 넘어가지 않는다 —
-  ///    실패는 실패로 드러나야 하고, 조용한 폴백은 어느 통로가 실제로 돌았는지
-  ///    로그로 못 가리게 만든다.
+  /// WebRTC가 붙지 않고 릴레이 설정이 있으면 해당 통화부터 기존 PCM 릴레이로
+  /// 한 번 전환한다. 전환 이유와 실제 통로는 진단 로그에 반드시 남긴다.
   ///
   /// 🚫 이 값은 **직접 대화에만** 쓰인다. 만능 통역은 어느 값이든 통화
   ///    경로를 열지 않는다(원음을 보내지 않는다).
   String _directTransport = kDuoTransportWebrtc;
 
-  bool get _useWebrtcTransport => _directTransport == kDuoTransportWebrtc;
+  // 같은 화면에서 WebRTC 실패를 확인한 뒤에는 재연결도 릴레이로 한다.
+  // 양쪽 통로를 한 통화 안에서 동시에 살리지 않기 위한 세션 범위 핀이다.
+  bool _directRelayFallback = false;
+  bool _directFallbackInProgress = false;
+
+  bool get _useWebrtcTransport =>
+      !_directRelayFallback && _directTransport == kDuoTransportWebrtc;
+
+  String get _effectiveDirectTransport =>
+      _useWebrtcTransport ? kDuoTransportWebrtc : kDuoTransportRelay;
 
   /// 이 글자를 만든 PCM이 어느 마이크에서 왔는가. 저장 문서와 진단 로그가
   /// 같은 값을 쓴다 — 실기기 로그에서 어느 경로로 만든 글자인지 가리는 근거다.
@@ -1708,7 +1728,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   DocumentReference? _duoSessionRef;
   StreamSubscription? _partnerJoinedSubscription;
   String? _interpreterProtocol;
-  Future<String?>? _interpreterProtocolLock;
+  Future<DuoLockedCallResolution?>? _callResolutionLock;
   DuoInterpreterCallableClient? _interpreterCallable;
   final Map<String, String> _interpreterUtteranceIds = {};
   StreamSubscription? _utteranceSubscription;
@@ -2351,11 +2371,23 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           .collection('duo_sessions')
           .doc(roomId)
           .get();
-      final String authoritative = _normalizeDuoMode(snap.data()?['mode']);
-      if (authoritative != kDuoModeDirect) {
-        _lgDuo('[MODE]',
-            'direct_start_blocked session_mode=$authoritative (문서가 기준)');
-        if (mounted) setState(() => _duoMode = authoritative);
+      final room = snap.data();
+      final String authoritative = _normalizeDuoMode(room?['mode']);
+      final resolved = room?[kDuoResolvedModeField];
+      final bool directAllowed = authoritative == kDuoModeDirect ||
+          (authoritative == kDuoModeInterpreter && resolved == kDuoModeDirect);
+      if (!directAllowed) {
+        _lgDuo(
+            '[MODE]',
+            'direct_start_blocked session_mode=$authoritative '
+                'resolved=${resolved ?? 'none'} (문서가 기준)');
+        if (mounted) {
+          setState(() {
+            _duoMode = authoritative;
+            _resolvedDuoMode =
+                isKnownDuoResolvedMode(resolved) ? resolved as String : null;
+          });
+        }
         return;
       }
     } catch (e) {
@@ -2392,12 +2424,25 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //            MainActivity의 AudioManager 조작도 돌지 않는다 —
       //            이 구간의 오디오 세션 주인은 flutter_webrtc 하나다.
       //   relay  — 기존 경로 그대로. 재생기를 먼저 열고 소켓을 붙인다.
-      final bool useWebrtcNow = _useWebrtcTransport;
-      final bool transportOk = useWebrtcNow
+      bool useWebrtcNow = _useWebrtcTransport;
+      bool transportOk = useWebrtcNow
           ? await _openWebrtcTransport(generation, roomId)
           : await _openRelayTransport(generation, roomId);
       if (!_isDirectGenerationCurrent(generation)) return;
-      if (!transportOk) return; // 실패 처리는 각 헬퍼가 이미 했다
+      if (!transportOk && useWebrtcNow && _relayUrl.trim().isNotEmpty) {
+        _directRelayFallback = true;
+        useWebrtcNow = false;
+        _lgDuo(
+          '⚠️ [DUO-TRANSPORT]',
+          'fallback from=webrtc to=relay reason=connect_failed',
+        );
+        transportOk = await _openRelayTransport(generation, roomId);
+      }
+      if (!_isDirectGenerationCurrent(generation)) return;
+      if (!transportOk) {
+        await _stopDirectCall('transport_connect_failed');
+        return;
+      }
 
       // ③ 전사 세션 — 실패해도 통화는 계속한다(History 텍스트만 포기).
       await _startDirectStt(generation);
@@ -2526,7 +2571,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _lgDuo(
         '[DIRECT]',
         'call_started gen=$generation room=$roomId role=$_myRole '
-            'transport=$_directTransport '
+            'transport=$_effectiveDirectTransport '
             'micActive=true sttActive=$_sttActive '
             'connected=$_relayConnected partnerAudio=$_partnerRelayConnected '
             'captureFirstFrameAt=${_directCaptureFirstFrameAt?.toIso8601String()}');
@@ -2683,9 +2728,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 아예 없어지므로, "상대 오디오를 전사하지 않는다"는 규칙이 더 강하게
   /// 지켜진다.
   ///
-  /// 🚫 상대가 없거나 신호가 안 맞아 못 붙으면 **릴레이로 몰래 돌아가지
-  ///    않는다.** 조용한 폴백은 어느 통로가 실제로 돌았는지 로그로 못 가르게
-  ///    만든다. 실패는 실패로 남기고 통화를 접는다.
+  /// 상대가 없거나 신호가 안 맞아 못 붙으면 호출부가 명시적인 로그를 남기고
+  /// 기존 Direct PCM 릴레이를 시도한다. 이 함수 자체는 WebRTC 자원만 정리한다.
   Future<bool> _openWebrtcTransport(int generation, String roomId) async {
     final call = DuoWebrtcCall(
       roomId: roomId,
@@ -2704,7 +2748,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       onFatal: (reason) {
         if (!_isDirectGenerationCurrent(generation)) return;
         _lgDuo('❌ [DIRECT]', 'webrtc_fatal=$reason');
-        unawaited(_stopDirectCall('webrtc_$reason'));
+        if (!_directStarting) {
+          unawaited(_fallbackActiveWebrtcToRelay(reason));
+        }
       },
       // 💰 [BILLING-IDLE] 릴레이 경로에서 `_noteInboundAudio`가 하던 일.
       //   상대 PCM이 앱에 오지 않으므로 통계로 같은 신호를 받는다. 이게
@@ -2727,12 +2773,42 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       });
     }
     if (!ok) {
-      await _stopDirectCall('webrtc_connect_failed');
+      if (identical(_webrtcCall, call)) _webrtcCall = null;
+      await call.dispose();
+      if (mounted && _isDirectGenerationCurrent(generation)) {
+        setState(() {
+          _relayConnected = false;
+          _partnerRelayConnected = false;
+        });
+      }
       return false;
     }
     // 음소거 상태를 새 통화에 옮긴다(보통 false다).
     call.setMuted(_directMuted);
     return true;
+  }
+
+  /// 이미 붙었던 WebRTC가 ICE 재시도 뒤 죽은 경우에도 Direct 통화를 살린다.
+  Future<void> _fallbackActiveWebrtcToRelay(String reason) async {
+    if (_directFallbackInProgress || _isExiting || !_directCallActive) return;
+    if (_relayUrl.trim().isEmpty) {
+      await _stopDirectCall('webrtc_$reason');
+      return;
+    }
+    _directFallbackInProgress = true;
+    _directRelayFallback = true;
+    _lgDuo(
+      '⚠️ [DUO-TRANSPORT]',
+      'fallback from=webrtc to=relay reason=$reason',
+    );
+    try {
+      await _stopDirectCall('webrtc_fallback_$reason');
+      if (mounted && !_isExiting && _isPartnerOnline) {
+        await _startDirectCall();
+      }
+    } finally {
+      _directFallbackInProgress = false;
+    }
   }
 
   /// 🔬 [DUO-AB] 진단기를 세운다. **개발 빌드가 아니면 null을 돌려준다.**
@@ -3260,7 +3336,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
     _lgDuo(
         '[DIRECT]',
-        'call_stopped reason=$reason transport=$_directTransport '
+        'call_stopped reason=$reason transport=$_effectiveDirectTransport '
             'relayRttMs=${relay?.lastRoundTripMs} '
             'playFirstLatencyMs=${player?.firstPlayLatencyMs} '
             'sentBytes=${relay?.sentBytes} recvBytes=${relay?.receivedBytes} '
@@ -5842,7 +5918,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         //   저장되지만 **남는 글이 다르다** — 직접 대화는 두 사람이 실제로 한
         //   말이고, 만능 통역은 내가 들은 번역문이다. 히스토리 목록이 이 값을
         //   보고 Replay가 붙는 방을 가린다.
-        kDuoModeField: _duoMode,
+        kDuoModeField: _effectiveDuoMode,
+        'duo_requested_mode': _duoMode,
+        if (_duoResolutionReason != null)
+          'duo_resolution_reason': _duoResolutionReason,
         // 📝 새 방은 검수 대기다. 공부방 첫 화면에서 사용자가 원문을 확정해야
         //   배울글·연습 자료가 만들어진다.
         ...historyDraftSeed(),
@@ -6267,6 +6346,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             kDuoHostCallablePcV2Field: duoInterpreterCallableCapability(
               remoteCandidate: _interpTransportRaw,
             ),
+          if (chosenMode == kDuoModeInterpreter)
+            kDuoHostSameOriginDirectV1Field: duoSameOriginDirectCapability(),
           if (_isTrialHost) 'trialPreview': true,
           // 상대 화면의 언어쌍 표시용. 첫 메시지 전에도 알아야 하므로
           // 세션 문서로 주고받는다.
@@ -6546,6 +6627,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           kDuoPartnerCallablePcV2Field: duoInterpreterCallableCapability(
             remoteCandidate: _interpTransportRaw,
           ),
+        if (sessionMode == kDuoModeInterpreter)
+          kDuoPartnerSameOriginDirectV1Field: duoSameOriginDirectCapability(),
         'partnerJoinedAt': FieldValue.serverTimestamp(),
         'partnerLang': _myNative(),
         if (_isTrialPreviewRoom)
@@ -6574,22 +6657,45 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           '[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
 
       if (sessionMode == kDuoModeInterpreter) {
-        final Object? locked = data[kDuoInterpreterProtocolField];
-        if (isKnownDuoInterpreterProtocol(locked)) {
-          if (!_adoptInterpreterProtocol(
-              locked as String, 'guest_join_existing')) {
-            return;
+        if (!data.containsKey(kDuoHostSameOriginDirectV1Field)) {
+          final existing = data[kDuoInterpreterProtocolField];
+          if (isKnownDuoInterpreterProtocol(existing)) {
+            if (!_adoptCallResolution(
+              DuoLockedCallResolution(
+                mode: kDuoModeInterpreter,
+                reason: kDuoResolutionCompatibilityFallback,
+                interpreterProtocol: existing as String,
+              ),
+              'guest_join_existing_protocol',
+            )) {
+              return;
+            }
+          } else if (!data.containsKey(kDuoHostCallablePcV2Field)) {
+            // Truly old hosts cannot lock any protocol. The only safe
+            // compatibility baseline is the documented legacy path.
+            _adoptOldRoomInterpreterProtocol('guest_join_old_host');
+          } else {
+            // Protocol-aware releases immediately before this feature still
+            // own the lock, but know nothing about resolvedMode.
+            final protocol = await _waitForLegacyInterpreterProtocol();
+            if (_isExiting || !mounted || protocol == null) return;
+            if (!_adoptCallResolution(
+              DuoLockedCallResolution(
+                mode: kDuoModeInterpreter,
+                reason: kDuoResolutionCompatibilityFallback,
+                interpreterProtocol: protocol,
+              ),
+              'guest_join_previous_host',
+            )) {
+              return;
+            }
           }
-        } else if (!data.containsKey(kDuoHostCallablePcV2Field)) {
-          // Old hosts cannot lock a protocol. Use the only compatibility
-          // baseline a new client may infer without negotiation.
-          _adoptOldRoomInterpreterProtocol('guest_join_old_host');
         } else {
-          // A protocol-aware host is the sole writer. Do not start capture
-          // until its room-scoped value is visible.
-          final String? protocol = await _waitForInterpreterProtocol();
-          if (_isExiting || !mounted || protocol == null) return;
-          if (!_adoptInterpreterProtocol(protocol, 'guest_join_locked')) {
+          // A resolution-aware host is the sole writer. Do not start either
+          // audio path until the room-scoped decision is visible.
+          final resolution = await _waitForCallResolution();
+          if (_isExiting || !mounted || resolution == null) return;
+          if (!_adoptCallResolution(resolution, 'guest_join_locked')) {
             return;
           }
         }
@@ -6692,6 +6798,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   void _adoptOldRoomInterpreterProtocol(String reason) {
     if (_interpreterProtocol != null) return;
+    _adoptCallResolution(
+      const DuoLockedCallResolution(
+        mode: kDuoModeInterpreter,
+        reason: kDuoResolutionCompatibilityFallback,
+        interpreterProtocol: kDuoInterpreterProtocolLegacyWebrtcV1,
+      ),
+      reason,
+    );
     _interpreterProtocol = kDuoInterpreterProtocolLegacyWebrtcV1;
     // An old host cannot publish a room lock. The only protocol a new client
     // may safely infer is the documented compatibility baseline.
@@ -6702,6 +6816,44 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           'transport=$_interpTransport '
           'reason=$reason',
     );
+  }
+
+  bool _adoptCallResolution(DuoLockedCallResolution resolution, String reason) {
+    if (!isKnownDuoResolvedMode(resolution.mode) ||
+        !isKnownDuoResolutionReason(resolution.reason)) {
+      return false;
+    }
+    final current = _resolvedDuoMode;
+    if (current != null && current != resolution.mode) {
+      _lgDuo(
+        '❌ [DUO-RESOLUTION]',
+        'lock_changed old=$current new=${resolution.mode} reason=$reason',
+      );
+      return false;
+    }
+    _resolvedDuoMode = resolution.mode;
+    _duoResolutionReason = resolution.reason;
+    final protocol = resolution.interpreterProtocol;
+    if (resolution.mode == kDuoModeInterpreter && protocol != null) {
+      if (!_adoptInterpreterProtocol(protocol, reason)) return false;
+    }
+    _lgDuo(
+      '[DUO-RESOLUTION]',
+      'adopted requested=$_duoMode resolved=${resolution.mode} '
+          'reason=${resolution.reason} source=$reason',
+    );
+    final history = _myHistoryRef;
+    if (history != null) {
+      unawaited(history.set(<String, dynamic>{
+        kDuoModeField: resolution.mode,
+        'duo_requested_mode': _duoMode,
+        'duo_resolution_reason': resolution.reason,
+      }, SetOptions(merge: true)).catchError((Object error) {
+        _lgDuo('[DUO-RESOLUTION]', 'history_sync_failed=${error.runtimeType}');
+      }));
+    }
+    if (mounted) setState(() {});
+    return true;
   }
 
   bool _adoptInterpreterProtocol(String protocol, String reason) {
@@ -6738,33 +6890,71 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     return true;
   }
 
-  Future<String?> _waitForInterpreterProtocol() async {
+  Future<DuoLockedCallResolution?> _waitForCallResolution() async {
     final ref = _duoSessionRef;
     if (ref == null) return null;
     await for (final snap in ref.snapshots()) {
       if (_isExiting || !snap.exists) return null;
       final data = snap.data() as Map<String, dynamic>?;
-      final Object? protocol = data?[kDuoInterpreterProtocolField];
-      if (isKnownDuoInterpreterProtocol(protocol)) {
-        return protocol as String;
+      final mode = data?[kDuoResolvedModeField];
+      final reason = data?[kDuoResolutionReasonField];
+      if (!isKnownDuoResolvedMode(mode) ||
+          !isKnownDuoResolutionReason(reason)) {
+        continue;
       }
+      final protocol = data?[kDuoInterpreterProtocolField];
+      if (mode == kDuoModeInterpreter &&
+          !isKnownDuoInterpreterProtocol(protocol)) {
+        continue;
+      }
+      return DuoLockedCallResolution(
+        mode: mode as String,
+        reason: reason as String,
+        interpreterProtocol:
+            isKnownDuoInterpreterProtocol(protocol) ? protocol as String : null,
+      );
     }
     return null;
   }
 
-  Future<String?> _lockHostInterpreterProtocol(
-      Map<String, dynamic> snapshotData) {
-    final Object? existing = snapshotData[kDuoInterpreterProtocolField];
-    if (isKnownDuoInterpreterProtocol(existing)) {
-      return Future<String?>.value(existing as String);
+  Future<String?> _waitForLegacyInterpreterProtocol() async {
+    final ref = _duoSessionRef;
+    if (ref == null) return null;
+    await for (final snap in ref.snapshots()) {
+      if (_isExiting || !snap.exists) return null;
+      final data = snap.data() as Map<String, dynamic>?;
+      final protocol = data?[kDuoInterpreterProtocolField];
+      if (isKnownDuoInterpreterProtocol(protocol)) return protocol as String;
     }
-    final inFlight = _interpreterProtocolLock;
+    return null;
+  }
+
+  Future<DuoLockedCallResolution?> _lockHostCallResolution(
+      Map<String, dynamic> snapshotData) {
+    final existingMode = snapshotData[kDuoResolvedModeField];
+    final existingReason = snapshotData[kDuoResolutionReasonField];
+    final existingProtocol = snapshotData[kDuoInterpreterProtocolField];
+    if (isKnownDuoResolvedMode(existingMode) &&
+        isKnownDuoResolutionReason(existingReason) &&
+        (existingMode == kDuoModeDirect ||
+            isKnownDuoInterpreterProtocol(existingProtocol))) {
+      return Future<DuoLockedCallResolution?>.value(DuoLockedCallResolution(
+        mode: existingMode as String,
+        reason: existingReason as String,
+        interpreterProtocol: isKnownDuoInterpreterProtocol(existingProtocol)
+            ? existingProtocol as String
+            : null,
+      ));
+    }
+    final inFlight = _callResolutionLock;
     if (inFlight != null) return inFlight;
     final ref = _duoSessionRef;
-    if (ref == null || !_amIHost) return Future<String?>.value();
+    if (ref == null || !_amIHost) {
+      return Future<DuoLockedCallResolution?>.value();
+    }
 
-    final lock =
-        FirebaseFirestore.instance.runTransaction<String?>((transaction) async {
+    final lock = FirebaseFirestore.instance
+        .runTransaction<DuoLockedCallResolution?>((transaction) async {
       final snap = await transaction.get(ref);
       if (!snap.exists) return null;
       final data = snap.data() as Map<String, dynamic>?;
@@ -6774,32 +6964,76 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           data['hostUid']?.toString() != _myUid) {
         return null;
       }
-      final Object? already = data[kDuoInterpreterProtocolField];
-      if (isKnownDuoInterpreterProtocol(already)) {
-        return already as String;
+      final alreadyMode = data[kDuoResolvedModeField];
+      final alreadyReason = data[kDuoResolutionReasonField];
+      final alreadyProtocol = data[kDuoInterpreterProtocolField];
+      if (isKnownDuoResolvedMode(alreadyMode) &&
+          isKnownDuoResolutionReason(alreadyReason) &&
+          (alreadyMode == kDuoModeDirect ||
+              isKnownDuoInterpreterProtocol(alreadyProtocol))) {
+        return DuoLockedCallResolution(
+          mode: alreadyMode as String,
+          reason: alreadyReason as String,
+          interpreterProtocol: isKnownDuoInterpreterProtocol(alreadyProtocol)
+              ? alreadyProtocol as String
+              : null,
+        );
       }
-      final protocol = chooseDuoInterpreterProtocol(
-        hostCallablePcV2: data[kDuoHostCallablePcV2Field] == true,
-        partnerCallablePcV2: data[kDuoPartnerCallablePcV2Field] == true,
+
+      // A protocol written by an older negotiation is already an irreversible
+      // Interpreter decision. Never reinterpret that room as Direct.
+      final DuoCallResolution resolution =
+          isKnownDuoInterpreterProtocol(alreadyProtocol)
+              ? const DuoCallResolution(
+                  mode: kDuoModeInterpreter,
+                  reason: kDuoResolutionCompatibilityFallback,
+                )
+              : chooseDuoCallResolution(
+                  hostLanguage: data['hostLang'],
+                  partnerLanguage: data['partnerLang'],
+                  hostSameOriginDirectV1:
+                      data[kDuoHostSameOriginDirectV1Field] == true,
+                  partnerSameOriginDirectV1:
+                      data[kDuoPartnerSameOriginDirectV1Field] == true,
+                );
+      String? protocol;
+      final update = <String, dynamic>{
+        kDuoResolvedModeField: resolution.mode,
+        kDuoResolvedModeLockedAtField: FieldValue.serverTimestamp(),
+        kDuoResolutionReasonField: resolution.reason,
+      };
+      if (!resolution.isDirect) {
+        protocol = isKnownDuoInterpreterProtocol(alreadyProtocol)
+            ? alreadyProtocol as String
+            : chooseDuoInterpreterProtocol(
+                hostCallablePcV2: data[kDuoHostCallablePcV2Field] == true,
+                partnerCallablePcV2: data[kDuoPartnerCallablePcV2Field] == true,
+              );
+        if (!isKnownDuoInterpreterProtocol(alreadyProtocol)) {
+          update[kDuoInterpreterProtocolField] = protocol;
+          update[kDuoInterpreterProtocolLockedAtField] =
+              FieldValue.serverTimestamp();
+        }
+      }
+      transaction.update(ref, update);
+      return DuoLockedCallResolution(
+        mode: resolution.mode,
+        reason: resolution.reason,
+        interpreterProtocol: protocol,
       );
-      transaction.update(ref, <String, dynamic>{
-        kDuoInterpreterProtocolField: protocol,
-        kDuoInterpreterProtocolLockedAtField: FieldValue.serverTimestamp(),
-      });
-      return protocol;
     }).catchError((Object error) {
       _lgDuo(
-        '❌ [INTERP-PROTOCOL]',
+        '❌ [DUO-RESOLUTION]',
         'lock_failed reason=${error.runtimeType}',
       );
       return null;
     });
-    _interpreterProtocolLock = lock;
+    _callResolutionLock = lock;
     unawaited(lock.whenComplete(() {
       // Share one in-flight transaction across repeated snapshots, but do not
       // cache a failed/null result forever. A later room snapshot may retry.
-      if (identical(_interpreterProtocolLock, lock)) {
-        _interpreterProtocolLock = null;
+      if (identical(_callResolutionLock, lock)) {
+        _callResolutionLock = null;
       }
     }));
     return lock;
@@ -6836,9 +7070,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         if (mounted) setState(() => _duoMode = sessionMode);
       }
       if (partnerJoined && sessionMode == kDuoModeInterpreter) {
-        final String? protocol = await _lockHostInterpreterProtocol(data);
-        if (_isExiting || !mounted || protocol == null) return;
-        if (!_adoptInterpreterProtocol(protocol, 'host_partner_joined')) {
+        final resolution = await _lockHostCallResolution(data);
+        if (_isExiting || !mounted || resolution == null) return;
+        if (!_adoptCallResolution(resolution, 'host_partner_joined')) {
           return;
         }
       }
@@ -7603,7 +7837,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 게스트는 이 값을 바꿀 수 없다. 언어만 고른다.
   Widget _buildInvitedModeBadge() {
     final bool loading = _pendingModeLoading;
-    final bool direct = _duoMode == kDuoModeDirect;
+    final bool direct = _isDirectMode;
     final t = modePickerTextFor(FFAppState().chatLang);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),

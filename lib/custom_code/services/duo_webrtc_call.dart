@@ -272,7 +272,8 @@ class DuoWebrtcCall {
       if (_disposed) return false;
       if (!_ice!.hasTurn) {
         // 숨기지 않는다. P2P가 안 되는 망에서 이 한 줄이 유일한 단서다.
-        _lg('⚠️ [DUO-RTC]',
+        _lg(
+            '⚠️ [DUO-RTC]',
             'no_turn — P2P만 가능하다. 대칭 NAT(일부 LTE·기업망)에서는 '
                 '연결이 무음으로 실패한다');
       }
@@ -352,8 +353,7 @@ class DuoWebrtcCall {
       _localStream = stream;
       final tracks = stream.getAudioTracks();
       if (tracks.isEmpty) {
-        _lg('❌ [DUO-RTC-MIC]',
-            'no_audio_track — 스트림은 열렸는데 오디오 트랙이 없다');
+        _lg('❌ [DUO-RTC-MIC]', 'no_audio_track — 스트림은 열렸는데 오디오 트랙이 없다');
         return false;
       }
       _lg(
@@ -405,7 +405,8 @@ class DuoWebrtcCall {
               ..negotiated = false,
           );
           _wireDataChannel(ch, 'created');
-          _lg('[INTERP-DATA]', 'channel_created label=$kDuoInterpDataChannelLabel');
+          _lg('[INTERP-DATA]',
+              'channel_created label=$kDuoInterpDataChannelLabel');
         } else {
           pc.onDataChannel = (RTCDataChannel ch) {
             if (_disposed) return;
@@ -562,7 +563,8 @@ class DuoWebrtcCall {
     });
   }
 
-  void _onRemoteCandidate(String candidate, String? sdpMid, int? sdpMLineIndex) {
+  void _onRemoteCandidate(
+      String candidate, String? sdpMid, int? sdpMLineIndex) {
     if (_disposed) return;
     _addRemoteCandidate(RTCIceCandidate(candidate, sdpMid, sdpMLineIndex));
   }
@@ -640,8 +642,24 @@ class DuoWebrtcCall {
   }
 
   void _scheduleIceRestart(String reason) {
-    if (_disposed || !isOfferer) {
-      // 재협상은 offerer(호스트)만 건다. 둘이 동시에 걸면 신호가 엉킨다.
+    if (_disposed) return;
+    if (!isOfferer) {
+      // 재협상 offer는 호스트만 만든다. 다만 게스트도 영원히 죽은 WebRTC에
+      // 남아 있으면 호스트만 릴레이로 바뀌어 통로가 갈린다. 호스트의 최대
+      // 재시도 창보다 조금 긴 시간 동안 복구되지 않으면 호출부에 알려 양쪽이
+      // 같은 Direct 릴레이로 전환하게 한다.
+      _iceRestartTimer?.cancel();
+      _iceRestartTimer = Timer(
+        kDuoWebrtcIceRestartDelay * (kDuoWebrtcMaxIceRestarts + 1),
+        () {
+          if (_disposed || _partnerPresent) return;
+          _lg(
+            '❌ [DUO-RTC]',
+            'answerer_recovery_timeout reason=$reason',
+          );
+          onFatal?.call('answerer_recovery_timeout');
+        },
+      );
       return;
     }
     if (_iceRestarts >= kDuoWebrtcMaxIceRestarts) {
@@ -655,8 +673,7 @@ class DuoWebrtcCall {
       final pc = _pc;
       if (pc == null) return;
       _iceRestarts++;
-      _lg('🔁 [DUO-RTC]',
-          'ice_restart attempt=$_iceRestarts reason=$reason');
+      _lg('🔁 [DUO-RTC]', 'ice_restart attempt=$_iceRestarts reason=$reason');
       try {
         final offer = await pc.createOffer(<String, dynamic>{
           'offerToReceiveAudio': true,
@@ -842,7 +859,8 @@ class DuoWebrtcCall {
     // 어느 근거도 없는 기기. 한 번만 알리고, 이후로는 조용히 넘어간다.
     if (!_statsHaveAudioSignal) {
       _statsHaveAudioSignal = true;
-      _lg('⚠️ [DUO-RTC]',
+      _lg(
+          '⚠️ [DUO-RTC]',
           'no_remote_audio_level_stat — 상대 발화만으로는 과금 유휴가 '
               '풀리지 않는다(내 발화·통역 단계는 그대로 잡는다)');
     }
@@ -964,59 +982,59 @@ class DuoWebrtcCall {
 /// 실기기에서 눈으로 못 잡는다.
 String resolveDuoIcePath(List<StatsReport> reports) {
   final types = <String, String>{};
-    StatsReport? selectedPair;
-    StatsReport? nominatedPair;
-    StatsReport? anySucceeded;
-    String? selectedPairId;
+  StatsReport? selectedPair;
+  StatsReport? nominatedPair;
+  StatsReport? anySucceeded;
+  String? selectedPairId;
 
-    for (final report in reports) {
-      final values = report.values;
-      switch (report.type) {
-        case 'local-candidate':
-        case 'remote-candidate':
-        case 'localcandidate':
-        case 'remotecandidate':
-          final t = values['candidateType'];
-          if (t is String) types[report.id] = t;
-          break;
-        case 'transport':
-          final id = values['selectedCandidatePairId'];
-          if (id is String && id.isNotEmpty) selectedPairId = id;
-          break;
-        case 'candidate-pair':
-          if (values['selected'] == true) selectedPair ??= report;
-          if (values['nominated'] == true && values['state'] == 'succeeded') {
-            nominatedPair ??= report;
-          }
-          if (values['state'] == 'succeeded') anySucceeded ??= report;
-          break;
-      }
-    }
-
-    // transport가 가리키는 쌍이 가장 믿을 만하다. 없으면 nominated, 그다음
-    // 아무 succeeded. 셋 다 없으면 아직 안 골랐다는 뜻이다.
-    if (selectedPairId != null) {
-      for (final report in reports) {
-        if (report.type == 'candidate-pair' && report.id == selectedPairId) {
-          selectedPair = report;
-          break;
+  for (final report in reports) {
+    final values = report.values;
+    switch (report.type) {
+      case 'local-candidate':
+      case 'remote-candidate':
+      case 'localcandidate':
+      case 'remotecandidate':
+        final t = values['candidateType'];
+        if (t is String) types[report.id] = t;
+        break;
+      case 'transport':
+        final id = values['selectedCandidatePairId'];
+        if (id is String && id.isNotEmpty) selectedPairId = id;
+        break;
+      case 'candidate-pair':
+        if (values['selected'] == true) selectedPair ??= report;
+        if (values['nominated'] == true && values['state'] == 'succeeded') {
+          nominatedPair ??= report;
         }
+        if (values['state'] == 'succeeded') anySucceeded ??= report;
+        break;
+    }
+  }
+
+  // transport가 가리키는 쌍이 가장 믿을 만하다. 없으면 nominated, 그다음
+  // 아무 succeeded. 셋 다 없으면 아직 안 골랐다는 뜻이다.
+  if (selectedPairId != null) {
+    for (final report in reports) {
+      if (report.type == 'candidate-pair' && report.id == selectedPairId) {
+        selectedPair = report;
+        break;
       }
     }
-    final pair = selectedPair ?? nominatedPair ?? anySucceeded;
-    if (pair == null) return 'not-selected-yet';
+  }
+  final pair = selectedPair ?? nominatedPair ?? anySucceeded;
+  if (pair == null) return 'not-selected-yet';
 
-    String typeOf(String idKey, String directKey) {
-      final direct = pair.values[directKey];
-      if (direct is String && direct.isNotEmpty) return direct;
-      final id = pair.values[idKey];
-      if (id is String) return types[id] ?? '?';
-      return '?';
-    }
+  String typeOf(String idKey, String directKey) {
+    final direct = pair.values[directKey];
+    if (direct is String && direct.isNotEmpty) return direct;
+    final id = pair.values[idKey];
+    if (id is String) return types[id] ?? '?';
+    return '?';
+  }
 
-    final local = typeOf('localCandidateId', 'localCandidateType');
-    final remote = typeOf('remoteCandidateId', 'remoteCandidateType');
-    // 어느 한쪽이라도 relay면 그 구간은 TURN을 지난다.
-    final bool viaTurn = local == 'relay' || remote == 'relay';
+  final local = typeOf('localCandidateId', 'localCandidateType');
+  final remote = typeOf('remoteCandidateId', 'remoteCandidateType');
+  // 어느 한쪽이라도 relay면 그 구간은 TURN을 지난다.
+  final bool viaTurn = local == 'relay' || remote == 'relay';
   return viaTurn ? 'TURN(relay $local/$remote)' : 'P2P($local/$remote)';
 }

@@ -10,6 +10,8 @@
 // 위젯의 `_fetchKeys`가 하는 판정과 **같은 규칙**을 여기 두어, 나중에 한쪽만
 // 느슨해지는 것을 막는다.
 
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/widgets/routine_mode_duo.dart'
     show kDuoTransportRelay, kDuoTransportWebrtc, kDuoModeDirect;
@@ -63,6 +65,67 @@ void main() {
 
     test('통로 값 두 개는 서로 다르다', () {
       expect(kDuoTransportRelay, isNot(kDuoTransportWebrtc));
+    });
+  });
+
+  group('WebRTC 실패 폴백', () {
+    final source = File('lib/custom_code/widgets/routine_mode_duo.dart')
+        .readAsStringSync();
+    final callSource = File('lib/custom_code/services/duo_webrtc_call.dart')
+        .readAsStringSync();
+
+    test('초기 연결 실패는 WebRTC를 정리한 뒤 릴레이 하나만 연다', () {
+      final start = source.indexOf('Future<void> _startDirectCall()');
+      final end = source.indexOf('DuoMicPcmFanout _buildDirectFanout', start);
+      final body = source.substring(start, end);
+      expect(body, contains('!transportOk && useWebrtcNow'));
+      expect(body, contains('_directRelayFallback = true'));
+      expect(body, contains('await _openRelayTransport(generation, roomId)'));
+
+      final open = source.indexOf('Future<bool> _openWebrtcTransport(');
+      final fallback = source.indexOf(
+        'Future<void> _fallbackActiveWebrtcToRelay(',
+        open,
+      );
+      final openBody = source.substring(open, fallback);
+      expect(openBody, contains('await call.dispose()'));
+      expect(openBody,
+          isNot(contains("_stopDirectCall('webrtc_connect_failed')")));
+    });
+
+    test('통화 중 ICE 실패도 종료 후 릴레이로 다시 시작한다', () {
+      final start = source.indexOf(
+        'Future<void> _fallbackActiveWebrtcToRelay(',
+      );
+      final end = source.indexOf('/// 🔬 [DUO-AB]', start);
+      final body = source.substring(start, end);
+      expect(
+          body, contains("await _stopDirectCall('webrtc_fallback_\$reason')"));
+      expect(body, contains('await _startDirectCall()'));
+      expect(body, contains('_directFallbackInProgress'));
+    });
+
+    test('게스트도 호스트 재협상 창이 끝나면 폴백 신호를 받는다', () {
+      final start = callSource.indexOf('void _scheduleIceRestart(');
+      final end = callSource.indexOf('void _cancelIceRestart()', start);
+      final body = callSource.substring(start, end);
+      expect(body, contains('if (!isOfferer)'));
+      expect(body, contains("onFatal?.call('answerer_recovery_timeout')"));
+      expect(
+        body,
+        contains('kDuoWebrtcMaxIceRestarts + 1'),
+      );
+    });
+
+    test('폴백은 번역 모드가 아니라 Direct transport만 바꾼다', () {
+      final start = source.indexOf(
+        'Future<void> _fallbackActiveWebrtcToRelay(',
+      );
+      final end = source.indexOf('/// 🔬 [DUO-AB]', start);
+      final body = source.substring(start, end);
+      expect(body, isNot(contains('_duoMode =')));
+      expect(body, isNot(contains('kDuoModeInterpreter')));
+      expect(body, isNot(contains('_startInterpreter')));
     });
   });
 }

@@ -125,25 +125,26 @@ void main() {
               "        kDuoPartnerCallablePcV2Field")));
     });
 
-    test('host alone writes the protocol in a Firestore transaction', () {
+    test('host alone resolves mode and protocol in one transaction', () {
       final lock = _region(
         duo,
-        'Future<String?> _lockHostInterpreterProtocol(',
+        'Future<DuoLockedCallResolution?> _lockHostCallResolution(',
         '  void _listenForPartnerJoined()',
       );
-      expect(lock, contains('runTransaction<String?>'));
+      expect(lock, contains('runTransaction<DuoLockedCallResolution?>'));
       expect(lock, contains("data['hostUid']?.toString() != _myUid"));
       expect(lock, contains('transaction.update(ref'));
-      expect(lock, contains('kDuoInterpreterProtocolField: protocol'));
+      expect(lock, contains('kDuoResolvedModeField: resolution.mode'));
+      expect(lock, contains('update[kDuoInterpreterProtocolField] = protocol'));
     });
 
-    test('new guest waits for the host lock before transport starts', () {
+    test('new guest waits for the host resolution before transport starts', () {
       final join = _region(
         duo,
         'Future<void> _joinAsGuest(String roomId) async {',
         '  /// 🔵 [INTERP-LIVE]',
       );
-      final wait = join.indexOf('await _waitForInterpreterProtocol()');
+      final wait = join.indexOf('await _waitForCallResolution()');
       final messages = join.indexOf('_listenForMessages();');
       final start = join.indexOf("_maybeAutoStartInterpreter('guest_joined')");
       expect(wait, greaterThanOrEqualTo(0));
@@ -174,7 +175,7 @@ void main() {
       final adopt = _region(
         duo,
         'bool _adoptInterpreterProtocol(',
-        '  Future<String?> _waitForInterpreterProtocol()',
+        '  Future<DuoLockedCallResolution?> _waitForCallResolution()',
       );
       expect(adopt, contains('_interpTransport = kDuoInterpTransportWebrtc;'));
       expect(adopt, contains('current != null && current != protocol'));
