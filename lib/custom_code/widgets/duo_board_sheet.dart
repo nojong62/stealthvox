@@ -48,7 +48,7 @@ Future<bool> showDuoBoardComposer(
   required String mode,
   required String directLanguage,
 }) async {
-  final copy = DuoInviteCopy.forLanguage(FFAppState().chatLang);
+  final copy = DuoInviteCopy.forSystemLocale();
   final topic = TextEditingController();
   var saving = false;
   String? error;
@@ -159,8 +159,23 @@ class DuoBoardSheet extends StatefulWidget {
 class _DuoBoardSheetState extends State<DuoBoardSheet> {
   String? _claiming;
   String? _error;
-  DuoInviteCopy get _copy =>
-      DuoInviteCopy.forLanguage(duoBoardViewerLanguage());
+  Timer? _originNoticeTimer;
+  bool _showOriginNotice = true;
+  DuoInviteCopy get _copy => DuoInviteCopy.forSystemLocale();
+
+  @override
+  void initState() {
+    super.initState();
+    _originNoticeTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _showOriginNotice = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _originNoticeTimer?.cancel();
+    super.dispose();
+  }
 
   Future<void> _writePost() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -327,43 +342,25 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                   alignment: Alignment.centerLeft,
                   child: Text(_copy['boardSubtitle'],
                       style: const TextStyle(color: Colors.white54)))),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              decoration: BoxDecoration(
-                color: const Color(0xFF52D4C3).withValues(alpha: .09),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: const Color(0xFF52D4C3).withValues(alpha: .22),
-                ),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.only(top: 1),
-                    child: Icon(
-                      Icons.call_outlined,
-                      size: 16,
-                      color: Color(0xFF52D4C3),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _copy['sameChatLanguageDirect'],
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 360),
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) => SizeTransition(
+              sizeFactor: animation,
+              axisAlignment: -1,
+              child: FadeTransition(opacity: animation, child: child),
             ),
+            child: _showOriginNotice
+                ? Padding(
+                    key: const ValueKey('duo-origin-notice'),
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                    child: _DuoBoardOriginNoticeBubble(
+                      text: _copy['sameOriginDirect'],
+                    ),
+                  )
+                : const SizedBox(
+                    key: ValueKey('duo-origin-notice-hidden'),
+                  ),
           ),
           if (_error != null)
             Padding(
@@ -643,6 +640,81 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
       );
 }
 
+class _DuoBoardOriginNoticeBubble extends StatelessWidget {
+  const _DuoBoardOriginNoticeBubble({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+        painter: const _DuoBoardBubblePainter(),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 11, 14, 19),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(top: 1),
+                child: Icon(
+                  Icons.record_voice_over_outlined,
+                  size: 17,
+                  color: Color(0xFF52D4C3),
+                ),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  text,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+class _DuoBoardBubblePainter extends CustomPainter {
+  const _DuoBoardBubblePainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const tailHeight = 8.0;
+    final bubble = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(0, 0, size.width, size.height - tailHeight),
+          const Radius.circular(14),
+        ),
+      );
+    final tail = Path()
+      ..moveTo(24, size.height - tailHeight)
+      ..lineTo(38, size.height - tailHeight)
+      ..lineTo(29, size.height)
+      ..close();
+    final shape = Path.combine(PathOperation.union, bubble, tail);
+    canvas
+      ..drawPath(
+        shape,
+        Paint()..color = const Color(0xFF52D4C3).withValues(alpha: .10),
+      )
+      ..drawPath(
+        shape,
+        Paint()
+          ..color = const Color(0xFF52D4C3).withValues(alpha: .30)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
+  }
+
+  @override
+  bool shouldRepaint(covariant _DuoBoardBubblePainter oldDelegate) => false;
+}
+
 class _TranslatedBoardTopic extends StatelessWidget {
   const _TranslatedBoardTopic({
     required this.text,
@@ -722,7 +794,7 @@ class _DuoWaitingDialogState extends State<_DuoWaitingDialog> {
           status == 'expired' ||
           status == 'cancelled') {
         Navigator.pop(context);
-        final copy = DuoInviteCopy.forLanguage(duoBoardViewerLanguage());
+        final copy = DuoInviteCopy.forSystemLocale();
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(
           SnackBar(
               content: Text(status == 'busy'
@@ -751,7 +823,7 @@ class _DuoWaitingDialogState extends State<_DuoWaitingDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final copy = DuoInviteCopy.forLanguage(duoBoardViewerLanguage());
+    final copy = DuoInviteCopy.forSystemLocale();
     return AlertDialog(
       title: Text(copy['requestSent']),
       content: Column(

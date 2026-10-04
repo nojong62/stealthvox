@@ -110,7 +110,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   ];
 
   OriginSurfaceCopy get _surfaceCopy =>
-      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+      OriginSurfaceCopy.forSystemLocale();
 
   bool isLoading = false;
   String _apiKey = "";
@@ -335,7 +335,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
 
   // 📦 [Box 6: 시스템 알림 팝업]
   void _showUsageGuideDialog(BuildContext context) {
-    final guideCopy = GuideUiCopy.forLanguage(FFAppState().chatLang);
+    final guideCopy = GuideUiCopy.forSystemLocale();
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -519,7 +519,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     );
   }
 
-  /// Store / Study Room.
+  /// Study Room / Duo Board / Store.
   ///
   /// ⚠️ 모양만 세그먼트 컨트롤을 빌렸을 뿐, **토글이 아니다.** 누르면 그 자리에서
   /// 선택이 바뀌는 게 아니라 각자 다른 화면으로 넘어간다. 지금 화면이 로비이므로
@@ -540,6 +540,15 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
               label: _surfaceCopy['studyRoom'],
               highlighted: true,
               onTap: () => context.pushNamed('ChatHistory'),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: _buildSegment(
+              icon: Icons.forum_outlined,
+              label: 'Duo Board',
+              highlighted: false,
+              onTap: _openDuoBoardAsGuest,
             ),
           ),
           const SizedBox(width: 4),
@@ -1305,25 +1314,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 ),
               ),
               const Spacer(),
-              Material(
-                color: _kLobbySurfaceHi,
-                shape: const CircleBorder(
-                  side: BorderSide(color: _kLobbyBorder),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: _openDuoBoardAsGuest,
-                  child: const Padding(
-                    padding: EdgeInsets.all(9),
-                    child: Icon(
-                      Icons.forum_outlined,
-                      color: _kLobbyCyan,
-                      size: 20,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
               // 👤 등록 정보 — 스텔스룸 아래 줄에 있는 것과 같은 시트다.
               Material(
                 color: _kLobbySurfaceHi,

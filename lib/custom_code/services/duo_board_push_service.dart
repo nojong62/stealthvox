@@ -185,7 +185,7 @@ class DuoBoardPushService {
   static Future<void> _prompt(String requestId, BuildContext context) async {
     if (_handledRequests.contains(requestId) || !context.mounted) return;
     _handledRequests.add(requestId);
-    final copy = DuoInviteCopy.forLanguage(FFAppState().chatLang);
+    final copy = DuoInviteCopy.forSystemLocale();
     Timer? timeout;
     try {
       final choice = await showDialog<String>(
@@ -235,16 +235,16 @@ class DuoBoardPushService {
       if (!context.mounted) return;
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         SnackBar(
-            content: Text(DuoInviteCopy.forLanguage(
-                FFAppState().chatLang)['requestGone'])),
+            content:
+                Text(DuoInviteCopy.forSystemLocale()['requestGone'])),
       );
     } catch (error) {
       debugPrint('[DuoBoard] open request failed: $error');
       if (!context.mounted) return;
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         SnackBar(
-            content: Text(DuoInviteCopy.forLanguage(
-                FFAppState().chatLang)['requestGone'])),
+            content:
+                Text(DuoInviteCopy.forSystemLocale()['requestGone'])),
       );
     }
   }

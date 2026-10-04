@@ -86,7 +86,7 @@ class _TrialStudyTimerOverlayState extends State<TrialStudyTimerOverlay> {
   }
 
   Widget _buildEndMessage() {
-    final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+    final copy = OriginSurfaceCopy.forSystemLocale();
     return Container(
       color: const Color(0xCC1A1A2E),
       child: Center(

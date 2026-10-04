@@ -104,7 +104,7 @@ void showUsageSheet(BuildContext context) {
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (sheetContext) {
-      final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+      final copy = OriginSurfaceCopy.forSystemLocale();
       return Container(
         height: MediaQuery.of(sheetContext).size.height * 0.75,
         padding: const EdgeInsets.all(24),

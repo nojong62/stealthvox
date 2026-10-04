@@ -1,4 +1,6 @@
-/// ORIGIN 기반 공통 화면 문구. 인트로는 ORIGIN 선택 전 화면이므로 이 표를 쓰지 않는다.
+import 'system_ui_language.dart';
+
+/// 공통 화면 문구. 대화의 ORIGIN과 분리해 휴대폰 시스템 언어로 고른다.
 class OriginSurfaceCopy {
   const OriginSurfaceCopy._(this._language);
 
@@ -21,6 +23,9 @@ class OriginSurfaceCopy {
 
   static OriginSurfaceCopy forLanguage(String language) => OriginSurfaceCopy._(
       _languages.contains(language.trim()) ? language.trim() : 'English');
+
+  static OriginSurfaceCopy forSystemLocale() =>
+      forLanguage(systemUiLanguageName());
 
   String operator [](String key) {
     final values = _values[key];
@@ -2703,6 +2708,48 @@ class OriginSurfaceCopy {
       'Seu tempo restante acabou. A conversa foi salva e encerrada.',
       'Il tempo rimanente è terminato. La conversazione è stata salvata e chiusa.',
       'Je resterende tijd is op. Het gesprek is opgeslagen en gesloten.'
+    ],
+    'duoRoomReopenFailed': [
+      'Could not reopen the Duo room.',
+      'Duo 방을 다시 열 수 없습니다.',
+      'Duoルームを再度開けませんでした。',
+      '无法重新打开 Duo 房间。',
+      'No se pudo volver a abrir la sala Duo.',
+      'Impossible de rouvrir le salon Duo.',
+      'Der Duo-Raum konnte nicht erneut geöffnet werden.',
+      'Duo रूम को दोबारा नहीं खोला जा सका।',
+      'Не удалось снова открыть комнату Duo.',
+      'Não foi possível reabrir a sala Duo.',
+      'Impossibile riaprire la stanza Duo.',
+      'De Duo-ruimte kon niet opnieuw worden geopend.'
+    ],
+    'guestWaiting': [
+      'Waiting for guest',
+      '게스트 대기',
+      'ゲストを待機中',
+      '正在等待访客',
+      'Esperando al invitado',
+      'En attente de l’invité',
+      'Warten auf Gast',
+      'अतिथि की प्रतीक्षा',
+      'Ожидание гостя',
+      'Aguardando convidado',
+      'In attesa dell’ospite',
+      'Wachten op gast'
+    ],
+    'noConversationContent': [
+      '(No conversation content)',
+      '(대화 내용 없음)',
+      '（会話内容なし）',
+      '（无对话内容）',
+      '(Sin contenido de conversación)',
+      '(Aucun contenu de conversation)',
+      '(Kein Gesprächsinhalt)',
+      '(कोई बातचीत सामग्री नहीं)',
+      '(Нет содержимого разговора)',
+      '(Sem conteúdo de conversa)',
+      '(Nessun contenuto della conversazione)',
+      '(Geen gespreksinhoud)'
     ],
   };
 }

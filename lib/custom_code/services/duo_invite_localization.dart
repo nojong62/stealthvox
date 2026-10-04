@@ -1,3 +1,5 @@
+import 'system_ui_language.dart';
+
 class DuoInviteCopy {
   const DuoInviteCopy._(this._values);
 
@@ -8,6 +10,8 @@ class DuoInviteCopy {
   static DuoInviteCopy forLanguage(String language) =>
       DuoInviteCopy._(_copies[language.trim()] ?? _english);
 
+  static DuoInviteCopy forSystemLocale() => forLanguage(systemUiLanguageName());
+
   static const _english = <String, String>{
     'inviteMethod': 'Invite options',
     'copyLink': 'Copy link',
@@ -16,8 +20,8 @@ class DuoInviteCopy {
     'postToBoardDetail': 'Your room stays private. Add only a topic.',
     'boardTitle': 'Duo Interpreter Invite Board',
     'boardSubtitle': 'Choose someone to join a Duo conversation.',
-    'sameChatLanguageDirect':
-        'When both Chat Lang settings match, Duo switches to Direct mode so you can hear each other’s voices.',
+    'sameOriginDirect':
+        'When both Origin settings match, Duo switches to Direct mode so you can hear each other’s voices.',
     'write': 'Write',
     'topic': 'Topic',
     'mode': 'Mode',
@@ -79,8 +83,8 @@ class DuoInviteCopy {
       'postToBoardDetail': '방 정보는 비공개입니다. 주제만 입력하세요.',
       'boardTitle': 'Duo 통역 초대 게시판',
       'boardSubtitle': '상대를 선택해 Duo 대화로 연결하세요.',
-      'sameChatLanguageDirect':
-          'Chat Lang이 같으면 서로의 목소리를 직접 들으면서 대화할 수 있는 직접 통화 모드로 전환됩니다.',
+      'sameOriginDirect':
+          'Origin이 같으면 서로의 목소리를 직접 들으면서 대화할 수 있는 직접 통화 모드로 전환됩니다.',
       'write': '글쓰기',
       'topic': '대화 주제',
       'mode': '방식',
@@ -136,8 +140,7 @@ class DuoInviteCopy {
       'postToBoardDetail': 'ルーム情報は非公開です。話題だけ入力してください。',
       'boardTitle': 'Duo 招待掲示板',
       'boardSubtitle': '相手を選んでDuo会話に参加します。',
-      'sameChatLanguageDirect':
-          'Chat Langが同じ場合は、お互いの声を直接聞いて話せる直接通話モードに切り替わります。',
+      'sameOriginDirect': 'Originが同じ場合は、お互いの声を直接聞いて話せる直接通話モードに切り替わります。',
       'write': '投稿',
       'topic': '話題',
       'mode': '方式',
@@ -177,7 +180,7 @@ class DuoInviteCopy {
       'postToBoardDetail': '房间信息不会公开，只需填写话题。',
       'boardTitle': 'Duo 邀请公告板',
       'boardSubtitle': '选择一位用户加入 Duo 对话。',
-      'sameChatLanguageDirect': '如果双方的 Chat Lang 相同，将切换为可直接听到彼此声音的直接通话模式。',
+      'sameOriginDirect': '如果双方的 Origin 相同，将切换为可直接听到彼此声音的直接通话模式。',
       'write': '发帖',
       'topic': '话题',
       'mode': '方式',
@@ -217,8 +220,8 @@ class DuoInviteCopy {
       'postToBoardDetail': 'Tu sala sigue siendo privada. Añade solo un tema.',
       'boardTitle': 'Tablón de invitaciones Duo',
       'boardSubtitle': 'Elige a alguien para unirte a una conversación Duo.',
-      'sameChatLanguageDirect':
-          'Si ambos tienen el mismo Chat Lang, Duo cambia al modo Directo para que puedan oír sus voces.',
+      'sameOriginDirect':
+          'Si ambos tienen el mismo Origin, Duo cambia al modo Directo para que puedan oír sus voces.',
       'write': 'Publicar',
       'topic': 'Tema',
       'mode': 'Modo',
@@ -265,8 +268,8 @@ class DuoInviteCopy {
       'boardTitle': 'Tableau d’invitations Duo',
       'boardSubtitle':
           'Choisissez quelqu’un pour rejoindre une conversation Duo.',
-      'sameChatLanguageDirect':
-          'Si les deux Chat Lang sont identiques, Duo passe en mode Direct pour entendre vos voix respectives.',
+      'sameOriginDirect':
+          'Si les deux Origin sont identiques, Duo passe en mode Direct pour entendre vos voix respectives.',
       'write': 'Publier',
       'topic': 'Sujet',
       'mode': 'Mode',
@@ -311,8 +314,8 @@ class DuoInviteCopy {
       'postToBoardDetail': 'Dein Raum bleibt privat. Gib nur ein Thema ein.',
       'boardTitle': 'Duo-Einladungsboard',
       'boardSubtitle': 'Wähle jemanden für ein Duo-Gespräch.',
-      'sameChatLanguageDirect':
-          'Wenn beide dieselbe Chat Lang haben, wechselt Duo in den Direktmodus, sodass ihr euch gegenseitig hören könnt.',
+      'sameOriginDirect':
+          'Wenn beide dieselbe Origin-Einstellung haben, wechselt Duo in den Direktmodus, sodass ihr euch gegenseitig hören könnt.',
       'write': 'Posten',
       'topic': 'Thema',
       'mode': 'Modus',
@@ -358,8 +361,8 @@ class DuoInviteCopy {
       'postToBoardDetail': 'आपका रूम निजी रहता है। केवल विषय जोड़ें।',
       'boardTitle': 'Duo निमंत्रण बोर्ड',
       'boardSubtitle': 'Duo बातचीत में जुड़ने के लिए किसी को चुनें।',
-      'sameChatLanguageDirect':
-          'दोनों की Chat Lang समान होने पर Duo सीधे कॉल मोड में बदल जाता है, ताकि आप एक-दूसरे की आवाज़ सीधे सुन सकें।',
+      'sameOriginDirect':
+          'दोनों का Origin समान होने पर Duo सीधे कॉल मोड में बदल जाता है, ताकि आप एक-दूसरे की आवाज़ सीधे सुन सकें।',
       'write': 'पोस्ट करें',
       'topic': 'विषय',
       'mode': 'तरीका',
@@ -404,8 +407,8 @@ class DuoInviteCopy {
           'Ваша комната останется приватной. Укажите только тему.',
       'boardTitle': 'Доска приглашений Duo',
       'boardSubtitle': 'Выберите человека для разговора Duo.',
-      'sameChatLanguageDirect':
-          'Если Chat Lang совпадает, Duo переключается в режим прямого звонка, где вы слышите голоса друг друга.',
+      'sameOriginDirect':
+          'Если Origin совпадает, Duo переключается в режим прямого звонка, где вы слышите голоса друг друга.',
       'write': 'Опубликовать',
       'topic': 'Тема',
       'mode': 'Режим',
@@ -449,8 +452,8 @@ class DuoInviteCopy {
           'Sua sala continua privada. Adicione apenas um tema.',
       'boardTitle': 'Mural de convites Duo',
       'boardSubtitle': 'Escolha alguém para entrar em uma conversa Duo.',
-      'sameChatLanguageDirect':
-          'Se o Chat Lang for igual, o Duo muda para o modo Direto para vocês ouvirem a voz um do outro.',
+      'sameOriginDirect':
+          'Se o Origin for igual, o Duo muda para o modo Direto para vocês ouvirem a voz um do outro.',
       'write': 'Publicar',
       'topic': 'Tema',
       'mode': 'Modo',
@@ -495,8 +498,8 @@ class DuoInviteCopy {
           'La tua stanza resta privata. Aggiungi solo un argomento.',
       'boardTitle': 'Bacheca inviti Duo',
       'boardSubtitle': 'Scegli qualcuno per entrare in una conversazione Duo.',
-      'sameChatLanguageDirect':
-          'Se il Chat Lang è uguale, Duo passa alla modalità Diretta per ascoltare le vostre voci.',
+      'sameOriginDirect':
+          'Se l’Origin è uguale, Duo passa alla modalità Diretta per ascoltare le vostre voci.',
       'write': 'Pubblica',
       'topic': 'Argomento',
       'mode': 'Modalità',
@@ -542,8 +545,8 @@ class DuoInviteCopy {
           'Je kamer blijft privé. Voeg alleen een onderwerp toe.',
       'boardTitle': 'Duo-uitnodigingsbord',
       'boardSubtitle': 'Kies iemand om aan een Duo-gesprek deel te nemen.',
-      'sameChatLanguageDirect':
-          'Als jullie Chat Lang gelijk is, schakelt Duo over naar Direct zodat jullie elkaars stem horen.',
+      'sameOriginDirect':
+          'Als jullie Origin gelijk is, schakelt Duo over naar Direct zodat jullie elkaars stem horen.',
       'write': 'Plaatsen',
       'topic': 'Onderwerp',
       'mode': 'Modus',

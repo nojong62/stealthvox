@@ -1035,7 +1035,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   /// 전사기에 넘길 ORIGIN 언어 코드. 예열(`stealth_room_master`)이 쓰는 것과
   /// **같은 함수**라야 `take()`가 예열 세션을 채택한다.
   String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
-  TalkUiCopy get _uiCopy => TalkUiCopy.forLanguage(_nativeLangName());
+  TalkUiCopy get _uiCopy => TalkUiCopy.forSystemLocale();
 
   /// 첫 발화 전사에 넘길 언어 코드. 판정 전에는 **빈 문자열 = 자동 감지**다.
   /// 언어를 박아 두면 다른 언어 발화가 그 언어 문자로 음차되어 나와,

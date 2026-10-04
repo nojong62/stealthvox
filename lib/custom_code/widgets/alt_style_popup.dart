@@ -27,7 +27,7 @@ Widget buildAltStyleButton({
   EdgeInsets padding = const EdgeInsets.all(8),
   double minTouchSize = 44,
 }) {
-  final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+  final copy = OriginSurfaceCopy.forSystemLocale();
   return IconButton(
     padding: padding,
     constraints:
@@ -50,7 +50,7 @@ void showAltStylePopup({
   required String baseText,
   required String targetLang,
 }) {
-  final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+  final copy = OriginSurfaceCopy.forSystemLocale();
   final styles = otherAiStyles(targetLang);
   if (styles.isEmpty) return;
   final future = fetchAltStyleSentences(

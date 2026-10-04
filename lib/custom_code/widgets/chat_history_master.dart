@@ -149,8 +149,7 @@ class ChatHistoryMaster extends StatefulWidget {
 class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     with SingleTickerProviderStateMixin, BillingIdleMixin<ChatHistoryMaster> {
   // 📦 [Box 3: 상태 변수 - 기본 UI 및 로딩]
-  OriginSurfaceCopy get _surfaceCopy =>
-      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+  OriginSurfaceCopy get _surfaceCopy => OriginSurfaceCopy.forSystemLocale();
 
   bool isPracticeMode = false;
   bool isPaused = false;
@@ -470,11 +469,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 🔧 틱 방식: 1초마다 활동 여부 확인. 튜터링/녹음/오디오 재생 중엔 카운터 0 유지.
   @override
   String get billingModeName => 'history';
-  TalkUiCopy get _uiCopy => TalkUiCopy.forLanguage(
-        (_sessionNativeLang ?? '').trim().isNotEmpty
-            ? _sessionNativeLang!.trim()
-            : FFAppState().chatLang,
-      );
+  TalkUiCopy get _uiCopy => TalkUiCopy.forSystemLocale();
 
   @override
   bool get isBillingBusy {
@@ -2110,6 +2105,17 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     return false;
   }
 
+  /// 검수 중인 원문을 재료로 학습 콘텐츠를 만들지 않는다.
+  ///
+  /// 이 상태는 로딩 실패가 아니다. 사용자가 하단의 `최종 수정 완료`를 눌러
+  /// 원문을 확정하면 같은 기능을 정상적으로 다시 이용할 수 있다.
+  bool _guardFinalizedStudyFeature() {
+    if (!_historyIsDraft) return true;
+    _showRoomEntryToast(_uiCopy['finishFinalEditsFirst']);
+    debugPrint('[HISTORY-DRAFT-GATE] blocked study feature reason=draft');
+    return false;
+  }
+
   /// 📝 배울글 생성만 따로 묻는다. **다른 유료 동작과 판정이 다르다** —
   /// Duo 게스트에게는 열려 있다(`study_access.canBuildHistoryTarget`).
   ///
@@ -3179,6 +3185,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   /// 같은 뜻을 스타일만 바꿔 늘어놓는다. 목록도 생성 규칙도 공용이다.
   void _showAltStylePopup(String baseText) {
+    if (!_guardFinalizedStudyFeature()) return;
     if (!_guardPaidStudy()) return;
     _resumeHistoryFromUserAction();
     showAltStylePopup(
@@ -3191,6 +3198,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   // 📦 [Box 17-A-2: 실전 튜터링 - 팝업 바텀시트]
   void _showTutoringPopup(String docId, String baseText) {
+    if (!_guardFinalizedStudyFeature()) return;
     if (!_guardPaidStudy()) return;
     _resumeHistoryFromUserAction();
     if (_appIsRecording) {
@@ -4323,11 +4331,7 @@ RULES — follow exactly:
     topic = topic.trim();
     if (topic.isEmpty) return null;
 
-    final copy = TalkUiCopy.forLanguage(
-      (_sessionNativeLang ?? '').trim().isEmpty
-          ? 'English'
-          : _sessionNativeLang!.trim(),
-    );
+    final copy = TalkUiCopy.forSystemLocale();
     String me = '';
     String partner = '';
     if (isScenario) {

@@ -736,7 +736,7 @@ void showBillingBlockedNotice(
   String? message,
   bool offerStore = true,
 }) {
-  final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+  final copy = OriginSurfaceCopy.forSystemLocale();
   final effectiveMessage = message ?? copy['remainingTimeExhausted'];
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
@@ -927,8 +927,7 @@ class SessionSavedNotice extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
           ),
           child: Text(
-            OriginSurfaceCopy.forLanguage(
-                FFAppState().chatLang)['sessionSaved'],
+            OriginSurfaceCopy.forSystemLocale()['sessionSaved'],
             style: TextStyle(
               color: Colors.white,
               fontSize: 13,

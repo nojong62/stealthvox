@@ -80,8 +80,8 @@ class FirebaseAuthManager extends AuthManager
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text(OriginSurfaceCopy.forLanguage(
-                  FFAppState().chatLang)['recentLoginDelete'])),
+              content:
+                  Text(OriginSurfaceCopy.forSystemLocale()['recentLoginDelete'])),
         );
       }
     }
@@ -104,8 +104,8 @@ class FirebaseAuthManager extends AuthManager
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text(OriginSurfaceCopy.forLanguage(
-                  FFAppState().chatLang)['recentLoginEmail'])),
+              content:
+                  Text(OriginSurfaceCopy.forSystemLocale()['recentLoginEmail'])),
         );
       }
     }
@@ -128,7 +128,7 @@ class FirebaseAuthManager extends AuthManager
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
               content: Text(
-                  '${OriginSurfaceCopy.forLanguage(FFAppState().chatLang)['error']}: ${e.message!}')),
+                  '${OriginSurfaceCopy.forSystemLocale()['error']}: ${e.message!}')),
         );
       }
     }
@@ -146,14 +146,14 @@ class FirebaseAuthManager extends AuthManager
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
             content: Text(
-                '${OriginSurfaceCopy.forLanguage(FFAppState().chatLang)['error']}: ${e.message!}')),
+                '${OriginSurfaceCopy.forSystemLocale()['error']}: ${e.message!}')),
       );
       return null;
     }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-          content: Text(OriginSurfaceCopy.forLanguage(
-              FFAppState().chatLang)['passwordResetSent'])),
+          content:
+              Text(OriginSurfaceCopy.forSystemLocale()['passwordResetSent'])),
     );
   }
 
@@ -220,7 +220,7 @@ class FirebaseAuthManager extends AuthManager
         final e = phoneAuthManager.phoneAuthError!;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
-              '${OriginSurfaceCopy.forLanguage(FFAppState().chatLang)['error']}: ${e.message!}'),
+              '${OriginSurfaceCopy.forSystemLocale()['error']}: ${e.message!}'),
         ));
         phoneAuthManager.update(() => phoneAuthManager.phoneAuthError = null);
       }

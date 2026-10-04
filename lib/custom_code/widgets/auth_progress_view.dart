@@ -26,7 +26,7 @@ class _AuthProgressViewState extends State<AuthProgressView>
   late final AnimationController _controller;
 
   OriginSurfaceCopy get _copy =>
-      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+      OriginSurfaceCopy.forSystemLocale();
 
   List<String> get _steps => [
         _copy['checkingAccount'],

@@ -72,7 +72,7 @@ class _AccountSheetState extends State<_AccountSheet> {
   bool _saving = false;
 
   OriginSurfaceCopy get _copy =>
-      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+      OriginSurfaceCopy.forSystemLocale();
 
   @override
   void dispose() {

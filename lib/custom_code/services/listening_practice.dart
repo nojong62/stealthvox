@@ -181,10 +181,8 @@ class ListeningStepSwitch extends StatelessWidget {
     final bool step2 = step == ListeningStep.step2;
     return Tooltip(
       message: step2
-          ? OriginSurfaceCopy.forLanguage(
-              FFAppState().chatLang)['listeningStep2']
-          : OriginSurfaceCopy.forLanguage(
-              FFAppState().chatLang)['listeningStep1'],
+          ? OriginSurfaceCopy.forSystemLocale()['listeningStep2']
+          : OriginSurfaceCopy.forSystemLocale()['listeningStep1'],
       child: Opacity(
         opacity: enabled ? 1.0 : 0.35,
         child: GestureDetector(

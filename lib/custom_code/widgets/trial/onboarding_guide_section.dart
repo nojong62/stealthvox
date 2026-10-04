@@ -7,7 +7,7 @@ class OnboardingGuideSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+    final copy = OriginSurfaceCopy.forSystemLocale();
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),

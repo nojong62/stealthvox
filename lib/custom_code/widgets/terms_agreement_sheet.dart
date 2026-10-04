@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/custom_code/services/origin_surface_localization.dart';
+import '/custom_code/services/system_ui_language.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class TermsResult {
@@ -59,9 +60,9 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
   bool _marketingAccepted = false;
 
   OriginSurfaceCopy get _copy =>
-      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+      OriginSurfaceCopy.forSystemLocale();
 
-  bool get _useEnglishLegalDocs => FFAppState().chatLang.trim() != 'Korean';
+  bool get _useEnglishLegalDocs => systemUiLanguageName() != 'Korean';
 
   Future<void> _openLegalDocument({required bool isTerms}) async {
     final bool english = _useEnglishLegalDocs;
@@ -306,8 +307,7 @@ class _AgreementRow extends StatelessWidget {
                 color: const Color(0xFF8F8F98),
                 iconSize: 24,
                 visualDensity: VisualDensity.compact,
-                tooltip: OriginSurfaceCopy.forLanguage(
-                    FFAppState().chatLang)['viewTerms'],
+                tooltip: OriginSurfaceCopy.forSystemLocale()['viewTerms'],
               ),
             ],
           ],

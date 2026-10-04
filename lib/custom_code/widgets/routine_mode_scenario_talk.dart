@@ -315,7 +315,7 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
       OriginLanguageSession.instance.resolve(FFAppState().chatLang));
 
   String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
-  TalkUiCopy get _uiCopy => TalkUiCopy.forLanguage(_nativeLangName());
+  TalkUiCopy get _uiCopy => TalkUiCopy.forSystemLocale();
 
   /// 🎯 [LANG] 이 방의 배울 언어(LearnLang = 로비 Target). 비어 있으면 English다.
   ///

@@ -59,8 +59,8 @@ void main() {
       expect(at, greaterThan(0));
       final String body = master.substring(
           at, master.indexOf('Future<bool> _askFinalize(', at));
-      // 되돌릴 수 없다는 말을 먼저 하고,
-      expect(body, contains('최종 확정하시면 더 이상 내용 수정을 할 수 없습니다.'));
+      // 되돌릴 수 없다는 시스템 언어 안내를 먼저 하고,
+      expect(body, contains("body: _uiCopy['practiceBody']"));
       // 확정 여부는 방 문서로 판정한다("눌렀다"는 사실이 아니라).
       expect(body, contains('return historyIsUserFinalized(_cachedRoomData);'));
     });
@@ -80,6 +80,32 @@ void main() {
           at, master.indexOf('NativeEnglishSpeechBuilder.build', at));
       expect(
           body, contains('if (!historyGenerationAllowed(_cachedRoomData)) {'));
+    });
+
+    test('다른 표현은 DRAFT에서 요청 전에 안내하고 멈춘다', () {
+      final int at = master.indexOf('void _showAltStylePopup(');
+      expect(at, greaterThan(0));
+      final String body =
+          master.substring(at, master.indexOf('void _showTutoringPopup(', at));
+      expect(body, contains('if (!_guardFinalizedStudyFeature()) return;'));
+      expect(body.indexOf('_guardFinalizedStudyFeature()'),
+          lessThan(body.lastIndexOf('showAltStylePopup(')));
+    });
+
+    test('실전 튜터링은 DRAFT에서 생성 전에 안내하고 멈춘다', () {
+      final int at = master.indexOf('void _showTutoringPopup(');
+      expect(at, greaterThan(0));
+      final String body = master.substring(at, at + 700);
+      expect(body, contains('if (!_guardFinalizedStudyFeature()) return;'));
+      expect(body.indexOf('_guardFinalizedStudyFeature()'),
+          lessThan(body.indexOf('_generateAppText(baseText)')));
+    });
+
+    test('DRAFT 안내는 로딩 실패가 아니라 최종 수정 완료를 요구한다', () {
+      final int at = master.indexOf('bool _guardFinalizedStudyFeature()');
+      expect(at, greaterThan(0));
+      final String body = master.substring(at, at + 420);
+      expect(body, contains("_uiCopy['finishFinalEditsFirst']"));
     });
 
     test('확정 성공 직후에 생성이 열린다', () {
@@ -168,7 +194,7 @@ void main() {
       expect(at, greaterThan(0));
       final String body = master.substring(at, at + 900);
       expect(body, contains('final bool editable = _historyIsDraft;'));
-      expect(body, contains('확정된 대화입니다'));
+      expect(body, contains("_surfaceCopy['finalizedConversation']"));
     });
   });
 
@@ -183,7 +209,7 @@ void main() {
       final int at = master.indexOf('if (docs.isEmpty) {');
       expect(at, greaterThan(0));
       final String body = master.substring(at, at + 900);
-      expect(body, contains('데이터가 없습니다.'));
+      expect(body, contains("_surfaceCopy['noData']"));
       expect(body, contains('_buildHistoryFooter(hasLines: false)'));
     });
 
@@ -193,7 +219,7 @@ void main() {
       final String body = master.substring(
           at, master.indexOf('Future<void> _confirmFinalizeHistory(', at));
       expect(body, contains('(draft && hasLines && !_isFinalizing)'));
-      expect(body, contains('남은 대사가 없어 확정할 수 없습니다.'));
+      expect(body, contains("_uiCopy['noLinesToFinalize']"));
     });
 
     test('확정 가능 여부는 캐시가 아니라 지금 그리는 줄에서 온다', () {
@@ -207,8 +233,7 @@ void main() {
     test('목록은 빈 값을 기존 문구로 그린다 — 새 placeholder를 만들지 않는다', () {
       final String list =
           _read('lib/custom_code/widgets/chat_history_list_master.dart');
-      expect(list,
-          contains('storedPreview.isEmpty ? "(대화 내용 없음)" : storedPreview'));
+      expect(list, contains("? _surfaceCopy['noConversationContent']"));
       // 값이 아예 없는 방(대사가 한 번도 없던 방)을 빼는 정책은 그대로다.
       expect(list, contains("if (data['last_message'] == null) return false;"));
     });

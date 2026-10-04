@@ -62,7 +62,7 @@ class _LearningPrepContentState extends State<_LearningPrepContent>
 
   @override
   Widget build(BuildContext context) {
-    final copy = OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+    final copy = OriginSurfaceCopy.forSystemLocale();
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 40),

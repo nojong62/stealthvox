@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/widgets/routine_mode_duo.dart';
 
-/// 대화 방식 선택 시트 문구는 로비 ORIGIN(대화 언어)으로 고른다.
-/// 로비가 고를 수 있는 언어에 빠진 칸이 있으면 시트가 빈 줄로 뜨거나
+/// 대화 방식 선택 시트의 언어별 원문 표를 검증한다.
+/// 지원 언어에 빠진 칸이 있으면 시트가 빈 줄로 뜨거나
 /// `!` 단정에서 터진다. 그걸 여기서 막는다.
 void main() {
   /// 로비 드롭다운(`lobby_master.dart`의 `languages`)과 게스트 오버레이가
@@ -37,6 +37,8 @@ void main() {
     'note',
     'cancel',
     'invite',
+    'inviteShareText',
+    'inviteShareSubject',
     // 초대 직후 화면 밑에서 올라오는 알림
     'inviteDoneDirect',
     'inviteDoneInterp',

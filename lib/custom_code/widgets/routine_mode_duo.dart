@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:firebase_auth/firebase_auth.dart';
@@ -94,6 +95,7 @@ import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/duo_canonical.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/duo_invite_localization.dart';
+import '/custom_code/services/system_ui_language.dart';
 
 // ============================================================================
 // 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다. **통신 로직 자체가 다르다** —
@@ -167,6 +169,10 @@ const String kDuoTransportRemoteConfigKey = 'DuoDirectTransport';
 /// 다시 켜 보려면 `--dart-define=DUO_INTERP_STREAM_TTS=true`.
 const bool kDuoInterpStreamingTts =
     bool.fromEnvironment('DUO_INTERP_STREAM_TTS', defaultValue: false);
+
+/// 초대 게스트가 화면 잠금·알림 확인처럼 잠깐 앱을 벗어난 경우의 복귀 유예.
+/// 이 안에 돌아오면 통화를 유지하고, 지나면 기존과 같이 저장 후 종료한다.
+const Duration kDuoGuestBackgroundGrace = Duration(seconds: 30);
 
 /// 🌐 [INTERP-ORIGIN] 만능 통역에서 로비 ORIGIN이 실제 발화 언어와 어긋났는지
 /// 확인할 것인가.
@@ -672,6 +678,9 @@ Map<String, String> modePickerTextFor(String originLang) =>
     kModePickerText[originLang.trim()] ??
     kModePickerText[_kModePickerFallbackLang]!;
 
+Map<String, String> modePickerTextForSystemUi() =>
+    modePickerTextFor(systemUiLanguageName());
+
 const String kInterpreterPartnerTtsVoice = 'alloy';
 
 /// 맛보기 직접 통화 길이. 폰 한 대에 딱 한 번만 주어진다.
@@ -1141,7 +1150,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       if (_trialCallRemaining <= 0) {
         _trialCallRemaining = 0;
         _trialCallTimer?.cancel();
-        unawaited(_handleAutoSaveAndExit());
+        unawaited(_handleAutoSaveAndExit('trial_time_limit'));
       }
     });
     if (mounted) setState(() {});
@@ -1769,6 +1778,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   bool _exitWasTrialHost = false;
   bool _exitTrialWasConsumed = false;
   bool _exitWasInviteGuest = false;
+  Timer? _guestBackgroundExitTimer;
+  DateTime? _guestBackgroundedAt;
+  bool _activeCallNetworkProbed = false;
   // 공유 메시지 채널(duo_sessions/{roomId}/messages) 구독
   StreamSubscription? _messageSubscription;
   // 이미 처리한 메시지 doc id (중복 렌더 방지)
@@ -1811,6 +1823,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 게스트는 과금 대상이 아니라 소진 신호 자체가 뜨지 않는다).
     StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_probeDuoNetwork('session_start'));
     // 상태등 맥박. 발화 중에만 돈다(`_setInterpMicPhase`가 켜고 끈다).
     _interpPulse = AnimationController(
       vsync: this,
@@ -1843,6 +1856,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       debugPrint('[Duo] role=HOST (direct entry)');
       _invitePulse.repeat(reverse: true);
     }
+    _lgDuo('[DUO-SESSION]', 'started role=$_myRole');
 
     TrialFlowState.instance.restoreFromAppState();
     if (_isTrialHost) {
@@ -1911,7 +1925,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _lgDuo('[BOARD]', 'host_restore_failed(${error.runtimeType})');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Duo 방을 다시 열 수 없습니다.')),
+          SnackBar(content: Text(_surfaceCopy['duoRoomReopenFailed'])),
         );
       }
     }
@@ -1953,6 +1967,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   화면은 이미 없으므로 기다리지 않는다.
     unawaited(_finalizeDuoSession('dispose'));
     WidgetsBinding.instance.removeObserver(this);
+    _guestBackgroundExitTimer?.cancel();
+    _guestBackgroundExitTimer = null;
     _trialCallTimer?.cancel();
     _partnerJoinedSubscription?.cancel();
     _hostExitSubscription?.cancel();
@@ -1986,7 +2002,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       if (state == AppLifecycleState.paused ||
           state == AppLifecycleState.hidden ||
           state == AppLifecycleState.detached) {
-        unawaited(_handleAutoSaveAndExit());
+        unawaited(_handleAutoSaveAndExit('trial_background'));
       } else if (state == AppLifecycleState.resumed && _isExiting && mounted) {
         context.goNamed('Intro');
       }
@@ -1994,13 +2010,48 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
     if (!FFAppState().isGuestSession) return;
 
-    if (state == AppLifecycleState.paused) {
-      // 초대 게스트가 앱을 떠나면 Duo 세션을 종료한다. 정리 작업은
-      // 백그라운드에서도 마무리하고, 복귀 시에는 Intro만 보이게 한다.
-      unawaited(_handleAutoSaveAndExit());
-    } else if (state == AppLifecycleState.resumed && _isExiting && mounted) {
-      context.goNamed('Intro');
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _scheduleGuestBackgroundExit(state.name);
+    } else if (state == AppLifecycleState.detached) {
+      _cancelGuestBackgroundExit('detached');
+      unawaited(_handleAutoSaveAndExit('guest_app_detached'));
+    } else if (state == AppLifecycleState.resumed) {
+      final backgroundedAt = _guestBackgroundedAt;
+      _cancelGuestBackgroundExit('resumed');
+      if (backgroundedAt != null) {
+        _lgDuo(
+          '[DUO-LIFECYCLE]',
+          'guest_resumed backgroundMs=${DateTime.now().difference(backgroundedAt).inMilliseconds}',
+        );
+      }
+      _guestBackgroundedAt = null;
+      unawaited(_probeDuoNetwork('guest_resumed'));
+      if (_isExiting && mounted) context.goNamed('Intro');
     }
+  }
+
+  void _scheduleGuestBackgroundExit(String state) {
+    if (_isExiting || _guestBackgroundExitTimer != null) return;
+    _guestBackgroundedAt = DateTime.now();
+    _lgDuo(
+      '[DUO-LIFECYCLE]',
+      'guest_background state=$state graceMs=${kDuoGuestBackgroundGrace.inMilliseconds}',
+    );
+    _guestBackgroundExitTimer = Timer(kDuoGuestBackgroundGrace, () {
+      _guestBackgroundExitTimer = null;
+      _lgDuo('[DUO-LIFECYCLE]', 'guest_background_grace_expired');
+      unawaited(_handleAutoSaveAndExit('guest_background_timeout'));
+    });
+  }
+
+  void _cancelGuestBackgroundExit(String reason) {
+    final timer = _guestBackgroundExitTimer;
+    if (timer == null) return;
+    timer.cancel();
+    _guestBackgroundExitTimer = null;
+    _lgDuo(
+        '[DUO-LIFECYCLE]', 'guest_background_grace_cancelled reason=$reason');
   }
 
   Future<void> _fetchKeys() async {
@@ -2070,7 +2121,41 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
   }
 
-  void _lgDuo(String tag, String msg) => debugPrint('[Duo]$tag $msg');
+  bool _isDurableDuoLog(String tag) =>
+      tag.contains('DUO-EXIT') ||
+      tag.contains('DUO-LIFECYCLE') ||
+      tag.contains('DUO-NETWORK') ||
+      tag.contains('DUO-PERF') ||
+      tag.contains('INTERP-LATENCY') ||
+      tag.contains('INTERP-PREROLL');
+
+  /// 릴리스에서도 logcat에 남기고, 핵심 운영 지표는 관리자 진단 장부에도 둔다.
+  /// 대화 원문은 이 함수에 싣지 않는다(`_lgDuoDev`만 개발 진단에서 사용).
+  void _lgDuo(String tag, String msg) {
+    final line = '[Duo]$tag $msg';
+    debugPrint(line);
+    if (_isDurableDuoLog(tag)) {
+      developer.log(line, name: 'StealthVox.Duo');
+      AppLogLedger.instance.add('DUO', '$tag $msg');
+    }
+  }
+
+  Future<void> _probeDuoNetwork(String reason) async {
+    final startedAt = DateTime.now();
+    try {
+      final addresses = await InternetAddress.lookup('firestore.googleapis.com')
+          .timeout(const Duration(seconds: 4));
+      _lgDuo(
+        '[DUO-NETWORK]',
+        'status=online reason=$reason dnsMs=${DateTime.now().difference(startedAt).inMilliseconds} addresses=${addresses.length}',
+      );
+    } catch (error) {
+      _lgDuo(
+        '[DUO-NETWORK]',
+        'status=offline reason=$reason dnsMs=${DateTime.now().difference(startedAt).inMilliseconds} error=${error.runtimeType}',
+      );
+    }
+  }
 
   /// 🆔 [DUO-FID] Remote Config 조건에 넣을 이 설치본의 ID를 한 줄 남긴다.
   ///
@@ -2335,8 +2420,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     unawaited(_startDirectCall());
   }
 
-  OriginSurfaceCopy get _surfaceCopy =>
-      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+  OriginSurfaceCopy get _surfaceCopy => OriginSurfaceCopy.forSystemLocale();
 
   Future<void> _startDirectCall() async {
     if (_directCallActive || _directStarting || _directStopping || _isExiting) {
@@ -5196,6 +5280,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //    화자별 일련번호와 발화 시작 시각을 함께 싣는다(직접 대화와 같은 규칙).
     final int seq = ++_interpSeq;
     final DateTime spokenAt = _interpSpeechStartedAt ?? DateTime.now();
+    _lgDuo(
+      '[DUO-PERF][STT]',
+      'turn=$seq engine=${kDuoInterpUseSocketStt ? 'socket' : 'deepgram_openai'} '
+          'speechToTranscriptMs=${DateTime.now().difference(spokenAt).inMilliseconds} '
+          'textLen=${spoken.length}',
+    );
     _interpSpeechStartedAt = null;
 
     // 1. 상대에게 넘긴다. 번역하지 않은 내 말 그대로 — 상대 폰이 자기 대화
@@ -5374,6 +5464,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     String? sttSource,
   }) async {
     if (_duoSessionRef == null || raw.trim().isEmpty) return null;
+    final startedAt = DateTime.now();
     try {
       // 🆕 내 메시지 doc id를 업로드 전에 _processedMsgIds에 선등록한다.
       //    → 리스너(605행)가 내 발화를 항상 스킵하므로, 내 글이 절대
@@ -5397,9 +5488,20 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           'roomId': _duoSessionRef!.id,
         },
       });
+      _lgDuo(
+        '[DUO-NETWORK]',
+        'operation=firestore_message_write status=ok '
+            'elapsedMs=${DateTime.now().difference(startedAt).inMilliseconds}',
+      );
       return docRef.id;
     } catch (e) {
-      debugPrint('[Duo] upload message error: $e');
+      _lgDuo(
+        '[DUO-NETWORK]',
+        'operation=firestore_message_write status=failed '
+            'elapsedMs=${DateTime.now().difference(startedAt).inMilliseconds} '
+            'error=${e.runtimeType}',
+      );
+      unawaited(_probeDuoNetwork('message_write_failed'));
       return null;
     }
   }
@@ -5550,6 +5652,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         BillingTicker.instance.resumeFromActivity('duo_message_received');
         _enqueueIncoming(data);
       }
+    }, onError: (Object error, StackTrace stackTrace) {
+      _lgDuo(
+        '[DUO-NETWORK]',
+        'operation=message_stream status=failed error=${error.runtimeType}',
+      );
+      unawaited(_probeDuoNetwork('message_stream_error'));
     });
   }
 
@@ -6406,8 +6514,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       debugPrint('[Duo] inviteLink: $inviteLink');
       // 5) 배포 방법 선택. 시스템 공유 시트 안에는 앱 전용 버튼을 넣을 수
       // 없으므로 복사·공유·Duo 게시판 등록을 먼저 앱 팝업에서 고른다.
-      final t = modePickerTextFor(FFAppState().chatLang);
-      final inviteCopy = DuoInviteCopy.forLanguage(FFAppState().chatLang);
+      final t = modePickerTextForSystemUi();
+      final inviteCopy = DuoInviteCopy.forSystemLocale();
       if (!mounted) return;
       final destination = await showModalBottomSheet<String>(
         context: context,
@@ -6495,7 +6603,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     } catch (e) {
       debugPrint('[Duo] Share invite error: $e');
       if (mounted) {
-        final t = modePickerTextFor(FFAppState().chatLang);
+        final t = modePickerTextForSystemUi();
         _showDuoSnack(
           icon: Icons.error_outline_rounded,
           accent: const Color(0xFFF87171),
@@ -6753,7 +6861,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       if (!snap.exists) {
         _lgDuo('[INTERP-LIVE]', 'host_left reason=session_deleted');
         unawaited(_handleInterpreterPartnerLeft('host_left').then((_) {
-          if (mounted && !_isExiting) _handleAutoSaveAndExit();
+          if (mounted && !_isExiting) {
+            _handleAutoSaveAndExit('host_session_deleted');
+          }
         }));
         return;
       }
@@ -6787,12 +6897,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       // 문서가 통째로 사라진 경우도 끝난 것으로 본다(옛 방·정리 작업).
       if (!snap.exists || data == null) {
         _lgDuo('[DIRECT-LIVE]', 'host_left reason=session_gone');
-        unawaited(_handleAutoSaveAndExit());
+        unawaited(_handleAutoSaveAndExit('host_session_gone'));
         return;
       }
       if (data[kDuoEndedAtField] == null) return;
       _lgDuo('[DIRECT-LIVE]', 'host_left reason=ended_at');
-      unawaited(_handleAutoSaveAndExit());
+      unawaited(_handleAutoSaveAndExit('host_ended'));
     });
   }
 
@@ -7048,7 +7158,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
       // 세션 문서가 삭제된 경우 (호스트가 먼저 나가 세션 delete됨)
       if (!snap.exists) {
-        _handleAutoSaveAndExit();
+        _handleAutoSaveAndExit('session_deleted');
         return;
       }
 
@@ -7095,6 +7205,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         if (partnerJoined) {
           _startTrialCallIfNeeded();
           _startDuoBilling();
+          if (!_activeCallNetworkProbed) {
+            _activeCallNetworkProbed = true;
+            unawaited(_probeDuoNetwork('partner_joined'));
+          }
         } else {
           _stopDuoBilling();
         }
@@ -7117,7 +7231,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           // 🔵 [INTERP-LIVE] 방을 닫기 전에 마이크 등부터 끈다. 종료 처리가
           //   도는 동안 화면이 "대화를 시작하세요"로 남아 있으면 안 된다.
           unawaited(_handleInterpreterPartnerLeft('guest_left'));
-          _handleAutoSaveAndExit();
+          _handleAutoSaveAndExit('guest_left');
         }
       }
     });
@@ -7143,7 +7257,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   ///
   /// **한 번만 돈다.** 두 번 돌면 빈 방 삭제와 정돈이 겹친다.
   Future<void> _finalizeDuoSession(String reason) async {
-    if (_sessionFinalized) return;
+    if (_sessionFinalized) {
+      _lgDuo('[DUO-EXIT]',
+          'finalize_skipped reason=$reason already_finalized=true');
+      return;
+    }
+    final finalizeStartedAt = DateTime.now();
     _sessionFinalized = true;
     _lgDuo('[DUO-EXIT]', 'finalize reason=$reason');
     if (_isExiting) return;
@@ -7299,7 +7418,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           }
         }
       } catch (e) {
-        debugPrint('[Duo] session cleanup error: $e');
+        _lgDuo(
+          '[DUO-NETWORK]',
+          'operation=session_cleanup status=failed error=${e.runtimeType}',
+        );
+        unawaited(_probeDuoNetwork('session_cleanup_failed'));
       }
     }
 
@@ -7329,10 +7452,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         ));
       }
     }
+    _lgDuo(
+      '[DUO-EXIT]',
+      'finalize_complete reason=$reason '
+          'elapsedMs=${DateTime.now().difference(finalizeStartedAt).inMilliseconds} '
+          'historyLines=$_historyMessageCount',
+    );
   }
 
-  Future<void> _handleAutoSaveAndExit() async {
-    await _finalizeDuoSession('exit_button');
+  Future<void> _handleAutoSaveAndExit([String reason = 'user_exit']) async {
+    _lgDuo(
+      '[DUO-EXIT]',
+      'requested reason=$reason role=$_myRole mode=$_effectiveDuoMode '
+          'guestSession=${FFAppState().isGuestSession}',
+    );
+    await _finalizeDuoSession(reason);
     if (!mounted) return;
     final bool isTrialHost = _exitWasTrialHost;
     final bool trialWasConsumed = _exitTrialWasConsumed;
@@ -7436,7 +7570,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         canPop: false,
         onPopInvokedWithResult: (didPop, result) async {
           if (didPop) return;
-          await _handleAutoSaveAndExit();
+          await _handleAutoSaveAndExit('system_back');
         },
         child: Stack(children: [
           Container(
@@ -7535,7 +7669,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 📡 상대가 아직 안 들어왔다. 두 방식 모두 같은 화면을 쓴다 — 기다리는
   ///   동안에는 직접 대화든 통역이든 유저가 할 일이 똑같이 없다.
   Widget _buildWaitingStage(String backdropAsset) {
-    final t = modePickerTextFor(FFAppState().chatLang);
+    final t = modePickerTextForSystemUi();
     return Column(
       children: [
         Expanded(child: DuoWaitingStage(backdropAsset: backdropAsset)),
@@ -7587,7 +7721,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     String picked = _duoMode;
     // 글자는 로비 Chat Lang을 따른다 — 초대 흐름 셋이 같은 말을
     // 쓴다(팝업 · 초대 완료 알림 · 실패 알림).
-    final Map<String, String> t = modePickerTextFor(FFAppState().chatLang);
+    final Map<String, String> t = modePickerTextForSystemUi();
     return showDialog<String>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.72),
@@ -7838,7 +7972,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   Widget _buildInvitedModeBadge() {
     final bool loading = _pendingModeLoading;
     final bool direct = _isDirectMode;
-    final t = modePickerTextFor(FFAppState().chatLang);
+    final t = modePickerTextForSystemUi();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
@@ -8373,7 +8507,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           const SizedBox(width: 6),
           Flexible(
             child: Text(
-              _trialCallStarted ? value : '게스트 대기',
+              _trialCallStarted ? value : _surfaceCopy['guestWaiting'],
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -8392,7 +8526,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   내준다 — 그만두기. 위 `<`와 같은 곳으로 가지만, 기다리는 화면에서
     //   구석의 화살표는 눈에 잘 안 띈다.
     if (!_hasConversationPartner) {
-      final t = modePickerTextFor(FFAppState().chatLang);
+      final t = modePickerTextForSystemUi();
       return Container(
         padding: EdgeInsets.fromLTRB(24, 8, 24, bottomPadding),
         decoration: const BoxDecoration(color: Color(0xFF121212)),
@@ -8400,7 +8534,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           height: 76,
           child: Center(
             child: OutlinedButton.icon(
-              onPressed: () => unawaited(_handleAutoSaveAndExit()),
+              onPressed: () =>
+                  unawaited(_handleAutoSaveAndExit('cancel_button')),
               icon: const Icon(Icons.cancel_outlined, size: 19),
               label: Text(
                 t['cancelConnection']!,

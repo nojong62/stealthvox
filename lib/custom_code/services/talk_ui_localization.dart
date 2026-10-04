@@ -1,3 +1,5 @@
+import 'system_ui_language.dart';
+
 class TalkUiCopy {
   const TalkUiCopy._(this._language, this._values);
 
@@ -16,6 +18,8 @@ class TalkUiCopy {
     final resolved = _copies.containsKey(normalized) ? normalized : 'English';
     return TalkUiCopy._(resolved, _copies[resolved]!);
   }
+
+  static TalkUiCopy forSystemLocale() => forLanguage(systemUiLanguageName());
 
   static const Map<String, Map<String, String>> _copies = {
     'English': {
@@ -510,6 +514,8 @@ class TalkUiCopy {
       'bestValue': 'Best Value',
       'premium': 'Premium',
       'finalizeEdits': 'Finish final edits',
+      'finishFinalEditsFirst':
+          'Please finish the final edits before using this feature.',
       'cannotEditAfter': 'You cannot edit this conversation after finishing.',
       'noLinesToFinalize': 'There are no remaining lines to finalize.',
       'finalizeTitle': 'Finalize this conversation?',
@@ -547,6 +553,7 @@ class TalkUiCopy {
       'bestValue': '최고 혜택',
       'premium': '프리미엄',
       'finalizeEdits': '최종 수정 완료',
+      'finishFinalEditsFirst': '먼저 최종 수정 완료를 마친 후 이용해 주세요.',
       'cannotEditAfter': '완료 후에는 대화를 수정할 수 없습니다.',
       'noLinesToFinalize': '남은 대사가 없어 확정할 수 없습니다.',
       'finalizeTitle': '이 대화를 최종 확정할까요?',
@@ -584,6 +591,7 @@ class TalkUiCopy {
       'bestValue': 'お得',
       'premium': 'プレミアム',
       'finalizeEdits': '最終編集を完了',
+      'finishFinalEditsFirst': '先に最終編集を完了してからご利用ください。',
       'cannotEditAfter': '完了後はこの会話を編集できません。',
       'noLinesToFinalize': '確定するセリフが残っていません。',
       'finalizeTitle': 'この会話を最終確定しますか？',
@@ -620,6 +628,7 @@ class TalkUiCopy {
       'bestValue': '最划算',
       'premium': '高级',
       'finalizeEdits': '完成最终修改',
+      'finishFinalEditsFirst': '请先完成最终修改后再使用。',
       'cannotEditAfter': '完成后将无法修改此对话。',
       'noLinesToFinalize': '没有可确认的剩余台词。',
       'finalizeTitle': '要最终确认此对话吗？',
@@ -657,6 +666,8 @@ class TalkUiCopy {
       'bestValue': 'Mejor oferta',
       'premium': 'Premium',
       'finalizeEdits': 'Terminar la edición final',
+      'finishFinalEditsFirst':
+          'Primero termina la edición final para usar esta función.',
       'cannotEditAfter': 'No podrás editar esta conversación después.',
       'noLinesToFinalize': 'No quedan líneas por confirmar.',
       'finalizeTitle': '¿Confirmar definitivamente esta conversación?',
@@ -695,6 +706,8 @@ class TalkUiCopy {
       'bestValue': 'Meilleure offre',
       'premium': 'Premium',
       'finalizeEdits': 'Terminer les modifications',
+      'finishFinalEditsFirst':
+          'Terminez d’abord les modifications finales avant d’utiliser cette fonction.',
       'cannotEditAfter': 'Vous ne pourrez plus modifier cette conversation.',
       'noLinesToFinalize': 'Aucune réplique restante à valider.',
       'finalizeTitle': 'Valider définitivement cette conversation ?',
@@ -734,6 +747,8 @@ class TalkUiCopy {
       'bestValue': 'Bestes Angebot',
       'premium': 'Premium',
       'finalizeEdits': 'Endbearbeitung abschließen',
+      'finishFinalEditsFirst':
+          'Schließe zuerst die Endbearbeitung ab, bevor du diese Funktion verwendest.',
       'cannotEditAfter':
           'Danach kann dieses Gespräch nicht mehr bearbeitet werden.',
       'noLinesToFinalize': 'Keine verbleibenden Zeilen zum Bestätigen.',
@@ -774,6 +789,8 @@ class TalkUiCopy {
       'bestValue': 'सर्वोत्तम मूल्य',
       'premium': 'प्रीमियम',
       'finalizeEdits': 'अंतिम संपादन पूरा करें',
+      'finishFinalEditsFirst':
+          'इस सुविधा का उपयोग करने से पहले अंतिम संपादन पूरा करें।',
       'cannotEditAfter': 'इसके बाद आप यह बातचीत संपादित नहीं कर सकेंगे।',
       'noLinesToFinalize': 'पुष्टि करने के लिए कोई पंक्ति शेष नहीं है।',
       'finalizeTitle': 'इस बातचीत को अंतिम रूप दें?',
@@ -812,6 +829,8 @@ class TalkUiCopy {
       'bestValue': 'Выгодно',
       'premium': 'Премиум',
       'finalizeEdits': 'Завершить правки',
+      'finishFinalEditsFirst':
+          'Сначала завершите окончательное редактирование.',
       'cannotEditAfter': 'После этого разговор нельзя будет изменить.',
       'noLinesToFinalize': 'Нет оставшихся реплик для подтверждения.',
       'finalizeTitle': 'Окончательно подтвердить этот разговор?',
@@ -851,6 +870,8 @@ class TalkUiCopy {
       'bestValue': 'Melhor oferta',
       'premium': 'Premium',
       'finalizeEdits': 'Concluir edição final',
+      'finishFinalEditsFirst':
+          'Conclua primeiro a edição final antes de usar este recurso.',
       'cannotEditAfter': 'Você não poderá editar esta conversa depois.',
       'noLinesToFinalize': 'Não há falas restantes para confirmar.',
       'finalizeTitle': 'Confirmar esta conversa definitivamente?',
@@ -889,6 +910,8 @@ class TalkUiCopy {
       'bestValue': 'Miglior offerta',
       'premium': 'Premium',
       'finalizeEdits': 'Completa le modifiche finali',
+      'finishFinalEditsFirst':
+          'Completa prima le modifiche finali per usare questa funzione.',
       'cannotEditAfter': 'Dopo non potrai modificare questa conversazione.',
       'noLinesToFinalize': 'Non restano battute da confermare.',
       'finalizeTitle': 'Confermare definitivamente questa conversazione?',
@@ -927,6 +950,8 @@ class TalkUiCopy {
       'bestValue': 'Beste waarde',
       'premium': 'Premium',
       'finalizeEdits': 'Laatste bewerkingen afronden',
+      'finishFinalEditsFirst':
+          'Rond eerst de laatste bewerkingen af voordat je deze functie gebruikt.',
       'cannotEditAfter': 'Hierna kun je dit gesprek niet meer bewerken.',
       'noLinesToFinalize': 'Er zijn geen regels meer om te bevestigen.',
       'finalizeTitle': 'Dit gesprek definitief bevestigen?',

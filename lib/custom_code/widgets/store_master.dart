@@ -27,6 +27,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '/components/social_login_modal.dart';
 import '/custom_code/services/talk_ui_localization.dart';
 import '/custom_code/services/origin_surface_localization.dart';
+import '/custom_code/services/system_ui_language.dart';
 // 💡 에러의 원인이었던 외부 패키지 삭제 완료! Firebase로 대체합니다.
 
 /// 스토어 상품 정의. **상품 ID·제목·초의 유일한 출처다.**
@@ -143,10 +144,10 @@ class _StoreMasterState extends State<StoreMaster> {
   bool isProcessing = false;
   Map<String, String> _localizedPrices = const {};
   bool _priceLookupComplete = false;
-  bool get _useEnglishLegalDocs => FFAppState().chatLang.trim() != 'Korean';
-  TalkUiCopy get _copy => TalkUiCopy.forLanguage(FFAppState().chatLang);
+  bool get _useEnglishLegalDocs => systemUiLanguageName() != 'Korean';
+  TalkUiCopy get _copy => TalkUiCopy.forSystemLocale();
   OriginSurfaceCopy get _surfaceCopy =>
-      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+      OriginSurfaceCopy.forSystemLocale();
   String _versionText = '';
 
   // [v4.0] 서버 증액 감지용 Firestore 리스너
@@ -635,7 +636,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                                 data,
                                                 storePlans,
                                                 language:
-                                                    FFAppState().chatLang,
+                                                    systemUiLanguageName(),
                                               ),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,

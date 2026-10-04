@@ -95,7 +95,7 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       _checkingUid = null;
       return;
     }
-    final copy = DuoInviteCopy.forLanguage(FFAppState().chatLang);
+    final copy = DuoInviteCopy.forSystemLocale();
     final choice = await showDialog<String>(
       context: context,
       barrierDismissible: false,

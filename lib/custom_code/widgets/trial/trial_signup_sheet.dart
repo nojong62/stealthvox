@@ -39,7 +39,7 @@ class TrialSignupSheet extends StatefulWidget {
 
 class _TrialSignupSheetState extends State<TrialSignupSheet> {
   OriginSurfaceCopy get _copy =>
-      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+      OriginSurfaceCopy.forSystemLocale();
   bool _isLoading = false;
   String? _errorMessage;
 

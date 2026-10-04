@@ -28,7 +28,7 @@ class _AppUpdateGateState extends State<AppUpdateGate> {
   bool _recommendedDismissedForSession = false;
 
   OriginSurfaceCopy get _copy =>
-      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+      OriginSurfaceCopy.forSystemLocale();
 
   Future<void> _openStore() async {
     var opened = false;

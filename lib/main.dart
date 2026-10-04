@@ -22,6 +22,7 @@ import '/custom_code/services/app_update_policy.dart';
 import '/custom_code/widgets/app_update_gate.dart';
 import '/custom_code/services/duo_board_push_service.dart';
 import '/custom_code/services/duo_board_host_presence.dart';
+import '/custom_code/services/system_ui_language.dart';
 import '/custom_code/widgets/stealth_room_master.dart';
 
 /// 🔍 [OVERFLOW-SCAN] 디버그 빌드 전용 — 레이아웃이 터진 **자리**를 남긴다.
@@ -265,7 +266,7 @@ class _MyAppState extends State<MyApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [Locale('en', '')],
+      supportedLocales: kSupportedSystemUiLocales,
       theme: ThemeData(
         brightness: Brightness.light,
         useMaterial3: false,

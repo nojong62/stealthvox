@@ -40,6 +40,7 @@ import '/custom_code/services/origin_language_session.dart'
 import '/custom_code/services/duo_canonical.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/origin_surface_localization.dart';
+import '/custom_code/services/system_ui_language.dart';
 
 const String _historyListTtsVoice = 'nova';
 
@@ -58,6 +59,9 @@ class _DeletionUiCopy {
 
   static _DeletionUiCopy forLanguage(String language) =>
       _DeletionUiCopy(_copies[language.trim()] ?? _copies['English']!);
+
+  static _DeletionUiCopy forSystemLocale() =>
+      forLanguage(systemUiLanguageName());
 
   static const Map<String, Map<String, String>> _copies = {
     'English': {
@@ -260,8 +264,7 @@ class ChatHistoryListMaster extends StatefulWidget {
 
 class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     with BillingIdleMixin<ChatHistoryListMaster> {
-  OriginSurfaceCopy get _surfaceCopy =>
-      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+  OriginSurfaceCopy get _surfaceCopy => OriginSurfaceCopy.forSystemLocale();
   String _selectedFilter = 'All';
   Set<String> _selectedDocIds = {};
   Set<String> _visibleHistoryDocIds = {};
@@ -1280,7 +1283,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     //     남아야 다시 들어가 보거나 방째 지울 수 있다. 새 문구를 만들지 않고
     //     여기 있던 fallback을 그대로 쓴다.
     final String storedPreview = (data['last_message'] ?? '').toString().trim();
-    String previewText = storedPreview.isEmpty ? "(대화 내용 없음)" : storedPreview;
+    String previewText = storedPreview.isEmpty
+        ? _surfaceCopy['noConversationContent']
+        : storedPreview;
     // 🎬 직접 통화 방을 가리는 표. 만능 통역은 같은 이름으로 저장되지만
     //   남는 글이 **내가 들은 번역문**이라 되살릴 통화가 없다.
     //   `duo_mode`가 없는 옛 방에는 표가 안 붙는다 — 소급하지 않는다.
@@ -1782,7 +1787,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   //  Keepers 삭제 (소프트 삭제)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   void _showDeleteKeeperDialog(DocumentSnapshot doc) {
-    final copy = _DeletionUiCopy.forLanguage(FFAppState().chatLang);
+    final copy = _DeletionUiCopy.forSystemLocale();
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -2658,7 +2663,7 @@ RULES — follow exactly:
   }
 
   void _showBatchDeleteDialog() {
-    final copy = _DeletionUiCopy.forLanguage(FFAppState().chatLang);
+    final copy = _DeletionUiCopy.forSystemLocale();
     if (_selectedDocIds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -2889,7 +2894,7 @@ RULES — follow exactly:
   }
 
   void _showDeleteDialog(DocumentSnapshot doc) {
-    final copy = _DeletionUiCopy.forLanguage(FFAppState().chatLang);
+    final copy = _DeletionUiCopy.forSystemLocale();
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -2935,7 +2940,7 @@ RULES — follow exactly:
 
   // 📦 [Box 1: 사용설명서 팝업]
   void _showStudyRoomManual() {
-    final guideCopy = GuideUiCopy.forLanguage(FFAppState().chatLang);
+    final guideCopy = GuideUiCopy.forSystemLocale();
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(

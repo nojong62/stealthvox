@@ -24,7 +24,7 @@ class SocialLoginModal extends StatefulWidget {
 
 class _SocialLoginModalState extends State<SocialLoginModal> {
   OriginSurfaceCopy get _copy =>
-      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+      OriginSurfaceCopy.forSystemLocale();
   bool _isLoading = false;
   bool _showEmailForm = false;
   bool _isSignUp = false;

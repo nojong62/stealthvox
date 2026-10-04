@@ -95,9 +95,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   String get _chatLanguage => FFAppState().chatLang.trim().isEmpty
       ? 'English'
       : FFAppState().chatLang.trim();
-  TalkUiCopy get _setupCopy => TalkUiCopy.forLanguage(_chatLanguage);
+  TalkUiCopy get _setupCopy => TalkUiCopy.forSystemLocale();
   OriginSurfaceCopy get _surfaceCopy =>
-      OriginSurfaceCopy.forLanguage(FFAppState().chatLang);
+      OriginSurfaceCopy.forSystemLocale();
 
   final AudioRecorder _circleAudioRecorder = AudioRecorder();
   late Future<void> _circleAudioReady;
@@ -665,7 +665,7 @@ Return ONLY valid JSON: {"name":"..."}.
   // 스텔스 훈련소 가이드 팝업창 및 설명 텍스트 렌더링
   // ============================================================================
   void _showManualDialog() {
-    final copy = GuideUiCopy.forLanguage(FFAppState().chatLang);
+    final copy = GuideUiCopy.forSystemLocale();
     final modeBody = copy['modeBody'];
     // Last block is the billing legend (title plus two status lines).
     final legendStart = modeBody.lastIndexOf('\n\n');
