@@ -131,11 +131,16 @@ class ChatHistoryMaster extends StatefulWidget {
     this.width,
     this.height,
     required this.historyDoc,
+    this.allowDuoGuestStudyPreview = false,
   }) : super(key: key);
 
   final double? width;
   final double? height;
   final DocumentReference historyDoc;
+
+  /// 초대받은 익명 게스트가 통화 직후 받는 5분 공부방 체험.
+  /// 일반 History 진입에는 전달하지 않으므로 무료 권한이 다른 방으로 새지 않는다.
+  final bool allowDuoGuestStudyPreview;
 
   @override
   _ChatHistoryMasterState createState() => _ChatHistoryMasterState();
@@ -2090,7 +2095,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   //   판정은 `services/study_access.dart` 한 곳에서 온다. 과금 티커도 같은
   //   자리를 보므로 "버튼은 열렸는데 차감만 막힌" 구간이 생기지 않는다.
 
-  StudyAccess get _studyAccess => currentStudyAccess();
+  StudyAccess get _studyAccess => currentStudyAccess(
+        hasDuoGuestStudyPreview: widget.allowDuoGuestStudyPreview,
+      );
 
   bool get _paidStudyAllowed => _studyAccess.canUsePaidStudy;
 

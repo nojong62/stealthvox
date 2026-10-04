@@ -458,6 +458,9 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
       FirstUtteranceContextJudgeSession();
   String? _pendingHeardConfirmation;
   int _heardConfirmationAttempts = 0;
+  // 직전 턴에서 [USER_FIX]가 확정됐으면 다음 Dialog Brain 호출 한 번만
+  // 교정된 문맥을 더 주의 깊게 읽는다. 호출 직전에 소비되므로 지속 상태가 아니다.
+  bool _previousTurnHadUserFix = false;
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
   Future<void> _pendingTurnPersistence = Future<void>.value();
@@ -1466,6 +1469,8 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     var aiIndex = -1;
     if (mounted) setState(() {});
     try {
+      _log(
+          '[DIALOG-REASONING]', 'mode=Circle reasoning=low reason=normal_turn');
       final nativeLang = _nativeLangName();
       final openerTheme = _chooseCircleOpenerTheme();
       final openerSw = Stopwatch()..start();
@@ -3607,6 +3612,7 @@ $userFixPolicy$finalLanguageRule''';
     )) {
       return;
     }
+    var hasSttCorrectionContext = understandingConfirmed;
     final pendingHeard = _pendingHeardConfirmation;
     if (pendingHeard != null && !understandingConfirmed) {
       _pendingHeardConfirmation = null;
@@ -3638,6 +3644,7 @@ $userFixPolicy$finalLanguageRule''';
           return;
         case HeardConfirmReply.corrected:
           _heardConfirmationAttempts = 0;
+          hasSttCorrectionContext = true;
           _log('[HEARD-CONFIRM]', 'corrected_with_content → 새 발화 판정');
           break;
       }
@@ -3753,12 +3760,32 @@ $userFixPolicy$finalLanguageRule''';
         step: step,
         disableHeardConfirmation: understandingConfirmed,
       );
+      final previousAssistantText = _recentHistory.reversed
+          .where((turn) => turn['role'] == 'assistant')
+          .map((turn) => turn['content'] ?? '')
+          .firstOrNull;
+      final usedPreviousUserFix = _previousTurnHadUserFix;
+      _previousTurnHadUserFix = false;
+      final reasoning = selectDialogBrainReasoning(
+        userText: userOriginal,
+        previousAssistantText: previousAssistantText ?? '',
+        hasConversationContext: _recentHistory.isNotEmpty,
+        isCorrectionRetry: isCorrectionRetry,
+        hasSttCorrectionContext: hasSttCorrectionContext,
+        previousTurnHadUserFix: usedPreviousUserFix,
+        isStep2: step == ListeningStep.step2,
+      );
+      _log(
+        '[DIALOG-REASONING]',
+        'mode=Circle reasoning=${reasoning.effort} reason=${reasoning.reason}',
+      );
 
       await for (final delta in UnifiedBrain.streamCircleMemberTurn(
         apiKey: _openAiKey,
         systemPrompt: systemPrompt,
         userText: userOriginal,
         history: _recentHistory,
+        reasoningEffort: reasoning.effort,
         // 🎧 [LISTENING] Step 2는 유저 말 바로 앞에 언어 규칙을 한 번 더 둔다.
         //   직전 한국어 답변들 뒤에 오는 마지막 지시라야 이긴다.
         trailingSystemNote: step == ListeningStep.step2
@@ -3808,7 +3835,7 @@ $userFixPolicy$finalLanguageRule''';
       _log(
           '⏱️ [AI-GEN]',
           'turn=$currentTurnId model=$kCircleDialogBrainModel '
-              'reasoning=$kDialogBrainReasoningEffort stream=true '
+              'reasoning=${reasoning.effort} stream=true '
               'step=${step.value} '
               'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiOriginal.length} '
               'text="${aiOriginal.replaceAll(RegExp(r'\s+'), ' ')}"');
@@ -3874,6 +3901,7 @@ $userFixPolicy$finalLanguageRule''';
               'turn=$currentTurnId "$userOriginal" → "${userFix.userLine}"');
           sttText = userOriginal;
           userOriginal = userFix.userLine;
+          _previousTurnHadUserFix = true;
           if (mounted) {
             setState(() {
               updateBubbleTextById(_localMessages, hostBubbleId, userOriginal);
@@ -6658,6 +6686,7 @@ Return only the line itself.'''
     required String systemPrompt,
     required String userText,
     required List<Map<String, String>> history,
+    required String reasoningEffort,
     void Function(int promptTokens, int completionTokens, int cachedTokens,
             int totalTokens)?
         onUsage,
@@ -6677,7 +6706,7 @@ Return only the line itself.'''
       request.headers['Content-Type'] = 'application/json; charset=utf-8';
       request.body = jsonEncode(<String, dynamic>{
         'model': kCircleDialogBrainModel,
-        'reasoning_effort': kDialogBrainReasoningEffort,
+        'reasoning_effort': reasoningEffort,
         'max_completion_tokens': 120,
         'stream': true,
         // 📏 입력 토큰을 추측하지 않고 서버가 센 값을 받는다. 프롬프트를 줄여

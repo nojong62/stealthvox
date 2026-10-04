@@ -7395,8 +7395,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         // 🚪 [GUEST-EXIT] **방금 한 대화를 보여주고 끝낸다.**
         //   예전에는 곧장 Intro였다. 초대받아 처음 써 본 사람에게 남는
         //   마지막 화면이 로그인 창이었고, 방금 나눈 대화는 어디에도
-        //   없었다. 남길 줄이 있으면 공부방으로 보낸다 — 비용이 드는
-        //   기능은 잠겨 있어도 자기가 한 말은 볼 수 있다.
+        //   없었다. 남길 줄이 있으면 공부방으로 보낸다. 익명 비회원은
+        //   5분 동안 공부 기능까지 체험한 뒤 가입 안내를 받는다.
         final guestHistoryRef = _myHistoryRef;
         if (guestHistoryRef != null && _historyMessageCount > 0) {
           _lgDuo('[GUEST-EXIT]', 'study_room lines=$_historyMessageCount');

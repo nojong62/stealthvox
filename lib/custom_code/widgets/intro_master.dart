@@ -1224,9 +1224,8 @@ class _IntroMasterState extends State<IntroMaster>
     if (continueToBoard != true || !mounted) return;
     final claim = await showDuoBoardSheet(context);
     if (!mounted || claim == null) return;
-    unawaited(
-      DuoBoardHostPresence.instance.prepareForIncomingInvite(claim.roomId),
-    );
+    await DuoBoardHostPresence.instance.prepareForIncomingInvite(claim.roomId);
+    if (!mounted) return;
     FFAppState().isGuestSession = true;
     FFAppState().inviterUid = claim.ownerUid;
     FFAppState().duoRoomId = claim.roomId;

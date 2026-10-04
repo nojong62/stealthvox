@@ -7,6 +7,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import '/app_state.dart';
 import '/custom_code/services/duo_invite_localization.dart';
+import '/custom_code/services/duo_call_resolution.dart';
 import '/custom_code/services/duo_board_service.dart';
 import '/custom_code/services/duo_board_host_presence.dart';
 import '/custom_code/services/duo_board_topic_translation.dart';
@@ -321,11 +322,49 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                 ),
               ])),
           Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(_copy['boardSubtitle'],
                       style: const TextStyle(color: Colors.white54)))),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFF52D4C3).withValues(alpha: .09),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: const Color(0xFF52D4C3).withValues(alpha: .22),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 1),
+                    child: Icon(
+                      Icons.call_outlined,
+                      size: 16,
+                      color: Color(0xFF52D4C3),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _copy['sameChatLanguageDirect'],
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
           if (_error != null)
             Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -395,26 +434,85 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                                   crossAxisAlignment:
                                                       CrossAxisAlignment.start,
                                                   children: [
-                                                    Text(_copy['topic'],
-                                                        style: const TextStyle(
-                                                            color:
-                                                                Colors.white54,
-                                                            fontSize: 10,
-                                                            fontWeight:
-                                                                FontWeight
-                                                                    .w700)),
+                                                    Row(
+                                                      children: [
+                                                        Expanded(
+                                                          child: Text(
+                                                            _copy['topic'],
+                                                            style:
+                                                                const TextStyle(
+                                                              color: Colors
+                                                                  .white54,
+                                                              fontSize: 10,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w700,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                          width: 42,
+                                                          child: Text(
+                                                            'Orig.',
+                                                            textAlign: TextAlign
+                                                                .center,
+                                                            style: TextStyle(
+                                                              color: Color(
+                                                                  0xFF93C5FD),
+                                                              fontSize: 10,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w700,
+                                                              letterSpacing: .2,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
                                                     const SizedBox(height: 5),
-                                                    _TranslatedBoardTopic(
-                                                      text: data['topic']
-                                                              ?.toString() ??
-                                                          '',
-                                                      sourceLanguage:
-                                                          data['topicLanguage']
-                                                                  ?.toString() ??
-                                                              '',
-                                                      color: readable
-                                                          ? Colors.white
-                                                          : Colors.white38,
+                                                    Row(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Expanded(
+                                                          child:
+                                                              _TranslatedBoardTopic(
+                                                            text: data['topic']
+                                                                    ?.toString() ??
+                                                                '',
+                                                            sourceLanguage:
+                                                                data['topicLanguage']
+                                                                        ?.toString() ??
+                                                                    '',
+                                                            color: readable
+                                                                ? Colors.white
+                                                                : Colors
+                                                                    .white38,
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                            width: 8),
+                                                        SizedBox(
+                                                          width: 42,
+                                                          child: Text(
+                                                            duoOriginLanguageAbbreviation(
+                                                                data[
+                                                                    'topicLanguage']),
+                                                            textAlign: TextAlign
+                                                                .center,
+                                                            style:
+                                                                const TextStyle(
+                                                              color: Color(
+                                                                  0xFF93C5FD),
+                                                              fontSize: 12,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w700,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
                                                     if (duoBoardNeedsTranslation(
                                                       sourceLanguage:

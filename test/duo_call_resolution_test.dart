@@ -3,6 +3,13 @@ import 'package:stealth_vox/custom_code/services/duo_call_resolution.dart';
 
 void main() {
   group('Duo same-origin call resolution', () {
+    test('board Origin language uses two-letter English abbreviations', () {
+      expect(duoOriginLanguageAbbreviation('Korean'), 'Ko');
+      expect(duoOriginLanguageAbbreviation('English'), 'En');
+      expect(duoOriginLanguageAbbreviation('Chinese'), 'Zh');
+      expect(duoOriginLanguageAbbreviation('Esperanto'), '--');
+    });
+
     test('two capable peers with the same canonical Chat Lang use Direct', () {
       final result = chooseDuoCallResolution(
         hostLanguage: 'Korean',

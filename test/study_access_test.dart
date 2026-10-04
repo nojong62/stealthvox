@@ -14,8 +14,54 @@ StudyAccess c() => resolveStudyAccess(
     isTrial: false, isDuoGuest: false, isSignedInMember: true);
 StudyAccess d() => resolveStudyAccess(
     isTrial: false, isDuoGuest: false, isSignedInMember: false);
+StudyAccess guestPreview() => resolveStudyAccess(
+    isTrial: false,
+    isDuoGuest: true,
+    isSignedInMember: false,
+    hasDuoGuestStudyPreview: true);
 
 void main() {
+  group('초대 비회원 공부방 5분 제한', () {
+    test('익명 초대 게스트에게만 적용한다', () {
+      expect(
+        shouldLimitDuoGuestStudy(
+          isAnonymous: true,
+          isGuestSession: true,
+        ),
+        isTrue,
+      );
+      expect(
+        shouldLimitDuoGuestStudy(
+          isAnonymous: false,
+          isGuestSession: true,
+        ),
+        isFalse,
+      );
+      expect(
+        shouldLimitDuoGuestStudy(
+          isAnonymous: true,
+          isGuestSession: false,
+        ),
+        isFalse,
+      );
+    });
+
+    test('허용 시간은 5분이다', () {
+      expect(kDuoAnonymousGuestStudySeconds, 300);
+    });
+
+    test('5분 화면 안에서는 공부 기능을 열고 게스트 과금은 계속 억제한다', () {
+      expect(guestPreview().canUsePaidStudy, isTrue);
+      expect(guestPreview().reason, StudyBlockReason.none);
+      expect(isDuoBillingSuppressed(isTrial: false, isDuoGuest: true), isTrue);
+    });
+
+    test('5분 권한을 전달하지 않은 일반 게스트는 그대로 잠긴다', () {
+      expect(b().canUsePaidStudy, isFalse);
+      expect(b().reason, StudyBlockReason.duoGuest);
+    });
+  });
+
   group('보기는 누구에게도 막지 않는다', () {
     test('네 상태 모두 자기 대화를 볼 수 있다', () {
       for (final access in <StudyAccess>[a(), b(), c(), d()]) {
@@ -189,7 +235,7 @@ void main() {
       }
     });
 
-    test('차감이 막힌 구간에서 열리는 것은 맛보기뿐이다', () {
+    test('차감이 막힌 일반 구간은 잠기고 명시적 5분 체험만 예외다', () {
       expect(
         resolveStudyAccess(
                 isTrial: false, isDuoGuest: true, isSignedInMember: true)
@@ -202,6 +248,7 @@ void main() {
             .canUsePaidStudy,
         isFalse,
       );
+      expect(guestPreview().canUsePaidStudy, isTrue);
     });
   });
 }

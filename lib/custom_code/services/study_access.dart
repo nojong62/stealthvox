@@ -28,6 +28,16 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/custom_code/widgets/trial/trial_flow_state.dart';
 
+/// 초대 링크로 들어온 익명 비회원에게 허용하는 공부방 열람 시간.
+const int kDuoAnonymousGuestStudySeconds = 5 * 60;
+
+/// 회원 게스트는 자기 History로 계속 이용하고, 익명 초대 게스트만 5분 제한한다.
+bool shouldLimitDuoGuestStudy({
+  required bool isAnonymous,
+  required bool isGuestSession,
+}) =>
+    isAnonymous && isGuestSession;
+
 /// 비용 드는 학습 기능이 막힌 이유. 화면은 이 값으로 안내 문구를 고른다.
 enum StudyBlockReason {
   /// 막히지 않았다.
@@ -122,9 +132,11 @@ bool isDuoBillingSuppressed({
 ///
 ///   ① 맛보기 — 폰 한 대에 한 번 주는 무료 이용권이다. 익명이라고 막으면
 ///      맛보기 자체가 성립하지 않는다.
-///   ② Duo 게스트 — 회원이어도 막는다. 이 구간은 차감이 안 되므로, 버튼만
+///   ② 초대 비회원의 5분 공부방 — 호스트가 만든 대화로 한 번 제공하는
+///      가입 전 체험이다. 이 화면이 살아 있는 동안만 호출부가 명시적으로 연다.
+///   ③ Duo 게스트 — 회원이어도 막는다. 이 구간은 차감이 안 되므로, 버튼만
 ///      열어 두면 무료 API 호출이 된다.
-///   ③ 익명 — 잔여 시간도 구매 권한도 없다. 볼 수는 있고, 쓰지는 못한다.
+///   ④ 익명 — 잔여 시간도 구매 권한도 없다. 볼 수는 있고, 쓰지는 못한다.
 ///
 /// [isSignedInMember]는 "익명이 아닌 Firebase 사용자"다. 로그인 여부와
 /// Duo 게스트 여부는 **다른 축이다** — 넷(A·B·C·D)이 전부 성립한다.
@@ -132,19 +144,22 @@ StudyAccess resolveStudyAccess({
   required bool isTrial,
   required bool isDuoGuest,
   required bool isSignedInMember,
+  bool hasDuoGuestStudyPreview = false,
 }) {
   if (isTrial) return _kAllowed;
+  if (isDuoGuest && hasDuoGuestStudyPreview) return _kAllowed;
   if (isDuoGuest) return _kDuoGuest;
   if (!isSignedInMember) return _kNotSignedIn;
   return _kAllowed;
 }
 
 /// 지금 이 앱의 상태로 판정한다. 화면은 이것만 부른다.
-StudyAccess currentStudyAccess() {
+StudyAccess currentStudyAccess({bool hasDuoGuestStudyPreview = false}) {
   final user = FirebaseAuth.instance.currentUser;
   return resolveStudyAccess(
     isTrial: TrialFlowState.instance.isTrial,
     isDuoGuest: FFAppState().isGuestSession,
     isSignedInMember: user != null && !user.isAnonymous,
+    hasDuoGuestStudyPreview: hasDuoGuestStudyPreview,
   );
 }

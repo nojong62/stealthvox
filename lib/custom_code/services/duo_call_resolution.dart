@@ -38,6 +38,26 @@ const Set<String> kDuoResolvableOriginLanguages = <String>{
   'Dutch',
 };
 
+const Map<String, String> _duoOriginLanguageAbbreviations = <String, String>{
+  'English': 'En',
+  'Korean': 'Ko',
+  'Japanese': 'Ja',
+  'Chinese': 'Zh',
+  'Spanish': 'Es',
+  'French': 'Fr',
+  'German': 'De',
+  'Hindi': 'Hi',
+  'Russian': 'Ru',
+  'Portuguese': 'Pt',
+  'Italian': 'It',
+  'Dutch': 'Nl',
+};
+
+/// Duo 게시판에서 Origin(Chat Lang)을 짧게 표시하는 영문 2자 약자.
+String duoOriginLanguageAbbreviation(Object? language) =>
+    _duoOriginLanguageAbbreviations[canonicalDuoOriginLanguage(language)] ??
+    '--';
+
 bool duoSameOriginDirectCapability({
   bool enabled = kDuoSameOriginDirectV1Enabled,
 }) =>

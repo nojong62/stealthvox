@@ -24,6 +24,7 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
   String? _checkingUid;
   BuildContext? _restoreDialogContext;
   String? _pausedForIncomingInvitePostId;
+  bool _incomingInviteTakesPriority = false;
 
   Future<void> initialize(BuildContext Function() context) async {
     _context = context;
@@ -42,6 +43,7 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       _ownsActivePost = false;
       _promptedThisLaunch = false;
       _checkingUid = null;
+      _incomingInviteTakesPriority = false;
       return;
     }
     if (_uid == user.uid && _promptedThisLaunch) return;
@@ -69,6 +71,12 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       _checkingUid = null;
       return;
     }
+    // 받은 초대를 처리하기 시작했다면 내 게시글 복원 질문은 띄우지 않는다.
+    // 초대 입장이 끝난 뒤 필요하면 게시판에서 직접 다시 활성화할 수 있다.
+    if (_incomingInviteTakesPriority) {
+      _checkingUid = null;
+      return;
+    }
     if (_promptedThisLaunch) {
       await ensureOnline();
       _checkingUid = null;
@@ -76,7 +84,8 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     }
     _promptedThisLaunch = true;
     await Future<void>.delayed(const Duration(milliseconds: 500));
-    if (_pausedForIncomingInvitePostId == post?.id) {
+    if (_incomingInviteTakesPriority ||
+        _pausedForIncomingInvitePostId == post?.id) {
       _checkingUid = null;
       return;
     }
@@ -138,6 +147,10 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
   Future<void> prepareForIncomingInvite(String incomingRoomId) async {
     final roomId = incomingRoomId.trim();
     if (roomId.isEmpty) return;
+
+    // 이 플래그는 조회보다 먼저 세운다. 앱 시작 복원 조회와 받은 초대 조회가
+    // 동시에 끝나더라도 복원 팝업이 뒤늦게 초대 화면 위에 뜨면 안 된다.
+    _incomingInviteTakesPriority = true;
 
     // 받은 초대가 최우선이다. 게시글 조회가 끝나기를 기다렸다가 닫으면 앱이
     // 먼저 띄운 "기존 초대를 유지할까요?" 팝업이 딥링크 위를 가릴 수 있다.

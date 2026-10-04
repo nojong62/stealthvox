@@ -1252,9 +1252,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   Future<void> _openDuoBoardAsGuest() async {
     final claim = await showDuoBoardSheet(context);
     if (!mounted || claim == null) return;
-    unawaited(
-      DuoBoardHostPresence.instance.prepareForIncomingInvite(claim.roomId),
-    );
+    await DuoBoardHostPresence.instance.prepareForIncomingInvite(claim.roomId);
+    if (!mounted) return;
     FFAppState().isGuestSession = true;
     FFAppState().inviterUid = claim.ownerUid;
     FFAppState().duoRoomId = claim.roomId;
@@ -1404,7 +1403,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                       //   (실기기 확인, 2026-08-27). 방향은 가운데 화살표가
                       //   말한다 — 아래를 가리키면 원어 → 배울 말이다.
                       _buildLangField(
-                        'Chat Lang',
+                        'Origin (Chat Lang)',
                         'Select',
                         appState.chatLang,
                         (val) {
@@ -1781,9 +1780,7 @@ class AppsFlyerManager {
       if (FirebaseAuth.instance.currentUser == null) {
         await FirebaseAuth.instance.signInAnonymously();
       }
-      unawaited(
-        DuoBoardHostPresence.instance.prepareForIncomingInvite(roomId),
-      );
+      await DuoBoardHostPresence.instance.prepareForIncomingInvite(roomId);
       FFAppState().isGuestSession = true;
       FFAppState().inviterUid = inviterId;
       FFAppState().duoRoomId = roomId;

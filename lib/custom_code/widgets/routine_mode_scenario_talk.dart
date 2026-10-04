@@ -142,6 +142,9 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   //   화면에 남아 유저가 컴플레인할 일을 없애는 것이 목적이다.
   String? _pendingHeardConfirmation;
   int _heardConfirmationAttempts = 0;
+  // 직전 턴에서 [USER_FIX]가 확정됐으면 다음 Dialog Brain 호출 한 번만
+  // 교정된 문맥을 더 주의 깊게 읽는다. 호출 직전에 소비되므로 지속 상태가 아니다.
+  bool _previousTurnHadUserFix = false;
 
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
@@ -1260,6 +1263,8 @@ $finalLanguageRule''';
     var aiIndex = -1;
     if (mounted) setState(() {});
     try {
+      _log('[DIALOG-REASONING]',
+          'mode=Scenario reasoning=low reason=normal_turn');
       final nativeLang = _nativeLangName();
       final openerSw = Stopwatch()..start();
       var aiKorean = await ScenarioBrain.generateOpener(
@@ -2665,6 +2670,7 @@ $finalLanguageRule''';
     //
     //   **`_turnCounter++`보다 먼저 판정한다.** 뒤로 미루면 "네" 한 마디가
     //   턴 하나를 먹고, 아래 재귀가 한 번 더 올려 번호가 어긋난다.
+    var hasSttCorrectionContext = understandingConfirmed;
     final pendingHeard = _pendingHeardConfirmation;
     if (pendingHeard != null && !understandingConfirmed) {
       _pendingHeardConfirmation = null;
@@ -2686,6 +2692,7 @@ $finalLanguageRule''';
         case HeardConfirmReply.corrected:
           // 유저가 내용을 담아 다시 말했다. 이것을 새 발화로 본다.
           _heardConfirmationAttempts = 0;
+          hasSttCorrectionContext = true;
           _log('[HEARD-CONFIRM]', 'corrected_with_content → 새 발화 판정');
           setState(_clearHeardConfirmBubbles);
           break;
@@ -2758,6 +2765,25 @@ $finalLanguageRule''';
     // 🩹 [USER-FIX] 답변이 유저 줄을 되살렸으면 원 전사를 여기 남긴다.
     String? sttText;
     final recentConversation = _recentKoreanConversation();
+    final previousAssistantText = _localMessages.reversed
+        .where((message) => message['role'] == 'SYSTEM')
+        .map((message) => message['target']?.toString() ?? '')
+        .firstOrNull;
+    final usedPreviousUserFix = _previousTurnHadUserFix;
+    _previousTurnHadUserFix = false;
+    final reasoning = selectDialogBrainReasoning(
+      userText: userKorean,
+      previousAssistantText: previousAssistantText ?? '',
+      hasConversationContext: recentConversation.trim().isNotEmpty,
+      isCorrectionRetry: isCorrectionRetry,
+      hasSttCorrectionContext: hasSttCorrectionContext,
+      previousTurnHadUserFix: usedPreviousUserFix,
+      isStep2: step == ListeningStep.step2,
+    );
+    _log(
+      '[DIALOG-REASONING]',
+      'mode=Scenario reasoning=${reasoning.effort} reason=${reasoning.reason}',
+    );
     // 되묻기가 나오면 이 말풍선을 도로 걷어내야 하므로 참조를 들고 간다.
     // 🔁 [LATE-CONTINUATION] id도 같이 박는다. 이어 말하기로 문장이 자라면
     //   새 말풍선을 만들지 않고 이 id로 찾아 글자만 바꾼다.
@@ -2792,6 +2818,7 @@ $finalLanguageRule''';
         instructions: _buildScenarioMemberInstructions(step: step),
         userText: userKorean,
         recentConversation: recentConversation,
+        reasoningEffort: reasoning.effort,
         // 🎧 [LISTENING] Step 2는 유저 말 바로 앞에 언어 규칙을 한 번 더 둔다.
         trailingSystemNote: step == ListeningStep.step2
             ? buildTargetLanguageFinalRule(
@@ -2878,7 +2905,7 @@ $finalLanguageRule''';
       _log(
           '⏱️ [AI-GEN]',
           'turn=$turnNumber model=$kDialogBrainModel '
-              'reasoning=$kDialogBrainReasoningEffort stream=true '
+              'reasoning=${reasoning.effort} stream=true '
               'step=${step.value} ttftMs=${firstTokenMs ?? -1} '
               'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiKorean.length} '
               'text="${aiKorean.replaceAll(RegExp(r'\s+'), ' ')}"');
@@ -2897,6 +2924,7 @@ $finalLanguageRule''';
               'turn=$turnNumber "$userKorean" → "${userFix.userLine}"');
           sttText = userKorean;
           userKorean = userFix.userLine;
+          _previousTurnHadUserFix = true;
           if (mounted) {
             setState(() {
               hostBubble['target'] = userKorean;
@@ -2935,6 +2963,7 @@ $finalLanguageRule''';
       }
       if (contextualCorrection != null) {
         handledContextualCorrection = true;
+        _previousTurnHadUserFix = true;
         earlyUtterance?.cancel();
         _aiTtsAdapter.stopAll(reason: 'scenario_contextual_correction');
         _ttsQueueManager.stop();
@@ -6266,6 +6295,7 @@ Return only the line itself.'''
     required String instructions,
     required String userText,
     required String recentConversation,
+    required String reasoningEffort,
     void Function(String message)? onLog,
     // 🎧 [LISTENING] 유저 메시지 바로 앞에 끼우는 system 한 줄. null이면
     //   메시지 배열이 전과 같다.
@@ -6284,7 +6314,7 @@ Return only the line itself.'''
       });
       request.body = jsonEncode(<String, dynamic>{
         'model': kDialogBrainModel,
-        'reasoning_effort': kDialogBrainReasoningEffort,
+        'reasoning_effort': reasoningEffort,
         'stream': true,
         'max_completion_tokens': 120,
         // 📏 마지막 SSE 조각에 choices가 비고 usage만 실려 온다.
