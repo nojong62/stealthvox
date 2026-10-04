@@ -8729,8 +8729,7 @@ Return strict JSON only:
                   'Content-Type': 'application/json; charset=utf-8'
                 },
                 body: jsonEncode({
-                  'model': kPostProcessModel,
-                  'reasoning_effort': kPostProcessReasoningEffort,
+                  ...kDuoLiveTranslationModelOptions,
                   // 한 문장이면 충분하다. 400은 JSON 두 칸 시절의 값이다.
                   'max_completion_tokens': 200,
                   'messages': [
@@ -8828,8 +8827,7 @@ Return strict JSON only:
       'Content-Type': 'application/json; charset=utf-8',
     });
     request.body = jsonEncode(<String, dynamic>{
-      'model': kPostProcessModel,
-      'reasoning_effort': kPostProcessReasoningEffort,
+      ...kDuoLiveTranslationModelOptions,
       'stream': true,
       'max_completion_tokens': 200,
       'messages': <Map<String, String>>[
@@ -8961,8 +8959,7 @@ Return strict JSON only:
                 'Content-Type': 'application/json; charset=utf-8'
               },
               body: jsonEncode({
-                'model': kPostProcessModel,
-                'reasoning_effort': kPostProcessReasoningEffort,
+                ...kDuoLiveTranslationModelOptions,
                 'max_completion_tokens': 400,
                 'response_format': {'type': 'json_object'},
                 'messages': [

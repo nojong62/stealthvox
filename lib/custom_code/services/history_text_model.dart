@@ -65,3 +65,20 @@ const String kPostProcessModel = 'gpt-6-luna';
 
 /// 후처리 `reasoning_effort`. 판정·번역은 첫 토큰이 먼저라 `none`으로 시작한다.
 const String kPostProcessReasoningEffort = 'none';
+
+// ====================================================================
+// 🗣️ [DUO LIVE TRANSLATION] 통화 중 현재 발화 번역 전용 모델.
+// --------------------------------------------------------------------
+// 공용 후처리와 분리한다. 듀오 번역만 되돌려 비교할 수 있어야 하며,
+// Circle/Scenario와 히스토리 정돈·복원·요약에는 이 설정을 쓰지 않는다.
+// 문맥을 덧붙이지 않고 현재 발화 하나만 보내며, 비추론 모델이므로
+// `reasoning_effort`는 요청에 포함하지 않는다.
+// ====================================================================
+
+const String kDuoLiveTranslationModel = 'gpt-4o-mini';
+const double kDuoLiveTranslationTemperature = 0;
+
+const Map<String, dynamic> kDuoLiveTranslationModelOptions = <String, dynamic>{
+  'model': kDuoLiveTranslationModel,
+  'temperature': kDuoLiveTranslationTemperature,
+};
