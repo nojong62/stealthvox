@@ -1872,6 +1872,12 @@ class _IntroMasterState extends State<IntroMaster>
             title: copy['step4Title']!,
             description: copy['step4Body']!,
           ),
+          const SizedBox(height: 16),
+          _buildGuideStep(
+            number: 5,
+            title: copy['step5Title']!,
+            description: copy['step5Body']!,
+          ),
         ],
       ),
     );

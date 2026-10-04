@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'duo_invite_localization.dart';
 
 class DuoBoardIntroNoticeCopy {
   const DuoBoardIntroNoticeCopy({
@@ -137,7 +138,11 @@ class DuoBoardGuidePageCopy {
 
   static Map<String, String> forSystemLocale() {
     final code = PlatformDispatcher.instance.locale.languageCode.toLowerCase();
-    return _copies[code] ?? _copies['en']!;
+    final base = _copies[code] ?? _copies['en']!;
+    return <String, String>{
+      ...base,
+      'step5Body': DuoInviteCopy.forSystemLocale()['sameOriginDirect'],
+    };
   }
 
   static const _copies = <String, Map<String, String>>{
@@ -155,6 +160,7 @@ class DuoBoardGuidePageCopy {
           '수락되면 각자 자기 언어로 말할 수 있습니다. 초대글을 올린 회원만 과금되며, 게시판에서 참여한 사람은 과금되지 않습니다.',
       'step4Title': '회원으로 복습하기',
       'step4Body': '로그인 회원은 저장된 대화를 공부방에서 다시 볼 수 있습니다.',
+      'step5Title': 'Origin이 같으면 직접 통화',
       'findAccount': '로그인 방법이 기억나지 않나요? 계정 찾기',
       'phoneSetup': '휴대폰을 바꿨다면 계정을 찾기 전에 새 휴대폰에서 Google 계정과 카카오톡 설정을 완료해 주세요.',
       'microphone': '마이크 접근 권한이 필요합니다.',
@@ -177,6 +183,7 @@ class DuoBoardGuidePageCopy {
       'step4Title': 'Review as a Member',
       'step4Body':
           'Signed-in members can revisit the saved conversation in the Study Room.',
+      'step5Title': 'Direct Calls for Matching Origin',
       'findAccount': 'Forgot how you logged in? Find Your Account',
       'phoneSetup':
           'If you changed phones, finish setting up your Google Account and KakaoTalk on your new phone before trying to find your account.',
@@ -197,6 +204,7 @@ class DuoBoardGuidePageCopy {
           '承認されると、それぞれ自分の言語で話せます。料金は招待を投稿した会員にのみ発生し、掲示板から参加する人には発生しません。',
       'step4Title': '会員として復習',
       'step4Body': 'ログインした会員は、保存された会話を学習ルームで見直せます。',
+      'step5Title': 'Originが同じなら直接通話',
       'findAccount': 'ログイン方法を忘れましたか？ アカウントを探す',
       'phoneSetup': '機種変更した場合は、アカウントを探す前に新しい端末でGoogleアカウントとカカオトークの設定を完了してください。',
       'microphone': 'マイクへのアクセスが必要です。',
@@ -215,6 +223,7 @@ class DuoBoardGuidePageCopy {
       'step3Body': '对方接受后，双方都可以使用自己的语言。费用仅由发布邀请的会员承担，从公告板加入的人不会被收费。',
       'step4Title': '会员复习',
       'step4Body': '已登录会员可以在学习室中重新查看保存的对话。',
+      'step5Title': 'Origin 相同时直接通话',
       'findAccount': '忘记登录方式？查找账户',
       'phoneSetup': '如果更换了手机，请先在新手机上完成Google账户和KakaoTalk设置，再尝试查找账户。',
       'microphone': '需要麦克风权限。',
@@ -237,6 +246,7 @@ class DuoBoardGuidePageCopy {
       'step4Title': 'Repasa como miembro',
       'step4Body':
           'Los miembros con sesión iniciada pueden revisar la conversación guardada en la Sala de estudio.',
+      'step5Title': 'Llamada directa con el mismo Origin',
       'findAccount': '¿Olvidaste cómo iniciaste sesión? Busca tu cuenta',
       'phoneSetup':
           'Si cambiaste de teléfono, configura tu cuenta de Google y KakaoTalk en el nuevo dispositivo antes de buscar tu cuenta.',
@@ -260,6 +270,7 @@ class DuoBoardGuidePageCopy {
       'step4Title': 'Révisez en tant que membre',
       'step4Body':
           'Les membres connectés peuvent revoir la conversation enregistrée dans la salle d’étude.',
+      'step5Title': 'Appel direct avec le même Origin',
       'findAccount':
           'Vous avez oublié votre mode de connexion ? Trouver votre compte',
       'phoneSetup':
@@ -284,6 +295,7 @@ class DuoBoardGuidePageCopy {
       'step4Title': 'Als Mitglied wiederholen',
       'step4Body':
           'Angemeldete Mitglieder können das gespeicherte Gespräch im Lernraum erneut ansehen.',
+      'step5Title': 'Direktanruf bei gleichem Origin',
       'findAccount': 'Anmeldeart vergessen? Konto finden',
       'phoneSetup':
           'Richte nach einem Handywechsel zuerst dein Google-Konto und KakaoTalk auf dem neuen Gerät ein, bevor du dein Konto suchst.',
@@ -307,6 +319,7 @@ class DuoBoardGuidePageCopy {
       'step4Title': 'सदस्य के रूप में दोहराएँ',
       'step4Body':
           'लॉग-इन सदस्य सहेजी गई बातचीत को स्टडी रूम में फिर देख सकते हैं।',
+      'step5Title': 'समान Origin पर सीधी कॉल',
       'findAccount': 'लॉग इन करने का तरीका भूल गए? अपना खाता खोजें',
       'phoneSetup':
           'फ़ोन बदलने पर खाता खोजने से पहले नए फ़ोन में Google खाता और KakaoTalk सेट करें।',
@@ -329,6 +342,7 @@ class DuoBoardGuidePageCopy {
       'step4Title': 'Повторяйте как участник',
       'step4Body':
           'Вошедшие участники могут просмотреть сохранённый разговор в учебной комнате.',
+      'step5Title': 'Прямой звонок при одинаковом Origin',
       'findAccount': 'Забыли способ входа? Найти аккаунт',
       'phoneSetup':
           'После смены телефона настройте аккаунт Google и KakaoTalk на новом устройстве, прежде чем искать аккаунт.',
@@ -352,6 +366,7 @@ class DuoBoardGuidePageCopy {
       'step4Title': 'Revise como membro',
       'step4Body':
           'Membros conectados podem rever a conversa salva na Sala de Estudos.',
+      'step5Title': 'Chamada direta com o mesmo Origin',
       'findAccount': 'Esqueceu como entrou? Encontre sua conta',
       'phoneSetup':
           'Se trocou de telefone, configure sua Conta do Google e o KakaoTalk no novo aparelho antes de procurar sua conta.',
@@ -374,6 +389,7 @@ class DuoBoardGuidePageCopy {
       'step4Title': 'Ripassa come membro',
       'step4Body':
           'I membri che hanno effettuato l’accesso possono rivedere la conversazione salvata nella Sala studio.',
+      'step5Title': 'Chiamata diretta con lo stesso Origin',
       'findAccount':
           'Hai dimenticato come hai effettuato l’accesso? Trova il tuo account',
       'phoneSetup':
@@ -397,6 +413,7 @@ class DuoBoardGuidePageCopy {
       'step4Title': 'Herhaal als lid',
       'step4Body':
           'Ingelogde leden kunnen het opgeslagen gesprek opnieuw bekijken in de studieruimte.',
+      'step5Title': 'Direct bellen met dezelfde Origin',
       'findAccount': 'Vergeten hoe je inlogde? Zoek je account',
       'phoneSetup':
           'Stel na een telefoonwissel eerst je Google-account en KakaoTalk in op het nieuwe toestel voordat je je account zoekt.',

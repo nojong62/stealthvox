@@ -519,7 +519,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     );
   }
 
-  /// Study Room / Duo Board / Store.
+  /// SR / Duo Board / Store.
   ///
   /// ⚠️ 모양만 세그먼트 컨트롤을 빌렸을 뿐, **토글이 아니다.** 누르면 그 자리에서
   /// 선택이 바뀌는 게 아니라 각자 다른 화면으로 넘어간다. 지금 화면이 로비이므로
@@ -537,7 +537,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           Expanded(
             child: _buildSegment(
               icon: Icons.auto_stories_rounded,
-              label: _surfaceCopy['studyRoom'],
+              label: 'SR',
               highlighted: true,
               onTap: () => context.pushNamed('ChatHistory'),
             ),
@@ -555,7 +555,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           Expanded(
             child: _buildSegment(
               icon: Icons.storefront_rounded,
-              label: _surfaceCopy['store'],
+              label: 'Store',
               highlighted: false,
               onTap: () => context.pushNamed('Store'),
             ),
@@ -578,31 +578,27 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 8),
-          // 글꼴 배율을 크게 쓰는 기기에서 "Study Room"이 밀려 나가지 않게
-          // 폭이 모자라면 글자를 줄인다. 잘라내지는 않는다.
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  icon,
-                  size: 15,
-                  color: highlighted ? _kLobbyCyan : _kLobbyTextLow,
+          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 15,
+                color: highlighted ? _kLobbyCyan : _kLobbyTextLow,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(
+                  color: highlighted ? _kLobbyTextHi : _kLobbyTextMid,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  label,
-                  maxLines: 1,
-                  style: TextStyle(
-                    color: highlighted ? _kLobbyTextHi : _kLobbyTextMid,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
