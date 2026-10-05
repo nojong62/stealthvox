@@ -63,6 +63,7 @@ exports.publishDuoBoardPost = functions.https.onCall(async (data, context) => {
       // foreground. RTDB presence keeps this synchronized after publishing,
       // but it must not block creation of the post.
       active: true, state: 'active', discoverable: true, ownerPaused: false,
+      inactiveSince: admin.firestore.FieldValue.delete(),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, {merge: true});
@@ -331,6 +332,7 @@ exports.resumeDuoBoardPost = functions.https.onCall(async (data, context) => {
     tx.update(roomRef, {partnerUid: null, boardReservedAt: null});
     // The member explicitly continued the invitation while using the app.
     tx.update(postRef, {state: 'active', discoverable: true, ownerPaused: false,
+      inactiveSince: admin.firestore.FieldValue.delete(),
       reservedAt: null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()});
     return {resumed: true};
@@ -355,6 +357,10 @@ exports.setDuoBoardPostVisibility = functions.https.onCall(async (data, context)
     tx.update(postRef, {
       ownerPaused: !enabled,
       discoverable: enabled,
+      inactiveSince: enabled
+        ? admin.firestore.FieldValue.delete()
+        : (post.get('inactiveSince') ||
+          admin.firestore.FieldValue.serverTimestamp()),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   });
@@ -373,15 +379,70 @@ exports.syncDuoBoardHostPresence = functions.database
       const batch = db().batch();
       posts.docs.filter(doc => doc.get('active') === true).forEach(doc => {
         if (doc.get('state') !== 'reserved') {
+          const visible = doc.get('ownerPaused') === true
+            ? false
+            : discoverable;
           batch.update(doc.ref, {
-            discoverable: doc.get('ownerPaused') === true
-              ? false
-              : discoverable,
+            discoverable: visible,
+            inactiveSince: visible
+              ? admin.firestore.FieldValue.delete()
+              : (doc.get('inactiveSince') ||
+                admin.firestore.FieldValue.serverTimestamp()),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
         }
       });
       await batch.commit();
+      return null;
+    });
+
+const INACTIVE_POST_TTL_MS = 48 * 60 * 60 * 1000;
+
+// Keep temporarily unavailable invitations visible to intro guests, but retire
+// them after 48 continuous hours without becoming discoverable again.
+exports.expireInactiveDuoBoardPosts = functions.pubsub
+    .schedule('every 60 minutes')
+    .onRun(async () => {
+      const cutoff = admin.firestore.Timestamp.fromMillis(
+          Date.now() - INACTIVE_POST_TTL_MS);
+      const snapshot = await db().collection('duo_board_posts')
+          .where('active', '==', true)
+          .get();
+      let expired = 0;
+      let initialized = 0;
+      for (const candidate of snapshot.docs) {
+        const result = await db().runTransaction(async tx => {
+          const current = await tx.get(candidate.ref);
+          if (!current.exists) return null;
+          const inactiveSince = current.get('inactiveSince');
+          if (current.get('active') !== true ||
+              current.get('discoverable') === true ||
+              current.get('state') === 'reserved') {
+            return null;
+          }
+          if (!inactiveSince) {
+            tx.update(candidate.ref, {
+              inactiveSince: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            return 'initialized';
+          }
+          if (inactiveSince.toMillis() > cutoff.toMillis()) return null;
+          tx.update(candidate.ref, {
+            active: false,
+            discoverable: false,
+            state: 'expired',
+            expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          tx.delete(db().collection('duo_board_runtime').doc(candidate.id));
+          return 'expired';
+        });
+        if (result === 'expired') expired += 1;
+        if (result === 'initialized') initialized += 1;
+      }
+      console.log(
+          `Expired ${expired} Duo board posts after 48 inactive hours; ` +
+          `initialized ${initialized} legacy inactive posts.`);
       return null;
     });
 

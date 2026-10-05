@@ -1222,7 +1222,10 @@ class _IntroMasterState extends State<IntroMaster>
       ),
     );
     if (continueToBoard != true || !mounted) return;
-    final claim = await showDuoBoardSheet(context);
+    final claim = await showDuoBoardSheet(
+      context,
+      showInactivePosts: true,
+    );
     if (!mounted || claim == null) return;
     await DuoBoardHostPresence.instance.prepareForIncomingInvite(claim.roomId);
     if (!mounted) return;

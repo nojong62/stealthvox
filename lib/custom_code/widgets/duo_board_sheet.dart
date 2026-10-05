@@ -28,6 +28,7 @@ class DuoBoardComposeDraft {
 Future<DuoBoardClaim?> showDuoBoardSheet(
   BuildContext context, {
   DuoBoardComposeDraft? composeDraft,
+  bool showInactivePosts = false,
 }) async {
   await DuoBoardService.ensureParticipantIdentity();
   if (!context.mounted) return null;
@@ -36,7 +37,10 @@ Future<DuoBoardClaim?> showDuoBoardSheet(
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: const Color(0xFF14171D),
-    builder: (_) => DuoBoardSheet(composeDraft: composeDraft),
+    builder: (_) => DuoBoardSheet(
+      composeDraft: composeDraft,
+      showInactivePosts: showInactivePosts,
+    ),
   );
 }
 
@@ -148,9 +152,14 @@ Future<bool> showDuoBoardComposer(
 }
 
 class DuoBoardSheet extends StatefulWidget {
-  const DuoBoardSheet({super.key, this.composeDraft});
+  const DuoBoardSheet({
+    super.key,
+    this.composeDraft,
+    this.showInactivePosts = false,
+  });
 
   final DuoBoardComposeDraft? composeDraft;
+  final bool showInactivePosts;
   @override
   State<DuoBoardSheet> createState() => _DuoBoardSheetState();
 }
@@ -345,11 +354,23 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                 }
                 final allDocs = snapshot.data!.docs;
                 final uid = FirebaseAuth.instance.currentUser?.uid;
-                final docs = allDocs
-                    .where((doc) =>
-                        doc.data()['discoverable'] == true ||
-                        doc.data()['ownerUid'] == uid)
-                    .toList();
+                final docs = allDocs.where((doc) {
+                  final data = doc.data();
+                  final mine = data['ownerUid'] == uid;
+                  final available = data['discoverable'] == true;
+                  final isOpenInvitation = data['state'] != 'reserved';
+                  return mine ||
+                      available ||
+                      (widget.showInactivePosts && isOpenInvitation);
+                }).toList();
+                if (widget.showInactivePosts) {
+                  docs.sort((a, b) {
+                    final aAvailable = a.data()['discoverable'] == true;
+                    final bAvailable = b.data()['discoverable'] == true;
+                    if (aAvailable == bAvailable) return 0;
+                    return aAvailable ? -1 : 1;
+                  });
+                }
                 final hasOwnActivePost =
                     allDocs.any((doc) => doc.data()['ownerUid'] == uid);
 
@@ -371,9 +392,10 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                 final doc = docs[index];
                                 final data = doc.data();
                                 final mine = data['ownerUid'] == uid;
-                                final enabled = !mine && _claiming == null;
-                                final readable = mine || _claiming == null;
                                 final available = data['discoverable'] == true;
+                                final enabled =
+                                    !mine && available && _claiming == null;
+                                final readable = mine || _claiming == null;
                                 return Card(
                                   color: const Color(0xFF202530),
                                   margin: EdgeInsets.zero,
@@ -535,13 +557,34 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                                   message: available
                                                       ? _copy['active']
                                                       : _copy['inactive'],
-                                                  child: Icon(
-                                                    Icons.circle,
-                                                    size: 15,
-                                                    color: available
-                                                        ? const Color(
-                                                            0xFF22C55E)
-                                                        : Colors.white30,
+                                                  child: Row(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Icon(
+                                                        Icons.circle,
+                                                        size: 13,
+                                                        color: available
+                                                            ? const Color(
+                                                                0xFF22C55E)
+                                                            : Colors.white30,
+                                                      ),
+                                                      const SizedBox(width: 4),
+                                                      Text(
+                                                        available
+                                                            ? _copy['active']
+                                                            : _copy['inactive'],
+                                                        style: TextStyle(
+                                                          color: available
+                                                              ? const Color(
+                                                                  0xFF86EFAC)
+                                                              : Colors.white38,
+                                                          fontSize: 10,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                        ),
+                                                      ),
+                                                    ],
                                                   ),
                                                 ),
                                               if (mine) ...[

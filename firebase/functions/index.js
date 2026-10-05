@@ -76,6 +76,7 @@ exports.resumeDuoBoardPost = duoBoard.resumeDuoBoardPost;
 exports.setDuoBoardPostVisibility = duoBoard.setDuoBoardPostVisibility;
 exports.syncDuoBoardHostPresence = duoBoard.syncDuoBoardHostPresence;
 exports.completeDuoBoardPostOnJoin = duoBoard.completeDuoBoardPostOnJoin;
+exports.expireInactiveDuoBoardPosts = duoBoard.expireInactiveDuoBoardPosts;
 
 
 async function verifyGoogleOAuthIdToken(idToken) {
