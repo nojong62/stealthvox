@@ -167,6 +167,7 @@ class DuoBoardSheet extends StatefulWidget {
 class _DuoBoardSheetState extends State<DuoBoardSheet> {
   String? _claiming;
   String? _error;
+  final Map<String, bool> _pendingVisibility = {};
   DuoInviteCopy get _copy => DuoInviteCopy.forSystemLocale();
 
   Future<void> _writePost() async {
@@ -273,32 +274,47 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
 
   Future<void> _togglePostVisibility(
       String postId, bool currentlyVisible) async {
+    final nextVisible = !currentlyVisible;
     setState(() {
       _claiming = postId;
       _error = null;
+      _pendingVisibility[postId] = nextVisible;
     });
     try {
       if (!currentlyVisible) {
         try {
           await DuoBoardHostPresence.instance
               .ensureOnline()
-              .timeout(const Duration(seconds: 5));
+              .timeout(const Duration(seconds: 3));
         } catch (error) {
           debugPrint('[DuoBoard] presence refresh before activation: $error');
         }
       }
       await DuoBoardService.setPostVisibility(
         postId,
-        enabled: !currentlyVisible,
+        enabled: nextVisible,
       );
+      Future<void>.delayed(const Duration(milliseconds: 800), () {
+        if (mounted) {
+          setState(() => _pendingVisibility.remove(postId));
+        }
+      });
     } on FirebaseFunctionsException catch (error) {
       if (mounted) {
         debugPrint(
             '[DuoBoard] visibility update failed: ${error.code} ${error.message}');
-        setState(() => _error = _copy['visibilityFailed']);
+        setState(() {
+          _pendingVisibility.remove(postId);
+          _error = _copy['visibilityFailed'];
+        });
       }
     } catch (_) {
-      if (mounted) setState(() => _error = _copy['visibilityFailed']);
+      if (mounted) {
+        setState(() {
+          _pendingVisibility.remove(postId);
+          _error = _copy['visibilityFailed'];
+        });
+      }
     } finally {
       if (mounted) setState(() => _claiming = null);
     }
@@ -392,7 +408,8 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                 final doc = docs[index];
                                 final data = doc.data();
                                 final mine = data['ownerUid'] == uid;
-                                final available = data['discoverable'] == true;
+                                final available = _pendingVisibility[doc.id] ??
+                                    data['discoverable'] == true;
                                 final enabled =
                                     !mine && available && _claiming == null;
                                 final readable = mine || _claiming == null;

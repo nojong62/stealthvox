@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -143,7 +145,8 @@ class DuoBoardService {
           .doc(requestId)
           .snapshots();
 
-  static Future<DatabaseReference> startWaitingPresence(String requestId) async {
+  static Future<DatabaseReference> startWaitingPresence(
+      String requestId) async {
     final user = await ensureParticipantIdentity();
     final ref = database.ref('duo_board_waiting/$requestId/${user.uid}');
     await ref.set({
@@ -152,11 +155,15 @@ class DuoBoardService {
     }).timeout(const Duration(seconds: 8));
     // The Firestore request expires independently after 30 seconds, so a slow
     // onDisconnect registration must not prevent the request from being sent.
-    try {
-      await ref.onDisconnect().remove().timeout(const Duration(seconds: 5));
-    } catch (error) {
-      debugPrint('[DuoBoard] waiting onDisconnect unavailable: $error');
-    }
+    unawaited(
+      ref
+          .onDisconnect()
+          .remove()
+          .timeout(const Duration(seconds: 3))
+          .catchError((Object error) {
+        debugPrint('[DuoBoard] waiting onDisconnect unavailable: $error');
+      }),
+    );
     return ref;
   }
 

@@ -5,7 +5,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 
-import '/app_state.dart';
 import 'duo_board_service.dart';
 import 'duo_invite_localization.dart';
 
@@ -193,16 +192,18 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       final id = '${DateTime.now().millisecondsSinceEpoch}';
       _connection =
           DuoBoardService.database.ref('duo_board_hosts/${user.uid}/$id');
-      try {
-        await _connection!
-            .onDisconnect()
-            .remove()
-            .timeout(const Duration(seconds: 5));
-      } catch (error) {
+      final connection = _connection!;
+      unawaited(connection
+          .onDisconnect()
+          .remove()
+          .timeout(const Duration(seconds: 5))
+          .catchError((Object error) {
         debugPrint('[DuoBoard] host onDisconnect unavailable: $error');
-      }
+      }));
     }
-    await _writeHeartbeat().timeout(const Duration(seconds: 8));
+    // The visible state should react to the heartbeat immediately. Registering
+    // the disconnect cleanup above remains best-effort and must not hold the UI.
+    await _writeHeartbeat().timeout(const Duration(seconds: 3));
     _heartbeat ??= Timer.periodic(
       const Duration(seconds: 20),
       (_) => unawaited(_writeHeartbeat()),
@@ -234,22 +235,20 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
   /// Authentication listeners run after sign-out, which is too late to make
   /// authenticated Realtime Database and callable-function writes reliably.
   Future<void> prepareForSignOut() async {
-    try {
+    final hidePost = () async {
       final post = await DuoBoardService.findOwnActivePost();
       if (post != null) {
         await DuoBoardService.setPostVisibility(post.id, enabled: false);
       }
-    } catch (error) {
-      debugPrint(
-          '[DuoBoard] post visibility cleanup before sign-out failed: $error');
-    }
+    }();
+    final clearPresence = stop();
 
     try {
-      await stop();
+      await Future.wait<void>([hidePost, clearPresence])
+          .timeout(const Duration(seconds: 2));
     } catch (error) {
-      // Keep onDisconnect armed when the explicit remove fails. It can still
-      // clean up the presence record when the RTDB connection drops.
-      debugPrint('[DuoBoard] presence cleanup before sign-out failed: $error');
+      debugPrint(
+          '[DuoBoard] board cleanup before sign-out continued in background: $error');
     }
   }
 

@@ -174,6 +174,13 @@ const bool kDuoInterpStreamingTts =
 /// 이 안에 돌아오면 통화를 유지하고, 지나면 기존과 같이 저장 후 종료한다.
 const Duration kDuoGuestBackgroundGrace = Duration(seconds: 30);
 
+DateTime? _duoEpochDateTime(Object? value) {
+  if (value is! num) return null;
+  final milliseconds = value.toInt();
+  if (milliseconds <= 0) return null;
+  return DateTime.fromMillisecondsSinceEpoch(milliseconds);
+}
+
 /// 🌐 [INTERP-ORIGIN] 만능 통역에서 로비 ORIGIN이 실제 발화 언어와 어긋났는지
 /// 확인할 것인가.
 ///
@@ -5340,6 +5347,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         'duoMode': kDuoModeInterpreter,
         'seq': seq,
         'spokenAt': spokenAt.millisecondsSinceEpoch,
+        'transcriptReadyAt': DateTime.now().millisecondsSinceEpoch,
+        'sentAt': sendStartedAt.millisecondsSinceEpoch,
       };
       final bool sent = _interpCall?.sendData(payload) ?? false;
       // 🚫 못 보냈다고 Firestore로 갈아타지 않는다. 받는 쪽이 그 스냅샷을
@@ -5820,6 +5829,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final lat = DuoInterpLatency(
       turnId: 'duo-partner-${_interpTtsTurnSeq + 1}',
       path: kDuoInterpStreamingTts && !sameLang ? 'stream' : 'blocking',
+      remoteSpeechStarted: _duoEpochDateTime(data['spokenAt']),
+      remoteTranscriptReady: _duoEpochDateTime(data['transcriptReadyAt']),
+      remoteSent: _duoEpochDateTime(data['sentAt']),
     )..sameLangSkip = sameLang;
     _interpLatency = lat;
 

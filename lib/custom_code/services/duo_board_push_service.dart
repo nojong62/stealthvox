@@ -24,6 +24,8 @@ class DuoBoardPushService {
   static StreamSubscription<User?>? _authSubscription;
   static StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
       _requestSubscription;
+  static int _requestWatchGeneration = 0;
+  static bool _requestPollInFlight = false;
   static DuoBoardRequestOpened? _onOpened;
   static final Set<String> _handledRequests = <String>{};
 
@@ -118,8 +120,14 @@ class DuoBoardPushService {
   }
 
   static Future<void> signOut() async {
-    await DuoBoardHostPresence.instance.prepareForSignOut();
-    await removeTokenForCurrentMember();
+    try {
+      await Future.wait<void>([
+        DuoBoardHostPresence.instance.prepareForSignOut(),
+        removeTokenForCurrentMember(),
+      ]).timeout(const Duration(milliseconds: 2500));
+    } catch (error) {
+      debugPrint('[DuoBoard] sign-out cleanup timed out: ${error.runtimeType}');
+    }
     await FirebaseAuth.instance.signOut();
   }
 
@@ -161,25 +169,63 @@ class DuoBoardPushService {
 
   static Future<void> _watchRequests(
       User? user, BuildContext Function() context) async {
+    final generation = ++_requestWatchGeneration;
     await _requestSubscription?.cancel();
     _requestSubscription = null;
     if (user == null || user.isAnonymous) return;
-    _requestSubscription = FirebaseFirestore.instance
+    final query = FirebaseFirestore.instance
         .collection('duo_board_requests')
-        .where('ownerUid', isEqualTo: user.uid)
-        .snapshots()
-        .listen((snapshot) {
-      for (final change in snapshot.docChanges) {
-        if (change.type == DocumentChangeType.removed) continue;
-        final data = change.doc.data();
-        final expires = data?['expiresAt'];
-        if (data?['status'] == 'waiting' &&
-            expires is Timestamp &&
-            expires.toDate().isAfter(DateTime.now())) {
-          unawaited(_prompt(change.doc.id, context()));
-        }
+        .where('ownerUid', isEqualTo: user.uid);
+    _requestSubscription = query.snapshots().listen(
+      (snapshot) => _dispatchWaitingRequests(snapshot.docs, context),
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint('[DuoBoard] request listener failed: ${error.runtimeType}');
+        if (generation != _requestWatchGeneration) return;
+        Future<void>.delayed(const Duration(seconds: 1), () {
+          if (generation == _requestWatchGeneration &&
+              FirebaseAuth.instance.currentUser?.uid == user.uid) {
+            unawaited(_watchRequests(user, context));
+          }
+        });
+      },
+    );
+
+    // Authentication may settle just before the listener is attached. One
+    // explicit read closes that startup gap without permanent polling cost.
+    unawaited(_pollWaitingRequests(query, context));
+  }
+
+  static Future<void> _pollWaitingRequests(
+    Query<Map<String, dynamic>> query,
+    BuildContext Function() context,
+  ) async {
+    if (_requestPollInFlight) return;
+    _requestPollInFlight = true;
+    try {
+      final snapshot = await query.get();
+      _dispatchWaitingRequests(snapshot.docs, context);
+    } catch (error) {
+      debugPrint(
+          '[DuoBoard] initial request poll failed: ${error.runtimeType}');
+    } finally {
+      _requestPollInFlight = false;
+    }
+  }
+
+  static void _dispatchWaitingRequests(
+    Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    BuildContext Function() context,
+  ) {
+    final now = DateTime.now();
+    for (final doc in docs) {
+      final data = doc.data();
+      final expires = data['expiresAt'];
+      if (data['status'] == 'waiting' &&
+          expires is Timestamp &&
+          expires.toDate().isAfter(now)) {
+        unawaited(_prompt(doc.id, context()));
       }
-    });
+    }
   }
 
   static Future<void> _prompt(String requestId, BuildContext context) async {
@@ -234,17 +280,13 @@ class DuoBoardPushService {
           '[DuoBoard] open request failed: ${error.code} ${error.message}');
       if (!context.mounted) return;
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        SnackBar(
-            content:
-                Text(DuoInviteCopy.forSystemLocale()['requestGone'])),
+        SnackBar(content: Text(DuoInviteCopy.forSystemLocale()['requestGone'])),
       );
     } catch (error) {
       debugPrint('[DuoBoard] open request failed: $error');
       if (!context.mounted) return;
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        SnackBar(
-            content:
-                Text(DuoInviteCopy.forSystemLocale()['requestGone'])),
+        SnackBar(content: Text(DuoInviteCopy.forSystemLocale()['requestGone'])),
       );
     }
   }

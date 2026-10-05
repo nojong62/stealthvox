@@ -23,8 +23,13 @@
 
 /// 한 턴(상대 발화 하나)의 시각표. 턴마다 새로 만든다.
 class DuoInterpLatency {
-  DuoInterpLatency({required this.turnId, required this.path})
-      : incomingMessageReceived = DateTime.now();
+  DuoInterpLatency({
+    required this.turnId,
+    required this.path,
+    this.remoteSpeechStarted,
+    this.remoteTranscriptReady,
+    this.remoteSent,
+  }) : incomingMessageReceived = DateTime.now();
 
   /// 로그에서 턴을 이어 보기 위한 값. TTS `turnId`와 같은 것을 쓴다.
   final String turnId;
@@ -33,6 +38,9 @@ class DuoInterpLatency {
   final String path;
 
   final DateTime incomingMessageReceived;
+  final DateTime? remoteSpeechStarted;
+  final DateTime? remoteTranscriptReady;
+  final DateTime? remoteSent;
 
   DateTime? translationRequestStart;
   DateTime? firstTranslationDelta;
@@ -60,11 +68,13 @@ class DuoInterpLatency {
 
   /// 🎯 KPI — 상대 말이 도착하고 내 귀에 소리가 나기까지.
   int? get toPlaybackMs => _ms(incomingMessageReceived, playbackStart);
+  int? get speechToPlaybackMs => _ms(remoteSpeechStarted, playbackStart);
+  int? get transcriptToPlaybackMs => _ms(remoteTranscriptReady, playbackStart);
+  int? get transportMs => _ms(remoteSent, incomingMessageReceived);
 
   int? get translateTtfbMs =>
       _ms(translationRequestStart, firstTranslationDelta);
-  int? get deltaToChunkMs =>
-      _ms(firstTranslationDelta, firstTtsChunkCommitted);
+  int? get deltaToChunkMs => _ms(firstTranslationDelta, firstTtsChunkCommitted);
   int? get ttsTtfbMs => _ms(firstTtsRequestStart, firstTtsAudioReady);
   int? get translateTotalMs =>
       _ms(translationRequestStart, translationComplete);
@@ -89,6 +99,9 @@ class DuoInterpLatency {
 
   /// 실기기 로그 한 줄. 오디오 내용도 전사문도 싣지 않는다 — 숫자뿐이다.
   String summary() => 'turn=$turnId path=$path '
+      'speechToPlaybackMs=${speechToPlaybackMs ?? -1} '
+      'transcriptToPlaybackMs=${transcriptToPlaybackMs ?? -1} '
+      'transportMs=${transportMs ?? -1} '
       'toPlaybackMs=${toPlaybackMs ?? -1} '
       'translateTtfbMs=${translateTtfbMs ?? -1} '
       'deltaToChunkMs=${deltaToChunkMs ?? -1} '
