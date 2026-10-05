@@ -1,22 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
-import '/app_state.dart';
-
-const Map<String, String> _languageCodeToName = {
-  'en': 'English',
-  'ko': 'Korean',
-  'ja': 'Japanese',
-  'zh': 'Chinese',
-  'es': 'Spanish',
-  'fr': 'French',
-  'de': 'German',
-  'hi': 'Hindi',
-  'ru': 'Russian',
-  'pt': 'Portuguese',
-  'it': 'Italian',
-  'nl': 'Dutch',
-};
+import 'system_ui_language.dart';
 
 const Map<String, TranslateLanguage> _translateLanguages = {
   'English': TranslateLanguage.english,
@@ -33,17 +18,11 @@ const Map<String, TranslateLanguage> _translateLanguages = {
   'Dutch': TranslateLanguage.dutch,
 };
 
-/// Uses the explicit Chat Language when one was chosen. Before that, including
-/// anonymous first entry, it follows the phone's system language.
-String duoBoardViewerLanguage() {
-  final app = FFAppState();
-  if (app.prefs.containsKey('ff_chatLang') &&
-      _translateLanguages.containsKey(app.chatLang)) {
-    return app.chatLang;
-  }
-  final code = PlatformDispatcher.instance.locale.languageCode.toLowerCase();
-  return _languageCodeToName[code] ?? 'English';
-}
+/// The invitation board is public UI and is also available before Origin is
+/// configured. Its display language therefore always follows the viewer's
+/// phone system language. `chatLang` belongs to partner conversation content
+/// and History; it must not leak into this surface.
+String duoBoardViewerLanguage() => systemUiLanguageName();
 
 /// Only show translation attribution when this card can genuinely be translated.
 /// Older board posts did not persist their source language and remain original.

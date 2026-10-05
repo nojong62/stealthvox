@@ -14,16 +14,14 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/duo_final_transcription.dart';
+import 'package:stealth_vox/custom_code/services/origin_pcm_store.dart';
 
-String _read(String p) =>
-    File(p).readAsStringSync().replaceAll('\r\n', '\n');
+String _read(String p) => File(p).readAsStringSync().replaceAll('\r\n', '\n');
 
 /// 주석을 뺀 **코드만**. 이 파일들은 "무엇을 안 하는지"를 주석에 적어 두므로,
 /// 그대로 찾으면 설명 문장이 걸려 단언이 거짓 양성이 된다.
-String _codeOnly(String src) => src
-    .split('\n')
-    .where((l) => !l.trimLeft().startsWith('//'))
-    .join('\n');
+String _codeOnly(String src) =>
+    src.split('\n').where((l) => !l.trimLeft().startsWith('//')).join('\n');
 
 DuoFinalRow row({
   String docId = 'd1',
@@ -47,8 +45,7 @@ DuoFinalRow row({
 /// 실제 표와 같은 모양의 가짜. 모르는 이름은 빈 값이다.
 String langOf(String name) => name == 'Korean' ? 'ko' : '';
 
-DuoFinalPlan plan(DuoFinalRow r) =>
-    planDuoFinalRow(r, languageCodeOf: langOf);
+DuoFinalPlan plan(DuoFinalRow r) => planDuoFinalRow(r, languageCodeOf: langOf);
 
 void main() {
   group('어느 줄을 다시 들을 것인가', () {
@@ -56,8 +53,7 @@ void main() {
       final p = plan(row());
       expect(p.shouldRetranscribe, isTrue);
       expect(p.pcmKey, 'item_1');
-      expect(p.languageCode, 'ko',
-          reason: '언어를 안 박으면 짧은 발화에서 흔들린다');
+      expect(p.languageCode, 'ko', reason: '언어를 안 박으면 짧은 발화에서 흔들린다');
     });
 
     test('상대 발화는 건너뛴다 — 그 소리는 내 폰에 없다', () {
@@ -148,8 +144,8 @@ void main() {
   });
 
   group('②③ 범위를 넘지 않는다', () {
-    final String svc =
-        _codeOnly(_read('lib/custom_code/services/duo_final_transcription.dart'));
+    final String svc = _codeOnly(
+        _read('lib/custom_code/services/duo_final_transcription.dart'));
     final String runner = _codeOnly(
         _read('lib/custom_code/services/duo_final_transcription_runner.dart'));
     // 앞 여유·싱글턴 단언은 코드 줄을 보므로 같은 문자열로 충분하다.
@@ -190,15 +186,15 @@ void main() {
     });
 
     test('기다리지 않는 싱글턴이다', () {
-      expect(runner, contains('static final DuoFinalTranscriptionRunner instance'));
+      expect(runner,
+          contains('static final DuoFinalTranscriptionRunner instance'));
       expect(runner, contains('void start('),
           reason: 'Future를 돌려주면 호출부가 나가는 길에 기다리게 된다');
     });
   });
 
   group('🔌 통화 종료에 걸려 있다', () {
-    final String duo =
-        _read('lib/custom_code/widgets/routine_mode_duo.dart');
+    final String duo = _read('lib/custom_code/widgets/routine_mode_duo.dart');
 
     test('통역 종료에서 시작한다', () {
       expect(duo, contains('DuoFinalTranscriptionRunner.instance.start('));
@@ -259,6 +255,57 @@ void main() {
       expect(duoFinalSupersedesRestoration(<String, dynamic>{}), isFalse);
       expect(duoFinalSupersedesRestoration(null), isFalse);
     });
+
+    test('재전사 pending이면 성공 0줄이어도 PCM 보호를 위해 복원을 건너뛴다', () {
+      expect(
+          duoFinalSupersedesRestoration(<String, dynamic>{
+            kRoomTranscriptionStateField: kRoomTranscriptionPending,
+            kDuoFinalRoomSuccessField: 0,
+            kDuoFinalRoomFailField: 1,
+          }),
+          isTrue,
+          reason: '복원 러너가 PCM을 지우면 다음 History 진입에서 재처리할 수 없다');
+    });
+  });
+
+  group('🔁 실패해도 같은 GPT Transcribe로 복구한다', () {
+    final String runner = _codeOnly(
+        _read('lib/custom_code/services/duo_final_transcription_runner.dart'));
+
+    test('동일 모델 전체 재시도는 최초 호출 포함 2회다', () {
+      expect(runner, contains('static const int sameModelAttempts = 2'));
+      expect(runner, contains('attempt <= sameModelAttempts'));
+      expect(runner, contains('model: OpenAiTranscribeService.duoFinalModel'));
+    });
+
+    test('긴 PCM은 전체 재시도 뒤 작은 구간으로 복구한다', () {
+      final int retry = runner.indexOf('attempt <= sameModelAttempts');
+      final int chunk = runner.indexOf('retryChunkDuration.inSeconds', retry);
+      final int slice = runner.indexOf('Uint8List.sublistView', chunk);
+      expect(retry, greaterThan(0));
+      expect(chunk, greaterThan(retry));
+      expect(slice, greaterThan(chunk));
+    });
+
+    test('끝내 실패하면 pending으로 남기고 PCM 삭제 전에 반환한다', () {
+      final int pending = runner
+          .indexOf('kRoomTranscriptionStateField: kRoomTranscriptionPending');
+      final int pendingReturn = runner.indexOf('return;', pending);
+      final int discard = runner.indexOf('OriginPcmStore.instance.discard');
+      expect(pending, greaterThan(0));
+      expect(pendingReturn, greaterThan(pending));
+      expect(discard, greaterThan(pendingReturn));
+    });
+
+    test('완료된 방만 complete로 표시한다', () {
+      final int pendingReturn = runner.indexOf(
+          'return;',
+          runner.indexOf(
+              'kRoomTranscriptionStateField: kRoomTranscriptionPending'));
+      final int complete = runner
+          .indexOf('kRoomTranscriptionStateField: kRoomTranscriptionComplete');
+      expect(complete, greaterThan(pendingReturn));
+    });
   });
 
   group('🧹 PCM 청소 주인이 재전사로 넘어왔다', () {
@@ -289,15 +336,18 @@ void main() {
 
     test('대기 API가 있고 상한이 복원과 같다', () {
       expect(runner, contains('Future<DuoFinalWaitResult> awaitIfRunning('));
-      expect(runner, contains('static const Duration waitTimeout = Duration(minutes: 3)'));
+      expect(runner,
+          contains('static const Duration waitTimeout = Duration(minutes: 3)'));
     });
 
     test('공부방이 canonical 직후에 걸고 기다린다', () {
       // ⚠️ `awaitIfRunning(`만으로 찾으면 안 된다 — 이 파일에는 원문 복원
       //   쪽 대기 호출이 여러 개 있다. 이 판의 대기는 로그 한 줄로 가린다.
-      final int start = study.indexOf('DuoFinalTranscriptionRunner.instance.start(');
+      final int start =
+          study.indexOf('DuoFinalTranscriptionRunner.instance.start(');
       final int wait = study.indexOf('[DUO-FINAL] study_wait');
-      final int restore = study.indexOf("_recoverOriginRestoration(caller: 'sync_canonical')");
+      final int restore =
+          study.indexOf("_recoverOriginRestoration(caller: 'sync_canonical')");
       expect(start, greaterThan(0));
       expect(wait, greaterThan(start));
       expect(restore, greaterThan(wait),
@@ -324,13 +374,13 @@ void main() {
 
     test('restoring 단계로 올리기 전에 우회를 먼저 본다', () {
       final int bypass = history.indexOf('duoFinalSupersedesRestoration(');
-      final int gate = history.indexOf('shouldRunRestoration(freshData)', bypass);
-      final int stage = history.indexOf(
-          '_HistoryPreparationStage.restoring', bypass);
+      final int gate =
+          history.indexOf('shouldRunRestoration(freshData)', bypass);
+      final int stage =
+          history.indexOf('_HistoryPreparationStage.restoring', bypass);
       expect(bypass, greaterThan(0));
       expect(gate, greaterThan(bypass));
-      expect(stage, greaterThan(bypass),
-          reason: '단계를 올린 뒤에 막으면 이미 대기에 들어간 뒤다');
+      expect(stage, greaterThan(bypass), reason: '단계를 올린 뒤에 막으면 이미 대기에 들어간 뒤다');
     });
 
     test('우회한 방은 복원 조건을 아예 통과하지 못한다', () {
@@ -374,18 +424,22 @@ void main() {
         _read('lib/custom_code/services/duo_final_transcription_runner.dart'));
 
     test('완료 표시가 있으면 끝난 방이다', () {
-      expect(duoFinalRoomAlreadyDone(<String, dynamic>{
-        kDuoFinalRoomCompletedField: 'ts',
-        kDuoFinalRoomSuccessField: 2,
-      }), isTrue);
+      expect(
+          duoFinalRoomAlreadyDone(<String, dynamic>{
+            kDuoFinalRoomCompletedField: 'ts',
+            kDuoFinalRoomSuccessField: 2,
+          }),
+          isTrue);
     });
 
     test('성공이 0줄이어도 끝난 판은 끝난 것이다', () {
       // 소리는 이미 지워졌다. 다시 열어 봐야 같은 0이 나온다.
-      expect(duoFinalRoomAlreadyDone(<String, dynamic>{
-        kDuoFinalRoomCompletedField: 'ts',
-        kDuoFinalRoomSuccessField: 0,
-      }), isTrue);
+      expect(
+          duoFinalRoomAlreadyDone(<String, dynamic>{
+            kDuoFinalRoomCompletedField: 'ts',
+            kDuoFinalRoomSuccessField: 0,
+          }),
+          isTrue);
     });
 
     test('중간에 끊긴 판은 다시 시도할 값이 있다', () {
@@ -400,8 +454,7 @@ void main() {
       final int rows = runner.indexOf("collection('messages').get()", run);
       expect(run, greaterThan(0));
       expect(guard, greaterThan(run));
-      expect(guard, lessThan(rows),
-          reason: '줄을 다 돌고 나서 막으면 이미 0을 써 버린 뒤다');
+      expect(guard, lessThan(rows), reason: '줄을 다 돌고 나서 막으면 이미 0을 써 버린 뒤다');
     });
 
     test('막을 때는 방 표시를 쓰지 않고 그냥 나간다', () {
@@ -409,8 +462,7 @@ void main() {
       final int ret = runner.indexOf('return;', guard);
       final int marker = runner.indexOf('kDuoFinalRoomCompletedField', guard);
       expect(ret, greaterThan(guard));
-      expect(marker, greaterThan(ret),
-          reason: '한 번 올라간 success는 내려가면 안 된다');
+      expect(marker, greaterThan(ret), reason: '한 번 올라간 success는 내려가면 안 된다');
     });
   });
 
@@ -429,11 +481,11 @@ void main() {
     test('readKeyed가 머리말을 벗겨서 돌려준다', () {
       final int read = store.indexOf('Future<Uint8List?> readKeyed(');
       final int unwrap = store.indexOf('wavToPcm16(', read);
-      final int close = store.indexOf('Future<OriginPcmManifest> manifest(', read);
+      final int close =
+          store.indexOf('Future<OriginPcmManifest> manifest(', read);
       expect(read, greaterThan(0));
       expect(unwrap, greaterThan(read));
-      expect(unwrap, lessThan(close),
-          reason: '창고가 안 벗기면 꺼내 쓰는 쪽마다 벗겨야 한다');
+      expect(unwrap, lessThan(close), reason: '창고가 안 벗기면 꺼내 쓰는 쪽마다 벗겨야 한다');
     });
 
     test('재전사 러너는 두 번 벗기지 않는다', () {
@@ -460,9 +512,11 @@ void main() {
         _codeOnly(_read('lib/custom_code/widgets/routine_mode_duo.dart'));
 
     test('onUtteranceClosed에서 담는다', () {
-      final int closed = duo.indexOf('session.onUtteranceClosed = (utteranceId, utterance, voicedMs)');
+      final int closed = duo.indexOf(
+          'session.onUtteranceClosed = (utteranceId, utterance, voicedMs)');
       final int stash = duo.indexOf('_stashDuoPcm(', closed);
-      final int transcript = duo.indexOf('session.onTranscript = (result)', closed);
+      final int transcript =
+          duo.indexOf('session.onTranscript = (result)', closed);
       expect(closed, greaterThan(0));
       expect(stash, greaterThan(closed));
       expect(stash, lessThan(transcript),

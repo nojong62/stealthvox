@@ -26,6 +26,8 @@
 
 import 'package:flutter/foundation.dart';
 
+import 'origin_pcm_store.dart';
+
 // ══════════════════════════════════════════════════════════════════════
 // 방 단위 표시 — 이 통화가 새 파이프라인을 탔는가
 // ══════════════════════════════════════════════════════════════════════
@@ -62,14 +64,17 @@ bool duoFinalRoomAlreadyDone(Map<String, dynamic>? room) =>
 /// 소리로 다시 들은 결과이고, 그 위에 "의심점만 다시 듣는" 층을 또 얹으면
 /// **앞 단계가 고친 것을 뒤 단계가 되돌리는** 상호작용이 생긴다.
 ///
-/// 반대로 성공이 0줄이면 새 경로는 실질적으로 아무 일도 못 한 것이다
-/// (소리가 없었거나 전사가 전부 실패했다). 그때는 기존 복원을 그대로 둔다 —
-/// 새 경로를 넣었다는 이유로 있던 방어선을 잃으면 안 된다.
+/// 전사가 끝내 실패해 `pending`이면 성공이 0줄이어도 복원을 건너뛴다.
+/// 실패한 줄은 실시간 원문을 보여 주되 PCM을 보존하고, 다음 History 진입에서
+/// 같은 `gpt-transcribe`로 다시 처리한다. 이때 기존 복원을 먼저 돌리면 그
+/// 러너가 PCM을 지워 재처리 기회가 사라진다.
 ///
-/// ⚠️ **부분 실패는 건너뛰는 쪽이다.** 몇 줄 때문에 복원 전체를 다시 돌리는
-/// 것이 바로 걷어내려던 그 구조다. 실패한 줄은 실시간 원문이 남는다.
+/// PCM 자체가 없어서 성공 0줄로 **완료된** 옛 방만 기존 복원을 그대로 둔다.
 bool duoFinalSupersedesRestoration(Map<String, dynamic>? room) {
   if (room == null) return false;
+  if (room[kRoomTranscriptionStateField] == kRoomTranscriptionPending) {
+    return true;
+  }
   if (room[kDuoFinalRoomCompletedField] == null) return false;
   final Object? success = room[kDuoFinalRoomSuccessField];
   return success is int && success > 0;
@@ -222,7 +227,8 @@ Map<String, Object?> buildDuoFinalUpdate({
     'original_text': next,
     // 🔤 실시간 전사를 남긴다. **이미 있으면 덮지 않는다** — 가장 처음 것이
     //   원문이고, 두 번째 판이 그것을 지우면 비교할 기준이 사라진다.
-    if (existingRaw.trim().isEmpty && live.isNotEmpty) 'original_text_raw': live,
+    if (existingRaw.trim().isEmpty && live.isNotEmpty)
+      'original_text_raw': live,
     kDuoFinalTranscribedAtField: finalizedAt,
     // 바뀐 줄에만 찍는다. 이 수가 곧 "실시간이 틀렸던 줄"의 수다.
     if (changed) kDuoFinalChangedField: true,

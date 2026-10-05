@@ -536,7 +536,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         children: [
           Expanded(
             child: _buildSegment(
-              icon: Icons.auto_stories_rounded,
               label: 'SR',
               highlighted: true,
               onTap: () => context.pushNamed('ChatHistory'),
@@ -545,7 +544,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           const SizedBox(width: 4),
           Expanded(
             child: _buildSegment(
-              icon: Icons.forum_outlined,
               label: 'Duo Board',
               highlighted: false,
               onTap: _openDuoBoardAsGuest,
@@ -554,7 +552,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           const SizedBox(width: 4),
           Expanded(
             child: _buildSegment(
-              icon: Icons.storefront_rounded,
               label: 'Store',
               highlighted: false,
               onTap: () => context.pushNamed('Store'),
@@ -566,39 +563,38 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   Widget _buildSegment({
-    required IconData icon,
     required String label,
     required bool highlighted,
     required VoidCallback onTap,
   }) {
-    return Material(
-      color: highlighted ? _kLobbySurfaceHi : Colors.transparent,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 15,
-                color: highlighted ? _kLobbyCyan : _kLobbyTextLow,
+    const radius = BorderRadius.all(Radius.circular(12));
+    return SizedBox(
+      height: 42,
+      child: Material(
+        color: highlighted ? _kLobbySurfaceHi : Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: radius,
+          side: BorderSide(
+            color: highlighted ? _kLobbyCyan : _kLobbyBorder,
+            width: highlighted ? 1.2 : 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: radius,
+          child: Center(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: highlighted ? _kLobbyTextHi : _kLobbyTextMid,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
               ),
-              const SizedBox(width: 4),
-              Text(
-                label,
-                maxLines: 1,
-                style: TextStyle(
-                  color: highlighted ? _kLobbyTextHi : _kLobbyTextMid,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

@@ -5,7 +5,6 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
-import '/app_state.dart';
 import '/custom_code/services/duo_invite_localization.dart';
 import '/custom_code/services/duo_call_resolution.dart';
 import '/custom_code/services/duo_board_service.dart';
@@ -118,9 +117,9 @@ Future<bool> showDuoBoardComposer(
                               roomId: roomId,
                               historyPath: historyPath,
                               topic: value,
-                              topicLanguage: FFAppState().chatLang.isNotEmpty
-                                  ? FFAppState().chatLang
-                                  : duoBoardViewerLanguage(),
+                              // The board is system-language UI, including for
+                              // anonymous viewers without an Origin setting.
+                              topicLanguage: duoBoardViewerLanguage(),
                               mode: 'interpreter',
                               directLanguage: '',
                               availability: 'request');

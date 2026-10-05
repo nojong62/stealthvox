@@ -16,7 +16,6 @@
 // ====================================================================
 
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -44,6 +43,13 @@ class DuoFinalTranscriptionRunner {
 
   /// 발화 하나를 다시 듣는 데 주는 상한.
   static const Duration perUtteranceTimeout = Duration(seconds: 30);
+
+  /// 정상 호출이 일시적으로 실패하면 **같은 모델로 딱 한 번** 더 듣는다.
+  static const int sameModelAttempts = 2;
+
+  /// 전체 업로드가 두 번 다 실패한 긴 발화만 작은 PCM 구간으로 나눈다.
+  /// 평범한 짧은 발화를 잘라 단어 경계를 손상시키지 않기 위한 상한이다.
+  static const Duration retryChunkDuration = Duration(seconds: 15);
 
   /// 공부방이 한 판을 기다리는 상한. 기존 원문 복원이 쓰던 값과 같다 —
   /// 그 대기 자리를 이 판이 물려받는다.
@@ -127,8 +133,16 @@ class DuoFinalTranscriptionRunner {
         return;
       }
 
+      // 판을 열자마자 pending을 먼저 남긴다. 앱이 중간에 종료되거나 예상하지
+      // 못한 예외가 나도 기존 원문 복원이 PCM을 지우지 않고, 다음 History
+      // 진입이 이 판을 다시 집어 들 수 있어야 한다.
+      await historyRef.set(<String, dynamic>{
+        kRoomTranscriptionStateField: kRoomTranscriptionPending,
+      }, SetOptions(merge: true));
+
       final snap = await historyRef.collection('messages').get();
       stats = stats.copyWith(rows: snap.docs.length);
+      var alreadyTranscribed = 0;
 
       for (final doc in snap.docs) {
         final data = doc.data();
@@ -143,8 +157,9 @@ class DuoFinalTranscriptionRunner {
               (data[kStudyStateField] ?? '').toString().trim() ==
                   kStudyStateDeletedByUser,
         );
-        final plan = planDuoFinalRow(row,
-            languageCodeOf: restorationLanguageCode);
+        if (row.alreadyFinal) alreadyTranscribed++;
+        final plan =
+            planDuoFinalRow(row, languageCodeOf: restorationLanguageCode);
         if (!plan.shouldRetranscribe) {
           stats = plan.skipReason == DuoFinalSkip.noPcm
               ? stats.copyWith(skippedNoPcm: stats.skippedNoPcm + 1)
@@ -197,12 +212,29 @@ class DuoFinalTranscriptionRunner {
             'finalLen=${finalText.trim().length} '
             'changed=${update.containsKey(kDuoFinalChangedField)}');
       }
+      final int totalSuccess = alreadyTranscribed + stats.retranscribed;
+
+      // 🔁 모든 재시도 후에도 못 만든 줄이 있으면 **완료로 닫지 않는다.**
+      //   실시간 원문과 PCM을 함께 남겨 다음 History 진입에서 실패한 줄만
+      //   같은 gpt-transcribe로 다시 처리한다.
+      if (stats.failed > 0) {
+        await historyRef.set(<String, dynamic>{
+          kRoomTranscriptionStateField: kRoomTranscriptionPending,
+          kDuoFinalRoomSuccessField: totalSuccess,
+          kDuoFinalRoomFailField: stats.failed,
+        }, SetOptions(merge: true));
+        debugPrint('[DUO-FINAL] pending room=$roomId '
+            'success=$totalSuccess failed=${stats.failed} pcm_preserved=true');
+        return;
+      }
+
       // 🏁 한 판이 **끝까지** 돌았다. 여기까지 와야 방에 표시한다 — 중간에
       //   예외로 빠진 판은 이 줄을 지나지 않는다.
       await historyRef.set(<String, dynamic>{
         kDuoFinalRoomCompletedField: FieldValue.serverTimestamp(),
-        kDuoFinalRoomSuccessField: stats.retranscribed,
-        kDuoFinalRoomFailField: stats.failed,
+        kDuoFinalRoomSuccessField: totalSuccess,
+        kDuoFinalRoomFailField: 0,
+        kRoomTranscriptionStateField: kRoomTranscriptionComplete,
       }, SetOptions(merge: true));
 
       // 🧹 [PCM] **이제 이 방의 소리를 지운다.**
@@ -215,14 +247,23 @@ class DuoFinalTranscriptionRunner {
       //   방 표시까지 찍힌 지금이 그 시점이다. 중간에 예외가 나면 이 줄에
       //   닿지 않으므로 소리가 남고, 다음에 다시 시도할 수 있다.
       //
-      //   실패한 줄이 있어도 지운다 — 그 줄은 실시간 원문으로 확정됐고,
-      //   같은 소리를 또 들어 봐야 같은 결과다.
+      //   실패한 줄이 있으면 위에서 이미 return했다. 이 지점은 전사가 모두
+      //   끝난 방만 도달하므로 PCM을 지워도 된다.
       await OriginPcmStore.instance.discard(roomId);
       debugPrint('[DUO-FINAL] pcm_discarded room=$roomId');
     } catch (e) {
       // ⚠️ 여기서 소리를 지우지 않는다. 끝까지 못 간 판이라 다음 기회가 있다.
       debugPrint('[DUO-FINAL] run_failed room=$roomId ${e.runtimeType} '
           '— PCM은 남긴다');
+      // 첫 pending 쓰기 자체가 일시적으로 실패했거나, 뒤쪽 Firestore 작업에서
+      // 빠졌을 수도 있다. 한 번 더 표시해 두되 이 표시 실패가 원래 오류를
+      // 가리지는 않게 한다.
+      try {
+        await historyRef.set(<String, dynamic>{
+          kRoomTranscriptionStateField: kRoomTranscriptionPending,
+          kDuoFinalRoomFailField: stats.failed > 0 ? stats.failed : 1,
+        }, SetOptions(merge: true));
+      } catch (_) {}
     } finally {
       sw.stop();
       // 🔎 [계측] `skippedNoPcm`이 곧 **이 폰에 소리가 없는 줄**이다.
@@ -255,7 +296,74 @@ class DuoFinalTranscriptionRunner {
         debugPrint('[DUO-FINAL] empty_audio utt=$utteranceId');
         return null;
       }
-      return await OpenAiTranscribeService.transcribePcm16(
+      // 1차와 즉시 재시도는 **같은 PCM·같은 gpt-transcribe**다.
+      for (var attempt = 1; attempt <= sameModelAttempts; attempt++) {
+        final String text = (await _transcribeOnce(
+                  apiKey: apiKey,
+                  pcm: pcm,
+                  languageCode: languageCode,
+                ) ??
+                '')
+            .trim();
+        if (text.isNotEmpty) {
+          debugPrint('[DUO-FINAL] transcribe_ok utt=$utteranceId '
+              'attempt=$attempt model=${OpenAiTranscribeService.duoFinalModel}');
+          return text;
+        }
+        debugPrint('[DUO-FINAL] transcribe_retry utt=$utteranceId '
+            'attempt=$attempt/$sameModelAttempts '
+            'model=${OpenAiTranscribeService.duoFinalModel}');
+        if (attempt < sameModelAttempts) {
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+        }
+      }
+
+      // 업로드 크기·길이 문제일 수 있는 긴 발화는 작은 구간으로 한 번 더
+      // 시도한다. 모든 구간이 성공해야만 합쳐서 쓴다.
+      final int bytesPerChunk =
+          kStealthVoxSttSampleRate * 2 * retryChunkDuration.inSeconds;
+      if (pcm.length > bytesPerChunk) {
+        final parts = <String>[];
+        var offset = 0;
+        var chunk = 0;
+        while (offset < pcm.length) {
+          final int next = offset + bytesPerChunk;
+          final int end = next < pcm.length ? next : pcm.length;
+          final Uint8List slice = Uint8List.sublistView(pcm, offset, end);
+          chunk++;
+          final String text = (await _transcribeOnce(
+                    apiKey: apiKey,
+                    pcm: slice,
+                    languageCode: languageCode,
+                  ) ??
+                  '')
+              .trim();
+          if (text.isEmpty) {
+            debugPrint('[DUO-FINAL] chunk_failed utt=$utteranceId '
+                'chunk=$chunk model=${OpenAiTranscribeService.duoFinalModel}');
+            return null;
+          }
+          parts.add(text);
+          offset = end;
+        }
+        debugPrint('[DUO-FINAL] chunk_recovery_ok utt=$utteranceId '
+            'chunks=${parts.length} model=${OpenAiTranscribeService.duoFinalModel}');
+        return parts.join(' ').trim();
+      }
+      return null;
+    } catch (e) {
+      debugPrint(
+          '[DUO-FINAL] transcribe_error utt=$utteranceId ${e.runtimeType}');
+      return null;
+    }
+  }
+
+  Future<String?> _transcribeOnce({
+    required String apiKey,
+    required Uint8List pcm,
+    required String languageCode,
+  }) =>
+      OpenAiTranscribeService.transcribePcm16(
         apiKey: apiKey,
         pcm: pcm,
         sampleRate: kStealthVoxSttSampleRate,
@@ -266,9 +374,4 @@ class DuoFinalTranscriptionRunner {
         //   여기서 잘라내면 그 작업이 통째로 헛것이 된다.
         trimLeadingSilence: false,
       );
-    } catch (e) {
-      debugPrint('[DUO-FINAL] transcribe_error utt=$utteranceId ${e.runtimeType}');
-      return null;
-    }
-  }
 }

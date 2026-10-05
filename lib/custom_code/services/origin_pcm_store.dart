@@ -58,8 +58,8 @@ const Duration kOriginPcmMaxAge = Duration(hours: 24);
 
 /// 📌 [TRANSCRIBE-STATE] 방 하나의 전사가 어디까지 갔는가.
 ///
-/// **아직 아무도 쓰지 않는다.** 통화 후 일괄 전사(다음 판)가 쓸 자리를 미리
-/// 이름만 정해 두는 것이고, 지금 이 판에서 상태 기계를 세우지 않는다.
+/// 통화 후 History 재전사(`DuoFinalTranscriptionRunner`)가 이 상태를 쓴다.
+/// 판을 열면 pending, 모든 발화가 끝나면 complete로 바뀐다.
 ///
 /// 이 값이 필요한 이유는 하나다 — 그 구조에서는 PCM이 **원본**이라, 전사가
 /// 끝나기 전에 소리가 사라지면 그 발화의 글자가 영영 안 생긴다. 그때

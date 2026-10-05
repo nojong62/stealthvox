@@ -2456,7 +2456,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     );
   }
 
-  // ── 녹음 시작/중지 + Whisper STT + 교정 ──
+  // ── 녹음 시작/중지 + GPT Transcribe + 교정 ──
   Future<void> _startKeeperRecording() async {
     _keeperRecorder ??= AudioRecorder();
     final hasPermission = await _keeperRecorder!.hasPermission();
@@ -2494,8 +2494,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
       if (!await file.exists()) return;
       final bytes = await file.readAsBytes();
 
-      // Whisper STT
-      final transcript = await _whisperTranscribe(bytes);
+      // GPT Transcribe STT
+      final transcript = await _transcribeKeeperAudio(bytes);
       if (transcript.isEmpty) return;
       BillingTicker.instance.resumeFromActivity('history_keeper_stt_result');
       _keeperTutoringTranscript = transcript;
@@ -2510,7 +2510,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     }
   }
 
-  Future<String> _whisperTranscribe(Uint8List audioBytes) async {
+  Future<String> _transcribeKeeperAudio(Uint8List audioBytes) async {
     if (_apiKey.isEmpty) return '';
     try {
       var request = http.MultipartRequest(
@@ -2531,7 +2531,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         return (json['text'] as String? ?? '').trim();
       }
     } catch (e) {
-      debugPrint('[Keepers] whisper error: $e');
+      debugPrint('[Keepers] gpt-transcribe error: $e');
     }
     return '';
   }

@@ -3720,7 +3720,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     final String targetLang = _sessionTargetLangName();
 
     try {
-      // 1. Whisper STT
+      // 1. GPT Transcribe STT
       final uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
       final request = http.MultipartRequest('POST', uri);
       request.headers['Authorization'] = 'Bearer $_apiKey';

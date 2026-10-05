@@ -14,17 +14,20 @@ class DuoBoardIntroNoticeCopy {
   final String cancel;
   final String openBoard;
 
-  static DuoBoardIntroNoticeCopy forSystemLocale() {
-    final code = PlatformDispatcher.instance.locale.languageCode.toLowerCase();
-    return _copies[code] ?? _copies['en']!;
-  }
+  static DuoBoardIntroNoticeCopy forSystemLocale() => forLanguageCode(
+        PlatformDispatcher.instance.locale.languageCode,
+      );
+
+  static DuoBoardIntroNoticeCopy forLanguageCode(String languageCode) =>
+      _copies[languageCode.trim().toLowerCase()] ?? _copies['en']!;
 
   static const _copies = <String, DuoBoardIntroNoticeCopy>{
     'ko': DuoBoardIntroNoticeCopy(
       title: 'Duo 통역 게시판 안내',
       body: '누구나 게시판에서 마음에 드는 주제를 올린 회원과 10분 동안 대화할 수 있습니다.\n\n'
           '대화하고 싶은 초대글을 누른 다음, 언어 설정에서 Chat Lang을 실제로 대화할 언어로 선택해 주세요. AI 통역을 통해 서로 다른 언어로도 자연스럽게 대화할 수 있습니다.\n\n'
-          '대화 내용은 공부방에 저장되며, 회원은 저장된 대화를 대화 연습 자료로 활용할 수 있습니다.',
+          '대화 내용은 공부방에 저장되며, 회원은 저장된 대화를 대화 연습 자료로 활용할 수 있습니다.\n\n'
+          '공개 Duo 초대는 언어 연습을 위한 대화입니다. 게시된 주제와 동떨어진 이야기나 비속어 등으로 상대방을 불쾌하게 하지 않도록 배려해 주세요.',
       cancel: '취소',
       openBoard: '게시판 보기',
     ),
@@ -33,7 +36,8 @@ class DuoBoardIntroNoticeCopy {
       body:
           'Anyone can have a 10-minute conversation with a member whose topic they like.\n\n'
           'Tap an invitation you want to join, then set Chat Lang in the language settings to the language you will speak. AI interpretation lets both people communicate naturally even when they use different languages.\n\n'
-          'The conversation is saved in the Study Room. Members can use the saved conversation as speaking-practice material.',
+          'The conversation is saved in the Study Room. Members can use the saved conversation as speaking-practice material.\n\n'
+          'Public Duo invitations are for language-practice conversations. Please stay on the posted topic and avoid profanity or other language that could make the other person uncomfortable.',
       cancel: 'Cancel',
       openBoard: 'View board',
     ),
@@ -41,7 +45,8 @@ class DuoBoardIntroNoticeCopy {
       title: 'Duo通訳掲示板のご案内',
       body: '掲示板で気になる話題を投稿した会員と、どなたでも10分間会話できます。\n\n'
           '参加したい招待をタップし、言語設定のChat Langを実際に話す言語に設定してください。AI通訳により、異なる言語でも自然に会話できます。\n\n'
-          '会話内容は学習ルームに保存されます。会員は保存された会話をスピーキング練習教材として利用できます。',
+          '会話内容は学習ルームに保存されます。会員は保存された会話をスピーキング練習教材として利用できます。\n\n'
+          '公開Duo招待は語学練習のための会話です。投稿されたテーマから大きく外れた話や暴言・不適切な言葉で相手を不快にさせないよう、ご配慮ください。',
       cancel: 'キャンセル',
       openBoard: '掲示板を見る',
     ),
@@ -49,7 +54,8 @@ class DuoBoardIntroNoticeCopy {
       title: 'Duo 口译公告板说明',
       body: '任何人都可以与发布了感兴趣话题的会员进行10分钟对话。\n\n'
           '点击想参加的邀请，然后在语言设置中将 Chat Lang 设为您实际要使用的语言。通过 AI 口译，即使双方使用不同语言也能自然交流。\n\n'
-          '对话内容会保存到学习室。会员可以将保存的对话用作口语练习资料。',
+          '对话内容会保存到学习室。会员可以将保存的对话用作口语练习资料。\n\n'
+          '公开的 Duo 邀请用于语言练习对话。请围绕发布的主题交流，并避免使用脏话或其他可能让对方感到不适的言语。',
       cancel: '取消',
       openBoard: '查看公告板',
     ),
@@ -58,7 +64,8 @@ class DuoBoardIntroNoticeCopy {
       body:
           'Cualquier persona puede conversar durante 10 minutos con un miembro cuyo tema le interese.\n\n'
           'Toca la invitación a la que quieras unirte y configura Chat Lang con el idioma que vas a hablar. La interpretación con IA permite conversar con naturalidad aunque uséis idiomas diferentes.\n\n'
-          'La conversación se guarda en la Sala de estudio. Los miembros pueden usarla como material para practicar conversación.',
+          'La conversación se guarda en la Sala de estudio. Los miembros pueden usarla como material para practicar conversación.\n\n'
+          'Las invitaciones públicas de Duo son para practicar idiomas. Mantén la conversación en el tema publicado y evita insultos u otras expresiones que puedan incomodar a la otra persona.',
       cancel: 'Cancelar',
       openBoard: 'Ver tablón',
     ),
@@ -67,7 +74,8 @@ class DuoBoardIntroNoticeCopy {
       body:
           'Tout le monde peut discuter pendant 10 minutes avec un membre dont le sujet lui plaît.\n\n'
           'Touchez l’invitation qui vous intéresse, puis choisissez dans Chat Lang la langue que vous parlerez. L’interprétation par IA permet de converser naturellement même dans des langues différentes.\n\n'
-          'La conversation est enregistrée dans la salle d’étude. Les membres peuvent l’utiliser comme support d’entraînement oral.',
+          'La conversation est enregistrée dans la salle d’étude. Les membres peuvent l’utiliser comme support d’entraînement oral.\n\n'
+          'Les invitations Duo publiques sont destinées à la pratique des langues. Restez dans le sujet publié et évitez les grossièretés ou tout propos susceptible de mettre l’autre personne mal à l’aise.',
       cancel: 'Annuler',
       openBoard: 'Voir le tableau',
     ),
@@ -76,7 +84,8 @@ class DuoBoardIntroNoticeCopy {
       body:
           'Jeder kann zehn Minuten lang mit einem Mitglied sprechen, dessen Thema ihm gefällt.\n\n'
           'Tippe auf eine passende Einladung und stelle Chat Lang auf die Sprache ein, die du sprechen wirst. Die KI-Übersetzung ermöglicht eine natürliche Unterhaltung auch in unterschiedlichen Sprachen.\n\n'
-          'Das Gespräch wird im Lernraum gespeichert. Mitglieder können es als Material für Sprechübungen verwenden.',
+          'Das Gespräch wird im Lernraum gespeichert. Mitglieder können es als Material für Sprechübungen verwenden.\n\n'
+          'Öffentliche Duo-Einladungen sind für Gespräche zum Sprachenüben gedacht. Bleibe beim veröffentlichten Thema und vermeide Schimpfwörter oder andere Äußerungen, die dein Gegenüber unangenehm berühren könnten.',
       cancel: 'Abbrechen',
       openBoard: 'Board ansehen',
     ),
@@ -85,7 +94,8 @@ class DuoBoardIntroNoticeCopy {
       body:
           'कोई भी व्यक्ति अपनी पसंद के विषय वाले सदस्य के साथ 10 मिनट बातचीत कर सकता है।\n\n'
           'जिस निमंत्रण में आपकी रुचि हो उसे टैप करें, फिर भाषा सेटिंग में Chat Lang को उस भाषा पर सेट करें जिसमें आप बोलेंगे। AI दुभाषिया अलग-अलग भाषाओं में भी सहज बातचीत संभव बनाता है।\n\n'
-          'बातचीत स्टडी रूम में सहेजी जाती है। सदस्य इसे बोलने के अभ्यास की सामग्री के रूप में उपयोग कर सकते हैं।',
+          'बातचीत स्टडी रूम में सहेजी जाती है। सदस्य इसे बोलने के अभ्यास की सामग्री के रूप में उपयोग कर सकते हैं।\n\n'
+          'सार्वजनिक Duo निमंत्रण भाषा-अभ्यास की बातचीत के लिए हैं। पोस्ट किए गए विषय पर रहें और गाली-गलौज या ऐसी भाषा से बचें जिससे दूसरे व्यक्ति को असहज महसूस हो।',
       cancel: 'रद्द करें',
       openBoard: 'बोर्ड देखें',
     ),
@@ -94,7 +104,8 @@ class DuoBoardIntroNoticeCopy {
       body:
           'Любой пользователь может десять минут поговорить с участником, тема которого ему интересна.\n\n'
           'Нажмите на подходящее приглашение и выберите в Chat Lang язык, на котором будете говорить. ИИ-перевод позволяет свободно общаться даже на разных языках.\n\n'
-          'Разговор сохраняется в учебной комнате. Участники могут использовать его как материал для разговорной практики.',
+          'Разговор сохраняется в учебной комнате. Участники могут использовать его как материал для разговорной практики.\n\n'
+          'Публичные приглашения Duo предназначены для языковой практики. Придерживайтесь заявленной темы и избегайте ругательств и других выражений, которые могут вызвать у собеседника дискомфорт.',
       cancel: 'Отмена',
       openBoard: 'Открыть доску',
     ),
@@ -103,7 +114,8 @@ class DuoBoardIntroNoticeCopy {
       body:
           'Qualquer pessoa pode conversar por 10 minutos com um membro cujo tema lhe interesse.\n\n'
           'Toque no convite desejado e defina Chat Lang como o idioma que você vai falar. A interpretação por IA permite conversar naturalmente mesmo usando idiomas diferentes.\n\n'
-          'A conversa é salva na Sala de Estudos. Os membros podem usá-la como material para praticar conversação.',
+          'A conversa é salva na Sala de Estudos. Os membros podem usá-la como material para praticar conversação.\n\n'
+          'Os convites públicos do Duo são destinados à prática de idiomas. Mantenha a conversa no tema publicado e evite palavrões ou outras falas que possam deixar a outra pessoa desconfortável.',
       cancel: 'Cancelar',
       openBoard: 'Ver mural',
     ),
@@ -112,7 +124,8 @@ class DuoBoardIntroNoticeCopy {
       body:
           'Chiunque può conversare per 10 minuti con un membro il cui argomento è di suo interesse.\n\n'
           'Tocca l’invito che preferisci e imposta Chat Lang sulla lingua che parlerai. L’interpretazione IA consente di comunicare naturalmente anche usando lingue diverse.\n\n'
-          'La conversazione viene salvata nella Sala studio. I membri possono usarla come materiale per esercitarsi nel parlato.',
+          'La conversazione viene salvata nella Sala studio. I membri possono usarla come materiale per esercitarsi nel parlato.\n\n'
+          'Gli inviti Duo pubblici sono destinati alla pratica linguistica. Rimani sul tema pubblicato ed evita parolacce o altre espressioni che potrebbero mettere a disagio l’altra persona.',
       cancel: 'Annulla',
       openBoard: 'Vedi bacheca',
     ),
@@ -121,7 +134,8 @@ class DuoBoardIntroNoticeCopy {
       body:
           'Iedereen kan tien minuten praten met een lid van wie het onderwerp aanspreekt.\n\n'
           'Tik op een uitnodiging waaraan je wilt deelnemen en stel Chat Lang in op de taal die je gaat spreken. Dankzij AI-vertolking kun je ook met verschillende talen natuurlijk met elkaar praten.\n\n'
-          'Het gesprek wordt opgeslagen in de studieruimte. Leden kunnen het opgeslagen gesprek gebruiken als oefenmateriaal voor spreekvaardigheid.',
+          'Het gesprek wordt opgeslagen in de studieruimte. Leden kunnen het opgeslagen gesprek gebruiken als oefenmateriaal voor spreekvaardigheid.\n\n'
+          'Openbare Duo-uitnodigingen zijn bedoeld voor taalgesprekken. Blijf bij het geplaatste onderwerp en vermijd scheldwoorden of andere taal die de ander een ongemakkelijk gevoel kan geven.',
       cancel: 'Annuleren',
       openBoard: 'Bord bekijken',
     ),
