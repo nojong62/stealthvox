@@ -91,6 +91,7 @@ import '/custom_code/services/duo_guest_handoff.dart';
 // 통화가 끝난 게스트가 방금 한 대화를 보는 자리.
 import 'duo_guest_study_page.dart';
 import 'duo_board_sheet.dart';
+import '/custom_code/services/duo_board_host_presence.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/duo_canonical.dart';
 import '/custom_code/services/origin_surface_localization.dart';
@@ -7479,6 +7480,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           'guestSession=${FFAppState().isGuestSession}',
     );
     await _finalizeDuoSession(reason);
+    // Restore the member's own board post after an incoming call ends.
+    await DuoBoardHostPresence.instance.resumePausedPostAfterIncomingInvite();
     if (!mounted) return;
     final bool isTrialHost = _exitWasTrialHost;
     final bool trialWasConsumed = _exitTrialWasConsumed;

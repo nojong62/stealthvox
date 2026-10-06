@@ -180,6 +180,31 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     }
   }
 
+  /// Restores the member's own invitation after a different board call ends.
+  ///
+  /// Joining someone else's invitation temporarily hides this post so the
+  /// member cannot receive two requests at once. The old flow stopped its
+  /// presence but never resumed the paused post when the call ended.
+  Future<void> resumePausedPostAfterIncomingInvite() async {
+    final postId = _pausedForIncomingInvitePostId;
+    if (postId == null || postId.isEmpty) return;
+    _pausedForIncomingInvitePostId = null;
+    _incomingInviteTakesPriority = false;
+    try {
+      final resumed = await DuoBoardService.resumePost(postId)
+          .timeout(const Duration(seconds: 8));
+      if (!resumed) {
+        debugPrint('[DuoBoard] paused post was not resumable: $postId');
+        return;
+      }
+      await ensureOnline().timeout(const Duration(seconds: 8));
+      _ownsActivePost = true;
+      debugPrint('[DuoBoard] paused post resumed after incoming call: $postId');
+    } catch (error) {
+      debugPrint('[DuoBoard] paused post resume failed: $error');
+    }
+  }
+
   Future<void> ensureOnline() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.isAnonymous) return;

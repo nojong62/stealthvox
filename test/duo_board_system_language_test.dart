@@ -18,9 +18,10 @@ void main() {
       expect(translation, isNot(contains('app.chatLang')));
     });
 
-    test('a newly posted topic records that same system UI language', () {
-      expect(board, contains('topicLanguage: duoBoardViewerLanguage()'));
-      expect(board, isNot(contains('topicLanguage: FFAppState')));
+    test('a newly posted topic records the host Origin language', () {
+      expect(board, contains('final originLanguage = directLanguage.trim()'));
+      expect(board, contains('topicLanguage: originLanguage'));
+      expect(board, contains('? duoBoardViewerLanguage()'));
     });
   });
 }

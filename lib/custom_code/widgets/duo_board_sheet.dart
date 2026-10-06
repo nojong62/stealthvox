@@ -117,13 +117,16 @@ Future<bool> showDuoBoardComposer(
                             debugPrint(
                                 '[DuoBoard] host presence unavailable before publish: $presenceError');
                           }
+                          final originLanguage = directLanguage.trim().isEmpty
+                              ? duoBoardViewerLanguage()
+                              : directLanguage.trim();
                           await DuoBoardService.publishPost(
                               roomId: roomId,
                               historyPath: historyPath,
                               topic: value,
-                              // The board is system-language UI, including for
-                              // anonymous viewers without an Origin setting.
-                              topicLanguage: duoBoardViewerLanguage(),
+                              // Orig. is the language the host will speak in
+                              // the Duo call, not the phone's UI language.
+                              topicLanguage: originLanguage,
                               mode: 'interpreter',
                               directLanguage: '',
                               availability: 'request');
