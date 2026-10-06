@@ -8416,7 +8416,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                     backgroundColor:
                         const Color(0xFF2563EB).withValues(alpha: 0.22),
                     shape: const CircleBorder(),
-                    minimumSize: const Size(44, 44),
+                    minimumSize: const Size(48, 48),
                   ),
                 ),
               const SizedBox(width: 4),
@@ -8624,7 +8624,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
               style: TextButton.styleFrom(
                 foregroundColor: const Color(0xFF93C5FD),
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                minimumSize: const Size(0, 44),
+                minimumSize: const Size(0, 48),
               ),
               child: Text(_surfaceCopy['retry'],
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),

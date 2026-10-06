@@ -146,8 +146,7 @@ class _StoreMasterState extends State<StoreMaster> {
   bool _priceLookupComplete = false;
   bool get _useEnglishLegalDocs => systemUiLanguageName() != 'Korean';
   TalkUiCopy get _copy => TalkUiCopy.forSystemLocale();
-  OriginSurfaceCopy get _surfaceCopy =>
-      OriginSurfaceCopy.forSystemLocale();
+  OriginSurfaceCopy get _surfaceCopy => OriginSurfaceCopy.forSystemLocale();
   String _versionText = '';
 
   // [v4.0] 서버 증액 감지용 Firestore 리스너
@@ -742,11 +741,11 @@ class _StoreMasterState extends State<StoreMaster> {
                     children: [
                       IconButton(
                         tooltip: 'Copy all',
-                        visualDensity: VisualDensity.compact,
+                        visualDensity: VisualDensity.standard,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints.tightFor(
-                          width: 36,
-                          height: 36,
+                          width: 48,
+                          height: 48,
                         ),
                         icon: const Icon(
                           Icons.copy_all_rounded,
@@ -769,11 +768,11 @@ class _StoreMasterState extends State<StoreMaster> {
                       ),
                       IconButton(
                         tooltip: 'Clear log',
-                        visualDensity: VisualDensity.compact,
+                        visualDensity: VisualDensity.standard,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints.tightFor(
-                          width: 36,
-                          height: 36,
+                          width: 48,
+                          height: 48,
                         ),
                         icon: const Icon(
                           Icons.delete_sweep_rounded,
@@ -787,11 +786,11 @@ class _StoreMasterState extends State<StoreMaster> {
                       ),
                       IconButton(
                         tooltip: 'Close',
-                        visualDensity: VisualDensity.compact,
+                        visualDensity: VisualDensity.standard,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints.tightFor(
-                          width: 36,
-                          height: 36,
+                          width: 48,
+                          height: 48,
                         ),
                         icon: const Icon(
                           Icons.close_rounded,

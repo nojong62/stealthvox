@@ -270,10 +270,28 @@ class _MyAppState extends State<MyApp> {
       theme: ThemeData(
         brightness: Brightness.light,
         useMaterial3: false,
+        // Keep every Material control finger-sized on phones. Individual
+        // icons may be visually small, but their hit target stays at least 48dp.
+        materialTapTargetSize: MaterialTapTargetSize.padded,
+        iconButtonTheme: IconButtonThemeData(
+          style: IconButton.styleFrom(
+            minimumSize: const Size(48, 48),
+            tapTargetSize: MaterialTapTargetSize.padded,
+            visualDensity: VisualDensity.standard,
+          ),
+        ),
       ),
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         useMaterial3: false,
+        materialTapTargetSize: MaterialTapTargetSize.padded,
+        iconButtonTheme: IconButtonThemeData(
+          style: IconButton.styleFrom(
+            minimumSize: const Size(48, 48),
+            tapTargetSize: MaterialTapTargetSize.padded,
+            visualDensity: VisualDensity.standard,
+          ),
+        ),
       ),
       themeMode: _themeMode,
       routerConfig: _router,

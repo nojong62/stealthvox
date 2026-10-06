@@ -561,7 +561,7 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                                         : Colors.white30,
                                                   ),
                                                   visualDensity:
-                                                      VisualDensity.compact,
+                                                      VisualDensity.standard,
                                                 )
                                               else if (_claiming == doc.id)
                                                 const SizedBox(
@@ -621,7 +621,7 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                                   color:
                                                       const Color(0xFFFCA5A5),
                                                   visualDensity:
-                                                      VisualDensity.compact,
+                                                      VisualDensity.standard,
                                                 ),
                                               ],
                                             ],

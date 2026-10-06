@@ -1755,7 +1755,7 @@ class _IntroMasterState extends State<IntroMaster>
                           backgroundColor: Colors.white.withValues(
                             alpha: 0.045,
                           ),
-                          minimumSize: const Size(44, 44),
+                          minimumSize: const Size(48, 48),
                         ),
                         icon: const Icon(Icons.arrow_back_rounded, size: 21),
                       ),
@@ -1765,7 +1765,7 @@ class _IntroMasterState extends State<IntroMaster>
                       TextButton(
                         onPressed: _openAuthScreen,
                         style: TextButton.styleFrom(
-                          minimumSize: const Size(44, 44),
+                          minimumSize: const Size(48, 48),
                           foregroundColor: const Color(0xFFBFC1C9),
                         ),
                         child: Text(
@@ -1955,7 +1955,7 @@ class _IntroMasterState extends State<IntroMaster>
                   // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
                   //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
                   constraints: const BoxConstraints(
-                    minHeight: 46,
+                    minHeight: 48,
                     minWidth: double.infinity,
                   ),
                   child: ElevatedButton(
@@ -2066,7 +2066,7 @@ class _IntroMasterState extends State<IntroMaster>
                   style: IconButton.styleFrom(
                     foregroundColor: const Color(0xFFE6E7EA),
                     backgroundColor: Colors.white.withValues(alpha: 0.045),
-                    minimumSize: const Size(44, 44),
+                    minimumSize: const Size(48, 48),
                   ),
                   icon: const Icon(Icons.arrow_back_rounded, size: 21),
                 )
@@ -2326,7 +2326,7 @@ class _IntroMasterState extends State<IntroMaster>
             // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
             //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
             constraints: const BoxConstraints(
-              minHeight: 44,
+              minHeight: 48,
               minWidth: double.infinity,
             ),
             child: ElevatedButton(
@@ -2832,7 +2832,7 @@ class _IntroMasterState extends State<IntroMaster>
               onPressed: _resetPassword,
               style: TextButton.styleFrom(
                 foregroundColor: const Color(0xFF9FA2AC),
-                minimumSize: const Size.fromHeight(42),
+                minimumSize: const Size.fromHeight(48),
               ),
               child: const Text(
                 'Forgot your password?',
@@ -3137,7 +3137,7 @@ class _IntroMasterState extends State<IntroMaster>
                   // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
                   //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
                   constraints: const BoxConstraints(
-                    minHeight: 46,
+                    minHeight: 48,
                     minWidth: double.infinity,
                   ),
                   child: ElevatedButton(
@@ -3238,7 +3238,7 @@ class _IntroMasterState extends State<IntroMaster>
             // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
             //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
             constraints: const BoxConstraints(
-              minHeight: 46,
+              minHeight: 48,
               minWidth: double.infinity,
             ),
             child: ElevatedButton(

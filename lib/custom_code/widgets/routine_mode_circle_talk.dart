@@ -5719,7 +5719,7 @@ $userFixPolicy$finalLanguageRule''';
                   tooltip: _uiCopy['studyRoom'],
                   padding: EdgeInsets.zero,
                   constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                      const BoxConstraints(minWidth: 48, minHeight: 48),
                   onPressed: _handleSaveAndOpenStudyRoom,
                 ),
                 // 사용설명서는 **입장 전 설정 페이지에만** 둔다. 방 안에서는
@@ -5736,7 +5736,7 @@ $userFixPolicy$finalLanguageRule''';
                   ),
                   padding: EdgeInsets.zero,
                   constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                      const BoxConstraints(minWidth: 48, minHeight: 48),
                   onPressed: () => setState(() {
                     _fontScale = _fontScale == 1.0
                         ? 1.3
@@ -5757,7 +5757,7 @@ $userFixPolicy$finalLanguageRule''';
                       setState(() => _showOriginal = !_showOriginal),
                   padding: EdgeInsets.zero,
                   constraints:
-                      const BoxConstraints(minWidth: 36, minHeight: 36),
+                      const BoxConstraints(minWidth: 48, minHeight: 48),
                 ),
                 const SizedBox(width: 4),
                 // [v3.6] 좁은 화면/큰 글꼴에서도 상단 Row가 넘치지 않도록 축소 허용

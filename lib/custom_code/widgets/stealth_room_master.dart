@@ -96,8 +96,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       ? 'English'
       : FFAppState().chatLang.trim();
   TalkUiCopy get _setupCopy => TalkUiCopy.forSystemLocale();
-  OriginSurfaceCopy get _surfaceCopy =>
-      OriginSurfaceCopy.forSystemLocale();
+  OriginSurfaceCopy get _surfaceCopy => OriginSurfaceCopy.forSystemLocale();
 
   final AudioRecorder _circleAudioRecorder = AudioRecorder();
   late Future<void> _circleAudioReady;
@@ -1190,7 +1189,7 @@ Return ONLY valid JSON: {"name":"..."}.
               ),
               tooltip: _setupCopy['lobby'],
               padding: const EdgeInsets.symmetric(horizontal: 8),
-              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
               onPressed: () => context.pushNamed('Lobby'),
             ),
             const Spacer(),
@@ -1225,7 +1224,7 @@ Return ONLY valid JSON: {"name":"..."}.
               onPressed: _showManualDialog,
               tooltip: _setupCopy['guide'],
               padding: const EdgeInsets.only(left: 8),
-              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
               icon: const Icon(
                 Icons.help_outline,
                 color: Colors.amberAccent,
@@ -1345,8 +1344,8 @@ Return ONLY valid JSON: {"name":"..."}.
                     style: TextButton.styleFrom(
                       foregroundColor: accent,
                       padding: const EdgeInsets.symmetric(horizontal: 8),
-                      minimumSize: const Size(0, 40),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      minimumSize: const Size(0, 48),
+                      tapTargetSize: MaterialTapTargetSize.padded,
                     ),
                     child: Text(
                       _surfaceCopy['guide'],

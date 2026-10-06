@@ -4596,7 +4596,7 @@ $finalLanguageRule''';
                   tooltip: _uiCopy['studyRoom'],
                   padding: EdgeInsets.zero,
                   constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                      const BoxConstraints(minWidth: 48, minHeight: 48),
                   onPressed: _handleSaveAndOpenStudyRoom,
                 ),
                 // 사용설명서는 **입장 전 설정 페이지에만** 둔다. 방 안에서는
@@ -4613,7 +4613,7 @@ $finalLanguageRule''';
                   ),
                   padding: EdgeInsets.zero,
                   constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                      const BoxConstraints(minWidth: 48, minHeight: 48),
                   onPressed: () => setState(() {
                     _fontScale = _fontScale == 1.0
                         ? 1.3
@@ -4634,7 +4634,7 @@ $finalLanguageRule''';
                       setState(() => _showOriginal = !_showOriginal),
                   padding: EdgeInsets.zero,
                   constraints:
-                      const BoxConstraints(minWidth: 36, minHeight: 36),
+                      const BoxConstraints(minWidth: 48, minHeight: 48),
                 ),
                 const SizedBox(width: 4),
                 // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)

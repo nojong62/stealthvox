@@ -109,8 +109,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     'Dutch',
   ];
 
-  OriginSurfaceCopy get _surfaceCopy =>
-      OriginSurfaceCopy.forSystemLocale();
+  OriginSurfaceCopy get _surfaceCopy => OriginSurfaceCopy.forSystemLocale();
 
   bool isLoading = false;
   String _apiKey = "";
@@ -819,7 +818,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 (String lang) => DropdownMenuItem<String>(
                   value: lang,
                   child: Container(
-                    constraints: const BoxConstraints(minHeight: 44),
+                    constraints: const BoxConstraints(minHeight: 48),
                     alignment: Alignment.centerLeft,
                     child: Text(
                       lang,
@@ -1398,7 +1397,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                               shape: const CircleBorder(
                                 side: BorderSide(color: _kLobbyBorder),
                               ),
-                              minimumSize: const Size(44, 44),
+                              minimumSize: const Size(48, 48),
                             ),
                             onPressed: _openAiSettingsSheet,
                           ),

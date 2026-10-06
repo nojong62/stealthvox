@@ -136,7 +136,8 @@ class DuoCanonicalTurn {
   final String rawText;
 
   /// 문맥 교정이 손댄 줄인가.
-  bool get wasCorrected => rawText.trim().isNotEmpty && rawText.trim() != text.trim();
+  bool get wasCorrected =>
+      rawText.trim().isNotEmpty && rawText.trim() != text.trim();
 
   /// 같은 줄에 교정 전 글자만 얹는다.
   DuoCanonicalTurn withRawText(String raw) => DuoCanonicalTurn(
@@ -1083,7 +1084,8 @@ Future<bool> applyDuoCanonicalToHistory({
       }
     } catch (e) {
       // 못 읽어도 **고치는 일은 예전대로 돈다.** 만드는 일만 못 할 뿐이다.
-      debugPrint('[DUO-CANON] source_read_failed room=$roomId ${e.runtimeType}');
+      debugPrint(
+          '[DUO-CANON] source_read_failed room=$roomId ${e.runtimeType}');
     }
 
     // 내 방의 줄을 채널 문서 id로 찾을 수 있어야 옮길 수 있다.
@@ -1169,13 +1171,11 @@ Future<bool> applyDuoCanonicalToHistory({
         //   가장 처음 것이 원문이다.
         final headRaw =
             (rawTextById[turn.sourceIds.first] ?? '').toString().trim();
-        // 🎯 [TARGET-SYNC] 원문이 실제로 바뀌었는가. 바뀌었으면 옛 원문으로
-        //   만든 배울글은 그 줄의 번역이 아니게 되므로 비운다 — 공부방이
-        //   빈 배울글을 보고 최종 원문으로 다시 만든다
-        //   (`_historyTargetNeedsWork`). 안 비우면 원문과 배울글이 서로
-        //   다른 문장을 가리킨 채 남는다.
+        // 🔤 [PERSONAL-ORIGIN] canonical의 turn.text는 양쪽이 공유하는
+        //   원본 타임라인이다. 통역 방에서는 두 언어가 섞일 수 있으므로,
+        //   통화 중 개인 방에 이미 저장된 Origin 문장을 보존한다.
         final String curText = curTextById[turn.sourceIds.first] ?? '';
-        final bool textChanged = curText.isNotEmpty && curText != turn.text;
+        final String personalText = curText.isNotEmpty ? curText : turn.text;
         // 🩺 [ORIGIN-CORRECT] 문맥 교정이 손댄 줄에만 자취를 남긴다.
         //
         //   `context_verified_candidate` — 이 폰에 소리가 있다. 이어지는
@@ -1190,10 +1190,9 @@ Future<bool> applyDuoCanonicalToHistory({
             ? kOriginCorrectionVerifiable
             : kOriginCorrectionUnverified;
         batch.update(head, <String, dynamic>{
-          'original_text': turn.text,
-          if (headRaw.isNotEmpty && headRaw != turn.text)
+          'original_text': personalText,
+          if (headRaw.isNotEmpty && headRaw != personalText)
             kOriginalRawField: headRaw,
-          if (textChanged) 'translated_text': '',
           if (corrected) kOriginCorrectionModelField: correctorModel,
           if (corrected) kOriginCorrectionStageField: stage,
           // 🧭 [SUBJECT-HINT] 3자가 나오는 줄에만 값이 있다. 없으면 빈 문자열을

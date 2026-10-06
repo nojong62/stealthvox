@@ -3149,7 +3149,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   Widget _buildAppBtn(String docId, String baseText) {
     return IconButton(
       padding: const EdgeInsets.all(8),
-      constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
       icon: const Icon(
         Icons.school_rounded,
         color: Colors.deepPurpleAccent,
@@ -3980,7 +3980,7 @@ RULES — follow exactly:
                         onPressed: _backToStudySelect,
                         padding: EdgeInsets.zero,
                         constraints:
-                            const BoxConstraints(minWidth: 40, minHeight: 40),
+                            const BoxConstraints(minWidth: 48, minHeight: 48),
                       ),
                       const Spacer(),
                       _buildStudyRoomPill(),
@@ -4157,7 +4157,7 @@ RULES — follow exactly:
               size: 24,
             ),
             padding: const EdgeInsets.all(10),
-            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
             onPressed: () => setState(() {
               _fontScale = _fontScale == 1.0
                   ? 1.3
@@ -4180,7 +4180,7 @@ RULES — follow exactly:
               _langDisplayMode = (_langDisplayMode + 1) % 3;
             }),
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
           ),
           GestureDetector(
             onLongPress: () {},
@@ -4826,7 +4826,7 @@ RULES — follow exactly:
     final bool editable = _historyIsDraft;
     return IconButton(
       padding: const EdgeInsets.all(8),
-      constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
       icon: Icon(
         Icons.edit_outlined,
         // 확정된 방에서는 흐린 채로 남는다. 감추면 아이콘이 둘로 줄어
@@ -5271,7 +5271,7 @@ RULES — follow exactly:
                   onPressed: _exitShadowing,
                   padding: EdgeInsets.zero,
                   constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                      const BoxConstraints(minWidth: 48, minHeight: 48),
                 ),
                 const Spacer(),
                 _buildStudyRoomPill(),
@@ -7709,7 +7709,7 @@ RULES — follow exactly:
       borderRadius: BorderRadius.circular(10),
       child: Container(
         // 📐 최소 높이로 바꿔 라벨이 커져도 잘리지 않게 한다.
-        constraints: const BoxConstraints(minHeight: 40),
+        constraints: const BoxConstraints(minHeight: 48),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: active ? 0.06 : 0.02),
@@ -7750,7 +7750,7 @@ RULES — follow exactly:
   Widget _p3SecondaryButton(String label, VoidCallback? onTap) =>
       ConstrainedBox(
         // 📐 위와 같은 이유로 최소 높이만 둔다.
-        constraints: const BoxConstraints(minHeight: 40),
+        constraints: const BoxConstraints(minHeight: 48),
         child: OutlinedButton(
           style: OutlinedButton.styleFrom(
             foregroundColor: Colors.white70,

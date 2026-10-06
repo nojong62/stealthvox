@@ -59,8 +59,7 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
   bool _ageConfirmed = false;
   bool _marketingAccepted = false;
 
-  OriginSurfaceCopy get _copy =>
-      OriginSurfaceCopy.forSystemLocale();
+  OriginSurfaceCopy get _copy => OriginSurfaceCopy.forSystemLocale();
 
   bool get _useEnglishLegalDocs => systemUiLanguageName() != 'Korean';
 
@@ -306,7 +305,7 @@ class _AgreementRow extends StatelessWidget {
                 icon: const Icon(Icons.chevron_right_rounded),
                 color: const Color(0xFF8F8F98),
                 iconSize: 24,
-                visualDensity: VisualDensity.compact,
+                visualDensity: VisualDensity.standard,
                 tooltip: OriginSurfaceCopy.forSystemLocale()['viewTerms'],
               ),
             ],
