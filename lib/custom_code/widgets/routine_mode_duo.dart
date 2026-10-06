@@ -6738,28 +6738,51 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _duoMode = sessionMode;
       _isTrialPreviewRoom = data['trialPreview'] == true;
 
-      await _duoSessionRef!.update({
-        'isPartnerJoined': true,
-        'partnerUid': guestUid,
-        // Keep the seat claim and capability in one atomic update. A host can
-        // therefore treat joined=true plus a missing field as an old client;
-        // there is no intermediate new-client snapshot to time out.
-        if (sessionMode == kDuoModeInterpreter)
-          kDuoPartnerCallablePcV2Field: duoInterpreterCallableCapability(
-            remoteCandidate: _interpTransportRaw,
-          ),
-        if (sessionMode == kDuoModeInterpreter)
-          kDuoPartnerSameOriginDirectV1Field: duoSameOriginDirectCapability(),
-        'partnerJoinedAt': FieldValue.serverTimestamp(),
-        'partnerLang': _myNative(),
-        if (_isTrialPreviewRoom)
-          'trialPreviewStartedAt': FieldValue.serverTimestamp(),
-        if (_isTrialPreviewRoom)
-          'trialPreviewEndsAt': Timestamp.fromDate(
-            DateTime.now().add(
-              const Duration(seconds: kDuoTrialCallSeconds),
+      // Claim the guest seat atomically. A direct invite can be opened on
+      // multiple phones at nearly the same time; only the first seat wins.
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final current = await tx.get(_duoSessionRef!);
+        if (!current.exists) {
+          throw StateError('Duo room no longer exists');
+        }
+        final currentData = current.data() as Map<String, dynamic>?;
+        if (currentData == null ||
+            currentData['isDuoEnabled'] != true ||
+            currentData['hostUid']?.toString() == guestUid ||
+            currentData['isPartnerJoined'] == true) {
+          throw StateError('Duo room is already occupied');
+        }
+        final reservedPartner = currentData['partnerUid']?.toString() ?? '';
+        final boardReserved = currentData['boardReservedAt'] != null;
+        if (boardReserved && reservedPartner.isNotEmpty &&
+            reservedPartner != guestUid) {
+          throw StateError('Duo room is reserved for another guest');
+        }
+        final latestMode = _normalizeDuoMode(currentData['mode']);
+        if (latestMode != sessionMode) {
+          throw StateError('Duo room mode changed');
+        }
+        tx.update(_duoSessionRef!, <String, dynamic>{
+          'isPartnerJoined': true,
+          'partnerUid': guestUid,
+          if (sessionMode == kDuoModeInterpreter)
+            kDuoPartnerCallablePcV2Field: duoInterpreterCallableCapability(
+              remoteCandidate: _interpTransportRaw,
             ),
-          ),
+          if (sessionMode == kDuoModeInterpreter)
+            kDuoPartnerSameOriginDirectV1Field:
+                duoSameOriginDirectCapability(),
+          'partnerJoinedAt': FieldValue.serverTimestamp(),
+          'partnerLang': _myNative(),
+          if (_isTrialPreviewRoom)
+            'trialPreviewStartedAt': FieldValue.serverTimestamp(),
+          if (_isTrialPreviewRoom)
+            'trialPreviewEndsAt': Timestamp.fromDate(
+              DateTime.now().add(
+                const Duration(seconds: kDuoTrialCallSeconds),
+              ),
+            ),
+        });
       });
       // 호스트 언어는 방 문서에 이미 있다(옛 방에는 없을 수 있다 — 그때는
       // 첫 메시지의 srcLang이 채운다).
@@ -7303,8 +7326,17 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             .doc(guestRoomId)
             .get();
         preservePublishedRoom = post.exists && post.data()?['active'] == true;
-      } catch (_) {
-        // If this check fails, retain the existing room cleanup behavior.
+      } catch (error) {
+        // A transient Firestore/DNS failure must not be treated as proof that
+        // the published board room is gone. Preserve the room and avoid the
+        // destructive cleanup branch until the state can be checked again.
+        preservePublishedRoom = true;
+        _lgDuo(
+          '[DUO-NETWORK]',
+          'operation=post_preservation_check status=unknown '
+              'error=' + error.runtimeType.toString(),
+        );
+        unawaited(_probeDuoNetwork('post_preservation_check_failed'));
       }
     }
     if (isInviteGuest) {

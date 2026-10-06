@@ -42,7 +42,7 @@ class DuoBoardService {
       FirebaseFirestore.instance
           .collection('duo_board_posts')
           .where('active', isEqualTo: true)
-          .orderBy('updatedAt', descending: true)
+          .orderBy('createdAt', descending: true)
           .limit(50)
           .snapshots();
 

@@ -397,36 +397,88 @@ exports.syncDuoBoardHostPresence = functions.database
     });
 
 const INACTIVE_POST_TTL_MS = 48 * 60 * 60 * 1000;
+const RESERVED_POST_TTL_MS = 5 * 60 * 1000;
 
 // Keep temporarily unavailable invitations visible to intro guests, but retire
-// them after 48 continuous hours without becoming discoverable again.
+// them after 48 continuous hours without becoming discoverable again. A board
+// match reserves a post before the guest has actually joined; release that
+// reservation if the join never arrives so one abandoned request cannot hide a
+// post forever.
 exports.expireInactiveDuoBoardPosts = functions.pubsub
-    .schedule('every 60 minutes')
+    .schedule('every 5 minutes')
     .onRun(async () => {
       const cutoff = admin.firestore.Timestamp.fromMillis(
           Date.now() - INACTIVE_POST_TTL_MS);
+      const reservedCutoff = admin.firestore.Timestamp.fromMillis(
+          Date.now() - RESERVED_POST_TTL_MS);
       const snapshot = await db().collection('duo_board_posts')
           .where('active', '==', true)
           .get();
       let expired = 0;
       let initialized = 0;
+      let released = 0;
       for (const candidate of snapshot.docs) {
         const result = await db().runTransaction(async tx => {
           const current = await tx.get(candidate.ref);
-          if (!current.exists) return null;
-          const inactiveSince = current.get('inactiveSince');
-          if (current.get('active') !== true ||
-              current.get('discoverable') === true ||
-              current.get('state') === 'reserved') {
-            return null;
+          if (!current.exists || current.get('active') !== true) return null;
+
+          if (current.get('state') === 'reserved') {
+            const reservedAt = current.get('reservedAt');
+            if (!(reservedAt instanceof admin.firestore.Timestamp) ||
+                reservedAt.toMillis() > reservedCutoff.toMillis()) {
+              return null;
+            }
+            const roomRef = db().collection('duo_sessions').doc(candidate.id);
+            const room = await tx.get(roomRef);
+            if (!room.exists || room.get('isDuoEnabled') !== true) {
+              tx.update(candidate.ref, {
+                active: false,
+                discoverable: false,
+                state: 'expired',
+                expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+              tx.delete(db().collection('duo_board_runtime').doc(candidate.id));
+              return 'expired';
+            }
+            if (room.get('isPartnerJoined') === true) {
+              return null;
+            }
+            // A prior guest joined and later left. Do not re-publish a board
+            // post whose completion trigger may only be delayed.
+            if (room.get('partnerJoinedAt')) {
+              tx.update(candidate.ref, {
+                active: false,
+                discoverable: false,
+                state: 'expired',
+                expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+              tx.delete(db().collection('duo_board_runtime').doc(candidate.id));
+              return 'expired';
+            }            tx.update(candidate.ref, {
+              state: 'active',
+              discoverable: false,
+              reservedAt: admin.firestore.FieldValue.delete(),
+              inactiveSince: admin.firestore.FieldValue.serverTimestamp(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            if (room.exists) {
+              tx.update(roomRef, {partnerUid: null, boardReservedAt: null});
+            }
+            return 'released';
           }
+
+          const inactiveSince = current.get('inactiveSince');
+          if (current.get('discoverable') === true) return null;
           if (!inactiveSince) {
             tx.update(candidate.ref, {
               inactiveSince: admin.firestore.FieldValue.serverTimestamp(),
             });
             return 'initialized';
           }
-          if (inactiveSince.toMillis() > cutoff.toMillis()) return null;
+          if (!(inactiveSince instanceof admin.firestore.Timestamp) ||
+              inactiveSince.toMillis() > cutoff.toMillis()) return null;
           tx.update(candidate.ref, {
             active: false,
             discoverable: false,
@@ -439,13 +491,13 @@ exports.expireInactiveDuoBoardPosts = functions.pubsub
         });
         if (result === 'expired') expired += 1;
         if (result === 'initialized') initialized += 1;
+        if (result === 'released') released += 1;
       }
-      console.log(
-          `Expired ${expired} Duo board posts after 48 inactive hours; ` +
-          `initialized ${initialized} legacy inactive posts.`);
+      console.log('Expired ' + expired + ' Duo board posts; released ' +
+          released + ' stale reservations; initialized ' + initialized +
+          ' inactive posts.');
       return null;
     });
-
 // The session document is the authoritative proof that the requester really
 // entered. Keep the post for audit, but remove it from the board permanently.
 exports.completeDuoBoardPostOnJoin = functions.firestore

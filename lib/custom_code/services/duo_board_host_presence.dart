@@ -24,6 +24,7 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
   BuildContext? _restoreDialogContext;
   String? _pausedForIncomingInvitePostId;
   bool _incomingInviteTakesPriority = false;
+  int _incomingInviteGeneration = 0;
 
   Future<void> initialize(BuildContext Function() context) async {
     _context = context;
@@ -149,6 +150,7 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
 
     // 이 플래그는 조회보다 먼저 세운다. 앱 시작 복원 조회와 받은 초대 조회가
     // 동시에 끝나더라도 복원 팝업이 뒤늦게 초대 화면 위에 뜨면 안 된다.
+    final generation = ++_incomingInviteGeneration;
     _incomingInviteTakesPriority = true;
 
     // 받은 초대가 최우선이다. 게시글 조회가 끝나기를 기다렸다가 닫으면 앱이
@@ -161,7 +163,11 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     try {
       final post = await DuoBoardService.findOwnActivePost()
           .timeout(const Duration(seconds: 5));
-      if (post == null || post.id == roomId) return;
+      if (post == null || post.id == roomId ||
+          generation != _incomingInviteGeneration ||
+          !_incomingInviteTakesPriority) {
+        return;
+      }
 
       _pausedForIncomingInvitePostId = post.id;
       // 위 첫 dismiss와 조회 사이에 복원 팝업이 새로 뜬 경합도 닫는다.
@@ -171,6 +177,23 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       }
       await DuoBoardService.setPostVisibility(post.id, enabled: false)
           .timeout(const Duration(seconds: 5));
+      // A call can finish while the visibility write is in flight. Do not let
+      // that stale pause win after resume; best-effortly undo only our write.
+      if (generation != _incomingInviteGeneration ||
+          !_incomingInviteTakesPriority) {
+        // A newer incoming invite may already be pausing the same post. Only
+        // undo our write when the current state says the pause was cancelled.
+        if (!_incomingInviteTakesPriority) {
+          try {
+            await DuoBoardService.setPostVisibility(post.id, enabled: true)
+                .timeout(const Duration(seconds: 5));
+          } catch (restoreError) {
+            debugPrint('[DuoBoard] stale invite pause restore failed: ' +
+                restoreError.toString());
+          }
+        }
+        return;
+      }
       _ownsActivePost = false;
       await stop().timeout(const Duration(seconds: 5));
     } catch (error) {
@@ -186,10 +209,11 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
   /// member cannot receive two requests at once. The old flow stopped its
   /// presence but never resumed the paused post when the call ended.
   Future<void> resumePausedPostAfterIncomingInvite() async {
+    ++_incomingInviteGeneration;
     final postId = _pausedForIncomingInvitePostId;
-    if (postId == null || postId.isEmpty) return;
     _pausedForIncomingInvitePostId = null;
     _incomingInviteTakesPriority = false;
+    if (postId == null || postId.isEmpty) return;
     try {
       final resumed = await DuoBoardService.resumePost(postId)
           .timeout(const Duration(seconds: 8));

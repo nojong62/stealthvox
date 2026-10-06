@@ -168,10 +168,25 @@ class DuoBoardSheet extends StatefulWidget {
 }
 
 class _DuoBoardSheetState extends State<DuoBoardSheet> {
+  late Stream<QuerySnapshot<Map<String, dynamic>>> _postsStream;
   String? _claiming;
   String? _error;
   final Map<String, bool> _pendingVisibility = {};
   DuoInviteCopy get _copy => DuoInviteCopy.forSystemLocale();
+
+  @override
+  void initState() {
+    super.initState();
+    _postsStream = DuoBoardService.watchPosts();
+  }
+
+  void _retryPosts() {
+    if (!mounted) return;
+    setState(() {
+      _postsStream = DuoBoardService.watchPosts();
+      _error = null;
+    });
+  }
 
   Future<void> _writePost() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -360,12 +375,23 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                     style: const TextStyle(color: Color(0xFFFCA5A5)))),
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: DuoBoardService.watchPosts(),
+              stream: _postsStream,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return Center(
-                    child: Text(_copy['loadFailed'],
-                        style: const TextStyle(color: Colors.white70)),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_copy['loadFailed'],
+                            style: const TextStyle(color: Colors.white70)),
+                        const SizedBox(height: 10),
+                        TextButton.icon(
+                          onPressed: _retryPosts,
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Retry'),
+                        ),
+                      ],
+                    ),
                   );
                 }
                 if (!snapshot.hasData) {
@@ -384,10 +410,24 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                 }).toList();
                 if (widget.showInactivePosts) {
                   docs.sort((a, b) {
-                    final aAvailable = a.data()['discoverable'] == true;
-                    final bAvailable = b.data()['discoverable'] == true;
-                    if (aAvailable == bAvailable) return 0;
-                    return aAvailable ? -1 : 1;
+                    final aData = a.data();
+                    final bData = b.data();
+                    // Keep every board post in strict newest-first creation order.
+                    // Without this tie-breaker, List.sort was unstable and
+                    // cards jumped whenever the Firestore stream refreshed.
+                    int createdMillis(Map<String, dynamic> data) {
+                      final value = data['createdAt'];
+                      if (value is Timestamp) {
+                        return value.millisecondsSinceEpoch;
+                      }
+                      if (value is DateTime) return value.millisecondsSinceEpoch;
+                      return 0;
+                    }
+
+                    final byCreated = createdMillis(bData).compareTo(
+                      createdMillis(aData),
+                    );
+                    return byCreated != 0 ? byCreated : a.id.compareTo(b.id);
                   });
                 }
                 final hasOwnActivePost =
