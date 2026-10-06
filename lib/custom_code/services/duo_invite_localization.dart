@@ -171,6 +171,10 @@ class DuoInviteCopy {
       'requestGone': 'リクエストした人はもう待っていません。',
       'requestArrived': 'Duo会話リクエストが届きました。',
       'open': '開く',
+      'restorePostTitle': '以前のDuo招待を続けますか？',
+      'restorePostBody': 'アプリを使用している間、以前の招待投稿を掲示板に再表示できます。',
+      'continuePost': '続ける',
+      'endPost': '招待を終了',
     },
     'Chinese': {
       'inviteMethod': '邀请方式',
@@ -211,6 +215,10 @@ class DuoInviteCopy {
       'requestGone': '请求者已不再等待。',
       'requestArrived': '收到 Duo 对话请求。',
       'open': '打开',
+      'restorePostTitle': '继续之前的 Duo 邀请吗？',
+      'restorePostBody': '使用应用期间，可以在公告板上重新显示之前的邀请。',
+      'continuePost': '继续',
+      'endPost': '结束邀请',
     },
     'Spanish': {
       'inviteMethod': 'Opciones de invitación',
@@ -257,6 +265,11 @@ class DuoInviteCopy {
       'requestGone': 'La persona solicitante ya no espera.',
       'requestArrived': 'Ha llegado una solicitud de conversación Duo.',
       'open': 'Abrir',
+      'restorePostTitle': '¿Continuar con tu invitación de Duo?',
+      'restorePostBody':
+          'Tu invitación anterior puede volver a mostrarse en el tablón mientras usas la app.',
+      'continuePost': 'Continuar',
+      'endPost': 'Finalizar invitación',
     },
     'French': {
       'inviteMethod': 'Options d’invitation',
@@ -304,6 +317,11 @@ class DuoInviteCopy {
       'requestGone': 'La personne qui a fait la demande n’attend plus.',
       'requestArrived': 'Une demande de conversation Duo est arrivée.',
       'open': 'Ouvrir',
+      'restorePostTitle': 'Poursuivre votre invitation Duo ?',
+      'restorePostBody':
+          'Votre invitation précédente peut de nouveau être affichée sur le tableau pendant que vous utilisez l’application.',
+      'continuePost': 'Continuer',
+      'endPost': 'Terminer l’invitation',
     },
     'German': {
       'inviteMethod': 'Einladungsoptionen',
@@ -351,6 +369,11 @@ class DuoInviteCopy {
       'requestGone': 'Die anfragende Person wartet nicht mehr.',
       'requestArrived': 'Eine Duo-Gesprächsanfrage ist eingetroffen.',
       'open': 'Öffnen',
+      'restorePostTitle': 'Duo-Einladung fortsetzen?',
+      'restorePostBody':
+          'Deine vorherige Einladung kann wieder auf dem Board angezeigt werden, während du die App verwendest.',
+      'continuePost': 'Fortsetzen',
+      'endPost': 'Einladung beenden',
     },
     'Hindi': {
       'inviteMethod': 'निमंत्रण विकल्प',
@@ -396,6 +419,11 @@ class DuoInviteCopy {
       'requestGone': 'अनुरोधकर्ता अब प्रतीक्षा नहीं कर रहा है।',
       'requestArrived': 'Duo बातचीत का अनुरोध आया है।',
       'open': 'खोलें',
+      'restorePostTitle': 'क्या पिछला Duo निमंत्रण जारी रखना है?',
+      'restorePostBody':
+          'ऐप का उपयोग करते समय आपका पिछला निमंत्रण बोर्ड पर फिर से दिखाया जा सकता है।',
+      'continuePost': 'जारी रखें',
+      'endPost': 'निमंत्रण समाप्त करें',
     },
     'Russian': {
       'inviteMethod': 'Способы приглашения',
@@ -441,6 +469,11 @@ class DuoInviteCopy {
       'requestGone': 'Запросивший пользователь больше не ждёт.',
       'requestArrived': 'Поступил запрос на разговор Duo.',
       'open': 'Открыть',
+      'restorePostTitle': 'Продолжить приглашение Duo?',
+      'restorePostBody':
+          'Ваше предыдущее приглашение можно снова показывать на доске, пока вы используете приложение.',
+      'continuePost': 'Продолжить',
+      'endPost': 'Завершить приглашение',
     },
     'Portuguese': {
       'inviteMethod': 'Opções de convite',
@@ -487,6 +520,11 @@ class DuoInviteCopy {
       'requestGone': 'A pessoa solicitante não está mais esperando.',
       'requestArrived': 'Chegou um pedido de conversa Duo.',
       'open': 'Abrir',
+      'restorePostTitle': 'Continuar seu convite Duo?',
+      'restorePostBody':
+          'Seu convite anterior pode voltar a ser exibido no mural enquanto você usa o app.',
+      'continuePost': 'Continuar',
+      'endPost': 'Encerrar convite',
     },
     'Italian': {
       'inviteMethod': 'Opzioni di invito',
@@ -534,6 +572,11 @@ class DuoInviteCopy {
       'requestGone': 'La persona richiedente non sta più aspettando.',
       'requestArrived': 'È arrivata una richiesta di conversazione Duo.',
       'open': 'Apri',
+      'restorePostTitle': 'Continuare il tuo invito Duo?',
+      'restorePostBody':
+          'Il tuo invito precedente può essere mostrato di nuovo sulla bacheca mentre usi l’app.',
+      'continuePost': 'Continua',
+      'endPost': 'Termina invito',
     },
     'Dutch': {
       'inviteMethod': 'Uitnodigingsopties',
@@ -581,6 +624,11 @@ class DuoInviteCopy {
       'requestGone': 'De aanvrager wacht niet meer.',
       'requestArrived': 'Er is een Duo-gespreksverzoek binnengekomen.',
       'open': 'Openen',
+      'restorePostTitle': 'Doorgaan met je Duo-uitnodiging?',
+      'restorePostBody':
+          'Je vorige uitnodiging kan opnieuw op het bord worden weergegeven terwijl je de app gebruikt.',
+      'continuePost': 'Doorgaan',
+      'endPost': 'Uitnodiging beëindigen',
     },
   };
 }
