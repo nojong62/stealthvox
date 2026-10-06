@@ -541,7 +541,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
               onTap: () => context.pushNamed('ChatHistory'),
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 5),
           Expanded(
             child: _buildSegment(
               label: 'Duo Board',
@@ -549,7 +549,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
               onTap: _openDuoBoardAsGuest,
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 5),
           Expanded(
             child: _buildSegment(
               label: 'Store',
@@ -570,29 +570,51 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     const radius = BorderRadius.all(Radius.circular(12));
     return SizedBox(
       height: 42,
-      child: Material(
-        color: highlighted ? _kLobbySurfaceHi : Colors.transparent,
-        shape: RoundedRectangleBorder(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
           borderRadius: radius,
-          side: BorderSide(
-            color: highlighted ? _kLobbyCyan : _kLobbyBorder,
-            width: highlighted ? 1.2 : 1,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: highlighted
+                ? const [Color(0x2922D3EE), Color(0x1F3B82F6)]
+                : const [Color(0x0FFFFFFF), Color(0x05000000)],
           ),
+          border: Border.all(
+            color: highlighted ? _kLobbyCyan : const Color(0x2EFFFFFF),
+            width: highlighted ? 1.3 : 1,
+          ),
+          boxShadow: highlighted
+              ? const [
+                  BoxShadow(
+                    color: Color(0x2922D3EE),
+                    blurRadius: 10,
+                    spreadRadius: -3,
+                  ),
+                ]
+              : null,
         ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
+        child: Material(
+          color: Colors.transparent,
           borderRadius: radius,
-          child: Center(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: highlighted ? _kLobbyTextHi : _kLobbyTextMid,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: radius,
+            splashColor: const Color(0x2422D3EE),
+            highlightColor: const Color(0x12FFFFFF),
+            child: Center(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: highlighted ? _kLobbyTextHi : const Color(0xFFB6C1D1),
+                  fontSize: 12,
+                  fontWeight: highlighted ? FontWeight.w800 : FontWeight.w700,
+                  letterSpacing: highlighted ? .2 : .1,
+                ),
               ),
             ),
           ),
@@ -1251,7 +1273,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   Future<void> _openDuoBoardAsGuest() async {
-    final claim = await showDuoBoardSheet(context);
+    final claim = await showDuoBoardSheet(
+      context,
+      showInactivePosts: true,
+    );
     if (!mounted || claim == null) return;
     await DuoBoardHostPresence.instance.prepareForIncomingInvite(claim.roomId);
     if (!mounted) return;
