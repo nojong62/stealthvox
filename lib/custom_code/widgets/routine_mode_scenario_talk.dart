@@ -552,12 +552,34 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
     _pendingCorrectionRollback = rollback;
   }
 
-  Future<void> _waitForScenarioCorrectionRollback() async {
+  Future<void> _waitForScenarioCorrectionRollback({
+    Duration timeout = const Duration(seconds: 3),
+  }) async {
     final pending = _pendingCorrectionRollback;
     if (pending == null) return;
-    await pending;
+    try {
+      await pending.timeout(timeout);
+    } on TimeoutException {
+      // 저장 정리는 계속 백그라운드에서 끝내되, 네트워크 지연이 대화와 마이크를
+      // 멈춰 세우지 않게 한다.
+      _log('[CORRECTION-PERSIST-TIMEOUT]',
+          'rollback wait exceeded ${timeout.inMilliseconds}ms');
+      return;
+    }
     if (identical(_pendingCorrectionRollback, pending)) {
       _pendingCorrectionRollback = null;
+    }
+  }
+
+  Future<void> _awaitScenarioTurnPersistence(
+    Future<void> persistence, {
+    required String reason,
+  }) async {
+    try {
+      await persistence.timeout(const Duration(seconds: 6));
+    } on TimeoutException {
+      // Firestore 저장은 이어서 완료될 수 있다. UI와 마이크만 막지 않는다.
+      _log('[SCENARIO-PERSIST-TIMEOUT]', 'reason=$reason code=PERSIST_TIMEOUT');
     }
   }
 
@@ -565,8 +587,10 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   /// 청취 연습 규칙이 붙는다. 되묻기([HEARD_CONFIRM])와 [CORRECTION] 줄은
   /// 유저 발화를 확정하는 절차라 Step 2에서도 대화 언어 그대로다.
   /// Step 1은 전과 한 글자도 다르지 않다.
-  String _buildScenarioMemberInstructions(
-      {ListeningStep step = ListeningStep.step1}) {
+  String _buildScenarioMemberInstructions({
+    ListeningStep step = ListeningStep.step1,
+    bool disableContextualCorrection = false,
+  }) {
     final nativeLang = _nativeLangName();
     final bool step2 = step == ListeningStep.step2;
     final String targetLang = _targetLangName();
@@ -619,7 +643,7 @@ $registerPolicy
 $kSpokenReplyLengthPolicy
 - In character, this means answering like a real person in that situation would: briefly.
 
-${_kContextualCorrectionEnabled ? '''
+${_kContextualCorrectionEnabled && !disableContextualCorrection ? '''
 [CORRECTION REPLACEMENT — CHECK BEFORE ANSWERING]
 Use the recent scene dialogue as evidence. If the latest user line explicitly
 rejects or corrects how their OWN immediately previous line was understood, and
@@ -635,6 +659,11 @@ Remove framing such as "아니", "내 말은", "그게 아니라", "I mean", or
 Do NOT use this control for an ordinary in-character no/refusal, a new detail, a
 change of mind, a correction of the character's factual claim, or dissatisfaction
 with the character's reply. If there is no replacement content, continue normally.
+''' : disableContextualCorrection ? '''
+[NORMAL REPLY RECOVERY]
+A prior correction-control response was incomplete. Reply to the user's latest
+line normally and briefly in character. Do not output brackets, control labels,
+or a correction format.
 ''' : ''}
 
 [ASK BACK INSTEAD OF GUESSING]
@@ -710,10 +739,13 @@ $finalLanguageRule''';
 
   /// 내부 제어 태그가 여러 SSE 조각으로 나뉘어 와도 제어 신호인지
   /// 확정되기 전에는 화면이나 TTS로 내보내지 않는다.
-  bool _scenarioReplyMayBeControlSignal(String text) {
+  bool _scenarioReplyMayBeControlSignal(
+    String text, {
+    required bool allowContextualCorrection,
+  }) {
     final leading = text.trimLeft();
     if (leading.isEmpty) return true;
-    const signals = _kContextualCorrectionEnabled
+    final signals = _kContextualCorrectionEnabled && allowContextualCorrection
         ? <String>['[HEARD_CONFIRM]', '[CORRECTION]', kUserFixTag]
         : <String>['[HEARD_CONFIRM]', kUserFixTag];
     return signals.any(
@@ -2654,6 +2686,7 @@ $finalLanguageRule''';
     required int generation,
     bool understandingConfirmed = false,
     bool isCorrectionRetry = false,
+    bool skipContextualCorrection = false,
   }) async {
     if (!mounted ||
         !_isConversationActive ||
@@ -2815,7 +2848,10 @@ $finalLanguageRule''';
 
       await for (final chunk in ScenarioBrain.streamKoreanTurn(
         apiKey: _openAiKey,
-        instructions: _buildScenarioMemberInstructions(step: step),
+        instructions: _buildScenarioMemberInstructions(
+          step: step,
+          disableContextualCorrection: skipContextualCorrection,
+        ),
         userText: userKorean,
         recentConversation: recentConversation,
         reasoningEffort: reasoning.effort,
@@ -2838,7 +2874,12 @@ $finalLanguageRule''';
         final streamedReply = responseBuffer.toString().trimLeft();
 
         // 제어 태그일 가능성이 남아 있는 동안에는 어떤 조각도 노출하지 않는다.
-        if (_scenarioReplyMayBeControlSignal(streamedReply)) continue;
+        if (_scenarioReplyMayBeControlSignal(
+          streamedReply,
+          allowContextualCorrection: !skipContextualCorrection,
+        )) {
+          continue;
+        }
 
         if (aiIndex < 0) {
           // 🔁 [LATE-CONTINUATION] 취소 시 이 id로 정확히 집어 걷어낸다.
@@ -2953,13 +2994,40 @@ $finalLanguageRule''';
       // 보고 판정한다. 제어 태그는 위 스트리밍 동안 화면/TTS에 한 글자도
       // 노출하지 않았으므로, 여기서 직전 교환을 걷고 실제 뜻만 다시 처리한다.
       final contextualCorrection =
-          !isCorrectionRetry ? _contextualScenarioCorrection(aiKorean) : null;
+          !isCorrectionRetry && !skipContextualCorrection
+              ? _contextualScenarioCorrection(aiKorean)
+              : null;
       if (!isCorrectionRetry &&
+          !skipContextualCorrection &&
           _kContextualCorrectionEnabled &&
           aiKorean.trimLeft().toUpperCase().startsWith('[CORRECTION]') &&
           contextualCorrection == null) {
-        // 불완전한 제어문을 역할 대사로 화면이나 TTS에 흘리지 않는다.
-        throw StateError('Scenario correction control was incomplete.');
+        // 모델이 제어문을 반쯤만 보냈을 때 예외로 조용히 끝내지 않는다.
+        // 제어 형식을 끈 안전한 한 번 재시도로 바로 대화를 이어 간다.
+        earlyUtterance?.cancel();
+        _aiTtsAdapter.stopAll(reason: 'scenario_correction_format_retry');
+        _ttsQueueManager.stop();
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((message) =>
+                identical(message, hostBubble) ||
+                message['msgId'] == hostBubble['msgId'] ||
+                (_activeAiBubbleId.isNotEmpty &&
+                    message['msgId'] == _activeAiBubbleId));
+          });
+          if (_localMessages.isNotEmpty) _scrollToBottom();
+        }
+        _activeHostBubbleId = '';
+        _activeAiBubbleId = '';
+        _turnCounter = (_turnCounter - 1).clamp(0, 1 << 30).toInt();
+        _log('[CORRECTION-FORMAT-RETRY]',
+            'turn=$turnNumber code=CORRECTION_FORMAT_INCOMPLETE');
+        return _processScenarioTalkTurn(
+          userKorean,
+          generation: generation,
+          isCorrectionRetry: true,
+          skipContextualCorrection: true,
+        );
       }
       if (contextualCorrection != null) {
         handledContextualCorrection = true;
@@ -3018,7 +3086,10 @@ $finalLanguageRule''';
           _saveHistoryMessages(
               <Map<String, dynamic>>[correctedHostLine, correctedSystemLine]),
         ]);
-        await _pendingTurnPersistence;
+        await _awaitScenarioTurnPersistence(
+          _pendingTurnPersistence,
+          reason: 'contextual_correction',
+        );
         return;
       }
       responseCompleted = true;
@@ -3180,13 +3251,22 @@ $finalLanguageRule''';
         _saveTurnToFirestore(<Map<String, dynamic>>[hostLine, systemLine]),
         _saveHistoryMessages(<Map<String, dynamic>>[hostLine, systemLine]),
       ]);
-      await _pendingTurnPersistence;
+      await _awaitScenarioTurnPersistence(
+        _pendingTurnPersistence,
+        reason: 'normal_turn',
+      );
       _log(
           '[GPT-HISTORY]',
           'turn=$turnNumber model=$kDialogBrainModel step=${step.value} '
               'voice=$_aiVoice tts=true');
     } catch (error) {
-      _log('[PIPE-ERR]', 'turn=$turnNumber reason=${error.runtimeType}');
+      final code = error is TimeoutException
+          ? 'AI_TIMEOUT'
+          : error is StateError
+              ? 'AI_STATE_ERROR'
+              : 'AI_TURN_FAILED';
+      _log('[PIPE-ERR]',
+          'turn=$turnNumber code=$code reason=${error.runtimeType}');
       if (!responseCompleted) {
         earlyUtterance?.cancel();
         _aiTtsAdapter.stopAll(reason: 'scenario_gpt_stream_failed');
@@ -3300,12 +3380,24 @@ $finalLanguageRule''';
       isUser: false,
       onLog: _log,
     );
-    fetcher.addText(_retryPhrase(lang));
-    while (
-        (fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
-      await Future.delayed(const Duration(milliseconds: 100));
+    final wait = Stopwatch()..start();
+    try {
+      fetcher.addText(_retryPhrase(lang));
+      while (
+          (fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        if (wait.elapsed >= const Duration(seconds: 12)) {
+          fetcher.cancel();
+          _ttsQueueManager.stop();
+          _log('[CORRECTION-RETRY-TIMEOUT]',
+              'code=RETRY_TTS_TIMEOUT waitedMs=${wait.elapsedMilliseconds}');
+          break;
+        }
+      }
+    } finally {
+      // 재생·네트워크가 실패해도 다음 말은 반드시 들을 수 있어야 한다.
+      if (mounted && _isConversationActive) _startConfiguredListening();
     }
-    if (mounted && _isConversationActive) _startConfiguredListening();
   }
 
   // [정정] 직전 잘못된 교환(HOST+SYSTEM)을 chat_history에서 제거
