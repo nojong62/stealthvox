@@ -436,3 +436,125 @@ class DuoBoardGuidePageCopy {
     },
   };
 }
+
+/// Login-independent copy for the first Intro page. It follows the phone's
+/// system locale because the member has not selected an in-app language yet.
+class IntroWelcomePageCopy {
+  IntroWelcomePageCopy._();
+
+  static Map<String, String> forSystemLocale() {
+    final code = PlatformDispatcher.instance.locale.languageCode.toLowerCase();
+    return _copies[code] ?? _copies['en']!;
+  }
+
+  static const Map<String, Map<String, String>> _copies = {
+    'en': {
+      'tagline': 'Speak freely, Pick it up naturally',
+      'headlineBefore': 'Your ',
+      'headlineAccent': 'Story',
+      'headlineAfter': '\nIs Your Best\nLanguage Lesson',
+      'duoInvite': 'Duo Invite',
+      'loginOrJoin': 'Login or Join',
+      'swipeContinue': 'Swipe to Continue'
+    },
+    'ko': {
+      'tagline': '자유롭게 말하고, 자연스럽게 익히세요',
+      'headlineBefore': '당신의 ',
+      'headlineAccent': '이야기',
+      'headlineAfter': '가\n가장 좋은 언어 수업입니다',
+      'duoInvite': 'Duo 초대',
+      'loginOrJoin': '로그인 또는 가입',
+      'swipeContinue': '스와이프하여 계속'
+    },
+    'ja': {
+      'tagline': '自由に話して、自然に身につけよう',
+      'headlineBefore': 'あなたの ',
+      'headlineAccent': '物語',
+      'headlineAfter': 'が\n最高の語学レッスンです',
+      'duoInvite': 'Duo 招待',
+      'loginOrJoin': 'ログイン・新規登録',
+      'swipeContinue': 'スワイプして続ける'
+    },
+    'zh': {
+      'tagline': '自在开口，自然习得',
+      'headlineBefore': '你的 ',
+      'headlineAccent': '故事',
+      'headlineAfter': '就是\n最好的语言课',
+      'duoInvite': 'Duo 邀请',
+      'loginOrJoin': '登录或注册',
+      'swipeContinue': '滑动以继续'
+    },
+    'es': {
+      'tagline': 'Habla con libertad, aprende de forma natural',
+      'headlineBefore': 'Tu ',
+      'headlineAccent': 'historia',
+      'headlineAfter': '\nes tu mejor\nlección de idiomas',
+      'duoInvite': 'Invitación Duo',
+      'loginOrJoin': 'Iniciar sesión o unirse',
+      'swipeContinue': 'Desliza para continuar'
+    },
+    'fr': {
+      'tagline': 'Parlez librement, apprenez naturellement',
+      'headlineBefore': 'Votre ',
+      'headlineAccent': 'histoire',
+      'headlineAfter': '\nest votre meilleure\nleçon de langue',
+      'duoInvite': 'Invitation Duo',
+      'loginOrJoin': 'Se connecter ou s’inscrire',
+      'swipeContinue': 'Balayez pour continuer'
+    },
+    'de': {
+      'tagline': 'Sprich frei, lerne ganz natürlich',
+      'headlineBefore': 'Deine ',
+      'headlineAccent': 'Geschichte',
+      'headlineAfter': ' ist\ndeine beste\nSprachlektion',
+      'duoInvite': 'Duo-Einladung',
+      'loginOrJoin': 'Anmelden oder registrieren',
+      'swipeContinue': 'Wischen zum Fortfahren'
+    },
+    'hi': {
+      'tagline': 'बेझिझक बोलें, स्वाभाविक रूप से सीखें',
+      'headlineBefore': 'आपकी ',
+      'headlineAccent': 'कहानी',
+      'headlineAfter': ' ही\nसबसे अच्छा भाषा पाठ है',
+      'duoInvite': 'Duo आमंत्रण',
+      'loginOrJoin': 'लॉग इन या जुड़ें',
+      'swipeContinue': 'जारी रखने के लिए स्वाइप करें'
+    },
+    'ru': {
+      'tagline': 'Говорите свободно, учитесь естественно',
+      'headlineBefore': 'Ваша ',
+      'headlineAccent': 'история',
+      'headlineAfter': ' —\nлучший урок языка',
+      'duoInvite': 'Приглашение Duo',
+      'loginOrJoin': 'Войти или зарегистрироваться',
+      'swipeContinue': 'Смахните, чтобы продолжить'
+    },
+    'pt': {
+      'tagline': 'Fale livremente, aprenda naturalmente',
+      'headlineBefore': 'A sua ',
+      'headlineAccent': 'história',
+      'headlineAfter': ' é\na sua melhor\naula de idiomas',
+      'duoInvite': 'Convite Duo',
+      'loginOrJoin': 'Entrar ou cadastrar-se',
+      'swipeContinue': 'Deslize para continuar'
+    },
+    'it': {
+      'tagline': 'Parla liberamente, impara in modo naturale',
+      'headlineBefore': 'La tua ',
+      'headlineAccent': 'storia',
+      'headlineAfter': ' è\nla tua migliore\nlezione di lingua',
+      'duoInvite': 'Invito Duo',
+      'loginOrJoin': 'Accedi o iscriviti',
+      'swipeContinue': 'Scorri per continuare'
+    },
+    'nl': {
+      'tagline': 'Spreek vrijuit, leer vanzelf',
+      'headlineBefore': 'Jouw ',
+      'headlineAccent': 'verhaal',
+      'headlineAfter': ' is\nje beste\ntaalles',
+      'duoInvite': 'Duo-uitnodiging',
+      'loginOrJoin': 'Inloggen of aanmelden',
+      'swipeContinue': 'Veeg om door te gaan'
+    },
+  };
+}

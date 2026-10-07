@@ -376,23 +376,25 @@ exports.syncDuoBoardHostPresence = functions.database
       const discoverable = await isHostForeground(uid);
       const posts = await db().collection('duo_board_posts')
           .where('ownerUid', '==', uid).get();
-      const batch = db().batch();
-      posts.docs.filter(doc => doc.get('active') === true).forEach(doc => {
-        if (doc.get('state') !== 'reserved') {
-          const visible = doc.get('ownerPaused') === true
-            ? false
-            : discoverable;
-          batch.update(doc.ref, {
-            discoverable: visible,
-            inactiveSince: visible
-              ? admin.firestore.FieldValue.delete()
-              : (doc.get('inactiveSince') ||
-                admin.firestore.FieldValue.serverTimestamp()),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        }
-      });
-      await batch.commit();
+      // Presence events can race a member's activate/deactivate tap. Re-read
+      // each document transactionally so a stale presence snapshot can never
+      // overwrite the newly written ownerPaused flag.
+      await Promise.all(posts.docs.map(doc => db().runTransaction(async tx => {
+        const current = await tx.get(doc.ref);
+        if (!current.exists || current.get('active') !== true ||
+            current.get('state') === 'reserved') return;
+        const visible = current.get('ownerPaused') === true
+          ? false
+          : discoverable;
+        tx.update(doc.ref, {
+          discoverable: visible,
+          inactiveSince: visible
+            ? admin.firestore.FieldValue.delete()
+            : (current.get('inactiveSince') ||
+              admin.firestore.FieldValue.serverTimestamp()),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      })));
       return null;
     });
 

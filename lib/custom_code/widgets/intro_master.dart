@@ -735,6 +735,7 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Widget _buildWelcomeDuoAction() {
+    final copy = IntroWelcomePageCopy.forSystemLocale();
     return AnimatedBuilder(
       animation: _welcomeMotionController,
       builder: (context, child) {
@@ -770,8 +771,9 @@ class _IntroMasterState extends State<IntroMaster>
             child: InkWell(
               onTap: _openDuoBoard,
               borderRadius: BorderRadius.circular(99),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
@@ -780,7 +782,7 @@ class _IntroMasterState extends State<IntroMaster>
                     // 화살표는 크기가 정해져 있어 그대로 둔다.
                     Flexible(
                       child: Text(
-                        'Duo Invite',
+                        copy['duoInvite']!,
                         maxLines: 2,
                         style: TextStyle(
                           color: Color(0xFFF9FAFC),
@@ -807,6 +809,7 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Widget _buildWelcomeLoginAction() {
+    final copy = IntroWelcomePageCopy.forSystemLocale();
     return TextButton(
       onPressed: _openAuthScreen,
       style: TextButton.styleFrom(
@@ -817,9 +820,9 @@ class _IntroMasterState extends State<IntroMaster>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text(
-            'Login or Join',
-            style: TextStyle(
+          Text(
+            copy['loginOrJoin']!,
+            style: const TextStyle(
               fontSize: 14.5,
               fontWeight: FontWeight.w500,
               letterSpacing: -0.15,
@@ -1371,6 +1374,7 @@ class _IntroMasterState extends State<IntroMaster>
   /// 임을 알린다. 흔들림은 숨보다 두 배 빠르되 ±1.6px·±0.9°로 얕게 둔다 —
   /// 크게 흔들면 글자가 읽히지 않는다(소리 구슬과 같은 시계를 쓴다).
   Widget _buildWelcomeTagline() {
+    final copy = IntroWelcomePageCopy.forSystemLocale();
     return AnimatedBuilder(
       animation: _welcomeMotionController,
       builder: (context, child) {
@@ -1398,7 +1402,7 @@ class _IntroMasterState extends State<IntroMaster>
             border: Border.all(color: const Color(0xFFD8D8DC), width: 1),
           ),
           child: Text(
-            'Speak freely, Pick it up naturally',
+            copy['tagline']!,
             maxLines: 1,
             textScaler: _cappedScaler(context, 1.0),
             style: const TextStyle(
@@ -1643,6 +1647,7 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Widget _buildWelcomeStoryPage() {
+    final copy = IntroWelcomePageCopy.forSystemLocale();
     return LayoutBuilder(
       key: const ValueKey('welcome-story'),
       builder: (context, constraints) {
@@ -1681,14 +1686,14 @@ class _IntroMasterState extends State<IntroMaster>
                   Text.rich(
                     TextSpan(
                       children: [
-                        const TextSpan(text: 'Your '),
+                        TextSpan(text: copy['headlineBefore']!),
                         TextSpan(
-                          text: 'Story',
+                          text: copy['headlineAccent']!,
                           style: TextStyle(
                             foreground: Paint()..shader = storyGradient,
                           ),
                         ),
-                        const TextSpan(text: '\nIs Your Best\nLanguage Lesson'),
+                        TextSpan(text: copy['headlineAfter']!),
                       ],
                     ),
                     textAlign: TextAlign.left,
@@ -1710,7 +1715,7 @@ class _IntroMasterState extends State<IntroMaster>
                   const Spacer(flex: 2),
                   Center(child: _buildPageIndicator(0, tealActive: true)),
                   const Spacer(flex: 2),
-                  _buildWelcomePageFooter('Swipe to Continue'),
+                  _buildWelcomePageFooter(copy['swipeContinue']!),
                   SizedBox(height: compact ? 8 : 12),
                   _buildLanguageFlagCluster(),
                   SizedBox(height: compact ? 2 : 6),
