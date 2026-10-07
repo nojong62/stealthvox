@@ -480,10 +480,33 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       final remoteConfig = FirebaseRemoteConfig.instance;
       String apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
       if (apiKey.isEmpty) {
-        await remoteConfig.fetchAndActivate().timeout(
-              const Duration(seconds: 8),
+        // A first launch can race Remote Config activation. Retry that short
+        // network fetch before reporting that the key is unavailable.
+        Object? lastRemoteConfigError;
+        for (var attempt = 1; attempt <= 3 && apiKey.isEmpty; attempt++) {
+          try {
+            await remoteConfig.fetchAndActivate().timeout(
+                  const Duration(seconds: 8),
+                );
+            apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
+          } catch (error) {
+            lastRemoteConfigError = error;
+          }
+          if (apiKey.isEmpty && attempt < 3) {
+            await Future<void>.delayed(
+              Duration(milliseconds: 500 * attempt),
             );
-        apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
+          }
+        }
+        if (apiKey.isEmpty && lastRemoteConfigError != null) {
+          if (lastRemoteConfigError is TimeoutException) {
+            throw lastRemoteConfigError;
+          }
+          throw const ScenarioRecommendationException(
+            'REMOTE_CONFIG_ERROR',
+            retryable: false,
+          );
+        }
       }
       if (apiKey.isEmpty) throw StateError('OpenAI key unavailable');
 
@@ -499,10 +522,22 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
         _userRoleController.text = result['user_role'] ?? '';
       });
     } catch (error) {
-      debugPrint('[SCENARIO-RECOMMEND] failed reason=${error.runtimeType}');
+      final code = error is ScenarioRecommendationException
+          ? error.code
+          : error is TimeoutException
+              ? 'REMOTE_CONFIG_TIMEOUT'
+              : error is StateError
+                  ? 'API_KEY_UNAVAILABLE'
+                  : 'UNKNOWN';
+      debugPrint(
+        '[SCENARIO-RECOMMEND] failed code=$code '
+        'reason=${error.runtimeType}',
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_setupCopy['scenarioRecommendError'])),
+          SnackBar(
+            content: Text('${_setupCopy['scenarioRecommendError']}\n[$code]'),
+          ),
         );
       }
     } finally {
@@ -538,10 +573,33 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       final remoteConfig = FirebaseRemoteConfig.instance;
       String apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
       if (apiKey.isEmpty) {
-        await remoteConfig.fetchAndActivate().timeout(
-              const Duration(seconds: 8),
+        // A first launch can race Remote Config activation. Retry that short
+        // network fetch before reporting that the key is unavailable.
+        Object? lastRemoteConfigError;
+        for (var attempt = 1; attempt <= 3 && apiKey.isEmpty; attempt++) {
+          try {
+            await remoteConfig.fetchAndActivate().timeout(
+                  const Duration(seconds: 8),
+                );
+            apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
+          } catch (error) {
+            lastRemoteConfigError = error;
+          }
+          if (apiKey.isEmpty && attempt < 3) {
+            await Future<void>.delayed(
+              Duration(milliseconds: 500 * attempt),
             );
-        apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
+          }
+        }
+        if (apiKey.isEmpty && lastRemoteConfigError != null) {
+          if (lastRemoteConfigError is TimeoutException) {
+            throw lastRemoteConfigError;
+          }
+          throw const ScenarioRecommendationException(
+            'REMOTE_CONFIG_ERROR',
+            retryable: false,
+          );
+        }
       }
       if (apiKey.isEmpty) throw StateError('OpenAI key unavailable');
       final recommendationLanguage = _chatLanguage;

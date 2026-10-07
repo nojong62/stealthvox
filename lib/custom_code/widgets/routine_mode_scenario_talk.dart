@@ -6158,7 +6158,19 @@ class HybridTtsPlayer {
   }
 }
 
+/// A safe, user-visible diagnostic for scenario recommendation failures.
+class ScenarioRecommendationException implements Exception {
+  const ScenarioRecommendationException(this.code, {required this.retryable});
+
+  final String code;
+  final bool retryable;
+
+  @override
+  String toString() => 'ScenarioRecommendationException($code)';
+}
+
 // ====================================================================
+
 // 🧠 [Box 7-1] ScenarioBrain v3 — 롤플레이 모드 전용 AI 뇌
 // ====================================================================
 class ScenarioBrain {
@@ -6553,7 +6565,38 @@ content and gist of the WHOLE conversation.
   // ==================================================================
   // 📦 [Box 7-1-0] generateDramaticScenario — 드라마/영화 장면 자동 생성
   // ==================================================================
+  /// Retries only transient recommendation failures. A failed attempt does not
+  /// consume a scenario seed, so a retry stays on the same recommendation.
   static Future<Map<String, String>?> generateDramaticScenario(
+    String apiKey, {
+    String languageName = 'English',
+  }) async {
+    const maxAttempts = 3;
+    ScenarioRecommendationException? lastError;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await _generateDramaticScenarioOnce(
+          apiKey,
+          languageName: languageName,
+        );
+      } on ScenarioRecommendationException catch (error) {
+        lastError = error;
+        debugPrint(
+          '[SCENARIO-RECOMMEND] attempt=$attempt/$maxAttempts '
+          'code=${error.code} retryable=${error.retryable}',
+        );
+        if (!error.retryable || attempt == maxAttempts) rethrow;
+        await Future<void>.delayed(Duration(milliseconds: 700 * attempt));
+      }
+    }
+    throw lastError ??
+        const ScenarioRecommendationException(
+          'UNKNOWN',
+          retryable: false,
+        );
+  }
+
+  static Future<Map<String, String>?> _generateDramaticScenarioOnce(
     String apiKey, {
     String languageName = 'English',
   }) async {
@@ -6591,7 +6634,7 @@ content and gist of the WHOLE conversation.
         ..shuffle(Random(uid.hashCode ^ (round * 0x9E3779B9)));
       final pickIndex = order[cursor % pool.length];
       final pick = pool[pickIndex];
-      await prefs.setInt(cursorKey, cursor + 1);
+
       // 앞 100개가 일상, 뒤 100개가 사고. 어느 쪽이냐에 따라 지켜야 할
       // 선이 달라서 프롬프트를 갈라 준다.
       final bool isEveryday = pickIndex < _everydaySituations100.length;
@@ -6663,7 +6706,7 @@ content and gist of the WHOLE conversation.
               ],
             }),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 20));
 
       if (res.statusCode == 200) {
         final body = jsonDecode(utf8.decode(res.bodyBytes));
@@ -6672,22 +6715,44 @@ content and gist of the WHOLE conversation.
             'finish_reason=${body['choices']?[0]?['finish_reason']} '
             'usage=${body['usage']}');
         final raw = body['choices'][0]['message']['content'].toString().trim();
-        final parsed = jsonDecode(raw);
-        return {
-          'situation': parsed['situation']?.toString() ?? '',
-          'ai_role': parsed['ai_role']?.toString() ?? '',
-          'user_role': parsed['user_role']?.toString() ?? '',
+        final parsed = jsonDecode(raw) as Map<String, dynamic>;
+        final result = <String, String>{
+          'situation': parsed['situation']?.toString().trim() ?? '',
+          'ai_role': parsed['ai_role']?.toString().trim() ?? '',
+          'user_role': parsed['user_role']?.toString().trim() ?? '',
         };
+        if (result.values.any((value) => value.isEmpty)) {
+          throw const FormatException('missing scenario fields');
+        }
+        await prefs.setInt(cursorKey, cursor + 1);
+        return result;
       }
-      // 폴백 없이 거절 본문을 그대로 남긴다.
       debugPrint('[AI-HTTP] scenario status=${res.statusCode} '
           'body=${utf8.decode(res.bodyBytes)}');
-    } catch (e) {
-      debugPrint('generateDramaticScenario Error: $e');
+      throw ScenarioRecommendationException(
+        'HTTP_${res.statusCode}',
+        retryable: const <int>{408, 409, 425, 429, 500, 502, 503, 504}
+            .contains(res.statusCode),
+      );
+    } on ScenarioRecommendationException {
+      rethrow;
+    } on TimeoutException {
+      throw const ScenarioRecommendationException('TIMEOUT', retryable: true);
+    } on SocketException {
+      throw const ScenarioRecommendationException('NETWORK', retryable: true);
+    } on http.ClientException {
+      throw const ScenarioRecommendationException('NETWORK', retryable: true);
+    } on FormatException {
+      throw const ScenarioRecommendationException(
+        'INVALID_RESPONSE',
+        retryable: true,
+      );
+    } catch (error) {
+      debugPrint('generateDramaticScenario Error: $error');
+      throw const ScenarioRecommendationException('UNKNOWN', retryable: false);
     } finally {
       client.close();
     }
-    return null;
   }
 
   // ==================================================================

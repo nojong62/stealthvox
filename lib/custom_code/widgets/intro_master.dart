@@ -1426,7 +1426,8 @@ class _IntroMasterState extends State<IntroMaster>
     if (anchor == null || !anchor.hasSize || overlay == null) return;
     final Offset topLeft = anchor.localToGlobal(Offset.zero);
     final double top = topLeft.dy + anchor.size.height + 10;
-    final List<String> pitch = _kTaglinePitches[_taglinePitchIndex];
+    final List<String> pitch =
+        IntroTaglinePitchCopy.forSystemLocale(_taglinePitchIndex);
     // 다음 차례를 미리 올려 둔다. 저절로 사라졌든 눌러서 껐든, 다음에 누르면
     // 언제나 그다음 한마디가 나온다.
     _taglinePitchIndex = (_taglinePitchIndex + 1) % _kTaglinePitches.length;
@@ -1706,6 +1707,7 @@ class _IntroMasterState extends State<IntroMaster>
                       letterSpacing: -0.8,
                     ),
                   ),
+                  SizedBox(height: veryCompact ? 20 : 32),
                   const Spacer(flex: 5),
                   _showEnglishTesterGoogleEntry
                       ? _buildEnglishTesterGoogleAction()

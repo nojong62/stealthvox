@@ -452,7 +452,7 @@ class IntroWelcomePageCopy {
       'tagline': 'Speak freely, Pick it up naturally',
       'headlineBefore': 'Your ',
       'headlineAccent': 'Story',
-      'headlineAfter': '\nIs Your Best\nLanguage Lesson',
+      'headlineAfter': ' Becomes\nLanguage.',
       'duoInvite': 'Duo Invite',
       'loginOrJoin': 'Login or Join',
       'swipeContinue': 'Swipe to Continue'
@@ -461,7 +461,7 @@ class IntroWelcomePageCopy {
       'tagline': '자유롭게 말하고, 자연스럽게 익히세요',
       'headlineBefore': '당신의 ',
       'headlineAccent': '이야기',
-      'headlineAfter': '가\n가장 좋은 언어 수업입니다',
+      'headlineAfter': '가 언어가 됩니다.',
       'duoInvite': 'Duo 초대',
       'loginOrJoin': '로그인 또는 가입',
       'swipeContinue': '스와이프하여 계속'
@@ -470,7 +470,7 @@ class IntroWelcomePageCopy {
       'tagline': '自由に話して、自然に身につけよう',
       'headlineBefore': 'あなたの ',
       'headlineAccent': '物語',
-      'headlineAfter': 'が\n最高の語学レッスンです',
+      'headlineAfter': 'が言語になります。',
       'duoInvite': 'Duo 招待',
       'loginOrJoin': 'ログイン・新規登録',
       'swipeContinue': 'スワイプして続ける'
@@ -479,7 +479,7 @@ class IntroWelcomePageCopy {
       'tagline': '自在开口，自然习得',
       'headlineBefore': '你的 ',
       'headlineAccent': '故事',
-      'headlineAfter': '就是\n最好的语言课',
+      'headlineAfter': '会成为语言。',
       'duoInvite': 'Duo 邀请',
       'loginOrJoin': '登录或注册',
       'swipeContinue': '滑动以继续'
@@ -488,7 +488,7 @@ class IntroWelcomePageCopy {
       'tagline': 'Habla con libertad, aprende de forma natural',
       'headlineBefore': 'Tu ',
       'headlineAccent': 'historia',
-      'headlineAfter': '\nes tu mejor\nlección de idiomas',
+      'headlineAfter': ' se convierte\nen idioma.',
       'duoInvite': 'Invitación Duo',
       'loginOrJoin': 'Iniciar sesión o unirse',
       'swipeContinue': 'Desliza para continuar'
@@ -497,7 +497,7 @@ class IntroWelcomePageCopy {
       'tagline': 'Parlez librement, apprenez naturellement',
       'headlineBefore': 'Votre ',
       'headlineAccent': 'histoire',
-      'headlineAfter': '\nest votre meilleure\nleçon de langue',
+      'headlineAfter': ' devient\nlangue.',
       'duoInvite': 'Invitation Duo',
       'loginOrJoin': 'Se connecter ou s’inscrire',
       'swipeContinue': 'Balayez pour continuer'
@@ -506,7 +506,7 @@ class IntroWelcomePageCopy {
       'tagline': 'Sprich frei, lerne ganz natürlich',
       'headlineBefore': 'Deine ',
       'headlineAccent': 'Geschichte',
-      'headlineAfter': ' ist\ndeine beste\nSprachlektion',
+      'headlineAfter': ' wird\nSprache.',
       'duoInvite': 'Duo-Einladung',
       'loginOrJoin': 'Anmelden oder registrieren',
       'swipeContinue': 'Wischen zum Fortfahren'
@@ -515,7 +515,7 @@ class IntroWelcomePageCopy {
       'tagline': 'बेझिझक बोलें, स्वाभाविक रूप से सीखें',
       'headlineBefore': 'आपकी ',
       'headlineAccent': 'कहानी',
-      'headlineAfter': ' ही\nसबसे अच्छा भाषा पाठ है',
+      'headlineAfter': ' भाषा बनती है।',
       'duoInvite': 'Duo आमंत्रण',
       'loginOrJoin': 'लॉग इन या जुड़ें',
       'swipeContinue': 'जारी रखने के लिए स्वाइप करें'
@@ -524,7 +524,7 @@ class IntroWelcomePageCopy {
       'tagline': 'Говорите свободно, учитесь естественно',
       'headlineBefore': 'Ваша ',
       'headlineAccent': 'история',
-      'headlineAfter': ' —\nлучший урок языка',
+      'headlineAfter': ' становится\nязыком.',
       'duoInvite': 'Приглашение Duo',
       'loginOrJoin': 'Войти или зарегистрироваться',
       'swipeContinue': 'Смахните, чтобы продолжить'
@@ -533,7 +533,7 @@ class IntroWelcomePageCopy {
       'tagline': 'Fale livremente, aprenda naturalmente',
       'headlineBefore': 'A sua ',
       'headlineAccent': 'história',
-      'headlineAfter': ' é\na sua melhor\naula de idiomas',
+      'headlineAfter': ' torna-se\nlinguagem.',
       'duoInvite': 'Convite Duo',
       'loginOrJoin': 'Entrar ou cadastrar-se',
       'swipeContinue': 'Deslize para continuar'
@@ -542,7 +542,7 @@ class IntroWelcomePageCopy {
       'tagline': 'Parla liberamente, impara in modo naturale',
       'headlineBefore': 'La tua ',
       'headlineAccent': 'storia',
-      'headlineAfter': ' è\nla tua migliore\nlezione di lingua',
+      'headlineAfter': ' diventa\nlinguaggio.',
       'duoInvite': 'Invito Duo',
       'loginOrJoin': 'Accedi o iscriviti',
       'swipeContinue': 'Scorri per continuare'
@@ -551,10 +551,164 @@ class IntroWelcomePageCopy {
       'tagline': 'Spreek vrijuit, leer vanzelf',
       'headlineBefore': 'Jouw ',
       'headlineAccent': 'verhaal',
-      'headlineAfter': ' is\nje beste\ntaalles',
+      'headlineAfter': ' wordt\ntaal.',
       'duoInvite': 'Duo-uitnodiging',
       'loginOrJoin': 'Inloggen of aanmelden',
       'swipeContinue': 'Veeg om door te gaan'
     },
+  };
+}
+
+/// Rotating welcome-page pitch bubbles localized to the device language.
+class IntroTaglinePitchCopy {
+  static List<String> forSystemLocale(int index) {
+    final locale =
+        PlatformDispatcher.instance.locale.languageCode.toLowerCase();
+    final pitches = _pitches[locale] ?? _pitches['en']!;
+    return pitches[index % pitches.length];
+  }
+
+  static const Map<String, List<List<String>>> _pitches = {
+    'en': [
+      [
+        '🎙️ Real-World AI Language Practice',
+        'No grammar lectures. No pattern drills.\nJust real conversation.\nPay only for the time you use.'
+      ],
+      [
+        '🎙️ No Lessons, Just Real Practice',
+        'Practice real conversations with AI.\nPay only for the time you use.'
+      ],
+      [
+        '🎙️ Your Personal AI Practice Room',
+        'Learn through conversation, without lectures.\nPay only for the time you use.'
+      ],
+    ],
+    'ko': [
+      ['🎙️ 실전 AI 언어 연습', '문법 강의도, 패턴 훈련도 없습니다.\n진짜 대화만 하세요.\n사용한 시간만 결제하세요.'],
+      ['🎙️ 수업 없이, 진짜 연습만', 'AI와 실제 대화를 연습하세요.\n사용한 시간만 결제하세요.'],
+      ['🎙️ 나만의 AI 연습방', '강의 없이 대화로 익히세요.\n사용한 시간만 결제하세요.'],
+    ],
+    'ja': [
+      ['🎙️ 実践AI語学練習', '文法講義もパターンドリルもありません。\n本当の会話だけ。\n使った時間分だけお支払いください。'],
+      ['🎙️ レッスンなし、実践だけ', 'AIとリアルな会話を練習しましょう。\n使った時間分だけお支払いください。'],
+      ['🎙️ あなた専用のAI練習室', '講義なしで、会話から身につけます。\n使った時間分だけお支払いください。'],
+    ],
+    'zh': [
+      ['🎙️ AI实战语言练习', '没有语法讲解，也没有句型操练。\n只有真实对话。\n只按使用时间付费。'],
+      ['🎙️ 不上课，只做真实练习', '和AI练习真实对话。\n只按使用时间付费。'],
+      ['🎙️ 你的专属AI练习室', '通过对话学习，不需要讲课。\n只按使用时间付费。'],
+    ],
+    'es': [
+      [
+        '🎙️ Práctica de idiomas con IA real',
+        'Sin clases de gramática ni ejercicios mecánicos.\nSolo conversación real.\nPaga solo por el tiempo que uses.'
+      ],
+      [
+        '🎙️ Sin lecciones, solo práctica real',
+        'Practica conversaciones reales con IA.\nPaga solo por el tiempo que uses.'
+      ],
+      [
+        '🎙️ Tu sala personal de práctica con IA',
+        'Aprende conversando, sin clases.\nPaga solo por el tiempo que uses.'
+      ],
+    ],
+    'fr': [
+      [
+        '🎙️ Pratique linguistique avec une IA réelle',
+        'Pas de cours de grammaire ni d’exercices mécaniques.\nSeulement de vraies conversations.\nPayez seulement le temps utilisé.'
+      ],
+      [
+        '🎙️ Pas de leçons, de la vraie pratique',
+        'Pratiquez de vraies conversations avec l’IA.\nPayez seulement le temps utilisé.'
+      ],
+      [
+        '🎙️ Votre salle d’entraînement IA',
+        'Apprenez par la conversation, sans cours.\nPayez seulement le temps utilisé.'
+      ],
+    ],
+    'de': [
+      [
+        '🎙️ KI-Sprachpraxis aus dem echten Leben',
+        'Keine Grammatikvorträge, keine Übungsdrills.\nNur echte Gespräche.\nDu zahlst nur für deine Nutzungszeit.'
+      ],
+      [
+        '🎙️ Keine Lektionen, nur echte Praxis',
+        'Übe echte Gespräche mit KI.\nDu zahlst nur für deine Nutzungszeit.'
+      ],
+      [
+        '🎙️ Dein persönlicher KI-Übungsraum',
+        'Lerne durch Gespräche, ganz ohne Vorträge.\nDu zahlst nur für deine Nutzungszeit.'
+      ],
+    ],
+    'hi': [
+      [
+        '🎙️ वास्तविक दुनिया का AI भाषा अभ्यास',
+        'व्याकरण के व्याख्यान या रटने वाले अभ्यास नहीं।\nबस वास्तविक बातचीत।\nकेवल इस्तेमाल किए समय का भुगतान करें।'
+      ],
+      [
+        '🎙️ पाठ नहीं, सिर्फ वास्तविक अभ्यास',
+        'AI के साथ वास्तविक बातचीत का अभ्यास करें।\nकेवल इस्तेमाल किए समय का भुगतान करें।'
+      ],
+      [
+        '🎙️ आपका निजी AI अभ्यास कक्ष',
+        'व्याख्यान के बिना बातचीत से सीखें।\nकेवल इस्तेमाल किए समय का भुगतान करें।'
+      ],
+    ],
+    'ru': [
+      [
+        '🎙️ Практика языка с ИИ в реальной жизни',
+        'Никаких лекций по грамматике и упражнений по шаблонам.\nТолько живое общение.\nПлатите только за время использования.'
+      ],
+      [
+        '🎙️ Без уроков — только настоящая практика',
+        'Практикуйте реальные разговоры с ИИ.\nПлатите только за время использования.'
+      ],
+      [
+        '🎙️ Ваша личная комната практики с ИИ',
+        'Учитесь через разговоры без лекций.\nПлатите только за время использования.'
+      ],
+    ],
+    'pt': [
+      [
+        '🎙️ Prática de idiomas com IA no mundo real',
+        'Sem aulas de gramática nem exercícios mecânicos.\nApenas conversas reais.\nPague somente pelo tempo usado.'
+      ],
+      [
+        '🎙️ Sem aulas, apenas prática real',
+        'Pratique conversas reais com IA.\nPague somente pelo tempo usado.'
+      ],
+      [
+        '🎙️ Sua sala pessoal de prática com IA',
+        'Aprenda conversando, sem aulas.\nPague somente pelo tempo usado.'
+      ],
+    ],
+    'it': [
+      [
+        '🎙️ Pratica linguistica con IA nel mondo reale',
+        'Niente lezioni di grammatica né esercizi meccanici.\nSolo conversazioni vere.\nPaghi solo il tempo che usi.'
+      ],
+      [
+        '🎙️ Niente lezioni, solo pratica reale',
+        'Esercitati in conversazioni vere con l’IA.\nPaghi solo il tempo che usi.'
+      ],
+      [
+        '🎙️ La tua sala personale di pratica IA',
+        'Impara conversando, senza lezioni.\nPaghi solo il tempo che usi.'
+      ],
+    ],
+    'nl': [
+      [
+        '🎙️ Praktische taaltraining met AI',
+        'Geen grammaticacolleges of patroonoefeningen.\nAlleen echte gesprekken.\nBetaal alleen voor je gebruikstijd.'
+      ],
+      [
+        '🎙️ Geen lessen, alleen echte oefening',
+        'Oefen echte gesprekken met AI.\nBetaal alleen voor je gebruikstijd.'
+      ],
+      [
+        '🎙️ Jouw persoonlijke AI-oefenruimte',
+        'Leer via gesprekken, zonder colleges.\nBetaal alleen voor je gebruikstijd.'
+      ],
+    ],
   };
 }
