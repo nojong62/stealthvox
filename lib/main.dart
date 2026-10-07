@@ -237,9 +237,7 @@ class _MyAppState extends State<MyApp> {
           );
         },
       ));
-      unawaited(DuoBoardHostPresence.instance.initialize(
-        () => appNavigatorKey.currentContext ?? context,
-      ));
+      unawaited(DuoBoardHostPresence.instance.initialize());
     });
   }
 

@@ -6,28 +6,23 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 
 import 'duo_board_service.dart';
-import 'duo_invite_localization.dart';
 
 /// Publishes presence only while a member with an active board post is visible.
 class DuoBoardHostPresence with WidgetsBindingObserver {
   DuoBoardHostPresence._();
   static final DuoBoardHostPresence instance = DuoBoardHostPresence._();
 
-  BuildContext Function()? _context;
   StreamSubscription<User?>? _authSubscription;
   DatabaseReference? _connection;
   Timer? _heartbeat;
   String? _uid;
   bool _ownsActivePost = false;
-  bool _promptedThisLaunch = false;
   String? _checkingUid;
-  BuildContext? _restoreDialogContext;
   String? _pausedForIncomingInvitePostId;
   bool _incomingInviteTakesPriority = false;
   int _incomingInviteGeneration = 0;
 
-  Future<void> initialize(BuildContext Function() context) async {
-    _context = context;
+  Future<void> initialize() async {
     WidgetsBinding.instance.addObserver(this);
     await _authSubscription?.cancel();
     _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
@@ -41,17 +36,15 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       await stop();
       _uid = null;
       _ownsActivePost = false;
-      _promptedThisLaunch = false;
       _checkingUid = null;
       _incomingInviteTakesPriority = false;
       return;
     }
-    if (_uid == user.uid && _promptedThisLaunch) return;
+    if (_uid == user.uid && _ownsActivePost) return;
     if (_checkingUid == user.uid) return;
     _checkingUid = user.uid;
     if (_uid != null && _uid != user.uid) {
       await stop();
-      _promptedThisLaunch = false;
     }
     _uid = user.uid;
     QueryDocumentSnapshot<Map<String, dynamic>>? post;
@@ -59,85 +52,34 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       post = await DuoBoardService.findOwnActivePost()
           .timeout(const Duration(seconds: 5));
     } catch (error) {
-      // 게시글 복원 확인은 앱 진입을 막는 절차가 아니다. 로그아웃 직후처럼
-      // 인증이 바뀌는 순간 조회가 실패해도 다음 auth/lifecycle 신호에서 다시
-      // 확인할 수 있으므로 여기서는 조용히 빠진다.
       debugPrint('[DuoBoard] active post lookup failed: $error');
       _checkingUid = null;
       return;
     }
     _ownsActivePost = post != null;
-    if (!_ownsActivePost) {
+    if (!_ownsActivePost || _incomingInviteTakesPriority) {
       _checkingUid = null;
       return;
     }
-    // 받은 초대를 처리하기 시작했다면 내 게시글 복원 질문은 띄우지 않는다.
-    // 초대 입장이 끝난 뒤 필요하면 게시판에서 직접 다시 활성화할 수 있다.
-    if (_incomingInviteTakesPriority) {
+
+    // 사용자가 직접 끈 글은 같은 로그인 중 계속 꺼져 있어야 한다.
+    if (post!.data()['ownerPaused'] == true) {
+      _ownsActivePost = false;
       _checkingUid = null;
       return;
     }
-    if (_promptedThisLaunch) {
-      await ensureOnline();
-      _checkingUid = null;
-      return;
-    }
-    _promptedThisLaunch = true;
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-    if (_incomingInviteTakesPriority ||
-        _pausedForIncomingInvitePostId == post?.id) {
-      _checkingUid = null;
-      return;
-    }
-    final context = _context?.call();
-    if (context == null || !context.mounted) {
-      _promptedThisLaunch = false;
-      _checkingUid = null;
-      return;
-    }
-    final copy = DuoInviteCopy.forSystemLocale();
-    final choice = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        _restoreDialogContext = dialogContext;
-        return AlertDialog(
-          title: Text(copy['restorePostTitle']),
-          content: Text(copy['restorePostBody']),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, 'end'),
-              child: Text(copy['endPost']),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, 'continue'),
-              child: Text(copy['continuePost']),
-            ),
-          ],
-        );
-      },
-    );
-    _restoreDialogContext = null;
-    if (choice == 'incoming_invite') {
-      _checkingUid = null;
-      return;
-    }
-    if (choice == 'continue') {
-      final resumed = await DuoBoardService.resumePost(post!.id);
+
+    // 그 외 본인 통역 게시글은 로그인 직후 기본값으로 바로 다시 활성화한다.
+    try {
+      final resumed = await DuoBoardService.resumePost(post.id)
+          .timeout(const Duration(seconds: 8));
       if (!resumed) {
         await postEnded();
       } else {
-        // Reactivate the Firestore post first. Presence synchronization is
-        // best-effort and must not leave the post permanently paused.
-        try {
-          await ensureOnline().timeout(const Duration(seconds: 8));
-        } catch (error) {
-          debugPrint('[DuoBoard] presence restore failed: $error');
-        }
+        await ensureOnline().timeout(const Duration(seconds: 8));
       }
-    } else if (post != null) {
-      await DuoBoardService.withdrawPost(post.id);
-      _ownsActivePost = false;
+    } catch (error) {
+      debugPrint('[DuoBoard] automatic post restore failed: $error');
     }
     _checkingUid = null;
   }
@@ -153,28 +95,18 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     final generation = ++_incomingInviteGeneration;
     _incomingInviteTakesPriority = true;
 
-    // 받은 초대가 최우선이다. 게시글 조회가 끝나기를 기다렸다가 닫으면 앱이
-    // 먼저 띄운 "기존 초대를 유지할까요?" 팝업이 딥링크 위를 가릴 수 있다.
-    final dialogContext = _restoreDialogContext;
-    if (dialogContext != null && dialogContext.mounted) {
-      Navigator.pop(dialogContext, 'incoming_invite');
-    }
-
     try {
       final post = await DuoBoardService.findOwnActivePost()
           .timeout(const Duration(seconds: 5));
-      if (post == null || post.id == roomId ||
+      if (post == null ||
+          post.id == roomId ||
           generation != _incomingInviteGeneration ||
           !_incomingInviteTakesPriority) {
         return;
       }
 
       _pausedForIncomingInvitePostId = post.id;
-      // 위 첫 dismiss와 조회 사이에 복원 팝업이 새로 뜬 경합도 닫는다.
-      final lateDialogContext = _restoreDialogContext;
-      if (lateDialogContext != null && lateDialogContext.mounted) {
-        Navigator.pop(lateDialogContext, 'incoming_invite');
-      }
+
       await DuoBoardService.setPostVisibility(post.id, enabled: false)
           .timeout(const Duration(seconds: 5));
       // A call can finish while the visibility write is in flight. Do not let

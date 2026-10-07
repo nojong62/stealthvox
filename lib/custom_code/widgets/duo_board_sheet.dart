@@ -420,7 +420,8 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                       if (value is Timestamp) {
                         return value.millisecondsSinceEpoch;
                       }
-                      if (value is DateTime) return value.millisecondsSinceEpoch;
+                      if (value is DateTime)
+                        return value.millisecondsSinceEpoch;
                       return 0;
                     }
 
@@ -451,8 +452,17 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                 final doc = docs[index];
                                 final data = doc.data();
                                 final mine = data['ownerUid'] == uid;
-                                final available = _pendingVisibility[doc.id] ??
-                                    data['discoverable'] == true;
+                                final pendingVisibility =
+                                    _pendingVisibility[doc.id];
+                                // 내 글은 앱이 막 로그인해 presence 동기화를 마치기
+                                // 전에도, 직접 꺼 둔(ownerPaused) 경우가 아니라면
+                                // 활성으로 보여야 한다.
+                                final available = pendingVisibility ??
+                                    (mine
+                                        ? data['active'] == true &&
+                                            data['state'] != 'reserved' &&
+                                            data['ownerPaused'] != true
+                                        : data['discoverable'] == true);
                                 final enabled =
                                     !mine && available && _claiming == null;
                                 final readable = mine || _claiming == null;
