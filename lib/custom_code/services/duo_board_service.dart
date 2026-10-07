@@ -53,7 +53,8 @@ class DuoBoardService {
     final result = await FirebaseFirestore.instance
         .collection('duo_board_posts')
         .where('ownerUid', isEqualTo: user.uid)
-        .limit(10)
+        .where('active', isEqualTo: true)
+        .limit(1)
         .get();
     for (final doc in result.docs) {
       if (doc.data()['active'] == true) return doc;
@@ -96,7 +97,11 @@ class DuoBoardService {
   static Future<bool> resumePost(String postId) async {
     final result = await _functions
         .httpsCallable('resumeDuoBoardPost')
-        .call({'postId': postId});
+        .call({'postId': postId})
+        // A failed restore must return control to the host-presence recovery
+        // path. Without a bound here, a stalled callable leaves the post
+        // paused for the rest of the login session.
+        .timeout(const Duration(seconds: 12));
     return Map<String, dynamic>.from(result.data as Map)['resumed'] == true;
   }
 

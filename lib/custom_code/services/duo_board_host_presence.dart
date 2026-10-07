@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
@@ -14,14 +13,18 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
   static final DuoBoardHostPresence instance = DuoBoardHostPresence._();
 
   BuildContext Function()? _context;
+  BuildContext? _restoreDialogContext;
+  String? _restoreChoice;
   StreamSubscription<User?>? _authSubscription;
   DatabaseReference? _connection;
   Timer? _heartbeat;
   String? _uid;
   bool _ownsActivePost = false;
-  bool _promptedThisLaunch = false;
+  bool _restoredThisSession = false;
+  Timer? _restoreRetry;
+  int _authGeneration = 0;
   String? _checkingUid;
-  BuildContext? _restoreDialogContext;
+
   String? _pausedForIncomingInvitePostId;
   bool _incomingInviteTakesPriority = false;
   int _incomingInviteGeneration = 0;
@@ -37,109 +40,125 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
   }
 
   Future<void> _handleUser(User? user) async {
-    if (user == null || user.isAnonymous) {
-      await stop();
-      _uid = null;
+    if (user == null || user.isAnonymous || _uid != user.uid) {
+      ++_authGeneration;
+      _restoreRetry?.cancel();
+      _restoreRetry = null;
+      _uid = user == null || user.isAnonymous ? null : user.uid;
       _ownsActivePost = false;
-      _promptedThisLaunch = false;
+      _restoredThisSession = false;
+      _restoreChoice = null;
       _checkingUid = null;
       _incomingInviteTakesPriority = false;
+      _pausedForIncomingInvitePostId = null;
+      try {
+        await stop().timeout(const Duration(seconds: 3));
+      } catch (error) {
+        debugPrint('[DuoBoard] old presence cleanup failed: $error');
+      }
+    }
+    debugPrint('[DuoBoard] restore lifecycle: ' +
+        WidgetsBinding.instance.lifecycleState.toString());
+    if (user == null ||
+        user.isAnonymous ||
+        _restoredThisSession ||
+        _checkingUid == user.uid ||
+        _incomingInviteTakesPriority ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
       return;
     }
-    if (_uid == user.uid && _promptedThisLaunch) return;
-    if (_checkingUid == user.uid) return;
+    final generation = _authGeneration;
+    final inviteGeneration = _incomingInviteGeneration;
+    bool stillCurrent() =>
+        generation == _authGeneration &&
+        FirebaseAuth.instance.currentUser?.uid == user.uid &&
+        inviteGeneration == _incomingInviteGeneration &&
+        !_incomingInviteTakesPriority;
     _checkingUid = user.uid;
-    if (_uid != null && _uid != user.uid) {
-      await stop();
-      _promptedThisLaunch = false;
-    }
-    _uid = user.uid;
-    QueryDocumentSnapshot<Map<String, dynamic>>? post;
     try {
-      post = await DuoBoardService.findOwnActivePost()
+      final post = await DuoBoardService.findOwnActivePost()
           .timeout(const Duration(seconds: 5));
-    } catch (error) {
-      // 게시글 복원 확인은 앱 진입을 막는 절차가 아니다. 로그아웃 직후처럼
-      // 인증이 바뀌는 순간 조회가 실패해도 다음 auth/lifecycle 신호에서 다시
-      // 확인할 수 있으므로 여기서는 조용히 빠진다.
-      debugPrint('[DuoBoard] active post lookup failed: $error');
-      _checkingUid = null;
-      return;
-    }
-    _ownsActivePost = post != null;
-    if (!_ownsActivePost) {
-      _checkingUid = null;
-      return;
-    }
-    // 받은 초대를 처리하기 시작했다면 내 게시글 복원 질문은 띄우지 않는다.
-    // 초대 입장이 끝난 뒤 필요하면 게시판에서 직접 다시 활성화할 수 있다.
-    if (_incomingInviteTakesPriority) {
-      _checkingUid = null;
-      return;
-    }
-    if (_promptedThisLaunch) {
-      await ensureOnline();
-      _checkingUid = null;
-      return;
-    }
-    _promptedThisLaunch = true;
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-    if (_incomingInviteTakesPriority ||
-        _pausedForIncomingInvitePostId == post?.id) {
-      _checkingUid = null;
-      return;
-    }
-    final context = _context?.call();
-    if (context == null || !context.mounted) {
-      _promptedThisLaunch = false;
-      _checkingUid = null;
-      return;
-    }
-    final copy = DuoInviteCopy.forSystemLocale();
-    final choice = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        _restoreDialogContext = dialogContext;
-        return AlertDialog(
-          title: Text(copy['restorePostTitle']),
-          content: Text(copy['restorePostBody']),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, 'end'),
-              child: Text(copy['endPost']),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, 'continue'),
-              child: Text(copy['continuePost']),
-            ),
-          ],
+      if (!stillCurrent()) return;
+      _ownsActivePost = false;
+      debugPrint(
+          '[DuoBoard] own active post found: ' + (post != null).toString());
+      if (post == null) {
+        _restoredThisSession = true;
+        return;
+      }
+      if (_restoreChoice == null) {
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        if (!stillCurrent()) return;
+        final context = _context?.call();
+        if (context == null || !context.mounted) {
+          throw StateError('Post restore dialog is not ready');
+        }
+        final copy = DuoInviteCopy.forSystemLocale();
+        final choice = await showDialog<String>(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) {
+            _restoreDialogContext = dialogContext;
+            return AlertDialog(
+              title: Text(copy['restorePostTitle']),
+              content: Text(copy['restorePostBody']),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, 'end'),
+                  child: Text(copy['endPost']),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, 'continue'),
+                  child: Text(copy['continuePost']),
+                ),
+              ],
+            );
+          },
         );
-      },
-    );
-    _restoreDialogContext = null;
-    if (choice == 'incoming_invite') {
-      _checkingUid = null;
-      return;
-    }
-    if (choice == 'continue') {
-      final resumed = await DuoBoardService.resumePost(post!.id);
+        _restoreDialogContext = null;
+        if (!stillCurrent() || (choice != 'continue' && choice != 'end')) {
+          return;
+        }
+        _restoreChoice = choice;
+      }
+      if (_restoreChoice == 'end') {
+        await DuoBoardService.withdrawPost(post.id);
+        if (stillCurrent()) await postEnded();
+        return;
+      }
+      // Retry the accepted choice without asking again on a network failure.
+      // Presence is best-effort; its failure must not block login recovery.
+      try {
+        await ensureOnline();
+      } catch (error) {
+        debugPrint('[DuoBoard] login presence pending: $error');
+      }
+      if (!stillCurrent() ||
+          WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+        return;
+      }
+      final resumed = await DuoBoardService.resumePost(post.id);
+      if (!stillCurrent()) return;
+      _restoredThisSession = true;
+      _restoreRetry?.cancel();
+      _restoreRetry = null;
       if (!resumed) {
         await postEnded();
       } else {
-        // Reactivate the Firestore post first. Presence synchronization is
-        // best-effort and must not leave the post permanently paused.
-        try {
-          await ensureOnline().timeout(const Duration(seconds: 8));
-        } catch (error) {
-          debugPrint('[DuoBoard] presence restore failed: $error');
-        }
+        debugPrint('[DuoBoard] own post restored after login: ' + post.id);
       }
-    } else if (post != null) {
-      await DuoBoardService.withdrawPost(post.id);
-      _ownsActivePost = false;
+    } catch (error) {
+      debugPrint('[DuoBoard] login post restore failed: $error');
+      if (stillCurrent() && !_restoredThisSession) {
+        _restoreRetry?.cancel();
+        _restoreRetry = Timer(const Duration(seconds: 5), () {
+          _restoreRetry = null;
+          unawaited(_handleUser(FirebaseAuth.instance.currentUser));
+        });
+      }
+    } finally {
+      if (generation == _authGeneration) _checkingUid = null;
     }
-    _checkingUid = null;
   }
 
   /// 다른 사람의 Duo 방으로 들어갈 때 내 게시글이 다시 노출되지 않게 한다.
@@ -149,17 +168,16 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     if (roomId.isEmpty) return;
 
     // 이 플래그는 조회보다 먼저 세운다. 앱 시작 복원 조회와 받은 초대 조회가
-    // 동시에 끝나더라도 복원 팝업이 뒤늦게 초대 화면 위에 뜨면 안 된다.
+    // 동시에 끝나더라도 내 글이 초대 입장 중 다시 활성화되면 안 된다.
     final generation = ++_incomingInviteGeneration;
     _incomingInviteTakesPriority = true;
-
-    // 받은 초대가 최우선이다. 게시글 조회가 끝나기를 기다렸다가 닫으면 앱이
-    // 먼저 띄운 "기존 초대를 유지할까요?" 팝업이 딥링크 위를 가릴 수 있다.
     final dialogContext = _restoreDialogContext;
     if (dialogContext != null && dialogContext.mounted) {
       Navigator.pop(dialogContext, 'incoming_invite');
     }
 
+    _restoreRetry?.cancel();
+    _restoreRetry = null;
     try {
       final post = await DuoBoardService.findOwnActivePost()
           .timeout(const Duration(seconds: 5));
@@ -171,11 +189,6 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       }
 
       _pausedForIncomingInvitePostId = post.id;
-      // 위 첫 dismiss와 조회 사이에 복원 팝업이 새로 뜬 경합도 닫는다.
-      final lateDialogContext = _restoreDialogContext;
-      if (lateDialogContext != null && lateDialogContext.mounted) {
-        Navigator.pop(lateDialogContext, 'incoming_invite');
-      }
       await DuoBoardService.setPostVisibility(post.id, enabled: false)
           .timeout(const Duration(seconds: 5));
       // A call can finish while the visibility write is in flight. Do not let
@@ -253,11 +266,28 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     }
     // The visible state should react to the heartbeat immediately. Registering
     // the disconnect cleanup above remains best-effort and must not hold the UI.
-    await _writeHeartbeat().timeout(const Duration(seconds: 3));
+
     _heartbeat ??= Timer.periodic(
       const Duration(seconds: 20),
-      (_) => unawaited(_writeHeartbeat()),
+      (_) => unawaited(_refreshHeartbeat()),
     );
+    await _writeHeartbeat().timeout(const Duration(seconds: 3));
+  }
+
+  Future<void> _refreshHeartbeat() async {
+    try {
+      await _writeHeartbeat().timeout(const Duration(seconds: 3));
+    } catch (error) {
+      debugPrint('[DuoBoard] host heartbeat will retry: $error');
+    }
+  }
+
+  Future<void> _refreshOnline() async {
+    try {
+      await ensureOnline();
+    } catch (error) {
+      debugPrint('[DuoBoard] foreground presence will retry: $error');
+    }
   }
 
   Future<void> _writeHeartbeat() async {
@@ -302,15 +332,28 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     }
   }
 
+  /// Explicit board actions win over pending automatic login retries.
+  void postVisibilityChanged() {
+    _restoredThisSession = true;
+    ++_authGeneration;
+    _checkingUid = null;
+    _restoreRetry?.cancel();
+    _restoreRetry = null;
+  }
+
   Future<void> postEnded() async {
+    _restoredThisSession = true;
+    _restoreRetry?.cancel();
+    _restoreRetry = null;
     _ownsActivePost = false;
     await stop();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && _ownsActivePost) {
-      unawaited(ensureOnline());
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_handleUser(FirebaseAuth.instance.currentUser));
+      if (_ownsActivePost) unawaited(_refreshOnline());
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {

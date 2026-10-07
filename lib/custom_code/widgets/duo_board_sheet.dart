@@ -292,6 +292,7 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
 
   Future<void> _togglePostVisibility(
       String postId, bool currentlyVisible) async {
+    DuoBoardHostPresence.instance.postVisibilityChanged();
     final nextVisible = !currentlyVisible;
     setState(() {
       _claiming = postId;
@@ -454,13 +455,13 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                 final mine = data['ownerUid'] == uid;
                                 final pendingVisibility =
                                     _pendingVisibility[doc.id];
-                                // 내 글은 앱이 막 로그인해 presence 동기화를 마치기
-                                // 전에도, 직접 꺼 둔(ownerPaused) 경우가 아니라면
-                                // 활성으로 보여야 한다.
+                                // Show availability confirmed by the server;
+                                // login recovery may still be in progress.
                                 final available = pendingVisibility ??
                                     (mine
                                         ? data['active'] == true &&
                                             data['state'] != 'reserved' &&
+                                            data['discoverable'] == true &&
                                             data['ownerPaused'] != true
                                         : data['discoverable'] == true);
                                 final enabled =
