@@ -185,16 +185,32 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       await ensureOnline().timeout(const Duration(seconds: 4));
       await DuoBoardService.setPostVisibility(postId, enabled: true)
           .timeout(const Duration(seconds: 8));
-      await Future<void>.delayed(const Duration(milliseconds: 600));
-      if (!stillCurrent()) return;
-      if (await DuoBoardService.isPostDiscoverable(postId)
-          .timeout(const Duration(seconds: 5))) {
+      if (await _isPostStablyDiscoverable(postId, stillCurrent)) {
         return;
       }
     }
     throw StateError('Duo post did not become discoverable');
   }
 
+  /// Confirms the server's public state twice instead of imposing a fixed
+  /// propagation delay. A fast, healthy restore completes as soon as the first
+  /// callable write is visible, while the second read guards against a late
+  /// presence-sync write changing the card immediately afterwards.
+  Future<bool> _isPostStablyDiscoverable(
+    String postId,
+    bool Function() stillCurrent,
+  ) async {
+    for (var confirmation = 0; confirmation < 2; confirmation++) {
+      if (!stillCurrent()) return false;
+      final discoverable = await DuoBoardService.isPostDiscoverable(postId)
+          .timeout(const Duration(seconds: 5));
+      if (!discoverable || !stillCurrent()) return false;
+      if (confirmation == 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+    }
+    return true;
+  }
   /// 다른 사람의 Duo 방으로 들어갈 때 내 게시글이 다시 노출되지 않게 한다.
   /// 글은 삭제하지 않고 비공개로 두므로 받은 통화가 끝난 뒤 다시 켤 수 있다.
   Future<void> prepareForIncomingInvite(String incomingRoomId) async {

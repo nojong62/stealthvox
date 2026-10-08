@@ -6319,7 +6319,7 @@ RULES — follow exactly:
   /// 한 바퀴가 끝나고 메뉴로 되돌아가기까지의 유예. 이 동안 녹음을 눌러
   /// 들어볼 수 있고, 그냥 두면 알아서 위로 올라간다.
   Timer? _p3ReturnTimer;
-  static const Duration _kP3ReturnDelay = Duration(seconds: 3);
+  static const Duration _kP3ReturnDelay = Duration(seconds: 5);
 
   /// 자동 읽기 스크롤의 마지막 여백. 버튼 하단을 화면 끝에 딱 붙이면 시스템
   /// 영역과 손가락에 가려지므로, 마지막 대사 몇 줄과 버튼이 함께 보이게 한다.

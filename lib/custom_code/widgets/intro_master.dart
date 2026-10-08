@@ -24,6 +24,8 @@ import '/custom_code/services/duo_guest_handoff.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/duo_board_push_service.dart';
 import '/custom_code/services/duo_board_intro_notice.dart';
+import '/custom_code/services/origin_surface_localization.dart';
+import '/custom_code/services/system_ui_language.dart';
 
 enum IntroScreen { welcome, auth, accountDiscovery }
 
@@ -2490,10 +2492,11 @@ class _IntroMasterState extends State<IntroMaster>
 
   String _providerDescription(String provider) {
     return switch (provider) {
-      'kakao' => 'You previously signed up with Kakao.',
-      'google' => 'You previously signed up with Google.',
-      'email' => 'You previously signed up with email.',
-      _ => 'Choose a login method.',
+      'kakao' => OriginSurfaceCopy.forSystemLocale()['previouslySignedUpKakao'],
+      'google' =>
+        OriginSurfaceCopy.forSystemLocale()['previouslySignedUpGoogle'],
+      'email' => OriginSurfaceCopy.forSystemLocale()['previouslySignedUpEmail'],
+      _ => OriginSurfaceCopy.forSystemLocale()['chooseLoginMethod'],
     };
   }
 
@@ -2514,7 +2517,8 @@ class _IntroMasterState extends State<IntroMaster>
             letterSpacing: -0.8,
           ),
         ),
-        const SizedBox(height: 10),
+        // 질문과 안내문이 붙어 보이지 않도록 제목 아래 간격을 둔다.
+        const SizedBox(height: 20),
         Text(
           description,
           style: const TextStyle(
@@ -2539,7 +2543,7 @@ class _IntroMasterState extends State<IntroMaster>
 
     switch (provider) {
       case 'kakao':
-        label = isLoginMode ? 'Continue with Kakao' : 'Join with Kakao';
+        label = OriginSurfaceCopy.forSystemLocale()['continueKakao'];
         backgroundColor = const Color(0xFFFEE500);
         foregroundColor = const Color(0xFF191919);
         icon = Image.asset(
@@ -2558,7 +2562,7 @@ class _IntroMasterState extends State<IntroMaster>
             );
         break;
       case 'google':
-        label = isLoginMode ? 'Continue with Google' : 'Join with Google';
+        label = OriginSurfaceCopy.forSystemLocale()['continueGoogle'];
         backgroundColor = const Color(0xFFF7F7F8);
         foregroundColor = const Color(0xFF17181B);
         border = Border.all(color: Colors.white.withValues(alpha: 0.12));
@@ -2579,10 +2583,8 @@ class _IntroMasterState extends State<IntroMaster>
         break;
       case 'email':
         label = _showEmailForm
-            ? 'Close Email Form'
-            : isLoginMode
-                ? 'Continue with Email'
-                : 'Join with Email';
+            ? OriginSurfaceCopy.forSystemLocale()['cancel']
+            : OriginSurfaceCopy.forSystemLocale()['continueEmail'];
         backgroundColor = const Color(0xFF24262D);
         foregroundColor = const Color(0xFFF2F3F6);
         border = Border.all(color: Colors.white.withValues(alpha: 0.08));
@@ -2658,7 +2660,7 @@ class _IntroMasterState extends State<IntroMaster>
                           borderRadius: BorderRadius.circular(99),
                         ),
                         child: Text(
-                          'Recent',
+                          OriginSurfaceCopy.forSystemLocale()['recent'],
                           style: TextStyle(
                             color: provider == 'kakao'
                                 ? const Color(0xFF3B3B36)
@@ -2687,20 +2689,83 @@ class _IntroMasterState extends State<IntroMaster>
     return widgets;
   }
 
+  Map<String, String> _authIntroCopy() {
+    return switch (systemUiLanguageName()) {
+      'Korean' => {
+          'title': '같이,\n얘기하실래요?',
+          'description': '기존 회원은 이전에 사용한 방법으로 로그인해 주세요.',
+        },
+      'Japanese' => {
+          'title': '一緒に、\n話しませんか？',
+          'description': 'すでにご利用の方は、以前使用した方法でログインしてください。',
+        },
+      'Chinese' => {
+          'title': '要一起\n聊聊吗？',
+          'description': '已有用户请使用之前的方式登录。',
+        },
+      'Spanish' => {
+          'title': '¿Hablamos\njuntos?',
+          'description':
+              'Los usuarios existentes pueden iniciar sesión con el método anterior.',
+        },
+      'French' => {
+          'title': 'On discute\nensemble ?',
+          'description':
+              'Les utilisateurs existants peuvent se connecter avec leur méthode habituelle.',
+        },
+      'German' => {
+          'title': 'Möchtest du\ngemeinsam sprechen?',
+          'description':
+              'Bestehende Nutzer können sich mit ihrer bisherigen Methode anmelden.',
+        },
+      'Hindi' => {
+          'title': 'क्या आप साथ\nबात करना चाहेंगे?',
+          'description':
+              'मौजूदा उपयोगकर्ता अपनी पहले की विधि से लॉग इन कर सकते हैं।',
+        },
+      'Russian' => {
+          'title': 'Хотите поговорить\nвместе?',
+          'description':
+              'Зарегистрированные пользователи могут войти прежним способом.',
+        },
+      'Portuguese' => {
+          'title': 'Vamos conversar\njuntos?',
+          'description':
+              'Usuários existentes podem entrar com o método usado anteriormente.',
+        },
+      'Italian' => {
+          'title': 'Ti va di parlare\ninsieme?',
+          'description':
+              'Gli utenti esistenti possono accedere con il metodo usato in precedenza.',
+        },
+      'Dutch' => {
+          'title': 'Zullen we samen\npraten?',
+          'description':
+              'Bestaande gebruikers kunnen inloggen met hun eerdere methode.',
+        },
+      _ => {
+          'title': 'Would you like to\ntalk together?',
+          'description':
+              'Existing users can log in with their previous method.',
+        },
+    };
+  }
+
   List<Widget> _buildAuthHeader() {
+    final copy = _authIntroCopy();
     final lastProvider = _validLastAuthProvider();
     if (lastProvider == null) {
       return [
         _authSectionTitle(
-          title: 'Log In or Sign Up',
-          description: 'Existing users can log in with their previous method.',
+          title: copy['title']!,
+          description: copy['description']!,
         ),
       ];
     }
 
     return [
       _authSectionTitle(
-        title: 'Continue with Account',
+        title: OriginSurfaceCopy.forSystemLocale()['continueWithAccount'],
         description: _providerDescription(lastProvider),
       ),
     ];
@@ -2764,6 +2829,7 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Widget _buildEmailForm({required bool isLogin}) {
+    final copy = OriginSurfaceCopy.forSystemLocale();
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -2781,10 +2847,10 @@ class _IntroMasterState extends State<IntroMaster>
             ),
             child: Row(
               children: [
-                _emailTabBtn('Log In', isLoginMode, () {
+                _emailTabBtn(copy['logIn'], isLoginMode, () {
                   setState(() => isLoginMode = true);
                 }),
-                _emailTabBtn('Sign Up', !isLoginMode, () {
+                _emailTabBtn(copy['signUp'], !isLoginMode, () {
                   setState(() => isLoginMode = false);
                 }),
               ],
@@ -2793,7 +2859,7 @@ class _IntroMasterState extends State<IntroMaster>
           const SizedBox(height: 14),
           _buildTextField(
             emailController,
-            'Email',
+            copy['email'],
             Icons.email_outlined,
             false,
             focusNode: _emailFocusNode,
@@ -2804,7 +2870,7 @@ class _IntroMasterState extends State<IntroMaster>
           const SizedBox(height: 11),
           _buildTextField(
             passwordController,
-            'Password',
+            copy['password'],
             Icons.lock_outline_rounded,
             true,
             focusNode: _passwordFocusNode,
@@ -2830,7 +2896,7 @@ class _IntroMasterState extends State<IntroMaster>
                 ),
               ),
               child: Text(
-                  isLoginMode ? 'Log In with Email' : 'Sign Up with Email'),
+                  isLoginMode ? copy['continueEmail'] : copy['signupEmail']),
             ),
           ),
           if (isLoginMode) ...[

@@ -503,23 +503,6 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                                             ),
                                                           ),
                                                         ),
-                                                        const SizedBox(
-                                                          width: 42,
-                                                          child: Text(
-                                                            'Orig.',
-                                                            textAlign: TextAlign
-                                                                .center,
-                                                            style: TextStyle(
-                                                              color: Color(
-                                                                  0xFF93C5FD),
-                                                              fontSize: 10,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w700,
-                                                              letterSpacing: .2,
-                                                            ),
-                                                          ),
-                                                        ),
                                                       ],
                                                     ),
                                                     const SizedBox(height: 5),
@@ -542,27 +525,6 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                                                 ? Colors.white
                                                                 : Colors
                                                                     .white38,
-                                                          ),
-                                                        ),
-                                                        const SizedBox(
-                                                            width: 8),
-                                                        SizedBox(
-                                                          width: 42,
-                                                          child: Text(
-                                                            duoOriginLanguageAbbreviation(
-                                                                data[
-                                                                    'topicLanguage']),
-                                                            textAlign: TextAlign
-                                                                .center,
-                                                            style:
-                                                                const TextStyle(
-                                                              color: Color(
-                                                                  0xFF93C5FD),
-                                                              fontSize: 12,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w700,
-                                                            ),
                                                           ),
                                                         ),
                                                       ],
