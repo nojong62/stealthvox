@@ -46,20 +46,35 @@ class DuoBoardService {
           .limit(50)
           .snapshots();
 
-  static Future<QueryDocumentSnapshot<Map<String, dynamic>>?>
-      findOwnActivePost() async {
+  static Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>>
+      findOwnActivePosts() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || user.isAnonymous) return null;
+    if (user == null || user.isAnonymous) return const [];
     final result = await FirebaseFirestore.instance
         .collection('duo_board_posts')
         .where('ownerUid', isEqualTo: user.uid)
         .where('active', isEqualTo: true)
-        .limit(1)
+        .limit(20)
         .get();
-    for (final doc in result.docs) {
-      if (doc.data()['active'] == true) return doc;
-    }
-    return null;
+    final posts =
+        result.docs.where((doc) => doc.data()['active'] == true).toList();
+    posts.sort((left, right) {
+      final leftUpdatedAt = left.data()['updatedAt'];
+      final rightUpdatedAt = right.data()['updatedAt'];
+      final leftMillis =
+          leftUpdatedAt is Timestamp ? leftUpdatedAt.millisecondsSinceEpoch : 0;
+      final rightMillis = rightUpdatedAt is Timestamp
+          ? rightUpdatedAt.millisecondsSinceEpoch
+          : 0;
+      return rightMillis.compareTo(leftMillis);
+    });
+    return posts;
+  }
+
+  static Future<QueryDocumentSnapshot<Map<String, dynamic>>?>
+      findOwnActivePost() async {
+    final posts = await findOwnActivePosts();
+    return posts.isEmpty ? null : posts.first;
   }
 
   static Future<User> ensureParticipantIdentity() async {
@@ -115,6 +130,22 @@ class DuoBoardService {
             const Duration(seconds: 12));
     return Map<String, dynamic>.from(result.data as Map)['discoverable'] ==
         true;
+  }
+
+  static Future<bool> isPostDiscoverable(String postId) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) return false;
+    final post = await FirebaseFirestore.instance
+        .collection('duo_board_posts')
+        .doc(postId)
+        .get(const GetOptions(source: Source.server));
+    final data = post.data();
+    return post.exists &&
+        data?['ownerUid'] == user.uid &&
+        data?['active'] == true &&
+        data?['state'] != 'reserved' &&
+        data?['ownerPaused'] != true &&
+        data?['discoverable'] == true;
   }
 
   static Future<DuoBoardClaim> claimNow(String postId) async {

@@ -61,6 +61,7 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/dialog_brain_model.dart';
+import '/custom_code/services/recent_recommendation_history.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/history_preview_summary.dart';
@@ -6663,7 +6664,7 @@ content and gist of the WHOLE conversation.
     String apiKey, {
     String languageName = 'English',
   }) async {
-    const maxAttempts = 3;
+    const maxAttempts = 4;
     ScenarioRecommendationException? lastError;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -6787,7 +6788,9 @@ content and gist of the WHOLE conversation.
               'model': kDialogBrainModel,
               'reasoning_effort': kDialogBrainReasoningEffort,
               'response_format': {'type': 'json_object'},
-              'max_completion_tokens': 150,
+              // A reasoning model can spend a short budget before emitting
+              // the JSON. Leave enough room for the actual structured result.
+              'max_completion_tokens': 400,
               'messages': [
                 {'role': 'system', 'content': systemPrompt},
                 {
@@ -6806,7 +6809,19 @@ content and gist of the WHOLE conversation.
             'reasoning=$kDialogBrainReasoningEffort stream=false '
             'finish_reason=${body['choices']?[0]?['finish_reason']} '
             'usage=${body['usage']}');
-        final raw = body['choices'][0]['message']['content'].toString().trim();
+        final choices = body is Map<String, dynamic> ? body['choices'] : null;
+        if (choices is! List || choices.isEmpty || choices.first is! Map) {
+          throw const FormatException('missing scenario choice');
+        }
+        final choice = Map<String, dynamic>.from(choices.first as Map);
+        final message = choice['message'];
+        final content = message is Map ? message['content'] : null;
+        if (choice['finish_reason'] == 'length' ||
+            content is! String ||
+            content.trim().isEmpty) {
+          throw const FormatException('incomplete scenario response');
+        }
+        final raw = content.trim();
         final parsed = jsonDecode(raw) as Map<String, dynamic>;
         final result = <String, String>{
           'situation': parsed['situation']?.toString().trim() ?? '',
@@ -6815,6 +6830,21 @@ content and gist of the WHOLE conversation.
         };
         if (result.values.any((value) => value.isEmpty)) {
           throw const FormatException('missing scenario fields');
+        }
+        final resultKey = RecentRecommendationHistory.scenarioResult(
+          situation: result['situation']!,
+          aiRole: result['ai_role']!,
+          userRole: result['user_role']!,
+        );
+        if (!await RecentRecommendationHistory.rememberIfNew(
+          'scenario',
+          resultKey,
+        )) {
+          await prefs.setInt(cursorKey, cursor + 1);
+          throw const ScenarioRecommendationException(
+            'DUPLICATE_RECOMMENDATION',
+            retryable: true,
+          );
         }
         await prefs.setInt(cursorKey, cursor + 1);
         return result;

@@ -461,7 +461,7 @@ class IntroWelcomePageCopy {
       'tagline': '자유롭게 말하고, 자연스럽게 익히세요',
       'headlineBefore': '당신의 ',
       'headlineAccent': '이야기',
-      'headlineAfter': '가\n언어가 됩니다.',
+      'headlineAfter': '가,\n살아있는\n언어가 됩니다.',
       'duoInvite': 'Duo 초대',
       'loginOrJoin': '로그인 또는 가입',
       'swipeContinue': '스와이프하여 계속'

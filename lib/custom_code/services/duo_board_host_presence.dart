@@ -76,13 +76,13 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
         !_incomingInviteTakesPriority;
     _checkingUid = user.uid;
     try {
-      final post = await DuoBoardService.findOwnActivePost()
+      final posts = await DuoBoardService.findOwnActivePosts()
           .timeout(const Duration(seconds: 5));
       if (!stillCurrent()) return;
       _ownsActivePost = false;
       debugPrint(
-          '[DuoBoard] own active post found: ' + (post != null).toString());
-      if (post == null) {
+          '[DuoBoard] own active posts found: ' + posts.length.toString());
+      if (posts.isEmpty) {
         _restoredThisSession = true;
         return;
       }
@@ -122,7 +122,10 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
         _restoreChoice = choice;
       }
       if (_restoreChoice == 'end') {
-        await DuoBoardService.withdrawPost(post.id);
+        for (final post in posts) {
+          if (!stillCurrent()) return;
+          await DuoBoardService.withdrawPost(post.id);
+        }
         if (stillCurrent()) await postEnded();
         return;
       }
@@ -137,15 +140,27 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
           WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
         return;
       }
-      final resumed = await DuoBoardService.resumePost(post.id);
+      String? resumedPostId;
+      for (final post in posts) {
+        if (!stillCurrent()) return;
+        if (await DuoBoardService.resumePost(post.id)) {
+          resumedPostId = post.id;
+          break;
+        }
+      }
       if (!stillCurrent()) return;
-      _restoredThisSession = true;
-      _restoreRetry?.cancel();
-      _restoreRetry = null;
-      if (!resumed) {
+      if (resumedPostId == null) {
+        _restoredThisSession = true;
         await postEnded();
       } else {
-        debugPrint('[DuoBoard] own post restored after login: ' + post.id);
+        await _confirmPostVisible(resumedPostId, stillCurrent);
+        if (!stillCurrent()) return;
+        _restoredThisSession = true;
+        _restoreRetry?.cancel();
+        _restoreRetry = null;
+        _ownsActivePost = true;
+        debugPrint(
+            '[DuoBoard] own post restored after login: ' + resumedPostId);
       }
     } catch (error) {
       debugPrint('[DuoBoard] login post restore failed: $error');
@@ -159,6 +174,25 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     } finally {
       if (generation == _authGeneration) _checkingUid = null;
     }
+  }
+
+  Future<void> _confirmPostVisible(
+    String postId,
+    bool Function() stillCurrent,
+  ) async {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!stillCurrent()) return;
+      await ensureOnline().timeout(const Duration(seconds: 4));
+      await DuoBoardService.setPostVisibility(postId, enabled: true)
+          .timeout(const Duration(seconds: 8));
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      if (!stillCurrent()) return;
+      if (await DuoBoardService.isPostDiscoverable(postId)
+          .timeout(const Duration(seconds: 5))) {
+        return;
+      }
+    }
+    throw StateError('Duo post did not become discoverable');
   }
 
   /// 다른 사람의 Duo 방으로 들어갈 때 내 게시글이 다시 노출되지 않게 한다.

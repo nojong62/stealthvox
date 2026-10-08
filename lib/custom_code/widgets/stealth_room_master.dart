@@ -29,6 +29,7 @@ import 'account_sheet.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/dialog_brain_model.dart';
+import '/custom_code/services/recent_recommendation_history.dart';
 import '/custom_code/services/talk_ui_localization.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/guide_ui_localization.dart';
@@ -79,6 +80,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   int? _currentMode;
   bool _circleSetupOpen = false;
   bool _isRecommendingCircle = false;
+  int _circleRecommendationRetries = 0;
   String? _selectedCircleDescription;
   final TextEditingController _circleController = TextEditingController();
 
@@ -536,7 +538,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${_setupCopy['scenarioRecommendError']}\n[$code]'),
+            content: Text(_setupCopy['scenarioRecommendError']),
           ),
         );
       }
@@ -627,7 +629,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       // 모델에게는 결까지 붙인 한 덩어리로 던진다. 1회차는 flavor가 비어
       // 있어 예전과 똑같이 분야만 간다.
       final seed = flavor.isEmpty ? domain : '$flavor $domain';
-      await prefs.setInt(cursorKey, cursor + 1);
+
       debugPrint('[CIRCLE-RECOMMEND] seed=$seed round=$round');
 
       final response = await OpenAiConnectionPool.instance.client
@@ -644,7 +646,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
               'model': kDialogBrainModel,
               'reasoning_effort': kDialogBrainReasoningEffort,
               'response_format': <String, String>{'type': 'json_object'},
-              'max_completion_tokens': 180,
+              // Give the reasoning model enough room to emit the JSON body.
+              'max_completion_tokens': 400,
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',
@@ -700,13 +703,42 @@ Return ONLY valid JSON: {"name":"..."}.
         throw const FormatException('empty recommendation');
       }
 
+      if (!await RecentRecommendationHistory.rememberIfNew('circle', name)) {
+        await prefs.setInt(cursorKey, cursor + 1);
+        throw const FormatException('duplicate circle recommendation');
+      }
+      _circleRecommendationRetries = 0;
+      await prefs.setInt(cursorKey, cursor + 1);
+
       if (!mounted) return;
       _circleController.value = TextEditingValue(
         text: name,
         selection: TextSelection.collapsed(offset: name.length),
       );
     } catch (error) {
-      debugPrint('[CIRCLE-RECOMMEND] failed reason=${error.runtimeType}');
+      final retryable = error is FormatException ||
+          error is TimeoutException ||
+          error is http.ClientException;
+      debugPrint(
+        '[CIRCLE-RECOMMEND] failed attempt=' +
+            (_circleRecommendationRetries + 1).toString() +
+            ' retryable=' +
+            retryable.toString() +
+            ' reason=' +
+            error.runtimeType.toString(),
+      );
+      if (retryable && _circleRecommendationRetries < 2 && mounted) {
+        _circleRecommendationRetries += 1;
+        await Future<void>.delayed(
+          Duration(milliseconds: 700 * _circleRecommendationRetries),
+        );
+        if (mounted) {
+          setState(() => _isRecommendingCircle = false);
+          await _recommendCircle();
+        }
+        return;
+      }
+      _circleRecommendationRetries = 0;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(_setupCopy['circleRecommendError'])),
