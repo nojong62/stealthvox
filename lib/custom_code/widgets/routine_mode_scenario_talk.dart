@@ -142,7 +142,6 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   //   확인해 주면 그대로 재개하고, 아니면 버린다. 잘못 들은 문장이
   //   화면에 남아 유저가 컴플레인할 일을 없애는 것이 목적이다.
   String? _pendingHeardConfirmation;
-  int _heardConfirmationAttempts = 0;
   // 직전 턴에서 [USER_FIX]가 확정됐으면 다음 Dialog Brain 호출 한 번만
   // 교정된 문맥을 더 주의 깊게 읽는다. 호출 직전에 소비되므로 지속 상태가 아니다.
   bool _previousTurnHadUserFix = false;
@@ -248,16 +247,6 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   int _bubbleSeq = 0;
   String _activeHostBubbleId = '';
   String _activeAiBubbleId = '';
-
-  /// 🚪 [ASK-BACK-ESCAPE] 연속 되묻기 횟수. 정상 응답이 나오면 0으로 돌아간다.
-  ///
-  /// 되묻기는 "유저가 다시 말하면 풀린다"는 전제인데, 모델이 같은 문장을 계속
-  /// 같게 판정하면 그 전제가 깨져 방을 나가는 것 말고는 길이 없다. 실측
-  /// (2026-08-09)에서 멀쩡한 한국어가 세 번 연달아 막혔다.
-  /// 👂 [HEARD-CONFIRM] 연속 되묻기 상한. 서클톡과 같은 값을 쓴다 —
-  /// 두 모드가 다르게 굴 이유가 없다. 횟수 자체는 `_heardConfirmationAttempts`
-  /// (117행, 레거시 경로와 공유)에 센다.
-  static const int _kMaxHeardConfirmAttempts = 2;
 
   /// 👂 [ASK-BACK] 직전 유저 발화의 유효 발화 길이(ms). 모르면 null.
   int? _lastTurnVoicedMs;
@@ -497,7 +486,8 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
 
   /// 👂 세 모드 공통 내부 신호만 판정한다. 실제 질문 문장은 ORIGIN 언어로
   /// 생성되며, 화면·TTS·히스토리에 전달하기 전에 신호를 제거한다.
-  static bool _isAskBackReply(String text) => hasHeardConfirmSignal(text);
+  static bool _isAskBackReply(String text) =>
+      hasHeardConfirmSignal(text) || text.trim().toUpperCase() == '[RETRY]';
 
   ({String corrected, String reply})? _contextualScenarioCorrection(
       String output) {
@@ -585,8 +575,8 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   }
 
   /// [step]이 Step 2면 출력 언어·말투·[REPLY] 줄 언어만 배울 언어로 바뀌고
-  /// 청취 연습 규칙이 붙는다. 되묻기([HEARD_CONFIRM])와 [CORRECTION] 줄은
-  /// 유저 발화를 확정하는 절차라 Step 2에서도 대화 언어 그대로다.
+  /// 청취 연습 규칙이 붙는다. 불명확한 전사는 AI가 추측해 이어가지 않고
+  /// [RETRY] 제어 신호로만 넘긴다. 사용자에게 되묻거나 답변하지 않는다.
   /// Step 1은 전과 한 글자도 다르지 않다.
   String _buildScenarioMemberInstructions({
     ListeningStep step = ListeningStep.step1,
@@ -600,7 +590,6 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
         : nativeLang == 'Korean'
             ? kKoreanPoliteSpeechPolicy
             : 'Use the everyday polite spoken register of $nativeLang unless the established roles clearly require another register.';
-    final askBackOutputRule = buildHeardConfirmOutputRule(nativeLang);
     final String outputLanguagePolicy = step2
         ? '${buildTargetOutputLanguagePolicy(nativeLang: nativeLang, targetLang: targetLang)}\n\n'
             '${buildListeningPracticePolicy(nativeLang: nativeLang, targetLang: targetLang)}'
@@ -667,7 +656,7 @@ line normally and briefly in character. Do not output brackets, control labels,
 or a correction format.
 ''' : ''}
 
-[ASK BACK INSTEAD OF GUESSING]
+[UNCLEAR TRANSCRIPT]
 What you receive is speech-recognition output, not typed text, so it can contain
 misrecognized words. You never hear the audio — judge the text itself.
 Judge damage to the text, never the content. Bringing up something new, changing
@@ -675,12 +664,9 @@ the subject, or saying something the scene has not mentioned is normal talk, not
 a recognition error. Do NOT answer, and do NOT repair it by guessing, only when:
 - The line does not hold together as $nativeLang, or breaks off mid-thought.
 - A word sits so oddly that the meaning cannot be recovered from this scene.
-In that case follow this output format exactly:
-$askBackOutputRule
-Say nothing before or after those two lines. Do not stay in character for the question, and
-do not add a reaction or a question of your own. Once the user says it again,
-continue the scene from their new words as if the unclear line had never been
-said. Never build the scene on a line you had to guess.
+In that case output exactly [RETRY], with nothing before or after it. Do not stay
+in character, ask a question, or add a reaction. The app will wait silently for
+the user to say their line again. Never build the scene on a line you had to guess.
 
 A dropped subject or object is normal speech, not damage. If your own previous
 line supplies what was left out, the turn is complete — fill it in from the
@@ -747,8 +733,8 @@ $finalLanguageRule''';
     final leading = text.trimLeft();
     if (leading.isEmpty) return true;
     final signals = _kContextualCorrectionEnabled && allowContextualCorrection
-        ? <String>['[HEARD_CONFIRM]', '[CORRECTION]', kUserFixTag]
-        : <String>['[HEARD_CONFIRM]', kUserFixTag];
+        ? <String>['[RETRY]', '[HEARD_CONFIRM]', '[CORRECTION]', kUserFixTag]
+        : <String>['[RETRY]', '[HEARD_CONFIRM]', kUserFixTag];
     return signals.any(
         (signal) => signal.startsWith(leading) || leading.startsWith(signal));
   }
@@ -1243,7 +1229,6 @@ $finalLanguageRule''';
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
     _pendingHeardConfirmation = null; // 보류된 확인 대기 발화도 버림
-    _heardConfirmationAttempts = 0;
     _pendingTranscript = ''; // 대기 중 발화도 버림
     _resetTurnPcmBuffer();
     _voiceManager?.dispose();
@@ -1499,7 +1484,6 @@ $finalLanguageRule''';
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
     _pendingHeardConfirmation = null;
-    _heardConfirmationAttempts = 0;
     var removedUserTurn = false;
     if (mounted) {
       setState(() {
@@ -2698,41 +2682,16 @@ $finalLanguageRule''';
       await _handleConversationCancelCommand();
       return;
     }
-    // 👂 [HEARD-CONFIRM] 되묻기를 걸어 둔 상태면, 이번 발화는 새 대화가 아니라
-    //   그 되물음에 대한 답이다. 서클톡과 같은 흐름이다
-    //   (`routine_mode_circle_talk.dart` `_processRelayPipeline` 머리).
-    //
-    //   **`_turnCounter++`보다 먼저 판정한다.** 뒤로 미루면 "네" 한 마디가
-    //   턴 하나를 먹고, 아래 재귀가 한 번 더 올려 번호가 어긋난다.
+    // 불명확한 전사 뒤에는 AI가 되묻지 않는다. 다음 발화는 확인 답변이 아니라
+    // 새로 말한 문장으로 취급해, 보류 말풍선만 걷고 그대로 처리한다.
     var hasSttCorrectionContext = understandingConfirmed;
     final pendingHeard = _pendingHeardConfirmation;
     if (pendingHeard != null && !understandingConfirmed) {
       _pendingHeardConfirmation = null;
-      switch (classifyHeardConfirmReply(userKorean)) {
-        case HeardConfirmReply.affirmed:
-          _heardConfirmationAttempts = 0;
-          _log('[HEARD-CONFIRM]', 'affirmed → 보류 발화 재개 "$pendingHeard"');
-          // 확인이 끝났으니 되묻기 흔적을 걷어낸다. 보류 발화가 아래에서
-          // 정식 HOST 말풍선으로 다시 선다.
-          setState(_clearHeardConfirmBubbles);
-          return _processScenarioTalkTurn(pendingHeard,
-              generation: generation, understandingConfirmed: true);
-        case HeardConfirmReply.denied:
-          _heardConfirmationAttempts = 0;
-          _log('[HEARD-CONFIRM]', 'denied_without_correction → 재청취');
-          setState(_clearHeardConfirmBubbles);
-          await _speakRetryAndListen();
-          return;
-        case HeardConfirmReply.corrected:
-          // 유저가 내용을 담아 다시 말했다. 이것을 새 발화로 본다.
-          _heardConfirmationAttempts = 0;
-          hasSttCorrectionContext = true;
-          _log('[HEARD-CONFIRM]', 'corrected_with_content → 새 발화 판정');
-          setState(_clearHeardConfirmBubbles);
-          break;
-      }
+      hasSttCorrectionContext = true;
+      _log('[UNCLEAR-TRANSCRIPT]', 'replacement_received → 새 발화 판정');
+      setState(_clearHeardConfirmBubbles);
     }
-
     // 🔄 Circle Talk과 같은 공용 판정기로, 답변을 만들기 전에 직전 교환을
     // 확실히 되돌린다. 정정 내용이 있으면 그 내용만 한 번 다시 처리하고,
     // 불만만 있으면 이전 교환을 지운 뒤 재청취한다.
@@ -3107,7 +3066,7 @@ $finalLanguageRule''';
       //
       //   근거가 없으면 신호만 떼고 **평범한 대사로** 흘려보낸다. 사람이
       //   "뭐라고요?" 하는 건 자연스러운 대사이지 상대의 말을 지울 이유가 아니다.
-      if (_isAskBackReply(replyKorean) && !_askBackHasEvidence(userKorean)) {
+      if (hasHeardConfirmSignal(replyKorean) && !_askBackHasEvidence(userKorean)) {
         final asDialogue = stripHeardConfirmSignal(replyKorean);
         if (asDialogue.isNotEmpty) {
           _log(
@@ -3115,66 +3074,25 @@ $finalLanguageRule''';
               'turn=$turnNumber len=${userKorean.trim().length} '
                   'voicedMs=${_lastTurnVoicedMs ?? -1} → 되묻기 무시, 유저 발화 유지');
           replyKorean = asDialogue;
-          _heardConfirmationAttempts = 0;
-        }
+            }
       }
       if (_isAskBackReply(replyKorean) && !understandingConfirmed) {
-        // 👂 [HEARD-CONFIRM] 서클톡과 같은 모양으로 되묻는다
-        //   (`routine_mode_circle_talk.dart` `heardConfirmation` 분기).
-        //
-        //   두 가지가 예전과 다르다:
-        //   1) 되묻는 말을 **화면에도 세운다**. 소리로만 내보내면 유저 눈에는
-        //      아무 일도 없이 자기 말만 사라진 것으로 보인다.
-        //   2) 유저 발화를 **보류해 둔다**. "네" 한 마디면 그대로 재개되므로
-        //      같은 말을 처음부터 다시 할 필요가 없다.
+        // 전사가 불명확하면 추측하거나 되묻지 않고, 이 발화를 문맥·저장에서는
+        // 제외한 채 마이크만 다시 연다. 다음 발화가 이 자리를 대체한다.
         askedBack = true;
         _turnCounter--;
-        _heardConfirmationAttempts++;
-        final spokenQuestion = stripHeardConfirmSignal(replyKorean)
-            .replaceAll(RegExp(r'[\r\n]+'), ' ');
-        // 서클톡과 같은 상한. 갇히면 짧은 재시도 문장으로 빠져나온다.
-        final tooManyAttempts =
-            _heardConfirmationAttempts > _kMaxHeardConfirmAttempts ||
-                spokenQuestion.isEmpty;
-        final prompt = tooManyAttempts
-            ? originRetryLine(_nativeLangName())
-            : spokenQuestion;
-        // 상한을 넘겼으면 보류하지 않는다 — 되살릴 발화를 들고 있으면
-        // 확인–되묻기가 끝없이 서로를 부른다. 그때는 통째로 다시 듣는다.
-        _pendingHeardConfirmation = tooManyAttempts ? null : userKorean.trim();
-        if (tooManyAttempts) _heardConfirmationAttempts = 0;
-        setState(() {
-          // 👂 유저 발화는 화면에서 지우지 않는다. 역할만 갈아 끼워 문맥·
-          //   히스토리에서만 빠지게 한다 — `_recentKoreanConversation()`과
-          //   `_rolloverContextTurns()`는 'HOST'/'SYSTEM'만 보고,
-          //   `_removeOrphanedHostBubbles()`도 'HOST'만 걷어낸다.
-          //   예전에는 통째로 remove해서, 전사가 멀쩡히 도착한 발화까지 흔적
-          //   없이 사라졌다(2026-08-18 실기기 턴5: len=15 deltas=10
-          //   voiced 2828ms인데 화면·히스토리 둘 다 무기록).
+        _pendingHeardConfirmation = userKorean.trim();
+          setState(() {
           hostBubble['role'] = 'HOST_UNHEARD';
-          // 되묻는 말도 'SYSTEM'이 아닌 역할로 세운다. 'SYSTEM'으로 두면
-          // `_recentKoreanConversation()`이 다음 턴 문맥으로 넘겨, AI가 자기
-          // 되묻기를 보고 따라 되묻는 고리가 생긴다.
-          _localMessages.add(<String, dynamic>{
-            'role': 'SYSTEM_ASKBACK',
-            'target': prompt,
-            'original': '',
-          });
         });
         _scrollToBottom();
-        // 🔁 이 말풍선은 더 이상 '자라는 말풍선'이 아니다. id를 놓지 않으면
-        //   이어 말하기가 폐기된 말풍선에 다음 발화를 덧붙인다.
         _activeHostBubbleId = '';
         _log(
-            '[HEARD-CONFIRM]',
-            'turn=$turnNumber attempts=$_heardConfirmationAttempts '
-                'len=${userKorean.trim().length} voicedMs=${_lastTurnVoicedMs ?? -1} '
-                'pending=${_pendingHeardConfirmation != null} '
-                'heard="${userKorean.trim()}" ask="$prompt"');
-        await _speakKoreanLine(prompt);
+          '[UNCLEAR-TRANSCRIPT]',
+          'turn=$turnNumber len=${userKorean.trim().length} → silent_listen',
+        );
         return;
       }
-      _heardConfirmationAttempts = 0;
       final aiKoreanFinal = replyKorean;
 
       setState(() {
@@ -3421,53 +3339,10 @@ $finalLanguageRule''';
   Future<void> _processRelayPipeline(String finalTranscript,
       {bool isCorrectionRetry = false,
       bool understandingConfirmed = false}) async {
-    // 👂 [HEARD-CONFIRM] 되묻기를 걸어둔 상태면, 이번 발화는 새 대화가 아니라
-    //   그 되물음에 대한 답이다. 확인/부정/정정 셋으로 갈라 처리한다.
-    final pendingHeard = _pendingHeardConfirmation;
-    if (pendingHeard != null) {
-      final reply = finalTranscript
-          .trim()
-          .toLowerCase()
-          .replaceAll(RegExp(r'[\s.!?~]'), '');
-      const affirmatives = {
-        '네',
-        '예',
-        '응',
-        '맞아',
-        '맞아요',
-        '맞습니다',
-        'yes',
-        'yeah',
-        'right',
-        'correct'
-      };
-      const bareNegatives = {
-        '아니',
-        '아니요',
-        '아닙니다',
-        'no',
-        'nope',
-      };
+    // 불명확한 전사 뒤의 다음 말은 확인 답변이 아니라 새 발화다.
+    if (_pendingHeardConfirmation != null) {
       _pendingHeardConfirmation = null;
-      if (affirmatives.contains(reply)) {
-        // 제대로 들은 게 맞았다 → 보류해 둔 원래 발화를 그때부터 이어서 처리
-        _heardConfirmationAttempts = 0;
-        _log('[HEARD-CONFIRM]', 'affirmed → 보류 발화 재개');
-        return _processRelayPipeline(
-          pendingHeard,
-          isCorrectionRetry: isCorrectionRetry,
-          understandingConfirmed: true,
-        );
-      }
-      if (bareNegatives.contains(reply)) {
-        // 아니라고만 했다 → 보류 발화는 버리고 다시 듣는다
-        _heardConfirmationAttempts = 0;
-        _log('[HEARD-CONFIRM]', 'denied_without_correction → 재청취');
-        await _speakRetryAndListen();
-        return;
-      }
-      // 내용이 담긴 답 → 유저가 다시 설명한 것이므로 이번 발화를 새 발화로 본다
-      _log('[HEARD-CONFIRM]', 'corrected_with_content → 새 발화 판정');
+      _log('[UNCLEAR-TRANSCRIPT]', 'legacy_replacement_received → 새 발화 판정');
     }
     resetBillingIdle();
     _turnCounter++;
@@ -3611,7 +3486,9 @@ $finalLanguageRule''';
         }
         // 👂 [HEARD-CONFIRM] 전사가 깨져 뜻을 복원할 수 없음
         //   → 추측 번역 금지. 화면에 적기 전에 말로 먼저 확인한다.
-        if (!heardConfirmation && hasHeardConfirmSignal(userTargetText)) {
+        if (!heardConfirmation &&
+            (hasHeardConfirmSignal(userTargetText) ||
+                userTargetText.trim().toUpperCase().contains('[RETRY]'))) {
           heardConfirmation = true;
           _log('[HEARD-CONFIRM]', '단어 확인 필요 → 스트림 완료 후 처리 예정');
         }
@@ -3852,66 +3729,24 @@ $finalLanguageRule''';
         return;
       }
 
-      // 👂 [HEARD-CONFIRM] 전사가 깨져 뜻을 복원할 수 없음
-      //   유저 발화를 화면에 적지 않고 보류한 채, 한국어로 먼저 확인만 한다.
-      //   추측해서 적어 놓으면 유저는 자기가 하지도 않은 말을 보게 된다.
+      // 불명확한 전사는 AI 답변·되묻기·저장 없이 버리고, 다음 발화를 기다린다.
       if (heardConfirmation) {
         _turnCounter--;
-        final spokenPrompt = stripHeardConfirmSignal(userTargetText)
-            .replaceAll(RegExp(r'[\r\n]+'), ' ');
         _pendingHeardConfirmation = finalTranscript.trim();
-        _heardConfirmationAttempts++;
-        // 두 번 되물어도 안 풀리면 단어 확인을 접고 통째로 다시 말해 달라고 한다.
-        // 세 번째부터는 되묻기가 대화를 막는 쪽으로 작동하기 때문이다.
-        final tooManyAttempts = _heardConfirmationAttempts > 2 ||
-            _pendingHeardConfirmation!.isEmpty ||
-            spokenPrompt.isEmpty;
-        final prompt =
-            tooManyAttempts ? originRetryLine(_nativeLangName()) : spokenPrompt;
-        final promptTarget = prompt;
-        if (tooManyAttempts) {
-          _pendingHeardConfirmation = null;
-          _heardConfirmationAttempts = 0;
-        }
-        if (mounted) {
+          if (mounted) {
           setState(() {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
             if (hostIndex < _localMessages.length &&
-                _localMessages[hostIndex]['role'] == 'HOST')
+                _localMessages[hostIndex]['role'] == 'HOST') {
               _localMessages.removeAt(hostIndex);
-            _localMessages.add({
-              'role': 'SYSTEM',
-              'target': promptTarget,
-              'original': prompt,
-              'clarify': true,
-            });
+            }
           });
           _scrollToBottom();
         }
-        _ttsQueueManager.stop();
-        _ttsQueueManager.setUserTurn(false);
-        _ttsQueueManager.setAiPaused(false);
-        // 확인 질문은 한국어로 말한다. 못 알아들었다는 말까지 외국어로 하면
-        // 유저가 두 번 헤맨다.
-        final confirmTts = ChunkedTtsFetcher(
-          _openAiKey,
-          _ttsQueueManager,
-          _aiVoice,
-          language: _nativeLangCode(),
-          isUser: false,
-          onLog: _log,
-        );
-        confirmTts.addText(prompt);
-        int confirmTicks = 0;
-        while ((confirmTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
-            mounted) {
-          await Future.delayed(const Duration(milliseconds: 50));
-          if (++confirmTicks > 200) break;
-        }
+        _log('[UNCLEAR-TRANSCRIPT]', 'legacy_silent_listen');
         if (mounted && _isConversationActive) _startConfiguredListening();
         return;
       }
-
       // [USER-FULL-TTS] fire the complete translated user sentence once.
       final String fullUserTts = _cleanText(userTargetText.trim());
       if (fullUserTts.isNotEmpty) {
@@ -6916,7 +6751,7 @@ If the user replaces the previous utterance, output [CORRECTION]. If they only
 complain that it was misheard, output [MISHEARD]. If they step out of character
 to reject the AI's last reply without replacement content, output [DISSATISFIED].
 ${isCorrectionRetry ? 'This is a correction retry: strip correction framing and output only the corrected content; never output a bracketed tag.' : ''}
-${disableHeardConfirmation ? 'The wording was confirmed; do not ask for confirmation again.' : 'If a core word is unrecoverable, ${buildHeardConfirmOutputRule(originLang)}'}
+${disableHeardConfirmation ? 'The wording was confirmed; do not ask for confirmation again.' : 'If a core word is unrecoverable, output exactly [RETRY] with no other text.'}
 If a referent is genuinely ambiguous, output [CLARIFY] followed by one short
 in-character question in $originLang. For noise output [EVAPORATE]. Otherwise
 output only natural $targetLang.${aiStylePromptBlock(targetLang: targetLang, scope: 'the $targetLang translation you output')}''';
@@ -6972,10 +6807,8 @@ Do NOT translate, and do NOT repair it by guessing, when any of these holds:
 - A word sits so oddly that the intended meaning cannot be recovered from the scenario and the conversation so far.
 - Making it make sense would require you to invent a subject, object, or verb that the context does not supply.
 
-In that case:
-${buildHeardConfirmOutputRule(originLang)}
-
-The question is spoken OUT of character on purpose. Checking what you heard is not a scene break — translating something the user never said is.
+In that case output EXACTLY: [RETRY]
+Do not ask a question, explain the problem, or add any other text. The app will wait silently for the user's next attempt.
 
 Being short is NOT by itself a reason to ask — "먼저 시켜놔." is complete and clear. Ask only when the text itself does not hold together. Accents, fillers, and casual grammar are fine; translate those normally.
 
