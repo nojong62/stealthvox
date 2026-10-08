@@ -6707,7 +6707,9 @@ Return only the line itself.'''
       request.body = jsonEncode(<String, dynamic>{
         'model': kCircleDialogBrainModel,
         'reasoning_effort': reasoningEffort,
-        'max_completion_tokens': 120,
+        // Reasoning tokens share this budget. 120 caused the model to finish
+        // with `length` before emitting any spoken reply on real devices.
+        'max_completion_tokens': 256,
         'stream': true,
         // 📏 입력 토큰을 추측하지 않고 서버가 센 값을 받는다. 프롬프트를 줄여
         //   첫 토큰이 빨라지는지 보려면 이 숫자가 기준선이어야 한다.
@@ -6814,7 +6816,7 @@ Return only the line itself.'''
             body: jsonEncode(<String, dynamic>{
               'model': kCircleDialogBrainModel,
               'reasoning_effort': kDialogBrainReasoningEffort,
-              'max_completion_tokens': 120,
+              'max_completion_tokens': 256,
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',

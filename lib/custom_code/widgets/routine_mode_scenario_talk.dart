@@ -6193,7 +6193,9 @@ Return only the line itself.'''
             body: jsonEncode(<String, dynamic>{
               'model': kDialogBrainModel,
               'reasoning_effort': kDialogBrainReasoningEffort,
-              'max_completion_tokens': 120,
+              // Reasoning tokens share this budget. Keep enough room for the
+              // structured scenario response after the model has reasoned.
+              'max_completion_tokens': 256,
               'messages': <Map<String, String>>[
                 <String, String>{'role': 'system', 'content': instructions},
                 if (recentConversation.trim().isNotEmpty)
@@ -6256,7 +6258,9 @@ Return only the line itself.'''
         'model': kDialogBrainModel,
         'reasoning_effort': reasoningEffort,
         'stream': true,
-        'max_completion_tokens': 120,
+        // Reasoning tokens share this budget. 120 repeatedly returned
+        // `finish_reason=length` with an empty or incomplete reply.
+        'max_completion_tokens': 256,
         // 📏 마지막 SSE 조각에 choices가 비고 usage만 실려 온다.
         'stream_options': <String, dynamic>{'include_usage': true},
         'messages': <Map<String, String>>[
