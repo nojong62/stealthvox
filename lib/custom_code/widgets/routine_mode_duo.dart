@@ -2142,8 +2142,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   void _lgDuo(String tag, String msg) {
     final line = '[Duo]$tag $msg';
     debugPrint(line);
+    developer.log(line, name: 'StealthVox.Duo');
     if (_isDurableDuoLog(tag)) {
-      developer.log(line, name: 'StealthVox.Duo');
       AppLogLedger.instance.add('DUO', '$tag $msg');
     }
   }

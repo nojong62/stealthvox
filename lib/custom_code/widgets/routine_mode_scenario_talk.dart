@@ -39,6 +39,7 @@ import 'package:flutter/services.dart'; // 🔬 [v3.1] Clipboard용
 // ====================================================================
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:record/record.dart';
@@ -279,6 +280,7 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
     debugPrint(line);
+    developer.log(line, name: 'StealthVox.ScenarioTalk');
     AppLogLedger.instance.add('ROLEPLAY', '$tag $msg');
   }
 
