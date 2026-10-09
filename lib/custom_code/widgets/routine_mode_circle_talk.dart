@@ -3716,6 +3716,7 @@ $userFixPolicy$finalLanguageRule''';
     // 🩹 [USER-FIX] 답변이 유저 줄을 되살리면 이 말풍선의 글자를 바꾼다.
     String hostBubbleId = '';
     String? sttText;
+    var aiResponseReady = false;
     try {
       // 🔁 [LATE-CONTINUATION] 사용자 말풍선은 한 턴에 하나다. 이어 말하기로
       //   다시 들어왔으면 새로 만들지 말고 기존 말풍선의 글자만 바꾼다.
@@ -3753,6 +3754,7 @@ $userFixPolicy$finalLanguageRule''';
       final aiGenSw = Stopwatch()..start();
       final buffer = StringBuffer();
       var firstTokenSeen = false;
+      String? aiFinishReason;
       // 🎧 [LISTENING] 이 턴의 Step은 여기서 한 번만 읽는다. 생성 도중 스위치를
       //   눌러도 이 턴은 끝까지 같은 언어로 가고, 다음 턴부터 바뀐다.
       final ListeningStep step = _listeningStep;
@@ -3808,6 +3810,7 @@ $userFixPolicy$finalLanguageRule''';
         //   모델로 다시 묻지 않으므로 400 본문이 여기로 올라와야 한다.
         onLog: (message) =>
             _log('🧪 [AI-HTTP]', 'turn=$currentTurnId $message'),
+        onFinish: (finishReason) => aiFinishReason = finishReason,
       )) {
         if (!firstTokenSeen) {
           firstTokenSeen = true;
@@ -3839,9 +3842,43 @@ $userFixPolicy$finalLanguageRule''';
               'step=${step.value} '
               'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiOriginal.length} '
               'text="${aiOriginal.replaceAll(RegExp(r'\s+'), ' ')}"');
+      // reasoning 토큰이 completion 예산을 모두 써 버리면 HTTP 200이어도
+      // 사용자에게 보낼 글자는 0이 될 수 있다. 이를 그냥 예외로 끝내면
+      // 앱은 다시 듣기만 시작해 사용자에게는 AI가 대답을 깜빡한 것처럼
+      // 보인다. 같은 문맥으로 한 번 자동 재시도한 뒤에만 실패로 처리한다.
+      if (aiOriginal.isEmpty &&
+          aiFinishReason == 'length' &&
+          isActivePipelineGeneration(
+            expected: expectedPipelineGeneration,
+            current: _pipelineGeneration,
+            mounted: mounted,
+            conversationActive: _isConversationActive,
+          ) &&
+          currentTurnId == _turnCounter) {
+        _log(
+            '[AI-EMPTY-RETRY]',
+            'turn=$currentTurnId first_attempt_empty '
+                'finish_reason=$aiFinishReason reasoning=${reasoning.effort}');
+        aiOriginal = await UnifiedBrain.generateCircleMemberTurn(
+          apiKey: _openAiKey,
+          systemPrompt: systemPrompt,
+          userText: userOriginal,
+          history: _recentHistory,
+          reasoningEffort: 'low',
+          trailingSystemNote: step == ListeningStep.step2
+              ? buildTargetLanguageFinalRule(
+                  nativeLang: _nativeLangName(),
+                  targetLang: _targetLangName(),
+                )
+              : null,
+        );
+        _log('[AI-EMPTY-RETRY]',
+            'turn=$currentTurnId retry_len=${aiOriginal.length}');
+      }
       if (aiOriginal.isEmpty) {
         throw StateError('Circle Talk response did not complete.');
       }
+      aiResponseReady = true;
       if (hasHeardConfirmSignal(aiOriginal) && !understandingConfirmed) {
         final spokenQuestion = stripHeardConfirmSignal(aiOriginal)
             .replaceAll(RegExp(r'[\r\n]+'), ' ')
@@ -4001,6 +4038,40 @@ $userFixPolicy$finalLanguageRule''';
             _localMessages.removeAt(aiIndex);
           }
         });
+      }
+      // 생성 실패를 침묵으로 보이지 않게 한다. 이 문구는 STT가
+      // 틀렸다고 단정하지 않고, 응답 생성을 마치지 못했을 때만 나간다.
+      if (!aiResponseReady &&
+          isActivePipelineGeneration(
+            expected: expectedPipelineGeneration,
+            current: _pipelineGeneration,
+            mounted: mounted,
+            conversationActive: _isConversationActive,
+          ) &&
+          currentTurnId == _turnCounter) {
+        final retryLine = originRetryLine(_nativeLangName());
+        if (mounted) {
+          setState(() {
+            _localMessages.add(<String, dynamic>{
+              'role': 'SYSTEM_ASKBACK',
+              'target': retryLine,
+              'original': '',
+            });
+          });
+          _scrollToBottom();
+        }
+        try {
+          await _speakSystemLine(
+            retryLine,
+            expectedPipelineGeneration: expectedPipelineGeneration,
+            step: ListeningStep.step2,
+          );
+        } catch (speakError) {
+          _log(
+              '[PIPE-ERR-FALLBACK]',
+              'turn=$currentTurnId '
+                  'reason=${speakError.runtimeType}');
+        }
       }
     } finally {
       // 🔐 [GEN-OWNERSHIP] 이어 말하기로 세대가 갈리면 이 파이프라인과 새
@@ -6692,6 +6763,7 @@ Return only the line itself.'''
             int totalTokens)?
         onUsage,
     void Function(String message)? onLog,
+    void Function(String? finishReason)? onFinish,
     // 🎧 [LISTENING] 유저 메시지 바로 앞에 끼우는 system 한 줄. null이면
     //   메시지 배열이 전과 같다.
     String? trailingSystemNote,
@@ -6708,9 +6780,9 @@ Return only the line itself.'''
       request.body = jsonEncode(<String, dynamic>{
         'model': kCircleDialogBrainModel,
         'reasoning_effort': reasoningEffort,
-        // Reasoning tokens share this budget. 120 caused the model to finish
-        // with `length` before emitting any spoken reply on real devices.
-        'max_completion_tokens': 256,
+        // Reasoning tokens share this budget. 256 still reached `length` with
+        // zero spoken characters on real Circle Talk turns (2026-10-09).
+        'max_completion_tokens': 512,
         'stream': true,
         // 📏 입력 토큰을 추측하지 않고 서버가 센 값을 받는다. 프롬프트를 줄여
         //   첫 토큰이 빨라지는지 보려면 이 숫자가 기준선이어야 한다.
@@ -6789,6 +6861,7 @@ Return only the line itself.'''
           // 조각 하나가 깨져도 스트림 전체를 죽이지 않는다.
         }
       }
+      onFinish?.call(finishReason);
     } catch (_) {
       // 호출부가 빈 스트림을 폴백 신호로 읽는다.
     } finally {
@@ -6803,6 +6876,8 @@ Return only the line itself.'''
     required String systemPrompt,
     required String userText,
     required List<Map<String, String>> history,
+    String reasoningEffort = kDialogBrainReasoningEffort,
+    String? trailingSystemNote,
   }) async {
     if (apiKey.isEmpty || userText.trim().isEmpty) return '';
     final client = http.Client();
@@ -6816,8 +6891,10 @@ Return only the line itself.'''
             },
             body: jsonEncode(<String, dynamic>{
               'model': kCircleDialogBrainModel,
-              'reasoning_effort': kDialogBrainReasoningEffort,
-              'max_completion_tokens': 256,
+              'reasoning_effort': reasoningEffort,
+              // 스트리밍 첫 시도가 비었을 때의 단 한 번 복구 호출.
+              // 추론이 답변 공간을 다 쓰지 않도록 같은 예산을 보장한다.
+              'max_completion_tokens': 512,
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',
@@ -6828,6 +6905,12 @@ Return only the line itself.'''
                           turn['role'] == 'assistant' ? 'assistant' : 'user',
                       'content': turn['content'] ?? '',
                     }),
+                if (trailingSystemNote != null &&
+                    trailingSystemNote.trim().isNotEmpty)
+                  <String, String>{
+                    'role': 'system',
+                    'content': trailingSystemNote,
+                  },
                 <String, String>{
                   'role': 'user',
                   'content': userText.trim(),

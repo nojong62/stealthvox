@@ -2751,6 +2751,7 @@ $finalLanguageRule''';
     var askedBack = false;
     var handledContextualCorrection = false;
     var responseCompleted = false;
+    var aiResponseReady = false;
     TtsUtterance? earlyUtterance;
     // 🎧 [LISTENING] 이 턴의 Step은 여기서 한 번만 읽는다. 생성 도중 스위치를
     //   눌러도 이 턴은 끝까지 같은 언어로 가고, 다음 턴부터 바뀐다.
@@ -2805,13 +2806,15 @@ $finalLanguageRule''';
       // ⏱️ 첫 델타(TTFT)와 생성 전체 시간. 서클톡의 AI_TEXT_FIRST_TOKEN에 해당.
       final aiGenSw = Stopwatch()..start();
       int? firstTokenMs;
+      String? aiFinishReason;
+      final scenarioInstructions = _buildScenarioMemberInstructions(
+        step: step,
+        disableContextualCorrection: skipContextualCorrection,
+      );
 
       await for (final chunk in ScenarioBrain.streamKoreanTurn(
         apiKey: _openAiKey,
-        instructions: _buildScenarioMemberInstructions(
-          step: step,
-          disableContextualCorrection: skipContextualCorrection,
-        ),
+        instructions: scenarioInstructions,
         userText: userKorean,
         recentConversation: recentConversation,
         reasoningEffort: reasoning.effort,
@@ -2821,6 +2824,7 @@ $finalLanguageRule''';
                 nativeLang: _nativeLangName(), targetLang: _targetLangName())
             : null,
         onLog: (message) => _log('🧪 [AI-HTTP]', 'turn=$turnNumber $message'),
+        onFinish: (finishReason) => aiFinishReason = finishReason,
       )) {
         firstTokenMs ??= aiGenSw.elapsedMilliseconds;
         if (!mounted ||
@@ -2910,9 +2914,46 @@ $finalLanguageRule''';
               'step=${step.value} ttftMs=${firstTokenMs ?? -1} '
               'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiKorean.length} '
               'text="${aiKorean.replaceAll(RegExp(r'\s+'), ' ')}"');
+      // reasoning이 256 completion 예산을 모두 쓰고 대사를 한 글자도
+      // 내보내지 못한 경우만 한 번 재시도한다. 이미 일부 문장이
+      // 화면이나 TTS로 나간 length 응답은 중복 대사를 막기 위해 재시도하지 않는다.
+      if (aiKorean.isEmpty &&
+          aiFinishReason == 'length' &&
+          mounted &&
+          _isConversationActive &&
+          generation == _pipelineGeneration &&
+          turnNumber == _turnCounter) {
+        _log(
+          '[AI-EMPTY-RETRY]',
+          'turn=$turnNumber first_attempt_empty '
+              'finish_reason=$aiFinishReason reasoning=${reasoning.effort}',
+        );
+        aiKorean = await ScenarioBrain.generateKoreanTurn(
+          apiKey: _openAiKey,
+          instructions: scenarioInstructions,
+          userText: userKorean,
+          recentConversation: recentConversation,
+          reasoningEffort: 'low',
+          trailingSystemNote: step == ListeningStep.step2
+              ? buildTargetLanguageFinalRule(
+                  nativeLang: _nativeLangName(),
+                  targetLang: _targetLangName(),
+                )
+              : null,
+        );
+        if (!mounted ||
+            !_isConversationActive ||
+            generation != _pipelineGeneration ||
+            turnNumber != _turnCounter) {
+          return;
+        }
+        _log('[AI-EMPTY-RETRY]',
+            'turn=$turnNumber retry_len=${aiKorean.length}');
+      }
       if (aiKorean.isEmpty) {
         throw StateError('Scenario Talk response did not complete.');
       }
+      aiResponseReady = true;
       // 🩹 [USER-FIX] 답변 앞에 되살린 유저 줄이 붙어 왔으면 직전 유저 말풍선을
       //   그 문장으로 바꾸고(문맥은 말풍선에서 읽으므로 같이 바뀐다), 답변은
       //   [REPLY] 뒤만 쓴다. 원 전사는 stt_text로 남긴다.
@@ -3066,7 +3107,8 @@ $finalLanguageRule''';
       //
       //   근거가 없으면 신호만 떼고 **평범한 대사로** 흘려보낸다. 사람이
       //   "뭐라고요?" 하는 건 자연스러운 대사이지 상대의 말을 지울 이유가 아니다.
-      if (hasHeardConfirmSignal(replyKorean) && !_askBackHasEvidence(userKorean)) {
+      if (hasHeardConfirmSignal(replyKorean) &&
+          !_askBackHasEvidence(userKorean)) {
         final asDialogue = stripHeardConfirmSignal(replyKorean);
         if (asDialogue.isNotEmpty) {
           _log(
@@ -3074,7 +3116,7 @@ $finalLanguageRule''';
               'turn=$turnNumber len=${userKorean.trim().length} '
                   'voicedMs=${_lastTurnVoicedMs ?? -1} → 되묻기 무시, 유저 발화 유지');
           replyKorean = asDialogue;
-            }
+        }
       }
       if (_isAskBackReply(replyKorean) && !understandingConfirmed) {
         // 전사가 불명확하면 추측하거나 되묻지 않고, 이 발화를 문맥·저장에서는
@@ -3082,7 +3124,7 @@ $finalLanguageRule''';
         askedBack = true;
         _turnCounter--;
         _pendingHeardConfirmation = userKorean.trim();
-          setState(() {
+        setState(() {
           hostBubble['role'] = 'HOST_UNHEARD';
         });
         _scrollToBottom();
@@ -3197,6 +3239,32 @@ $finalLanguageRule''';
         setState(() {
           _localMessages.removeAt(aiIndex);
         });
+      }
+      // 재시도까지 비었거나 통신 오류가 난 턴은 침묵으로 넘기지
+      // 않는다. 안내 말풍선은 실제 대화 히스토리 저장 경로에 넣지 않는다.
+      if (!responseCompleted &&
+          !aiResponseReady &&
+          mounted &&
+          _isConversationActive &&
+          generation == _pipelineGeneration &&
+          turnNumber == _turnCounter) {
+        final failureLanguage =
+            step == ListeningStep.step2 ? _targetLangName() : _nativeLangName();
+        final failureLine = _scenarioSpokenPhrase('retry', failureLanguage);
+        setState(() {
+          _localMessages.add(<String, dynamic>{
+            'role': 'SYSTEM_ASKBACK',
+            'target': failureLine,
+            'original': '',
+          });
+        });
+        _scrollToBottom();
+        try {
+          await _speakKoreanLine(failureLine);
+        } catch (speakError) {
+          _log('[PIPE-ERR-FALLBACK]',
+              'turn=$turnNumber reason=${speakError.runtimeType}');
+        }
       }
     } finally {
       // 🔁 [LATE-CONTINUATION] **턴이 끝나면 잠정 상태를 반드시 놓는다.**
@@ -3733,7 +3801,7 @@ $finalLanguageRule''';
       if (heardConfirmation) {
         _turnCounter--;
         _pendingHeardConfirmation = finalTranscript.trim();
-          if (mounted) {
+        if (mounted) {
           setState(() {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
             if (hostIndex < _localMessages.length &&
@@ -6179,6 +6247,8 @@ Return only the line itself.'''
     required String instructions,
     required String userText,
     required String recentConversation,
+    String reasoningEffort = kDialogBrainReasoningEffort,
+    String? trailingSystemNote,
   }) async {
     if (apiKey.isEmpty || userText.trim().isEmpty) return '';
     final client = http.Client();
@@ -6192,10 +6262,10 @@ Return only the line itself.'''
             },
             body: jsonEncode(<String, dynamic>{
               'model': kDialogBrainModel,
-              'reasoning_effort': kDialogBrainReasoningEffort,
-              // Reasoning tokens share this budget. Keep enough room for the
-              // structured scenario response after the model has reasoned.
-              'max_completion_tokens': 256,
+              'reasoning_effort': reasoningEffort,
+              // 256은 실시간 대화에서 reasoning이 전부 쓸 수 있다.
+              // 스트리밍 첫 시도가 0자일 때의 단 한 번 복구 호출이다.
+              'max_completion_tokens': 512,
               'messages': <Map<String, String>>[
                 <String, String>{'role': 'system', 'content': instructions},
                 if (recentConversation.trim().isNotEmpty)
@@ -6203,6 +6273,12 @@ Return only the line itself.'''
                     'role': 'system',
                     'content':
                         'Recent scene dialogue (continue it consistently):\n$recentConversation',
+                  },
+                if (trailingSystemNote != null &&
+                    trailingSystemNote.trim().isNotEmpty)
+                  <String, String>{
+                    'role': 'system',
+                    'content': trailingSystemNote,
                   },
                 <String, String>{
                   'role': 'user',
@@ -6239,6 +6315,7 @@ Return only the line itself.'''
     required String recentConversation,
     required String reasoningEffort,
     void Function(String message)? onLog,
+    void Function(String? finishReason)? onFinish,
     // 🎧 [LISTENING] 유저 메시지 바로 앞에 끼우는 system 한 줄. null이면
     //   메시지 배열이 전과 같다.
     String? trailingSystemNote,
@@ -6258,9 +6335,9 @@ Return only the line itself.'''
         'model': kDialogBrainModel,
         'reasoning_effort': reasoningEffort,
         'stream': true,
-        // Reasoning tokens share this budget. 120 repeatedly returned
-        // `finish_reason=length` with an empty or incomplete reply.
-        'max_completion_tokens': 256,
+        // Reasoning tokens share this budget. Circle Talk과 같은 모델이
+        // 256을 전부 쓰고 0자를 반환한 실기기 결과를 반영한다.
+        'max_completion_tokens': 512,
         // 📏 마지막 SSE 조각에 choices가 비고 usage만 실려 온다.
         'stream_options': <String, dynamic>{'include_usage': true},
         'messages': <Map<String, String>>[
@@ -6326,6 +6403,7 @@ Return only the line itself.'''
           // 한 SSE 줄의 JSON이 비정상이면 다음 정상 delta를 계속 받는다.
         }
       }
+      onFinish?.call(finishReason);
     } finally {
       client.close();
     }
