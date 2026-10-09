@@ -459,9 +459,9 @@ class IntroWelcomePageCopy {
     },
     'ko': {
       'tagline': '자유롭게 말하고, 자연스럽게 익히세요',
-      'headlineBefore': '당신의 ',
-      'headlineAccent': '이야기',
-      'headlineAfter': '에,\n언어가\n숨을 쉽니다.',
+      'headlineBefore': '같이,\n얘기하실래요?',
+      'headlineAccent': '',
+      'headlineAfter': '',
       'duoInvite': 'Duo 초대',
       'loginOrJoin': '로그인 또는 가입',
       'swipeContinue': '스와이프하여 계속'

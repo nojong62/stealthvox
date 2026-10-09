@@ -1709,7 +1709,7 @@ class _IntroMasterState extends State<IntroMaster>
                       letterSpacing: -0.8,
                     ),
                   ),
-                  SizedBox(height: veryCompact ? 20 : 32),
+                  SizedBox(height: veryCompact ? 28 : 42),
                   const Spacer(flex: 5),
                   _showEnglishTesterGoogleEntry
                       ? _buildEnglishTesterGoogleAction()
@@ -2692,59 +2692,59 @@ class _IntroMasterState extends State<IntroMaster>
   Map<String, String> _authIntroCopy() {
     return switch (systemUiLanguageName()) {
       'Korean' => {
-          'title': '같이,\n얘기하실래요?',
+          'title': '로그인 또는 가입',
           'description': '기존 회원은 이전에 사용한 방법으로 로그인해 주세요.',
         },
       'Japanese' => {
-          'title': '一緒に、\n話しませんか？',
+          'title': 'ログイン・新規登録',
           'description': 'すでにご利用の方は、以前使用した方法でログインしてください。',
         },
       'Chinese' => {
-          'title': '要一起\n聊聊吗？',
+          'title': '登录或注册',
           'description': '已有用户请使用之前的方式登录。',
         },
       'Spanish' => {
-          'title': '¿Hablamos\njuntos?',
+          'title': 'Iniciar sesión o registrarse',
           'description':
               'Los usuarios existentes pueden iniciar sesión con el método anterior.',
         },
       'French' => {
-          'title': 'On discute\nensemble ?',
+          'title': 'Se connecter ou s’inscrire',
           'description':
               'Les utilisateurs existants peuvent se connecter avec leur méthode habituelle.',
         },
       'German' => {
-          'title': 'Möchtest du\ngemeinsam sprechen?',
+          'title': 'Anmelden oder registrieren',
           'description':
               'Bestehende Nutzer können sich mit ihrer bisherigen Methode anmelden.',
         },
       'Hindi' => {
-          'title': 'क्या आप साथ\nबात करना चाहेंगे?',
+          'title': 'लॉग इन या साइन अप करें',
           'description':
               'मौजूदा उपयोगकर्ता अपनी पहले की विधि से लॉग इन कर सकते हैं।',
         },
       'Russian' => {
-          'title': 'Хотите поговорить\nвместе?',
+          'title': 'Войти или зарегистрироваться',
           'description':
               'Зарегистрированные пользователи могут войти прежним способом.',
         },
       'Portuguese' => {
-          'title': 'Vamos conversar\njuntos?',
+          'title': 'Entrar ou cadastrar-se',
           'description':
               'Usuários existentes podem entrar com o método usado anteriormente.',
         },
       'Italian' => {
-          'title': 'Ti va di parlare\ninsieme?',
+          'title': 'Accedi o iscriviti',
           'description':
               'Gli utenti esistenti possono accedere con il metodo usato in precedenza.',
         },
       'Dutch' => {
-          'title': 'Zullen we samen\npraten?',
+          'title': 'Inloggen of aanmelden',
           'description':
               'Bestaande gebruikers kunnen inloggen met hun eerdere methode.',
         },
       _ => {
-          'title': 'Would you like to\ntalk together?',
+          'title': 'Log In or Sign Up',
           'description':
               'Existing users can log in with their previous method.',
         },
