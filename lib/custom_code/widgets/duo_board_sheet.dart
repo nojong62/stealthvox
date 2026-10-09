@@ -6,7 +6,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import '/custom_code/services/duo_invite_localization.dart';
-import '/custom_code/services/duo_call_resolution.dart';
 import '/custom_code/services/duo_board_service.dart';
 import '/custom_code/services/duo_board_host_presence.dart';
 import '/custom_code/services/duo_board_topic_translation.dart';
@@ -409,29 +408,45 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                       available ||
                       (widget.showInactivePosts && isOpenInvitation);
                 }).toList();
-                if (widget.showInactivePosts) {
-                  docs.sort((a, b) {
-                    final aData = a.data();
-                    final bData = b.data();
-                    // Keep every board post in strict newest-first creation order.
-                    // Without this tie-breaker, List.sort was unstable and
-                    // cards jumped whenever the Firestore stream refreshed.
-                    int createdMillis(Map<String, dynamic> data) {
-                      final value = data['createdAt'];
-                      if (value is Timestamp) {
-                        return value.millisecondsSinceEpoch;
-                      }
-                      if (value is DateTime)
-                        return value.millisecondsSinceEpoch;
-                      return 0;
-                    }
+                docs.sort((a, b) {
+                  final aData = a.data();
+                  final bData = b.data();
 
-                    final byCreated = createdMillis(bData).compareTo(
-                      createdMillis(aData),
-                    );
-                    return byCreated != 0 ? byCreated : a.id.compareTo(b.id);
-                  });
-                }
+                  bool isVisible(
+                    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+                    Map<String, dynamic> data,
+                  ) {
+                    final pending = _pendingVisibility[doc.id];
+                    return pending ??
+                        (data['active'] == true &&
+                            data['state'] != 'reserved' &&
+                            data['discoverable'] == true &&
+                            data['ownerPaused'] != true);
+                  }
+
+                  final activeOrder = (isVisible(b, bData) ? 1 : 0)
+                      .compareTo(isVisible(a, aData) ? 1 : 0);
+                  if (activeOrder != 0) return activeOrder;
+
+                  // Within each visibility group, keep the original posting
+                  // order newest-first. The document id makes equal/missing
+                  // timestamps deterministic across stream refreshes.
+                  int createdMillis(Map<String, dynamic> data) {
+                    final value = data['createdAt'];
+                    if (value is Timestamp) {
+                      return value.millisecondsSinceEpoch;
+                    }
+                    if (value is DateTime) {
+                      return value.millisecondsSinceEpoch;
+                    }
+                    return 0;
+                  }
+
+                  final byCreated = createdMillis(bData).compareTo(
+                    createdMillis(aData),
+                  );
+                  return byCreated != 0 ? byCreated : a.id.compareTo(b.id);
+                });
                 final hasOwnActivePost =
                     allDocs.any((doc) => doc.data()['ownerUid'] == uid);
 

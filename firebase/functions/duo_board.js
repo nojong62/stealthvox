@@ -398,11 +398,11 @@ exports.syncDuoBoardHostPresence = functions.database
       return null;
     });
 
-const INACTIVE_POST_TTL_MS = 48 * 60 * 60 * 1000;
+const INACTIVE_POST_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 const RESERVED_POST_TTL_MS = 5 * 60 * 1000;
 
-// Keep temporarily unavailable invitations visible to intro guests, but retire
-// them after 48 continuous hours without becoming discoverable again. A board
+// Keep temporarily unavailable invitations visible to intro guests, but delete
+// them after 3 continuous days without becoming discoverable again. A board
 // match reserves a post before the guest has actually joined; release that
 // reservation if the join never arrives so one abandoned request cannot hide a
 // post forever.
@@ -417,6 +417,7 @@ exports.expireInactiveDuoBoardPosts = functions.pubsub
           .where('active', '==', true)
           .get();
       let expired = 0;
+      let deleted = 0;
       let initialized = 0;
       let released = 0;
       for (const candidate of snapshot.docs) {
@@ -481,22 +482,18 @@ exports.expireInactiveDuoBoardPosts = functions.pubsub
           }
           if (!(inactiveSince instanceof admin.firestore.Timestamp) ||
               inactiveSince.toMillis() > cutoff.toMillis()) return null;
-          tx.update(candidate.ref, {
-            active: false,
-            discoverable: false,
-            state: 'expired',
-            expiredAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
+          tx.delete(candidate.ref);
           tx.delete(db().collection('duo_board_runtime').doc(candidate.id));
-          return 'expired';
+          return 'deleted';
         });
         if (result === 'expired') expired += 1;
+        if (result === 'deleted') deleted += 1;
         if (result === 'initialized') initialized += 1;
         if (result === 'released') released += 1;
       }
-      console.log('Expired ' + expired + ' Duo board posts; released ' +
-          released + ' stale reservations; initialized ' + initialized +
+      console.log('Deleted ' + deleted + ' inactive Duo board posts; expired ' +
+          expired + ' unavailable posts; released ' + released +
+          ' stale reservations; initialized ' + initialized +
           ' inactive posts.');
       return null;
     });
