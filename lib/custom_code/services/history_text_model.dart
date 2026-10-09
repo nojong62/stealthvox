@@ -42,6 +42,13 @@ const String kDuoOriginCorrectorModel = 'gpt-6-luna';
 /// ②와 **일부러 따로 둔다.** 지금은 값이 같지만, 한쪽만 되돌릴 수 있어야 한다.
 const String kHistoryRepairModel = 'gpt-4.1-mini';
 
+/// Circle Talk History의 원문 복원 필요 여부를 먼저 가르는 Decisions 모델.
+///
+/// 이 모델은 문장을 고치지 않는다. `false`면 기존 원문 복원을 생략하고,
+/// `true`거나 판정 호출이 실패하면 [kHistoryRepairModel]이 하던 기존
+/// 의심 span 탐지 → PCM 재청취 → 수정 흐름을 그대로 탄다.
+const String kCircleHistoryDecisionModel = 'gpt-6-luna';
+
 /// 되돌릴 때 쓸 이전 값. 지우지 말 것 — A/B의 반대편이다.
 const String kTextModelPrevious = 'gpt-4o-mini';
 

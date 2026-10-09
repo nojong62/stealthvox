@@ -1255,6 +1255,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       // 임시 Target은 Duo Direct에서만 I/you/제3자·행위자 모순을 찾는다.
       // 이름·문체·숫자 교정기는 아니며 저장되지 않는다.
       targetSubjectOnly: (data[kDuoModeField] ?? '').toString() == 'direct',
+      // 대화방에서 판정 전에 앱이 종료됐더라도, Circle Talk History를 다시
+      // 열었을 때 같은 Decisions → 기존 복원 순서를 이어 간다.
+      useCircleDecisionGate: (data['mode'] ?? '').toString() == 'circle_talk',
       caller: 'history:$caller',
     );
   }

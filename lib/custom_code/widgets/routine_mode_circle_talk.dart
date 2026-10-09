@@ -5500,6 +5500,7 @@ $userFixPolicy$finalLanguageRule''';
         apiKey: _openAiKey,
         sourceName: _nativeLangName(),
         targetLanguage: _targetLangName(),
+        useCircleDecisionGate: true,
       );
     }());
   }
