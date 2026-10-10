@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // Automatic FlutterFlow imports
 import '/backend/backend.dart';
 import '/backend/schema/structs/index.dart';
@@ -2086,11 +2087,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           .getString(kDuoInterpTransportRemoteConfigKey)
           .trim()
           .toLowerCase();
+      final String gatewayToken = await SecureAiGateway.gatewayToken();
+      final String deepgramToken = await SecureAiGateway.deepgramToken();
       if (mounted) {
         setState(() {
-          _openAiKey = remoteConfig.getString('OpenAIAPIKey');
+          _openAiKey = gatewayToken;
           // 📡 발화 경계 센서용. 글자는 만들지 않는다(`DuoDeepgramEndpointSensor`).
-          _deepgramKey = remoteConfig.getString('DeepgramAPIKey');
+          _deepgramKey = deepgramToken;
           // Remote Config가 1순위, 비어 있으면 빌드 타임 값을 유지한다.
           if (relayUrl.isNotEmpty) _relayUrl = relayUrl;
           if (relayToken.isNotEmpty) _relayToken = relayToken;
@@ -8768,7 +8771,7 @@ class DuoBrain {
   }) async {
     if (key.isEmpty || turns.isEmpty) return null;
     try {
-      final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
+      final uri = SecureAiGateway.openAiUri('/v1/chat/completions');
       const prompt =
           '''You prepare a two-person DIRECT VOICE CALL transcript for a language-study room.
 
@@ -8879,7 +8882,7 @@ Return strict JSON only:
     //   그 턴을 통째로 접는다 — 원문 재생 폴백은 제거했다.
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        final Uri uri = Uri.parse('https://api.openai.com/v1/chat/completions');
+        final Uri uri = SecureAiGateway.openAiUri('/v1/chat/completions');
         final String prompt =
             "You are a translation engine for a live interpreter app.\n"
             "You are NOT a chat assistant. NEVER reply, comment, answer, or ask "
@@ -9002,7 +9005,7 @@ Return strict JSON only:
 
     final request = http.Request(
       'POST',
-      Uri.parse('https://api.openai.com/v1/chat/completions'),
+      SecureAiGateway.openAiUri('/v1/chat/completions'),
     );
     request.headers.addAll(<String, String>{
       'Authorization': 'Bearer $key',
@@ -9053,7 +9056,7 @@ Return strict JSON only:
   }) async {
     if (key.isEmpty || lines.isEmpty) return null;
     try {
-      final Uri uri = Uri.parse('https://api.openai.com/v1/chat/completions');
+      final Uri uri = SecureAiGateway.openAiUri('/v1/chat/completions');
       final String prompt =
           "You label a finished two-person conversation for a history list.\n"
           "Write ONE short phrase in $lang naming what they talked about — "
@@ -9110,7 +9113,7 @@ Return strict JSON only:
     required String myNativeLang,
   }) async {
     try {
-      Uri uri = Uri.parse('https://api.openai.com/v1/chat/completions');
+      Uri uri = SecureAiGateway.openAiUri('/v1/chat/completions');
 
       String prompt =
           "You are a translation engine for a live interpreter app.\n"

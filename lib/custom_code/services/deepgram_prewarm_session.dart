@@ -121,7 +121,7 @@ class DeepgramPrewarmSession {
     try {
       final channel = IOWebSocketChannel.connect(
         buildCircleTalkDeepgramUri(languageCode),
-        headers: {'Authorization': 'Token $apiKey'},
+        headers: {'Authorization': 'Bearer $apiKey'},
         pingInterval: const Duration(seconds: 10),
       );
       await channel.ready.timeout(const Duration(seconds: 6));

@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // Automatic FlutterFlow imports
 import '/backend/backend.dart';
 import '/backend/schema/structs/index.dart';
@@ -1274,10 +1275,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         ));
       }
       await remoteConfig.fetchAndActivate();
+      final gatewayToken = await SecureAiGateway.gatewayToken();
+      final deepgramToken = await SecureAiGateway.deepgramToken();
       if (mounted) {
         setState(() {
-          _apiKey = remoteConfig.getString('OpenAIAPIKey');
-          _deepgramKey = remoteConfig.getString('DeepgramAPIKey');
+          _apiKey = gatewayToken;
+          _deepgramKey = deepgramToken;
         });
         _recoverOriginRestoration(caller: 'remote_config');
         _scheduleMissingTargetGeneration(_cachedDocs);
@@ -1746,7 +1749,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       if (!sameLanguage) {
         final response = await http
             .post(
-              Uri.parse('https://api.openai.com/v1/chat/completions'),
+              SecureAiGateway.openAiUri('/v1/chat/completions'),
               headers: <String, String>{
                 'Authorization': 'Bearer $_apiKey',
                 'Content-Type': 'application/json; charset=utf-8',
@@ -2556,7 +2559,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     if (!_paidStudySilentlyAllowed('practice_stt')) return;
     final targetText = (_tutorLines[currentIndex]['text'] as String).trim();
     try {
-      final uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
+      final uri = SecureAiGateway.openAiUri('/v1/audio/transcriptions');
       final request = http.MultipartRequest('POST', uri);
       request.headers['Authorization'] = 'Bearer $_apiKey';
       // 앱의 다른 파일 전사 경로와 같은 현행 모델을 사용한다.
@@ -2739,7 +2742,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         '&utterance_end_ms=1200'
         '&vad_events=true'
         '&interim_results=true',
-        headers: {'Authorization': 'Token $_deepgramKey'},
+        headers: {'Authorization': 'Bearer $_deepgramKey'},
       );
 
       _micStreamSub = stream.listen((data) {
@@ -3122,7 +3125,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           : TtsWorkload.conversation;
       var response = await http
           .post(
-            Uri.parse('https://api.openai.com/v1/audio/speech'),
+            SecureAiGateway.openAiUri('/v1/audio/speech'),
             headers: {
               'Authorization': 'Bearer $_apiKey',
               'Content-Type': 'application/json'
@@ -3612,7 +3615,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
     try {
       final response = await http.post(
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        SecureAiGateway.openAiUri('/v1/chat/completions'),
         headers: {
           'Authorization': 'Bearer $_apiKey',
           'Content-Type': 'application/json',
@@ -3724,7 +3727,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
     try {
       // 1. GPT Transcribe STT
-      final uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
+      final uri = SecureAiGateway.openAiUri('/v1/audio/transcriptions');
       final request = http.MultipartRequest('POST', uri);
       request.headers['Authorization'] = 'Bearer $_apiKey';
       request.fields['model'] = OpenAiTranscribeService.model;
@@ -3769,7 +3772,7 @@ RULES — follow exactly:
 5. Output ONLY valid JSON with exactly these three keys: {"corrected": "...", "reason": "...", "usage_tip": "..."}''';
 
       final resp = await http.post(
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        SecureAiGateway.openAiUri('/v1/chat/completions'),
         headers: {
           'Authorization': 'Bearer $_apiKey',
           'Content-Type': 'application/json'
@@ -8398,7 +8401,7 @@ class ShadowingBrain {
   static Future<String> formatForSlowRhythm(
       String apiKey, String rawText) async {
     try {
-      Uri uri = Uri.parse('https://api.openai.com/v1/chat/completions');
+      Uri uri = SecureAiGateway.openAiUri('/v1/chat/completions');
       String systemPrompt = '''Role: 너는 영어 학습 앱의 '쉐도잉 텍스트 에디터'이다.
 사용자가 입력한 영문을 OpenAI tts-1 모델이 읽기에 가장 적합한 '아주 느리고 리듬감 있는 텍스트'로 재구성한다.
 Core Objective:

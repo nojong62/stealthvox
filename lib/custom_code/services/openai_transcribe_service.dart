@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // 🎧 Anyone 첫 유저 턴 전사 서비스.
 //   마이크 원본 PCM(16kHz mono) 버퍼를 WAV로 포장해 multipart로 올린다.
 
@@ -73,7 +74,7 @@ class OpenAiTranscribeService {
       final wav = pcm16ToWav(preparedPcm, sampleRate: sampleRate);
       final request = http.MultipartRequest(
         'POST',
-        Uri.parse('https://api.openai.com/v1/audio/transcriptions'),
+        SecureAiGateway.openAiUri('/v1/audio/transcriptions'),
       );
       request.headers['Authorization'] = 'Bearer $apiKey';
       request.fields['model'] = model;

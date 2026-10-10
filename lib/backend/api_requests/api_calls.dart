@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 import '../schema/structs/index.dart';
@@ -35,7 +36,7 @@ class SendChatCall {
 }''';
     return ApiManager.instance.makeApiCall(
       callName: 'SendChat',
-      apiUrl: 'https://api.openai.com/v1/chat/completions',
+      apiUrl: SecureAiGateway.openAiUrl('/v1/chat/completions'),
       callType: ApiCallType.POST,
       headers: {
         'Content-Type': 'application/json',
@@ -67,7 +68,7 @@ class TextToSpeechCall {
 }''';
     return ApiManager.instance.makeApiCall(
       callName: 'TextToSpeech',
-      apiUrl: 'https://api.openai.com/v1/audio/speech',
+      apiUrl: SecureAiGateway.openAiUrl('/v1/audio/speech'),
       callType: ApiCallType.POST,
       headers: {
         'Content-Type': 'application/json',

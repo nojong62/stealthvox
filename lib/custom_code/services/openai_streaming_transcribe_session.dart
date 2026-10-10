@@ -40,6 +40,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import 'pcm_audio_utils.dart';
+import 'secure_ai_gateway.dart';
 
 // ====================================================================
 // 🎚️ [PHASE-1 FLAG] Circle Talk 유저 음성 전사 엔진 전환 스위치
@@ -407,9 +408,10 @@ class OpenAiStreamingTranscribeSession {
     }
     final sw = Stopwatch()..start();
     try {
+      final realtimeToken = await SecureAiGateway.openAiRealtimeToken();
       final socket = await WebSocket.connect(
         kStreamingSttEndpoint,
-        headers: {'Authorization': 'Bearer $apiKey'},
+        headers: {'Authorization': 'Bearer $realtimeToken'},
       ).timeout(kStreamingSttConnectTimeout);
       if (_disposed) {
         unawaited(socket.close());

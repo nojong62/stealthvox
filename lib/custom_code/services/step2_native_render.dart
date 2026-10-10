@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // ====================================================================
 // 🎧 [STEP-2 → ORIGIN] AI가 배울 언어로 한 말을 대화 언어로 옮겨 원문 자리에 둔다.
 // --------------------------------------------------------------------
@@ -55,7 +56,7 @@ Future<String?> renderStep2LineToNative({
   try {
     final response = await http
         .post(
-          Uri.parse('https://api.openai.com/v1/chat/completions'),
+          SecureAiGateway.openAiUri('/v1/chat/completions'),
           headers: <String, String>{
             'Authorization': 'Bearer $apiKey',
             'Content-Type': 'application/json; charset=utf-8',

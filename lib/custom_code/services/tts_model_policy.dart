@@ -118,7 +118,9 @@ class TtsModelPolicy {
     String namespace,
   ) {
     final profile = forWorkload(workload);
-    return '${profile.model}_${profile.cacheVersion}_$namespace';
+    // The audio provider can change without the caller's cache key changing.
+    // Keep prior OpenAI Korean bytes from being replayed after the Aoede route.
+    return '${profile.model}_${profile.cacheVersion}_tts-route-v2_$namespace';
   }
 
   static TtsModelProfile _resolve(TtsWorkload workload) {

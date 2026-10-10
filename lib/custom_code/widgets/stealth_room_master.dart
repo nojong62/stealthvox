@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // Automatic FlutterFlow imports
 import '/backend/backend.dart';
 import '/backend/schema/structs/index.dart';
@@ -23,7 +24,6 @@ import 'package:shared_preferences/shared_preferences.dart'; // 분야 순회 �
 import 'package:firebase_auth/firebase_auth.dart'; // 회원별 커서 분리
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
-import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'usage_sheet.dart';
 import 'account_sheet.dart';
 import '/custom_code/actions/billing_ticker.dart';
@@ -202,20 +202,13 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   /// StealthRoom 메뉴를 보는 동안 첫 유저 번역/TTS용 OpenAI 연결을 준비한다.
   /// UI나 모드 진입을 막지 않으며, 준비 실패 시 각 모드의 기존 요청이 동작한다.
   Future<void> _prepareFirstUserResponse() async {
-    final remoteConfig = FirebaseRemoteConfig.instance;
-    String openAiKey = remoteConfig.getString('OpenAIAPIKey');
-    String deepgramKey = remoteConfig.getString('DeepgramAPIKey');
-
-    if (openAiKey.isEmpty || deepgramKey.isEmpty) {
-      try {
-        await remoteConfig.fetchAndActivate().timeout(
-              const Duration(seconds: 6),
-            );
-        openAiKey = remoteConfig.getString('OpenAIAPIKey');
-        deepgramKey = remoteConfig.getString('DeepgramAPIKey');
-      } catch (error) {
-        debugPrint('[ROOM-PREWARM] key unavailable: ${error.runtimeType}');
-      }
+    String openAiKey = '';
+    String deepgramKey = '';
+    try {
+      openAiKey = await SecureAiGateway.gatewayToken();
+      deepgramKey = await SecureAiGateway.deepgramToken();
+    } catch (error) {
+      debugPrint('[ROOM-PREWARM] secure session unavailable: ${error.runtimeType}');
     }
 
     // 🔥 [STT-PREWARM] 켜진 엔진 **하나만** 예열한다. 둘 다 열면 소켓도 비용도
@@ -479,38 +472,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     if (_isRecommendingScenario) return;
     setState(() => _isRecommendingScenario = true);
     try {
-      final remoteConfig = FirebaseRemoteConfig.instance;
-      String apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
-      if (apiKey.isEmpty) {
-        // A first launch can race Remote Config activation. Retry that short
-        // network fetch before reporting that the key is unavailable.
-        Object? lastRemoteConfigError;
-        for (var attempt = 1; attempt <= 3 && apiKey.isEmpty; attempt++) {
-          try {
-            await remoteConfig.fetchAndActivate().timeout(
-                  const Duration(seconds: 8),
-                );
-            apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
-          } catch (error) {
-            lastRemoteConfigError = error;
-          }
-          if (apiKey.isEmpty && attempt < 3) {
-            await Future<void>.delayed(
-              Duration(milliseconds: 500 * attempt),
-            );
-          }
-        }
-        if (apiKey.isEmpty && lastRemoteConfigError != null) {
-          if (lastRemoteConfigError is TimeoutException) {
-            throw lastRemoteConfigError;
-          }
-          throw const ScenarioRecommendationException(
-            'REMOTE_CONFIG_ERROR',
-            retryable: false,
-          );
-        }
-      }
-      if (apiKey.isEmpty) throw StateError('OpenAI key unavailable');
+      final apiKey = await SecureAiGateway.gatewayToken();
 
       final result = await ScenarioBrain.generateDramaticScenario(
         apiKey,
@@ -572,38 +534,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     if (_isRecommendingCircle) return;
     setState(() => _isRecommendingCircle = true);
     try {
-      final remoteConfig = FirebaseRemoteConfig.instance;
-      String apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
-      if (apiKey.isEmpty) {
-        // A first launch can race Remote Config activation. Retry that short
-        // network fetch before reporting that the key is unavailable.
-        Object? lastRemoteConfigError;
-        for (var attempt = 1; attempt <= 3 && apiKey.isEmpty; attempt++) {
-          try {
-            await remoteConfig.fetchAndActivate().timeout(
-                  const Duration(seconds: 8),
-                );
-            apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
-          } catch (error) {
-            lastRemoteConfigError = error;
-          }
-          if (apiKey.isEmpty && attempt < 3) {
-            await Future<void>.delayed(
-              Duration(milliseconds: 500 * attempt),
-            );
-          }
-        }
-        if (apiKey.isEmpty && lastRemoteConfigError != null) {
-          if (lastRemoteConfigError is TimeoutException) {
-            throw lastRemoteConfigError;
-          }
-          throw const ScenarioRecommendationException(
-            'REMOTE_CONFIG_ERROR',
-            retryable: false,
-          );
-        }
-      }
-      if (apiKey.isEmpty) throw StateError('OpenAI key unavailable');
+      final apiKey = await SecureAiGateway.gatewayToken();
       final recommendationLanguage = _chatLanguage;
 
       // 🔁 회원별 순차 배분. 무작위로 뽑으면 200개를 다 보기 전에 같은 분야가
@@ -634,7 +565,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
 
       final response = await OpenAiConnectionPool.instance.client
           .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            SecureAiGateway.openAiUri('/v1/chat/completions'),
             headers: <String, String>{
               'Authorization': 'Bearer $apiKey',
               'Content-Type': 'application/json; charset=utf-8',

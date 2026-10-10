@@ -60,6 +60,8 @@ function googleOAuthClient() {
 admin.initializeApp();
 const { interpretUtterance } = require("./duo_interpreter");
 const duoBoard = require("./duo_board");
+const secureAiGateway = require("./secure_ai_gateway");
+const memberRegistry = require("./member_registry");
 
 // Callable Interpreter v2 is deployed dark while the client rollout flag is
 // false. Existing direct/realtime functions keep their original regions and
@@ -77,6 +79,12 @@ exports.setDuoBoardPostVisibility = duoBoard.setDuoBoardPostVisibility;
 exports.syncDuoBoardHostPresence = duoBoard.syncDuoBoardHostPresence;
 exports.completeDuoBoardPostOnJoin = duoBoard.completeDuoBoardPostOnJoin;
 exports.expireInactiveDuoBoardPosts = duoBoard.expireInactiveDuoBoardPosts;
+exports.mintAiGatewaySession = secureAiGateway.mintAiGatewaySession;
+exports.mintDeepgramToken = secureAiGateway.mintDeepgramToken;
+exports.mintOpenAiRealtimeToken = secureAiGateway.mintOpenAiRealtimeToken;
+exports.openAiProxy = secureAiGateway.openAiProxy;
+exports.syncRealMemberProfile =
+  memberRegistry.createSyncRealMemberProfile(admin);
 
 
 async function verifyGoogleOAuthIdToken(idToken) {

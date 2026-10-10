@@ -52,15 +52,19 @@ async function processRevenueCatPurchase({
   const {eventId, appUserId, environment, productId, product} = validated;
   const userRef = firestore.doc("users/" + appUserId);
   const purchaseRef = userRef.collection("purchases").doc(eventId);
+  const realMemberRef = firestore.doc("real_members/" + appUserId);
+  const memberPurchaseRef =
+    realMemberRef.collection("purchases").doc(eventId);
   const allowlistRef = firestore.doc(SANDBOX_ALLOWLIST_PATH);
 
   return firestore.runTransaction(async (tx) => {
-    const refs = [purchaseRef, userRef];
+    const refs = [purchaseRef, userRef, realMemberRef];
     if (environment === "SANDBOX") refs.push(allowlistRef);
     const snapshots = await Promise.all(refs.map((ref) => tx.get(ref)));
     const purchaseSnap = snapshots[0];
     const userSnap = snapshots[1];
-    const allowlistSnap = snapshots[2];
+    const realMemberSnap = snapshots[2];
+    const allowlistSnap = snapshots[3];
 
     if (purchaseSnap.exists) {
       return {reason: "duplicate_event", eventId, appUserId, environment};
@@ -82,7 +86,7 @@ async function processRevenueCatPurchase({
     const updated = current + product.seconds;
 
     tx.update(userRef, {remainingTime: updated});
-    tx.set(purchaseRef, {
+    const purchaseData = {
       rc_event_id: eventId,
       product_id: productId,
       product_title: product.title,
@@ -91,7 +95,27 @@ async function processRevenueCatPurchase({
       event_type: event.type,
       environment,
       purchased_at: serverTimestamp(),
-    });
+    };
+    tx.set(purchaseRef, purchaseData);
+    tx.set(memberPurchaseRef, purchaseData);
+
+    const memberData = realMemberSnap.exists ? realMemberSnap.data() || {} : {};
+    const purchaseCount =
+      typeof memberData.purchaseCount === "number" ? memberData.purchaseCount : 0;
+    const totalSecondsPurchased =
+      typeof memberData.totalSecondsPurchased === "number"
+        ? memberData.totalSecondsPurchased
+        : 0;
+    tx.set(realMemberRef, {
+      uid: appUserId,
+      isRealMember: true,
+      hasPurchase: true,
+      purchaseCount: purchaseCount + 1,
+      totalSecondsPurchased: totalSecondsPurchased + product.seconds,
+      lastPurchasedAt: serverTimestamp(),
+      lastProductId: productId,
+      lastPurchaseEnvironment: environment,
+    }, {merge: true});
 
     return {
       reason: "success",

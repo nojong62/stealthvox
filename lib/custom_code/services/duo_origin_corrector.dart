@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // ====================================================================
 // 🩺 [DUO-ORIGIN-CORRECT] 통화가 끝난 뒤, 잘못 들린 낱말 하나를 문맥으로 되살린다
 // --------------------------------------------------------------------
@@ -488,7 +489,7 @@ Future<DuoOriginCorrectionResult> correctDuoOriginTexts({
     call: (payload) async {
       final response = await http_
           .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            SecureAiGateway.openAiUri('/v1/chat/completions'),
             headers: <String, String>{
               'Authorization': 'Bearer $apiKey',
               'Content-Type': 'application/json; charset=utf-8',

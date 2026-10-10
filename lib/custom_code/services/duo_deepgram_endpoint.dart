@@ -193,7 +193,7 @@ class DuoDeepgramEndpointSensor {
       final uri = buildDuoDeepgramEndpointUri(languageCode);
       _channel = IOWebSocketChannel.connect(
         uri,
-        headers: <String, dynamic>{'Authorization': 'Token $apiKey'},
+        headers: <String, dynamic>{'Authorization': 'Bearer $apiKey'},
       );
       _sub = _channel!.stream.listen(
         _onMessage,

@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -51,7 +52,7 @@ class SessionRolloverSummary {
       try {
         response = await client
             .post(
-              Uri.parse('https://api.openai.com/v1/chat/completions'),
+              SecureAiGateway.openAiUri('/v1/chat/completions'),
               headers: <String, String>{
                 'Authorization': 'Bearer $apiKey',
                 'Content-Type': 'application/json; charset=utf-8',

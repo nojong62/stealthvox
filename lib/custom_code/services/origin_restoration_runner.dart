@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // ====================================================================
 // 🔍 [ORIGIN-RESTORE] 복원 한 판을 실제로 돌리는 자리
 // --------------------------------------------------------------------
@@ -439,7 +440,7 @@ class OriginRestorationRunner {
     try {
       final response = await http
           .post(
-            Uri.parse('https://api.openai.com/v1/decisions'),
+            SecureAiGateway.openAiUri('/v1/decisions'),
             headers: <String, String>{
               'Authorization': 'Bearer $apiKey',
               'Content-Type': 'application/json; charset=utf-8',
@@ -540,7 +541,7 @@ The pipeline can listen to the original audio before changing anything. When unc
   }) async {
     final response = await http
         .post(
-          Uri.parse('https://api.openai.com/v1/chat/completions'),
+          SecureAiGateway.openAiUri('/v1/chat/completions'),
           headers: <String, String>{
             'Authorization': 'Bearer $apiKey',
             'Content-Type': 'application/json; charset=utf-8',

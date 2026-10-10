@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // Automatic FlutterFlow imports
 import '/backend/backend.dart';
 import '/backend/schema/structs/index.dart';
@@ -20,7 +21,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '/auth/firebase_auth/auth_util.dart';
 import 'package:audioplayers/audioplayers.dart' hide Source;
 import 'package:http/http.dart' as http;
-import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:record/record.dart';
 import '/custom_code/services/mic_record_config.dart';
 import 'routine_mode_scenario_talk.dart' show TtsCache;
@@ -484,10 +484,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
 
   Future<void> _fetchApiKey() async {
     try {
-      final rc = FirebaseRemoteConfig.instance;
-      await rc.fetchAndActivate();
+      final gatewayToken = await SecureAiGateway.gatewayToken();
       if (mounted) {
-        setState(() => _apiKey = rc.getString('OpenAIAPIKey'));
+        setState(() => _apiKey = gatewayToken);
       }
     } catch (e) {
       debugPrint('[Keepers] fetchApiKey error: $e');
@@ -1739,7 +1738,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         payload['speed'] = speed;
       }
       final response = await http.post(
-        Uri.parse('https://api.openai.com/v1/audio/speech'),
+        SecureAiGateway.openAiUri('/v1/audio/speech'),
         headers: {
           'Authorization': 'Bearer $_apiKey',
           'Content-Type': 'application/json',
@@ -2023,7 +2022,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     final String targetLang = _keeperTutoringTarget;
     try {
       final response = await http.post(
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        SecureAiGateway.openAiUri('/v1/chat/completions'),
         headers: {
           'Authorization': 'Bearer $_apiKey',
           'Content-Type': 'application/json',
@@ -2515,7 +2514,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     try {
       var request = http.MultipartRequest(
         'POST',
-        Uri.parse('https://api.openai.com/v1/audio/transcriptions'),
+        SecureAiGateway.openAiUri('/v1/audio/transcriptions'),
       );
       request.headers['Authorization'] = 'Bearer $_apiKey';
       request.fields['model'] = OpenAiTranscribeService.model;
@@ -2544,7 +2543,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     final String targetLang = _keeperTutoringTarget;
     try {
       final response = await http.post(
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        SecureAiGateway.openAiUri('/v1/chat/completions'),
         headers: {
           'Authorization': 'Bearer $_apiKey',
           'Content-Type': 'application/json',

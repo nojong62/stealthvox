@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:kakao_flutter_sdk_common/kakao_flutter_sdk_common.dart';
 import 'auth/firebase_auth/firebase_user_provider.dart';
 import 'auth/firebase_auth/auth_util.dart';
@@ -126,6 +127,11 @@ void main() async {
   usePathUrlStrategy();
 
   await initFirebase();
+  await FirebaseAppCheck.instance.activate(
+    androidProvider:
+        kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+    appleProvider: AppleProvider.appAttest,
+  );
   KakaoSdk.init(nativeAppKey: '339271f4dd4676bb030cab2f45de5091');
 
   await FlutterFlowTheme.initialize();
@@ -136,7 +142,7 @@ void main() async {
   await revenue_cat.initialize(
     "",
     "goog_XfTPcusZVFeDsZEkFHYiFgUUUIK",
-    debugLogEnabled: true,
+    debugLogEnabled: false,
     loadDataAfterLaunch: true,
   );
 

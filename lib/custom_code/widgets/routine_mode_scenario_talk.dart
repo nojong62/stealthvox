@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // Automatic FlutterFlow imports
 import '/backend/backend.dart';
 import '/backend/schema/structs/index.dart';
@@ -1084,11 +1085,12 @@ $finalLanguageRule''';
   Future<void> _fetchKeysAndInit() async {
     try {
       await FirebaseRemoteConfig.instance.fetchAndActivate();
+      final deepgramToken = await SecureAiGateway.deepgramToken();
+      final gatewayToken = await SecureAiGateway.gatewayToken();
       if (mounted) {
         setState(() {
-          _deepgramKey =
-              FirebaseRemoteConfig.instance.getString('DeepgramAPIKey');
-          _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
+          _deepgramKey = deepgramToken;
+          _openAiKey = gatewayToken;
         });
         // 🛡️ [v4 가드] 세팅된 시나리오가 있으면 재진입 시 보존, 없으면 새 제안
         if (ScenarioStore.situation.isNotEmpty &&
@@ -4099,7 +4101,7 @@ $finalLanguageRule''';
       if (existing != null) return;
       http
           .post(
-        Uri.parse('https://api.openai.com/v1/audio/speech'),
+        SecureAiGateway.openAiUri('/v1/audio/speech'),
         headers: {
           'Authorization': 'Bearer $_openAiKey',
           'Content-Type': 'application/json',
@@ -5112,7 +5114,7 @@ class DeepgramV2VoiceManager {
 
       _channel = IOWebSocketChannel.connect(
         uri,
-        headers: {'Authorization': 'Token $apiKey'},
+        headers: {'Authorization': 'Bearer $apiKey'},
         pingInterval: const Duration(seconds: 10),
       );
       _lg('🎤 [DG-01]', 'WebSocket 연결 요청 전송');
@@ -5331,7 +5333,7 @@ class UnifiedBrain {
 
       final request = http.Request(
         'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        SecureAiGateway.openAiUri('/v1/chat/completions'),
       );
       request.headers.addAll({
         'Authorization': 'Bearer $apiKey',
@@ -5773,7 +5775,7 @@ class ChunkedTtsFetcher {
       try {
         final res = await http
             .post(
-              Uri.parse('https://api.openai.com/v1/audio/speech'),
+              SecureAiGateway.openAiUri('/v1/audio/speech'),
               headers: {
                 'Authorization': 'Bearer $apiKey',
                 'Content-Type': 'application/json',
@@ -6114,7 +6116,7 @@ class HybridTtsPlayer {
         try {
           final res = await http
               .post(
-                Uri.parse('https://api.openai.com/v1/audio/speech'),
+                SecureAiGateway.openAiUri('/v1/audio/speech'),
                 headers: {
                   'Authorization': 'Bearer $apiKey',
                   'Content-Type': 'application/json',
@@ -6193,7 +6195,7 @@ class ScenarioBrain {
     try {
       final response = await client
           .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            SecureAiGateway.openAiUri('/v1/chat/completions'),
             headers: {
               'Authorization': 'Bearer $apiKey',
               'Content-Type': 'application/json; charset=utf-8',
@@ -6257,7 +6259,7 @@ Return only the line itself.'''
     try {
       final response = await client
           .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            SecureAiGateway.openAiUri('/v1/chat/completions'),
             headers: <String, String>{
               'Authorization': 'Bearer $apiKey',
               'Content-Type': 'application/json; charset=utf-8',
@@ -6327,7 +6329,7 @@ Return only the line itself.'''
     try {
       final request = http.Request(
         'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        SecureAiGateway.openAiUri('/v1/chat/completions'),
       );
       request.headers.addAll(<String, String>{
         'Authorization': 'Bearer $apiKey',
@@ -6455,7 +6457,7 @@ content and gist of the WHOLE conversation.
 - Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
       final response = await http
           .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            SecureAiGateway.openAiUri('/v1/chat/completions'),
             headers: {
               'Authorization': 'Bearer $apiKey',
               'Content-Type': 'application/json; charset=utf-8',
@@ -6698,7 +6700,7 @@ content and gist of the WHOLE conversation.
 
       final res = await client
           .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            SecureAiGateway.openAiUri('/v1/chat/completions'),
             headers: {
               'Authorization': 'Bearer $apiKey',
               'Content-Type': 'application/json; charset=utf-8',
@@ -6943,7 +6945,7 @@ NEVER break character when asking.
 
       final request = http.Request(
         'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        SecureAiGateway.openAiUri('/v1/chat/completions'),
       );
       request.headers.addAll({
         'Authorization': 'Bearer $apiKey',
@@ -7004,7 +7006,7 @@ NEVER break character when asking.
       try {
         final res = await client
             .post(
-              Uri.parse('https://api.openai.com/v1/chat/completions'),
+              SecureAiGateway.openAiUri('/v1/chat/completions'),
               headers: {
                 'Authorization': 'Bearer $apiKey',
                 'Content-Type': 'application/json; charset=utf-8',
@@ -7123,7 +7125,7 @@ NEVER break character when asking.
 
       final request = http.Request(
         'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        SecureAiGateway.openAiUri('/v1/chat/completions'),
       );
       request.headers.addAll({
         'Authorization': 'Bearer $apiKey',
@@ -7217,7 +7219,7 @@ NEVER break character when asking.
 
       final request = http.Request(
         'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        SecureAiGateway.openAiUri('/v1/chat/completions'),
       );
       request.headers.addAll({
         'Authorization': 'Bearer $apiKey',

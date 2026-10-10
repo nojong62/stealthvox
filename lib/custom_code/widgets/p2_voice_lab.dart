@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // 🔬 [P2-VOICE-LAB] 관리자 전용 P2 음성 실험실.
 //
 //   Style 6종 × Voice 13종 = 78조합을 **같은 한 문장**으로 만들어 듣고
@@ -21,7 +22,6 @@ import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:firebase_auth/firebase_auth.dart' show FirebaseAuth, User;
-import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -288,18 +288,17 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
 
   Future<void> _loadApiKey() async {
     try {
-      final rc = FirebaseRemoteConfig.instance;
-      await rc.fetchAndActivate();
+      final gatewayToken = await SecureAiGateway.gatewayToken();
       if (!mounted) return;
       setState(() {
-        _apiKey = rc.getString('OpenAIAPIKey');
+        _apiKey = gatewayToken;
         _apiKeyLoaded = true;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _apiKeyLoaded = true;
-        _error = 'Remote Config 실패: $e';
+        _error = '보안 AI 세션 준비 실패: $e';
         _status = _LabStatus.error;
       });
     }
@@ -389,14 +388,14 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
   }) async {
     if (_apiKey.trim().isEmpty) {
       return const _LabTtsResult(
-        error: 'OpenAI API key 없음 (Remote Config `OpenAIAPIKey`가 비어 있다)',
+        error: '보안 AI 세션을 준비하지 못했습니다.',
         fromCache: false,
       );
     }
     try {
       final response = await http
           .post(
-            Uri.parse('https://api.openai.com/v1/audio/speech'),
+            SecureAiGateway.openAiUri('/v1/audio/speech'),
             headers: <String, String>{
               'Authorization': 'Bearer $_apiKey',
               'Content-Type': 'application/json',

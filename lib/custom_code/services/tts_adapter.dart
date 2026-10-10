@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // 🔊 [TTS-ADAPTER] 공통 TTS 어댑터 — guide4 8장.
 //
 // 앱의 모든 TTS 호출은 이 어댑터를 통해서만 나간다. 대화방/화면 코드는
@@ -791,7 +792,7 @@ class TtsAdapter {
   }) {
     final httpRequest = http.Request(
       'POST',
-      Uri.parse('https://api.openai.com/v1/audio/speech'),
+      SecureAiGateway.openAiUri('/v1/audio/speech'),
     );
     httpRequest.headers.addAll({
       'Authorization': 'Bearer $apiKey',

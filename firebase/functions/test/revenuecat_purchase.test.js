@@ -80,14 +80,23 @@ test("allowed SANDBOX purchase credits once and stores environment", async () =>
   const purchase = db.docs.get("users/tester-uid/purchases/event-1");
   assert.equal(purchase.environment, "SANDBOX");
   assert.equal(purchase.seconds_added, 600);
+  const member = db.docs.get("real_members/tester-uid");
+  assert.equal(member.purchaseCount, 1);
+  assert.equal(member.totalSecondsPurchased, 600);
+  assert.equal(
+    db.docs.get("real_members/tester-uid/purchases/event-1").product_id,
+    "stealthvox_10m"
+  );
 
   const duplicate = await process(db);
   assert.equal(duplicate.reason, "duplicate_event");
   assert.equal(db.docs.get("users/tester-uid").remainingTime, 720);
   assert.equal(
-    [...db.docs.keys()].filter((path) => path.includes("/purchases/")).length,
+    [...db.docs.keys()].filter((path) =>
+      path.startsWith("users/tester-uid/purchases/")).length,
     1
   );
+  assert.equal(db.docs.get("real_members/tester-uid").purchaseCount, 1);
 });
 
 test("SANDBOX purchase rejects a UID outside the allowlist", async () => {

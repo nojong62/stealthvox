@@ -30,6 +30,7 @@ import 'dart:async'; // unawaited
 import 'routine_mode_scenario_talk.dart' show TtsCache; // 캐시 정리 진입점
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/admin_gate.dart'; // 관리자 판별(UID)
+import '/custom_code/services/real_member_registry.dart';
 import '/custom_code/services/guide_ui_localization.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/origin_pcm_store.dart';
@@ -112,8 +113,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   OriginSurfaceCopy get _surfaceCopy => OriginSurfaceCopy.forSystemLocale();
 
   bool isLoading = false;
-  String _apiKey = "";
-  bool _isKeyLoaded = false;
 
   // 💡 [핵심 뼈대] 버튼 연속 클릭 방지용 잠금장치
   bool _isActionLocked = false;
@@ -201,6 +200,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   Future<void> _initializeLobbyData() async {
+    unawaited(RealMemberRegistry.syncCurrentMember());
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
     final isSameAccountAsLastSync =
         currentUid != null && currentUid == LobbyBrain.lastSyncedUid;
@@ -240,11 +240,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         BillingTicker.instance.pause(); // 로비는 과금 없음
       }
 
-      // 2. DB 통신 분리: API 키 로드
+      // 2. Remote Config: 공개 가능한 런타임 설정만 로드
       // 앱 버전 정책은 모든 진입 경로에 공통 적용되는 AppUpdateGate가 맡는다.
       Map<String, dynamic> configData = await LobbyBrain.fetchRemoteConfig();
-      _apiKey = configData['apiKey'] ?? "";
-      if (_apiKey.isNotEmpty) _isKeyLoaded = true;
 
       // 3. RevenueCat 초기화
       final rcKey = configData['revenueCatAndroidKey'] ?? '';
@@ -1493,7 +1491,6 @@ class LobbyBrain {
       );
       await remoteConfig.fetchAndActivate();
 
-      result['apiKey'] = remoteConfig.getString('OpenAIAPIKey');
       result['revenueCatAndroidKey'] = remoteConfig.getString(
         'RevenueCatAndroidKey',
       );

@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 import 'dart:async';
 
 import 'package:http/http.dart' as http;
@@ -44,7 +45,7 @@ class OpenAiConnectionPool {
     try {
       final request = http.Request(
         'GET',
-        Uri.parse('https://api.openai.com/v1/models/gpt-4o-mini'),
+        SecureAiGateway.openAiUri('/v1/models/gpt-4o-mini'),
       );
       request.headers['Authorization'] = 'Bearer $apiKey';
 

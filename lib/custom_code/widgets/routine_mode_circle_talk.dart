@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // Automatic FlutterFlow imports
 import '/backend/backend.dart';
 import '/backend/schema/structs/index.dart';
@@ -1357,7 +1358,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
 
     // 앱 시작 시 이미 활성화된 값을 먼저 사용한다. 네트워크 fetch가 실패하거나
     // 지연돼도 두 번째 입장까지 기다리지 않고 첫 입장에서 바로 시작할 수 있다.
-    _applyActivatedKeys(remoteConfig);
+    await _applySecureTokens();
     if (_hasSttKeys) {
       _scheduleStartupRetry(immediate: true);
     }
@@ -1371,16 +1372,17 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     } finally {
       if (mounted) {
         // fetchAndActivate가 예외여도 이전에 활성화된 캐시 값은 유효하다.
-        _applyActivatedKeys(remoteConfig);
+        await _applySecureTokens();
         _scheduleStartupRetry(immediate: true);
       }
     }
   }
 
-  void _applyActivatedKeys(FirebaseRemoteConfig remoteConfig) {
+  Future<void> _applySecureTokens() async {
     if (!mounted) return;
-    final deepgramKey = remoteConfig.getString('DeepgramAPIKey');
-    final openAiKey = remoteConfig.getString('OpenAIAPIKey');
+    final deepgramKey = await SecureAiGateway.deepgramToken();
+    final openAiKey = await SecureAiGateway.gatewayToken();
+    if (!mounted) return;
     if (deepgramKey == _deepgramKey && openAiKey == _openAiKey) return;
     setState(() {
       _deepgramKey = deepgramKey;
@@ -1398,7 +1400,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     final delay = immediate ? Duration.zero : const Duration(milliseconds: 750);
     _startupRetryTimer = Timer(delay, () async {
       if (!mounted || _isConversationActive) return;
-      _applyActivatedKeys(FirebaseRemoteConfig.instance);
+      await _applySecureTokens();
       await _startFreeTalkSession();
       if (!mounted || _isConversationActive) return;
       // 🔇 오프너가 도는 동안은 실패로 세지 않는다. 마이크는 오프너가 끝나며
@@ -6355,7 +6357,7 @@ class DeepgramV2VoiceManager {
       final channel = preconnectedChannel ??
           IOWebSocketChannel.connect(
             uri,
-            headers: {'Authorization': 'Token $apiKey'},
+            headers: {'Authorization': 'Bearer $apiKey'},
             pingInterval: const Duration(seconds: 10),
           );
       _channel = channel;
@@ -6674,7 +6676,7 @@ class UnifiedBrain {
     try {
       final response = await client
           .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            SecureAiGateway.openAiUri('/v1/chat/completions'),
             headers: {
               'Authorization': 'Bearer $apiKey',
               'Content-Type': 'application/json; charset=utf-8',
@@ -6775,7 +6777,7 @@ Return only the line itself.'''
     try {
       final request = http.Request(
         'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        SecureAiGateway.openAiUri('/v1/chat/completions'),
       );
       request.headers['Authorization'] = 'Bearer $apiKey';
       request.headers['Content-Type'] = 'application/json; charset=utf-8';
@@ -6886,7 +6888,7 @@ Return only the line itself.'''
     try {
       final response = await client
           .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            SecureAiGateway.openAiUri('/v1/chat/completions'),
             headers: <String, String>{
               'Authorization': 'Bearer $apiKey',
               'Content-Type': 'application/json; charset=utf-8',
@@ -6956,7 +6958,7 @@ Return only the line itself.'''
 
       final request = http.Request(
         'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        SecureAiGateway.openAiUri('/v1/chat/completions'),
       );
       request.headers.addAll({
         'Authorization': 'Bearer $apiKey',
@@ -7250,7 +7252,7 @@ content and gist of the WHOLE conversation.
 - Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
       final response = await http
           .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            SecureAiGateway.openAiUri('/v1/chat/completions'),
             headers: {
               'Authorization': 'Bearer $apiKey',
               'Content-Type': 'application/json; charset=utf-8',
@@ -7491,7 +7493,7 @@ ${buildHeardConfirmOutputRule(originLang)}
 
       final request = http.Request(
         'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        SecureAiGateway.openAiUri('/v1/chat/completions'),
       );
       request.headers.addAll({
         'Authorization': 'Bearer $apiKey',
@@ -7548,7 +7550,7 @@ ${buildHeardConfirmOutputRule(originLang)}
       try {
         final response = await client
             .post(
-              Uri.parse('https://api.openai.com/v1/chat/completions'),
+              SecureAiGateway.openAiUri('/v1/chat/completions'),
               headers: {
                 'Authorization': 'Bearer $apiKey',
                 'Content-Type': 'application/json; charset=utf-8',
@@ -7602,7 +7604,7 @@ ${buildHeardConfirmOutputRule(originLang)}
       try {
         final res = await client
             .post(
-              Uri.parse('https://api.openai.com/v1/chat/completions'),
+              SecureAiGateway.openAiUri('/v1/chat/completions'),
               headers: {
                 'Authorization': 'Bearer $apiKey',
                 'Content-Type': 'application/json; charset=utf-8',
@@ -7681,7 +7683,7 @@ ${buildHeardConfirmOutputRule(originLang)}
     try {
       final response = await client
           .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            SecureAiGateway.openAiUri('/v1/chat/completions'),
             headers: {
               'Authorization': 'Bearer $apiKey',
               'Content-Type': 'application/json; charset=utf-8',
@@ -7747,7 +7749,7 @@ Update the private memory:'''
     try {
       final response = await client
           .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            SecureAiGateway.openAiUri('/v1/chat/completions'),
             headers: {
               'Authorization': 'Bearer $apiKey',
               'Content-Type': 'application/json; charset=utf-8',
@@ -7879,7 +7881,7 @@ $questionRule
 
       final request = http.Request(
         'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        SecureAiGateway.openAiUri('/v1/chat/completions'),
       );
       request.headers.addAll({
         'Authorization': 'Bearer $apiKey',

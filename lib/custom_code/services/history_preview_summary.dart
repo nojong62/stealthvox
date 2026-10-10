@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // ====================================================================
 // 🗂️ [HISTORY PREVIEW] 공부방 목록의 날짜 밑 한 줄 — 대화 주제 요약.
 // --------------------------------------------------------------------
@@ -38,7 +39,7 @@ Future<String?> summarizeConversationForList({
         "Return ONLY the phrase.";
     final res = await http
         .post(
-          Uri.parse('https://api.openai.com/v1/chat/completions'),
+          SecureAiGateway.openAiUri('/v1/chat/completions'),
           headers: <String, String>{
             'Authorization': 'Bearer $apiKey',
             'Content-Type': 'application/json; charset=utf-8',

@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // ====================================================================
 // 🌐 [ORIGIN-RESOLVE] 첫 발화가 로비 ORIGIN과 다른 언어인지 **알아만 둔다**
 // --------------------------------------------------------------------
@@ -298,7 +299,7 @@ Future<String?> _judgeLatinOrigin({
   try {
     final response = await OpenAiConnectionPool.instance.client
         .post(
-          Uri.parse('https://api.openai.com/v1/chat/completions'),
+          SecureAiGateway.openAiUri('/v1/chat/completions'),
           headers: <String, String>{
             'Authorization': 'Bearer $apiKey',
             'Content-Type': 'application/json; charset=utf-8',

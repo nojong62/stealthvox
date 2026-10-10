@@ -1,3 +1,4 @@
+import '/custom_code/services/secure_ai_gateway.dart';
 // ════════════════════════════════════════════════════════════════════
 // 🔀 [ALT-STYLE] "다른 표현 보기" — 같은 뜻을 스타일만 바꿔 다시 쓴다
 // --------------------------------------------------------------------
@@ -51,7 +52,7 @@ Future<Map<String, String>> fetchAltStyleSentences({
   try {
     final response = await http
         .post(
-          Uri.parse('https://api.openai.com/v1/chat/completions'),
+          SecureAiGateway.openAiUri('/v1/chat/completions'),
           headers: <String, String>{
             'Authorization': 'Bearer $apiKey',
             'Content-Type': 'application/json; charset=utf-8',
