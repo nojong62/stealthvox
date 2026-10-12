@@ -330,6 +330,22 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     }
   }
 
+  /// 자주 쓰는 Duo 언어쌍을 한 번에 고르고, 기존의 안전한 입장 절차로
+  /// 이어 간다. ENTER의 잔여시간 검사·History 생성·중복 탭 잠금을
+  /// 우회하지 않아 일반 진입과 결과가 같다.
+  void _enterWithLanguagePair(
+    BuildContext context, {
+    required String origin,
+    required String target,
+  }) {
+    setState(() {
+      FFAppState().chatLang = origin;
+      FFAppState().targetLang = target;
+    });
+    unawaited(DuoBoardPushService.refreshChatLanguageForCurrentMember());
+    _handleEnterRoom(context);
+  }
+
   // 📦 [Box 6: 시스템 알림 팝업]
   void _showUsageGuideDialog(BuildContext context) {
     final guideCopy = GuideUiCopy.forSystemLocale();
@@ -1433,6 +1449,36 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                         //   선택 그대로 남겨 뒀다가 English로 돌아왔을 때
                         //   복원한다.
                         (val) => setState(() => appState.targetLang = val!),
+                      ),
+                      const SizedBox(height: 18),
+                      _buildSectionLabel('QUICK DUO'),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildPill(
+                              'EN → KO',
+                              false,
+                              () => _enterWithLanguagePair(
+                                context,
+                                origin: 'English',
+                                target: 'Korean',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _buildPill(
+                              'KO → EN',
+                              false,
+                              () => _enterWithLanguagePair(
+                                context,
+                                origin: 'Korean',
+                                target: 'English',
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
