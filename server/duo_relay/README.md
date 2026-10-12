@@ -19,6 +19,7 @@ Duo **직접 대화**에서 두 사람의 실제 목소리를 주고받는 통�
   "role": "HOST" | "GUEST",
   "sessionId": "<통화 세대값>",
   "token": "<RELAY_TOKEN, 설정된 경우>",
+  "idToken": "<현재 Firebase 사용자의 ID token>",
   "audio": { "format": "pcm_s16le_mono", "rate": 24000, "channels": 1 }
 }
 ```
@@ -45,6 +46,10 @@ base64로 감싸지 않고, 헤더도 붙이지 않는다.
 | hello 유예 | 5초 |
 | 같은 uid 재접속 | 옛 연결을 끊고 새 연결로 교체 |
 | 상대 소켓 적체 | `bufferedAmount` 초과분은 **버린다** (과거 음성 몰아 재생 방지) |
+
+`VERIFY_ROOM=1`인 운영 기본값에서는 `idToken`이 필수다. Firebase 익명 로그인
+사용자도 ID 토큰을 가지므로, 토큰을 얻지 못한 연결은 UID 문자열만 믿고
+입장시키지 않고 `missing_id_token`으로 거절한다.
 
 ## 로컬 실행
 

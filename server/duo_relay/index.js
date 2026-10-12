@@ -16,6 +16,7 @@
 
 const http = require("http");
 const { WebSocketServer } = require("ws");
+const { verifyRelayMembership } = require("./auth");
 
 const PORT = parseInt(process.env.PORT || "8080", 10);
 
@@ -58,26 +59,16 @@ async function loadRoom(roomId) {
 }
 
 /// hello가 주장하는 roomId/uid가 실제 방 참가자인지 확인한다.
-/// idToken이 함께 왔으면 uid 소유까지 검증한다(비회원 게스트는 토큰이 없다).
+/// 운영 검증 모드에서는 Firebase 익명 게스트를 포함해 ID 토큰이 필수다.
 async function verifyMembership({ roomId, uid, idToken }) {
-  if (!VERIFY_ROOM) return { ok: true };
-  try {
-    if (idToken) {
-      const decoded = await firebaseAuth.verifyIdToken(idToken);
-      if (decoded.uid !== uid) return { ok: false, reason: "uid_mismatch" };
-    }
-    const room = await loadRoom(roomId);
-    if (!room) return { ok: false, reason: "room_not_found" };
-    if (room.isDuoEnabled !== true) return { ok: false, reason: "room_closed" };
-    const hostUid = room.hostUid ? String(room.hostUid) : "";
-    const partnerUid = room.partnerUid ? String(room.partnerUid) : "";
-    if (uid !== hostUid && uid !== partnerUid) {
-      return { ok: false, reason: "not_a_member" };
-    }
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, reason: `verify_failed(${error.code || error.name})` };
-  }
+  return verifyRelayMembership({
+    roomId,
+    uid,
+    idToken,
+    verifyRoom: VERIFY_ROOM,
+    loadRoom,
+    verifyIdToken: token => firebaseAuth.verifyIdToken(token),
+  });
 }
 
 // 방 하나에 붙을 수 있는 최대 인원. Duo는 1:1이다.
