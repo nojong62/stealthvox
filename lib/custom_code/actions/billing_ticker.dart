@@ -53,6 +53,40 @@ extension BillingRateMultiplier on BillingRate {
 
 const String _kBillingRegion = 'us-central1';
 
+/// Parses the Firebase callable response used by [BillingTicker.flushNow].
+///
+/// A non-200 response must throw. [flushNow] has already moved the pending
+/// seconds out of `_unflushedDeducted`, and its catch block is what restores
+/// them for retry. Returning normally on an HTTP error silently forgives the
+/// whole interval even though the server balance was never reduced.
+int parseDeductRemainingTimeResponse(http.Response response) {
+  if (response.statusCode != 200) {
+    throw StateError('deductRemainingTime HTTP ${response.statusCode}');
+  }
+
+  dynamic decoded;
+  try {
+    decoded = jsonDecode(response.body);
+  } catch (_) {
+    throw StateError('deductRemainingTime returned invalid JSON');
+  }
+  if (decoded is! Map) {
+    throw StateError('deductRemainingTime response is not an object');
+  }
+  final result = decoded['result'];
+  if (result is! Map) {
+    throw StateError('deductRemainingTime result is missing');
+  }
+  final remaining = result['remainingTime'];
+  if (remaining is! num ||
+      !remaining.isFinite ||
+      remaining < 0 ||
+      remaining != remaining.roundToDouble()) {
+    throw StateError('deductRemainingTime remainingTime is invalid');
+  }
+  return remaining.toInt();
+}
+
 class BillingTicker with WidgetsBindingObserver {
   static final BillingTicker instance = BillingTicker._();
   BillingTicker._() {
@@ -641,18 +675,12 @@ class BillingTicker with WidgetsBindingObserver {
         )
         .timeout(const Duration(seconds: 10));
 
-    if (response.statusCode == 200) {
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
-      final result = body['result'] as Map<String, dynamic>?;
-      final updated = (result?['remainingTime'] as num?)?.toInt();
-      if (updated != null) {
-        FFAppState().remainingTime = updated;
-        remainingSecondsNotifier.value = updated;
-      }
-      _addBillingLog('[BILLING] firestore save success');
-      _lastFlushResult =
-          'OK (-${seconds}s) @ ${DateTime.now().toIso8601String().substring(11, 19)}';
-    }
+    final updated = parseDeductRemainingTimeResponse(response);
+    FFAppState().remainingTime = updated;
+    remainingSecondsNotifier.value = updated;
+    _addBillingLog('[BILLING] firestore save success');
+    _lastFlushResult =
+        'OK (-${seconds}s) @ ${DateTime.now().toIso8601String().substring(11, 19)}';
   }
 
   /// [B-BILLING] Calls the server-owned usage_logs writer.
