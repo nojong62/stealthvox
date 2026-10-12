@@ -272,7 +272,13 @@ service cloud.firestore {
                             true))));
       }
 
-      allow read: if isAuth();
+      // Invite and post-login handoff both know one random room id and need a
+      // direct document lookup before the caller is recorded as a participant.
+      // That does not require collection enumeration. Keeping `read` here
+      // would also grant `list`, allowing any signed-in account to discover
+      // every live/finished Duo room and the participant UIDs stored in it.
+      allow get: if isAuth();
+      allow list: if false;
       allow create: if isAuth()
         && request.resource.data.hostUid == request.auth.uid
         && interpreterNegotiationCreateValid();

@@ -17,7 +17,7 @@ const {
   assertFails,
 } = require('@firebase/rules-unit-testing');
 const {
-  doc, getDoc, setDoc, updateDoc, deleteDoc, collection, addDoc,
+  doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, addDoc,
   serverTimestamp,
 } = require('firebase/firestore');
 
@@ -106,6 +106,8 @@ async function main() {
   section('초대 링크를 받은 사람의 읽기 (참가자가 되기 전이다)');
   await check('아직 참가자가 아닌 게스트도 방을 읽는다', () => assertSucceeds(
       getDoc(room(guest))));
+  await check('로그인해도 Duo 방 전체 목록은 읽지 못한다', () => assertFails(
+      getDocs(collection(guest, 'duo_sessions'))));
   await check('로그인하지 않으면 못 읽는다', () => assertFails(
       getDoc(room(anon))));
 
