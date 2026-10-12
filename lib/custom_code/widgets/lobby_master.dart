@@ -1151,7 +1151,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                     Text(
                       title,
                       maxLines: 1,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: _kLobbyText,
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
