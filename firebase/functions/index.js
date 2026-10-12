@@ -17,6 +17,7 @@ const crypto = require("crypto");
 const { defineSecret } = require("firebase-functions/params");
 const { resolveLegacyGoogleAccount } = require("./legacy_google_account");
 const { processRevenueCatPurchase } = require("./revenuecat_purchase");
+const { writeUsageLogIdempotently } = require("./usage_log");
 const revenueCatWebhookSecret = defineSecret("REVENUECAT_WEBHOOK_SECRET");
 
 // ----------------------------------------------------------------------------
@@ -528,6 +529,7 @@ exports.logUsageSession = functions.https.onCall(async (data, context) => {
   const actualSeconds = data.actual_seconds;
   const roomId = typeof data.room_id === "string" ? data.room_id : "";
   const sessionId = typeof data.session_id === "string" ? data.session_id : "";
+  const requestId = typeof data.request_id === "string" ? data.request_id : "";
 
   if (
     typeof secondsUsed !== "number" ||
@@ -551,44 +553,47 @@ exports.logUsageSession = functions.https.onCall(async (data, context) => {
       "actual_seconds must be a non-negative integer (<= 86400)."
     );
   }
+  if (requestId && !/^[A-Za-z0-9_-]{10,120}$/.test(requestId)) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "request_id must be a stable 10-120 character identifier."
+    );
+  }
+  // Older installed builds do not send request_id. Keep them working during
+  // rollout; only new builds receive retry deduplication guarantees.
+  const effectiveRequestId = requestId ||
+    `legacy_${crypto.randomBytes(16).toString("hex")}`;
 
-  const userRef = admin.firestore().doc("users/" + uid);
-  const snap = await userRef.get();
-  const afterSeconds =
-    snap.exists && typeof snap.data().remainingTime === "number"
-      ? snap.data().remainingTime
-      : 0;
-  const beforeSeconds = afterSeconds + secondsUsed;
-
-  await admin
-    .firestore()
-    .collection("users")
-    .doc(uid)
-    .collection("usage_logs")
-    .add({
-      created_at: admin.firestore.FieldValue.serverTimestamp(),
-      mode: mode,
-      rate: rate,
+  const result = await writeUsageLogIdempotently({
+    db: admin.firestore(),
+    uid,
+    requestId: effectiveRequestId,
+    fields: {
+      mode,
+      rate,
       seconds_used: secondsUsed,
       actual_seconds: actualSeconds,
-      before_seconds: beforeSeconds,
-      after_seconds: afterSeconds,
       room_id: roomId,
       session_id: sessionId,
-    });
+    },
+    serverTimestamp: () => admin.firestore.FieldValue.serverTimestamp(),
+  });
 
   functions.logger.info("logUsageSession", {
     uid: uid,
     mode: mode,
     seconds_used: secondsUsed,
-    before: beforeSeconds,
-    after: afterSeconds,
+    before: result.beforeSeconds,
+    after: result.afterSeconds,
+    duplicate: result.duplicate,
+    idempotency: requestId ? "client" : "legacy",
   });
 
   return {
     ok: true,
-    before_seconds: beforeSeconds,
-    after_seconds: afterSeconds,
+    duplicate: result.duplicate,
+    before_seconds: result.beforeSeconds,
+    after_seconds: result.afterSeconds,
   };
 });
 

@@ -260,6 +260,8 @@ class BillingTicker with WidgetsBindingObserver {
   int _sessionBeforeSeconds = 0;
   DateTime? _sessionStartTime;
   bool _usageLogSaved = false;
+  int _usageLogSequence = 0;
+  String _usageLogRequestId = '';
   String? _sessionDocIdForUsage;
   String? _roomIdForUsage;
   // ─────────────────────────────────────────────────────────────────────────
@@ -391,6 +393,8 @@ class BillingTicker with WidgetsBindingObserver {
   void _openSegment(String reason) {
     _sessionBeforeSeconds = FFAppState().remainingTime;
     _sessionStartTime = DateTime.now();
+    _usageLogRequestId =
+        'segment_${_sessionStartTime!.microsecondsSinceEpoch}_${++_usageLogSequence}';
     _usageLogSaved = false;
     _addBillingLog(
         '[BILLING-SEG] open reason=$reason before=$_sessionBeforeSeconds');
@@ -712,6 +716,9 @@ class BillingTicker with WidgetsBindingObserver {
               'actual_seconds': actualSeconds,
               'room_id': _roomIdForUsage ?? '',
               'session_id': _sessionDocIdForUsage ?? '',
+              // Stable for every retry of this billing segment. The server
+              // hashes it with uid and uses that as the Firestore document id.
+              'request_id': _usageLogRequestId,
             }
           }),
         )
