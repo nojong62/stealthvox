@@ -1119,6 +1119,81 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     );
   }
 
+  /// 언어 설정 카드까지 내려가지 않고 곧바로 시작하는 Duo 진입 버튼.
+  /// 각 버튼은 언어쌍을 먼저 확정한 뒤 `_handleEnterRoom`을 통해 입장한다.
+  Widget _buildQuickDuoEntryButtons() {
+    Widget button({
+      required String title,
+      required String subtitle,
+      required String origin,
+      required String target,
+    }) =>
+        Expanded(
+          child: Material(
+            color: _kLobbySurfaceHi,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: _kLobbyBorder),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => _enterWithLanguagePair(
+                context,
+                origin: origin,
+                target: target,
+              ),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      style: const TextStyle(
+                        color: _kLobbyText,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _kLobbyTextMid,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+
+    return Row(
+      children: [
+        button(
+          title: 'EN → KO',
+          subtitle: 'English · Learn Korean',
+          origin: 'English',
+          target: 'Korean',
+        ),
+        const SizedBox(width: 10),
+        button(
+          title: 'KO → EN',
+          subtitle: 'Korean · Learn English',
+          origin: 'Korean',
+          target: 'English',
+        ),
+      ],
+    );
+  }
+
   /// 화면 맨 아래 고정 줄.
   ///
   /// 기능은 예전 푸터 링크 셋과 **완전히 같다** — 다이얼로그 둘과 로그아웃
@@ -1450,36 +1525,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                         //   복원한다.
                         (val) => setState(() => appState.targetLang = val!),
                       ),
-                      const SizedBox(height: 18),
-                      _buildSectionLabel('QUICK DUO'),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildPill(
-                              'EN → KO',
-                              false,
-                              () => _enterWithLanguagePair(
-                                context,
-                                origin: 'English',
-                                target: 'Korean',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _buildPill(
-                              'KO → EN',
-                              false,
-                              () => _enterWithLanguagePair(
-                                context,
-                                origin: 'Korean',
-                                target: 'English',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
                     ],
                   ),
                 ),
@@ -1488,7 +1533,11 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(28, 10, 28, 12),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+          child: _buildQuickDuoEntryButtons(),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(28, 8, 28, 12),
           child: _buildEnterButton(),
         ),
         _buildBottomBar(),
