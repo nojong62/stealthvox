@@ -532,6 +532,22 @@ async function main() {
 
   await dumpRoom('canonical 뒤');
 
+  // AI 이용 자격은 callable이 Admin SDK로만 만든다. 앱이 이 문서를 읽거나
+  // 직접 쓰게 두면 1회 체험 제한과 서버 잔액 검사를 모두 우회할 수 있다.
+  section('AI trial entitlement — server only');
+  await check('인증 사용자도 device guard를 읽지 못한다', () => assertFails(
+      getDoc(doc(host, 'trial_devices', 'device-hash'))));
+  await check('인증 사용자가 device guard를 만들지 못한다', () => assertFails(
+      setDoc(doc(host, 'trial_devices', 'device-hash'), {uid: HOST})));
+  await check('인증 사용자가 trial grant를 읽지 못한다', () => assertFails(
+      getDoc(doc(host, 'ai_trial_grants', HOST))));
+  await check('인증 사용자가 trial grant를 만들지 못한다', () => assertFails(
+      setDoc(doc(host, 'ai_trial_grants', HOST), {
+        uid: HOST,
+        status: 'active',
+        expiresAtMs: Date.now() + 3600000,
+      })));
+
   // ── ⑧ 방 지우기 ─────────────────────────────────────────────────
   section('방 지우기');
   await check('게스트는 방을 못 지운다', () => assertFails(

@@ -26,6 +26,7 @@ import '/custom_code/services/duo_board_push_service.dart';
 import '/custom_code/services/duo_board_intro_notice.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/system_ui_language.dart';
+import '/custom_code/services/secure_ai_gateway.dart';
 
 enum IntroScreen { welcome, auth, accountDiscovery }
 
@@ -383,6 +384,8 @@ class _IntroMasterState extends State<IntroMaster>
         authNotificationSuppressed = true;
         await FirebaseAuth.instance.signInAnonymously();
       }
+      if (!_isCurrentTrialRequest(requestGeneration)) return;
+      await SecureAiGateway.claimTrialAccess();
       if (!_isCurrentTrialRequest(requestGeneration)) return;
       debugPrint(
         '[TrialDebug] anonymous auth ready, uid=${FirebaseAuth.instance.currentUser?.uid}, stateMounted=$mounted',

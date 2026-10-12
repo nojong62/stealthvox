@@ -82,6 +82,7 @@ exports.expireInactiveDuoBoardPosts = duoBoard.expireInactiveDuoBoardPosts;
 exports.mintAiGatewaySession = secureAiGateway.mintAiGatewaySession;
 exports.mintDeepgramToken = secureAiGateway.mintDeepgramToken;
 exports.mintOpenAiRealtimeToken = secureAiGateway.mintOpenAiRealtimeToken;
+exports.claimAiTrial = secureAiGateway.claimAiTrial;
 exports.openAiProxy = secureAiGateway.openAiProxy;
 exports.syncRealMemberProfile =
   memberRegistry.createSyncRealMemberProfile(admin);

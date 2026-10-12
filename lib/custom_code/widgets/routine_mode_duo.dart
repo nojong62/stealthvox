@@ -2087,8 +2087,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           .getString(kDuoInterpTransportRemoteConfigKey)
           .trim()
           .toLowerCase();
-      final String gatewayToken = await SecureAiGateway.gatewayToken();
-      final String deepgramToken = await SecureAiGateway.deepgramToken();
+      final String? accessRoomId = _resolveGuestRoomId();
+      final String gatewayToken = await SecureAiGateway.gatewayToken(
+        duoRoomId: accessRoomId,
+      );
+      final String deepgramToken = await SecureAiGateway.deepgramToken(
+        duoRoomId: accessRoomId,
+      );
       if (mounted) {
         setState(() {
           _openAiKey = gatewayToken;

@@ -1,9 +1,11 @@
 const crypto = require("crypto");
 const https = require("https");
+const admin = require("firebase-admin");
 const functions = require("firebase-functions/v1");
 const { onCall } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { GoogleAuth } = require("google-auth-library");
+const { claimTrialGrant, resolveAiAccess } = require("./ai_access");
 
 const openAiApiKey = defineSecret("OPENAI_API_KEY");
 const deepgramApiKey = defineSecret("DEEPGRAM_API_KEY");
@@ -11,8 +13,8 @@ const gatewaySigningSecret = defineSecret("AI_GATEWAY_SIGNING_SECRET");
 
 const REGION = "asia-northeast3";
 const GATEWAY_AUDIENCE = "stealthvox-openai-proxy";
-const GATEWAY_TOKEN_TTL_SECONDS = 2 * 60 * 60;
-const DEEPGRAM_TOKEN_TTL_SECONDS = 60 * 60;
+const GATEWAY_TOKEN_TTL_SECONDS = 10 * 60;
+const DEEPGRAM_TOKEN_TTL_SECONDS = 10 * 60;
 const GOOGLE_TTS_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
 const GOOGLE_TTS_ENDPOINT = "https://texttospeech.googleapis.com/v1/text:synthesize";
 const KOREAN_CHIRP_VOICE = "ko-KR-Chirp3-HD-Aoede";
@@ -41,7 +43,26 @@ function requireVerifiedCaller(request) {
   if (!request.app || !request.app.appId) {
     throw callableError("failed-precondition", "App Check is required.");
   }
-  return { uid: String(request.auth.uid), appId: String(request.app.appId) };
+  const provider = request.auth.token && request.auth.token.firebase &&
+    request.auth.token.firebase.sign_in_provider;
+  return {
+    uid: String(request.auth.uid),
+    appId: String(request.app.appId),
+    isAnonymous: provider === "anonymous",
+  };
+}
+
+async function requireAiAccess(request, caller) {
+  const access = await resolveAiAccess({
+    db: admin.firestore(),
+    uid: caller.uid,
+    isAnonymous: caller.isAnonymous,
+    roomId: request.data && request.data.roomId,
+  });
+  if (!access.allowed) {
+    throw callableError("permission-denied", "AI access requires available time or an active session.");
+  }
+  return access;
 }
 
 function base64UrlJson(value) {
@@ -236,8 +257,9 @@ const mintAiGatewaySession = onCall({
   region: REGION,
   enforceAppCheck: true,
   secrets: [gatewaySigningSecret],
-}, request => {
+}, async request => {
   const caller = requireVerifiedCaller(request);
+  const access = await requireAiAccess(request, caller);
   const now = Math.floor(Date.now() / 1000);
   const secret = gatewaySigningSecret.value();
   if (!secret) throw callableError("failed-precondition", "Gateway is not configured.");
@@ -246,6 +268,7 @@ const mintAiGatewaySession = onCall({
       aud: GATEWAY_AUDIENCE,
       uid: caller.uid,
       appId: caller.appId,
+      access: access.reason,
       iat: now,
       exp: now + GATEWAY_TOKEN_TTL_SECONDS,
       nonce: crypto.randomBytes(12).toString("base64url"),
@@ -259,7 +282,8 @@ const mintDeepgramToken = onCall({
   enforceAppCheck: true,
   secrets: [deepgramApiKey],
 }, async request => {
-  requireVerifiedCaller(request);
+  const caller = requireVerifiedCaller(request);
+  await requireAiAccess(request, caller);
   const key = deepgramApiKey.value();
   if (!key) throw callableError("failed-precondition", "Deepgram is not configured.");
   const response = await fetch("https://api.deepgram.com/v1/auth/grant", {
@@ -287,7 +311,8 @@ const mintOpenAiRealtimeToken = onCall({
   enforceAppCheck: true,
   secrets: [openAiApiKey],
 }, async request => {
-  requireVerifiedCaller(request);
+  const caller = requireVerifiedCaller(request);
+  await requireAiAccess(request, caller);
   const key = openAiApiKey.value();
   if (!key) throw callableError("failed-precondition", "OpenAI is not configured.");
   const response = await fetch("https://api.openai.com/v1/realtime/transcription_sessions", {
@@ -308,6 +333,29 @@ const mintOpenAiRealtimeToken = onCall({
     token,
     expiresAt: Number(payload.client_secret.expires_at || 0),
   };
+});
+
+const claimAiTrial = onCall({
+  region: REGION,
+  enforceAppCheck: true,
+}, async request => {
+  const caller = requireVerifiedCaller(request);
+  if (!caller.isAnonymous) {
+    throw callableError("failed-precondition", "Trial access is available only before account registration.");
+  }
+  const installationId = String(request.data && request.data.installationId || "").trim();
+  if (!/^[A-Za-z0-9_-]{10,200}$/.test(installationId)) {
+    throw callableError("invalid-argument", "A valid installation id is required.");
+  }
+  const result = await claimTrialGrant({
+    db: admin.firestore(),
+    uid: caller.uid,
+    installationHash: crypto.createHash("sha256").update(installationId).digest("hex"),
+  });
+  if (!result.granted) {
+    throw callableError("permission-denied", "This device has already used its trial.");
+  }
+  return { granted: true, expiresAt: result.expiresAtMs };
 });
 
 const openAiProxy = functions
@@ -357,5 +405,6 @@ module.exports = {
   mintAiGatewaySession,
   mintDeepgramToken,
   mintOpenAiRealtimeToken,
+  claimAiTrial,
   openAiProxy,
 };
