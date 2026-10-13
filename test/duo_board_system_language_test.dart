@@ -20,9 +20,26 @@ void main() {
     });
 
     test('a newly posted topic records the host Origin language', () {
-      expect(board, contains('final originLanguage = directLanguage.trim()'));
+      expect(board,
+          contains('final originLanguage = widget.directLanguage.trim()'));
       expect(board, contains('topicLanguage: originLanguage'));
       expect(board, contains('? duoBoardViewerLanguage()'));
+    });
+
+    // 2026-10-13: the composer disposed its controller as soon as the sheet
+    // future returned, while the closing sheet still rebuilt the TextField —
+    // red screen right after a successful publish.
+    test('composer controller is disposed with the sheet, not after its future',
+        () {
+      final start = board.indexOf('Future<bool> showDuoBoardComposer(');
+      final end = board.indexOf('\n}\n', start);
+      expect(start, greaterThanOrEqualTo(0));
+      expect(end, greaterThan(start));
+      final launcher = board.substring(start, end);
+      expect(launcher, isNot(contains('.dispose()')));
+      expect(launcher, isNot(contains('TextEditingController')));
+      expect(board, contains('void dispose() {\n    topic.dispose();'));
+      expect(board, contains("debugPrint('[DuoBoard] post published: \$postId');"));
     });
 
     test('restore-post dialog is translated for every supported language', () {

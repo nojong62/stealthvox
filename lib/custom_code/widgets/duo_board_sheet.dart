@@ -50,107 +50,138 @@ Future<bool> showDuoBoardComposer(
   required String mode,
   required String directLanguage,
 }) async {
-  final copy = DuoInviteCopy.forSystemLocale();
-  final topic = TextEditingController();
-  var saving = false;
-  String? error;
   final saved = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: const Color(0xFF171A21),
-    builder: (sheetContext) => StatefulBuilder(
-      builder: (context, setLocal) => Padding(
-        padding: EdgeInsets.fromLTRB(
-            22, 22, 22, 22 + MediaQuery.viewInsetsOf(context).bottom),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text(copy['composerTitle'],
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 21,
-                  fontWeight: FontWeight.w800)),
-          const SizedBox(height: 18),
-          TextField(
-            controller: topic,
-            autofocus: true,
-            maxLength: 80,
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              labelText: copy['topic'],
-              hintText: copy['topicHint'],
-              errorText: error,
-              filled: true,
-              fillColor: const Color(0xFF232833),
-              border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: saving
-                    ? null
-                    : () async {
-                        final value = topic.text.trim();
-                        if (value.length < 2) {
-                          setLocal(() => error = copy['topicMinimum']);
-                          return;
-                        }
-                        setLocal(() {
-                          saving = true;
-                          error = null;
-                        });
-                        try {
-                          // Presence is best-effort. A slow/unavailable Realtime
-                          // Database must not prevent the Firestore post itself
-                          // from being created.
-                          try {
-                            await DuoBoardHostPresence.instance
-                                .ensureOnline()
-                                .timeout(const Duration(seconds: 5));
-                          } on TimeoutException {
-                            debugPrint(
-                                '[DuoBoard] host presence timed out before publish');
-                          } catch (presenceError) {
-                            debugPrint(
-                                '[DuoBoard] host presence unavailable before publish: $presenceError');
-                          }
-                          final originLanguage = directLanguage.trim().isEmpty
-                              ? duoBoardViewerLanguage()
-                              : directLanguage.trim();
-                          await DuoBoardService.publishPost(
-                              roomId: roomId,
-                              historyPath: historyPath,
-                              topic: value,
-                              // Orig. is the language the host will speak in
-                              // the Duo call, not the phone's UI language.
-                              topicLanguage: originLanguage,
-                              mode: 'interpreter',
-                              directLanguage: '',
-                              availability: 'request');
-                          if (sheetContext.mounted) {
-                            Navigator.pop(sheetContext, true);
-                          }
-                        } catch (publishError) {
-                          debugPrint(
-                              '[DuoBoard] post publish failed: $publishError');
-                          unawaited(DuoBoardHostPresence.instance.postEnded());
-                          if (!sheetContext.mounted) return;
-                          setLocal(() {
-                            saving = false;
-                            error = copy['postFailed'];
-                          });
-                        }
-                      },
-                child: Text(saving ? copy['posting'] : copy['post']),
-              )),
-        ]),
-      ),
+    builder: (_) => _DuoBoardComposer(
+      roomId: roomId,
+      historyPath: historyPath,
+      directLanguage: directLanguage,
     ),
   );
-  topic.dispose();
   return saved == true;
+}
+
+/// The composer owns its [TextEditingController] so it is disposed only after
+/// the sheet route is gone. Disposing it right after `showModalBottomSheet`
+/// returned broke the closing animation: the keyboard was still collapsing and
+/// rebuilt the TextField with a dead controller (red screen on 2026-10-13,
+/// right after a successful publish).
+class _DuoBoardComposer extends StatefulWidget {
+  const _DuoBoardComposer({
+    required this.roomId,
+    required this.historyPath,
+    required this.directLanguage,
+  });
+
+  final String roomId;
+  final String historyPath;
+  final String directLanguage;
+
+  @override
+  State<_DuoBoardComposer> createState() => _DuoBoardComposerState();
+}
+
+class _DuoBoardComposerState extends State<_DuoBoardComposer> {
+  final DuoInviteCopy copy = DuoInviteCopy.forSystemLocale();
+  final TextEditingController topic = TextEditingController();
+  bool saving = false;
+  String? error;
+
+  @override
+  void dispose() {
+    topic.dispose();
+    super.dispose();
+  }
+
+  Future<void> _publish() async {
+    final value = topic.text.trim();
+    if (value.length < 2) {
+      setState(() => error = copy['topicMinimum']);
+      return;
+    }
+    setState(() {
+      saving = true;
+      error = null;
+    });
+    try {
+      // Presence is best-effort. A slow/unavailable Realtime
+      // Database must not prevent the Firestore post itself
+      // from being created.
+      try {
+        await DuoBoardHostPresence.instance
+            .ensureOnline()
+            .timeout(const Duration(seconds: 5));
+      } on TimeoutException {
+        debugPrint('[DuoBoard] host presence timed out before publish');
+      } catch (presenceError) {
+        debugPrint(
+            '[DuoBoard] host presence unavailable before publish: $presenceError');
+      }
+      final originLanguage = widget.directLanguage.trim().isEmpty
+          ? duoBoardViewerLanguage()
+          : widget.directLanguage.trim();
+      final postId = await DuoBoardService.publishPost(
+          roomId: widget.roomId,
+          historyPath: widget.historyPath,
+          topic: value,
+          // Orig. is the language the host will speak in
+          // the Duo call, not the phone's UI language.
+          topicLanguage: originLanguage,
+          mode: 'interpreter',
+          directLanguage: '',
+          availability: 'request');
+      debugPrint('[DuoBoard] post published: $postId');
+      if (mounted) Navigator.pop(context, true);
+    } catch (publishError) {
+      debugPrint('[DuoBoard] post publish failed: $publishError');
+      unawaited(DuoBoardHostPresence.instance.postEnded());
+      if (!mounted) return;
+      setState(() {
+        saving = false;
+        error = copy['postFailed'];
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          22, 22, 22, 22 + MediaQuery.viewInsetsOf(context).bottom),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text(copy['composerTitle'],
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 21,
+                fontWeight: FontWeight.w800)),
+        const SizedBox(height: 18),
+        TextField(
+          controller: topic,
+          autofocus: true,
+          maxLength: 80,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            labelText: copy['topic'],
+            hintText: copy['topicHint'],
+            errorText: error,
+            filled: true,
+            fillColor: const Color(0xFF232833),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: saving ? null : _publish,
+              child: Text(saving ? copy['posting'] : copy['post']),
+            )),
+      ]),
+    );
+  }
 }
 
 class DuoBoardSheet extends StatefulWidget {
