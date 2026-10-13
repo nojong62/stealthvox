@@ -1,4 +1,5 @@
 import 'dart:ui' show Locale;
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/origin_surface_localization.dart';
@@ -18,6 +19,21 @@ void main() {
   test('unsupported device language falls back to English', () {
     expect(systemUiLanguageNameForCode(''), 'English');
     expect(systemUiLanguageNameForCode('xx'), 'English');
+  });
+
+  test('lobby applies the system language only when Chat Lang is unset', () {
+    final source =
+        File('lib/custom_code/widgets/lobby_master.dart').readAsStringSync();
+    expect(
+      source,
+      contains("if (!languages.contains(FFAppState().chatLang))"),
+    );
+    expect(
+      source,
+      contains('FFAppState().chatLang = systemUiLanguageName()'),
+    );
+    expect(source, isNot(contains('_buildQuickDuoEntryButtons')));
+    expect(source, isNot(contains('_enterWithLanguagePair')));
   });
 
   test('Flutter exposes every translated UI locale', () {

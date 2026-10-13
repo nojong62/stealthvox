@@ -35,6 +35,7 @@ import '/custom_code/services/guide_ui_localization.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/origin_pcm_store.dart';
 import '/custom_code/services/origin_surface_localization.dart';
+import '/custom_code/services/system_ui_language.dart';
 import '/custom_code/services/duo_board_push_service.dart';
 import '/custom_code/services/duo_board_host_presence.dart';
 import 'p2_voice_lab.dart' show P2VoiceLabPage; // 관리자 전용 히든 화면
@@ -189,9 +190,14 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     if (!_kAiStyles.contains(FFAppState().aiStyle)) {
       setState(() => FFAppState().aiStyle = "Standard");
     }
-    // Chat Language와 Learn Language는 사용자가 다시 선택할 때만 바뀐다.
-    // 집 아이콘으로 Lobby에 재진입해도 직전 선택을 유지한다.
-    // Store를 포함한 로그인 이후 UI도 같은 언어를 계속 사용한다.
+    // 저장된 Chat Language가 있으면 로그인 상태와 앱 재시작 뒤에도 그대로
+    // 유지한다. 처음이거나 저장값이 깨진 경우에만 폰 시스템 언어를 기본값으로
+    // 잡는다. 시스템 언어가 지원 12개 밖이면 systemUiLanguageName()이
+    // English를 돌려준다. 이후에는 사용자가 풀다운에서 언제든 바꿀 수 있다.
+    if (!languages.contains(FFAppState().chatLang)) {
+      setState(() => FFAppState().chatLang = systemUiLanguageName());
+      unawaited(DuoBoardPushService.refreshChatLanguageForCurrentMember());
+    }
     // 로비에서 음성을 선택하지 않는다. 사용자 역할 음성이 필요한 기존
     // 화면(Duo/History Practice)은 항상 verse를 사용한다.
     if (FFAppState().aiVoice != "verse") {
@@ -328,22 +334,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     } finally {
       _isActionLocked = false;
     }
-  }
-
-  /// 자주 쓰는 Duo 언어쌍을 한 번에 고르고, 기존의 안전한 입장 절차로
-  /// 이어 간다. ENTER의 잔여시간 검사·History 생성·중복 탭 잠금을
-  /// 우회하지 않아 일반 진입과 결과가 같다.
-  void _enterWithLanguagePair(
-    BuildContext context, {
-    required String origin,
-    required String target,
-  }) {
-    setState(() {
-      FFAppState().chatLang = origin;
-      FFAppState().targetLang = target;
-    });
-    unawaited(DuoBoardPushService.refreshChatLanguageForCurrentMember());
-    _handleEnterRoom(context);
   }
 
   // 📦 [Box 6: 시스템 알림 팝업]
@@ -1119,81 +1109,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     );
   }
 
-  /// 언어 설정 카드까지 내려가지 않고 곧바로 시작하는 Duo 진입 버튼.
-  /// 각 버튼은 언어쌍을 먼저 확정한 뒤 `_handleEnterRoom`을 통해 입장한다.
-  Widget _buildQuickDuoEntryButtons() {
-    Widget button({
-      required String title,
-      required String subtitle,
-      required String origin,
-      required String target,
-    }) =>
-        Expanded(
-          child: Material(
-            color: _kLobbySurfaceHi,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-              side: const BorderSide(color: _kLobbyBorder),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: () => _enterWithLanguagePair(
-                context,
-                origin: origin,
-                target: target,
-              ),
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      style: TextStyle(
-                        color: _kLobbyText,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _kLobbyTextMid,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-
-    return Row(
-      children: [
-        button(
-          title: 'EN → KO',
-          subtitle: 'English · Learn Korean',
-          origin: 'English',
-          target: 'Korean',
-        ),
-        const SizedBox(width: 10),
-        button(
-          title: 'KO → EN',
-          subtitle: 'Korean · Learn English',
-          origin: 'Korean',
-          target: 'English',
-        ),
-      ],
-    );
-  }
-
   /// 화면 맨 아래 고정 줄.
   ///
   /// 기능은 예전 푸터 링크 셋과 **완전히 같다** — 다이얼로그 둘과 로그아웃
@@ -1533,11 +1448,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-          child: _buildQuickDuoEntryButtons(),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(28, 8, 28, 12),
+          padding: const EdgeInsets.fromLTRB(28, 12, 28, 12),
           child: _buildEnterButton(),
         ),
         _buildBottomBar(),
