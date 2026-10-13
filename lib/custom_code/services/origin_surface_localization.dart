@@ -707,6 +707,20 @@ class OriginSurfaceCopy {
       'Il tempo è terminato. La sala studio è stata chiusa.',
       'Je tijd is op. De studieruimte is gesloten.'
     ],
+    'timeExhaustedGrace': [
+      'Your time has run out. You can keep going for 3 more minutes, then the service will end and your conversation will be saved.',
+      '잔여 시간이 모두 소진되었습니다. 3분 이내에 서비스가 종료되며, 대화는 저장됩니다.',
+      '残り時間がなくなりました。3分以内にサービスが終了し、会話は保存されます。',
+      '剩余时间已用尽。服务将在3分钟内结束，对话将被保存。',
+      'Se agotó tu tiempo. El servicio terminará en 3 minutos y la conversación se guardará.',
+      'Votre temps est écoulé. Le service prendra fin dans 3 minutes et la conversation sera enregistrée.',
+      'Ihre Zeit ist abgelaufen. Der Dienst endet in 3 Minuten, das Gespräch wird gespeichert.',
+      'आपका समय समाप्त हो गया है। सेवा 3 मिनट में समाप्त हो जाएगी और बातचीत सहेज ली जाएगी।',
+      'Время закончилось. Сервис завершится через 3 минуты, разговор будет сохранён.',
+      'Seu tempo acabou. O serviço será encerrado em 3 minutos e a conversa será salva.',
+      'Il tempo è terminato. Il servizio terminerà tra 3 minuti e la conversazione verrà salvata.',
+      'Je tijd is op. De dienst stopt over 3 minuten en het gesprek wordt opgeslagen.'
+    ],
     'retry': [
       'Retry',
       '다시 시도',

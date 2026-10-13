@@ -231,13 +231,81 @@ class BillingTicker with WidgetsBindingObserver {
     _addBillingLog(log);
   }
 
+  /// 이용 중에 잔여시간이 0이 되면 바로 닫지 않고 이만큼 더 쓰게 한다.
+  /// 0 이후에는 차감하지 않는다 — 유예는 무료다.
+  static const Duration kExhaustionGrace = Duration(minutes: 3);
+  Timer? _exhaustionGraceTimer;
+
+  /// 0 도달 후 유예가 도는 중인가. 유예가 끝나면 [balanceExhausted]가 켜지고
+  /// 화면들은 기존 소진 경로(저장 → 종료 → 스토어)를 그대로 탄다.
+  final ValueNotifier<bool> balanceGraceActive = ValueNotifier<bool>(false);
+
+  void _applyExhaustion(bool blocked) {
+    if (!blocked) {
+      if (_exhaustionGraceTimer != null) {
+        _exhaustionGraceTimer!.cancel();
+        _exhaustionGraceTimer = null;
+      }
+      _setNotifier(balanceGraceActive, false, '[BILLING] grace=off');
+      _setNotifier(balanceExhausted, false, '[BILLING] balance=ok');
+      return;
+    }
+    if (balanceExhausted.value || _exhaustionGraceTimer != null) return;
+    // 차감이 돌던 중(= 서비스 이용 중)에 0이 된 경우만 유예한다. 로비나
+    // idle 정지 중에 0이 확인된 경우는 진행 중인 서비스가 없다.
+    if (_paused || _sessionMode.isEmpty) {
+      _setNotifier(balanceExhausted, true, '[BILLING] balance=exhausted');
+      return;
+    }
+    _setNotifier(balanceGraceActive, true,
+        '[BILLING] grace=on ${kExhaustionGrace.inSeconds}s mode=$_sessionMode');
+    _exhaustionGraceTimer = Timer(kExhaustionGrace, () {
+      _exhaustionGraceTimer = null;
+      _setNotifier(balanceGraceActive, false, '[BILLING] grace=end');
+      _setNotifier(balanceExhausted, true,
+          '[BILLING] balance=exhausted after_grace');
+    });
+    _showExhaustionGraceNotice();
+  }
+
+  /// 빌드 중에 불려도 터지지 않게 다음 프레임에 띄운다 ([_setNotifier]와
+  /// 같은 이유).
+  void _showExhaustionGraceNotice() {
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!balanceGraceActive.value) return;
+      _openExhaustionGraceDialog();
+    });
+    SchedulerBinding.instance.ensureVisualUpdate();
+  }
+
+  void _openExhaustionGraceDialog() {
+    final context = appNavigatorKey.currentContext;
+    if (context == null || !context.mounted) return;
+    final copy = OriginSurfaceCopy.forSystemLocale();
+    showDialog<void>(
+      context: context,
+      useRootNavigator: true,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C1E),
+        content: Text(
+          copy['timeExhaustedGrace'],
+          style: const TextStyle(color: Colors.white, fontSize: 15),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(copy['close']),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _updateBillingState() {
     // ⚠️ 아래 early return보다 먼저 갱신한다. 표시등은 이미 꺼져 있는데
     //   (로비에서 pause된 채 0이 되는 경우) 소진 신호만 안 나가면, 방에
     //   들어가 있는 화면이 영영 못 나온다.
-    final blocked = isBillingBlocked;
-    _setNotifier(balanceExhausted, blocked,
-        '[BILLING] balance=${blocked ? 'exhausted' : 'ok'}');
+    _applyExhaustion(isBillingBlocked);
 
     final next = _isActuallyBilling ? 2 : 0;
     _setNotifier(
