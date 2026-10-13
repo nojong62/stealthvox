@@ -165,6 +165,22 @@ void main() {
               targetLang: 'Japanese'),
           isFalse);
     });
+    // 서클톡 ORIGIN 가드가 이 판정을 쓴다. ORIGIN이 영어면 영어 답은 그대로,
+    // 한국어 안내 문구는 어긋남이다.
+    test('ORIGIN 영어 Step 1: 영어는 맞고 한국어는 어긋남', () {
+      expect(
+          replyMatchesListeningStep('Did you hear the gym moved our game to Thursday?',
+              step: ListeningStep.step1,
+              nativeLang: 'English',
+              targetLang: 'Korean'),
+          isTrue);
+      expect(
+          replyMatchesListeningStep('다시 한 번 말씀해 주세요.',
+              step: ListeningStep.step1,
+              nativeLang: 'English',
+              targetLang: 'Korean'),
+          isFalse);
+    });
     test('Step 1에 영어가 나오면 어긋남 — 라틴 문자끼리는 가리지 않는다', () {
       expect(
           replyMatchesListeningStep('That sounds exhausting.',
@@ -276,13 +292,28 @@ void main() {
       });
     }
 
-    test('서클톡: 한글 가드는 Step 1에서만 돈다', () {
-      final body = _method(_src(_circle), 'Future<void> _speakSystemLine(String text,');
-      expect(body, contains('(step ?? _listeningStep) == ListeningStep.step1'));
-      expect(body, contains('if (nativeGuard &&'));
-      // 가드 본체(한국어 되돌리기)는 그대로 남아 있다 — 지우지 않았다.
-      expect(body, contains('FreeTalkBrain.generateCleanOriginal('));
-      expect(body, contains("'조금 더 자세히 말씀해 주세요.'"));
+    // 2026-10-13: 가드가 ORIGIN을 한국어로 박아 두어, ORIGIN이 영어면 영어 답을
+    // 한국어로 읽었다. Step 1은 글자도 소리도 ORIGIN이다.
+    test('서클톡: ORIGIN 가드는 Step 1에서만, ORIGIN 언어 기준으로 돈다', () {
+      final source = _src(_circle);
+      final speak = _method(source, 'Future<void> _speakSystemLine(String text,');
+      expect(speak, contains('await _ensureOriginLine(text.trim(), step: step)'));
+      expect(speak, isNot(contains("RegExp(r'[가-힣]')")));
+
+      final guard = _method(source, 'Future<String> _ensureOriginLine(');
+      expect(guard, contains('(step ?? _listeningStep) != ListeningStep.step1'));
+      expect(guard, contains('replyMatchesListeningStep('));
+      expect(guard, contains('languageName: nativeLang,'));
+      expect(guard, isNot(contains("RegExp(r'[가-힣]')")));
+      // 한국어 ORIGIN의 마지막 되묻기 한 줄은 그대로다.
+      expect(guard, contains("nativeLang == 'Korean' ? '조금 더 자세히 말씀해 주세요.' : line"));
+    });
+
+    test('서클톡: 말풍선에 넣기 전에 ORIGIN을 맞춘다 — 글자와 소리가 같은 문장', () {
+      final source = _src(_circle);
+      expect(source, contains('aiText = await _ensureOriginLine(aiText);'));
+      expect(source,
+          contains('aiOriginal = await _ensureOriginLine(aiOriginal, step: step);'));
     });
 
     test('서클톡: 정규 턴은 그 턴의 Step으로 말한다', () {

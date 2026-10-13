@@ -1498,6 +1498,8 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
         aiText = openerTheme.koreanFallback;
         _log('[OPENER-FALLBACK]', '$kCircleDialogBrainModel 첫 마디 비어 있음');
       }
+      // 글자와 소리가 같은 문장이어야 한다 — 말풍선에 넣기 전에 ORIGIN을 맞춘다.
+      aiText = await _ensureOriginLine(aiText);
       if (!mounted) return;
       setState(() {
         _localMessages.add(<String, dynamic>{
@@ -3963,6 +3965,9 @@ $userFixPolicy$finalLanguageRule''';
           '🎧 [STEP-LANG]',
           'turn=$currentTurnId step=${step.value} '
               'ok=${replyMatchesListeningStep(aiOriginal, step: step, nativeLang: _nativeLangName(), targetLang: _targetLangName())}');
+      // 🌐 [ORIGIN-GUARD] 말풍선·History·TTS가 같은 문장을 쓰도록 여기서 맞춘다.
+      //   맞는 언어면 호출 없이 그대로 돌아온다.
+      aiOriginal = await _ensureOriginLine(aiOriginal, step: step);
       if (!isActivePipelineGeneration(
             expected: expectedPipelineGeneration,
             current: _pipelineGeneration,
@@ -4327,6 +4332,37 @@ $userFixPolicy$finalLanguageRule''';
 //   STEP 6: 유저·AI 영어 음성을 히스토리 규칙으로 백그라운드 생성
 //   STEP 7: 마이크 재개방
 // ====================================================================
+  /// 🌐 [ORIGIN-GUARD] Step 1에서 나가는 말을 ORIGIN 언어로 맞춘다.
+  ///
+  /// Step 1은 글자도 소리도 ORIGIN이다. 예전 가드는 ORIGIN을 한국어로 박아
+  /// 두고 "한글이 없으면 한국어로 번역"했다 — ORIGIN이 영어면 멀쩡한 영어
+  /// 답을 한국어로 읽었다(2026-10-13 실기기: 글자 영어, 소리 한국어).
+  ///
+  /// 이제 판정은 [replyMatchesListeningStep], 번역 목적어는 [_nativeLangName]이다.
+  /// Step 2의 배울 언어 답변은 가드를 타지 않는다.
+  Future<String> _ensureOriginLine(String text, {ListeningStep? step}) async {
+    final String line = text.trim();
+    if (line.isEmpty) return line;
+    if ((step ?? _listeningStep) != ListeningStep.step1) return line;
+    final String nativeLang = _nativeLangName();
+    bool matches(String value) => replyMatchesListeningStep(value,
+        step: ListeningStep.step1,
+        nativeLang: nativeLang,
+        targetLang: _targetLangName());
+    if (matches(line) || _openAiKey.isEmpty) return line;
+    final String converted = await FreeTalkBrain.generateCleanOriginal(
+      apiKey: _openAiKey,
+      sourceText: line,
+      languageName: nativeLang,
+    );
+    _log('🌐 [ORIGIN-GUARD]',
+        'lang=$nativeLang ok=${matches(converted)} from="$line" to="$converted"');
+    if (matches(converted)) return converted;
+    // 번역도 실패했다. 한국어는 예전 되묻기 한 줄로, 다른 ORIGIN은 다른
+    // 언어 문구를 지어내지 않고 원문을 그대로 둔다.
+    return nativeLang == 'Korean' ? '조금 더 자세히 말씀해 주세요.' : line;
+  }
+
   /// 🔊 안내/시스템 문구 1건을 어댑터로 재생하고 끝날 때까지 기다린다.
   ///   모델·보이스 매핑은 어댑터가 정한다 — 여기서 모델명을 쓰지 않는다.
   ///
@@ -4338,22 +4374,7 @@ $userFixPolicy$finalLanguageRule''';
       ListeningStep? step}) async {
     if (!mounted || text.trim().isEmpty) return;
     const voice = _aiVoice;
-    String spokenText = text.trim();
-    // 🎧 [LISTENING] 아래 한글 가드는 Step 1에서만 돈다. Step 2의 배울 언어
-    //   답변은 한글이 없는 것이 정상이라, 가드가 그것을 한국어로 되돌려
-    //   읽어 버린다. (가드 자체의 한계는 이번 범위 밖 — 손대지 않는다.)
-    final bool nativeGuard = (step ?? _listeningStep) == ListeningStep.step1;
-    if (nativeGuard &&
-        !RegExp(r'[가-힣]').hasMatch(spokenText) &&
-        _openAiKey.isNotEmpty) {
-      spokenText = await FreeTalkBrain.generateCleanOriginal(
-        apiKey: _openAiKey,
-        englishText: spokenText,
-      );
-      if (!RegExp(r'[가-힣]').hasMatch(spokenText)) {
-        spokenText = '조금 더 자세히 말씀해 주세요.';
-      }
-    }
+    final String spokenText = await _ensureOriginLine(text.trim(), step: step);
     final int generationId = expectedPipelineGeneration ?? _pipelineGeneration;
     // 세대가 갈렸으면 요청 자체를 내지 않는다. 어댑터도 재생 직전에 한 번 더
     // 거르지만, 여기서 막으면 취소된 답변의 TTS 비용이 아예 안 나간다.
@@ -7596,12 +7617,16 @@ ${buildHeardConfirmOutputRule(originLang)}
   // ==================================================================
   // 📦 [Box 7-1-C] generateCleanOriginal — AI original 생성 (오리지널 언어 자막)
   // ==================================================================
+  //   [languageName]은 ORIGIN이다. 한국어는 예전 프롬프트 그대로, 다른
+  //   ORIGIN은 같은 규칙(구어체·번역문만)을 그 언어로 요구한다.
   static Future<String> generateCleanOriginal({
     required String apiKey,
-    required String englishText,
+    required String sourceText,
+    String languageName = 'Korean',
   }) async {
     // 빈 입력 가드: GPT에 빈 문장을 보내 메타 응답을 받는 것을 방지.
-    if (englishText.trim().isEmpty) return englishText;
+    if (sourceText.trim().isEmpty) return sourceText;
+    final bool korean = languageName == 'Korean';
 
     for (int attempt = 0; attempt < 2; attempt++) {
       final client = http.Client();
@@ -7620,8 +7645,8 @@ ${buildHeardConfirmOutputRule(originLang)}
                 'messages': [
                   {
                     'role': 'system',
-                    'content':
-                        '''당신은 한영 통역 전문가입니다. 다음 영어 문장을 **자연스러운 한국어 구어체**로 번역하세요.
+                    'content': korean
+                        ? '''당신은 한영 통역 전문가입니다. 다음 영어 문장을 **자연스러운 한국어 구어체**로 번역하세요.
 
 [중요 규칙 - 주어 생략 처리]
 - 한국어는 주어를 자주 생략합니다. 영어의 I/You/He/She/We/They를 무조건 그대로 살리지 마세요.
@@ -7638,9 +7663,12 @@ ${buildHeardConfirmOutputRule(originLang)}
 
 [출력]
 - 번역문만 한 줄로 출력. 설명/주석/따옴표 없음.
-''',
+'''
+                        : '''You are a professional interpreter. Translate the following line into natural, everyday spoken $languageName.
+Keep the meaning and the polite conversational tone. Drop subjects only where $languageName naturally drops them.
+Output only the translation on one line — no explanation, notes, or quotation marks.''',
                   },
-                  {'role': 'user', 'content': englishText},
+                  {'role': 'user', 'content': sourceText},
                 ],
               }),
             )
@@ -7671,7 +7699,7 @@ ${buildHeardConfirmOutputRule(originLang)}
         client.close();
       }
     }
-    return englishText; // 실패 시 영어 원문 (빈칸 방지)
+    return sourceText; // 실패 시 원문 (빈칸 방지)
   }
 
   /// 세션 안에서만 쓰는 상대방 캐릭터 메모리. 이름·관계·성격을 추측하되
