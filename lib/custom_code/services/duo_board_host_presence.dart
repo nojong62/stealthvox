@@ -33,9 +33,26 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     _context = context;
     WidgetsBinding.instance.addObserver(this);
     await _authSubscription?.cancel();
-    _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
+    _authSubscription = FirebaseAuth.instance.userChanges().listen((user) {
       unawaited(_handleUser(user));
     });
+    await _handleUser(FirebaseAuth.instance.currentUser);
+  }
+
+  /// Runs the restore check again after an interactive login has finished
+  /// navigating to the member area. The auth event can arrive while the Intro
+  /// route is being replaced, which dismisses a dialog before the member can
+  /// answer it.
+  Future<void> recheckAfterLogin() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) return;
+    for (var attempt = 0; attempt < 4; attempt++) {
+      if (_checkingUid != user.uid) {
+        await _handleUser(user);
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
     await _handleUser(FirebaseAuth.instance.currentUser);
   }
 
@@ -211,6 +228,7 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     }
     return true;
   }
+
   /// 다른 사람의 Duo 방으로 들어갈 때 내 게시글이 다시 노출되지 않게 한다.
   /// 글은 삭제하지 않고 비공개로 두므로 받은 통화가 끝난 뒤 다시 켤 수 있다.
   Future<void> prepareForIncomingInvite(String incomingRoomId) async {

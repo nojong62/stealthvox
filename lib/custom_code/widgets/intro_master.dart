@@ -3129,6 +3129,15 @@ class _IntroMasterState extends State<IntroMaster>
     } else {
       _routeAfterAuth();
     }
+
+    // The auth-state listener can receive the member before this Intro route
+    // finishes being replaced. Recheck on the settled member screen so the Duo
+    // invitation decision is not dismissed by the route transition.
+    if (!joiningDuoNext) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(DuoBoardHostPresence.instance.recheckAfterLogin());
+      });
+    }
   }
 
   /// 신규 가입 시 태어난 해 확인 + 14세 미만 보호자 이메일 수집
