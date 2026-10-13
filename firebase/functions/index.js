@@ -18,6 +18,7 @@ const { defineSecret } = require("firebase-functions/params");
 const { resolveLegacyGoogleAccount } = require("./legacy_google_account");
 const { processRevenueCatPurchase } = require("./revenuecat_purchase");
 const { writeUsageLogIdempotently } = require("./usage_log");
+const { deductTimeIdempotently } = require("./deduct_time");
 const revenueCatWebhookSecret = defineSecret("REVENUECAT_WEBHOOK_SECRET");
 
 // ----------------------------------------------------------------------------
@@ -314,31 +315,35 @@ exports.deductRemainingTime = functions.https.onCall(async (data, context) => {
     );
   }
 
-  // 3. Transactional deduction (prevents race conditions)
+  const requestId = typeof data.request_id === "string" ? data.request_id : "";
+  if (requestId && !/^[A-Za-z0-9_-]{10,120}$/.test(requestId)) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "request_id must be a stable 10-120 character identifier."
+    );
+  }
+
+  // 3. Transactional deduction (prevents race conditions and, with
+  //    request_id, a second deduction when a lost response is retried)
   const uid = context.auth.uid;
-  const userRef = admin.firestore().doc("users/" + uid);
-
-  const newValue = await admin.firestore().runTransaction(async (tx) => {
-    const snap = await tx.get(userRef);
-    if (!snap.exists) return 0;
-
-    const current = snap.data().remainingTime;
-    if (current == null) return 0;
-
-    const updated = Math.max(0, current - seconds);
-    tx.update(userRef, { remainingTime: updated });
-
-    functions.logger.info("deductRemainingTime", {
-      uid: uid,
-      before: current,
-      deducted: seconds,
-      after: updated,
-    });
-
-    return updated;
+  const result = await deductTimeIdempotently({
+    db: admin.firestore(),
+    uid,
+    seconds,
+    requestId,
+    serverTimestamp: () => admin.firestore.FieldValue.serverTimestamp(),
   });
 
-  return { remainingTime: newValue };
+  functions.logger.info("deductRemainingTime", {
+    uid: uid,
+    before: result.before,
+    deducted: result.duplicate ? 0 : seconds,
+    after: result.after,
+    duplicate: result.duplicate,
+    idempotency: requestId ? "client" : "legacy",
+  });
+
+  return { remainingTime: result.after };
 });
 
 // ----------------------------------------------------------------------------

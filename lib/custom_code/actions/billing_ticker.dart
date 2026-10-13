@@ -53,11 +53,14 @@ extension BillingRateMultiplier on BillingRate {
 
 const String _kBillingRegion = 'us-central1';
 
+/// deductRemainingTime이 한 번에 받는 최대 초 (서버 검증과 같은 값).
+const int _kMaxDeductSecondsPerCall = 600;
+
 /// Parses the Firebase callable response used by [BillingTicker.flushNow].
 ///
-/// A non-200 response must throw. [flushNow] has already moved the pending
-/// seconds out of `_unflushedDeducted`, and its catch block is what restores
-/// them for retry. Returning normally on an HTTP error silently forgives the
+/// A non-200 response must throw. [flushNow] keeps the batch pending (same
+/// seconds, same request id) only when this throws. Returning normally on an
+/// HTTP error clears the batch and silently forgives the
 /// whole interval even though the server balance was never reduced.
 int parseDeductRemainingTimeResponse(http.Response response) {
   if (response.statusCode != 200) {
@@ -276,7 +279,7 @@ class BillingTicker with WidgetsBindingObserver {
   BillingRate get currentRate => _rate;
   bool get isPaused => _paused;
   double get fractionalDebt => _fractionalDebt;
-  int get unflushedDeducted => _unflushedDeducted;
+  int get unflushedDeducted => _unflushedDeducted + _pendingFlushSeconds;
   DateTime get lastFlushAt => _lastFlushAt;
   String? get lastFlushResult => _lastFlushResult;
   List<Map<String, dynamic>> get history => List.unmodifiable(_history);
@@ -623,19 +626,54 @@ class BillingTicker with WidgetsBindingObserver {
     }
   }
 
-  Future<void> flushNow() async {
-    if (_unflushedDeducted <= 0) return;
-    final amount = _unflushedDeducted;
-    _unflushedDeducted = 0;
+  /// 응답을 못 받은 차감 묶음. 서버는 이미 깎았을 수 있으므로 **같은 초,
+  /// 같은 request_id**로만 다시 보낸다. 새로 쌓인 초와 합치면 id가 달라져
+  /// 서버가 중복을 알아보지 못하고 두 번 깎는다.
+  int _pendingFlushSeconds = 0;
+  String _pendingFlushRequestId = '';
+  int _flushSequence = 0;
+  Future<void>? _flushInFlight;
+
+  Future<void> flushNow() {
+    final running = _flushInFlight;
+    if (running != null) return running;
+    final future = _flushPendingThenNew();
+    _flushInFlight = future;
+    return future.whenComplete(() {
+      if (identical(_flushInFlight, future)) _flushInFlight = null;
+    });
+  }
+
+  Future<void> _flushPendingThenNew() async {
+    // 밀린 묶음을 재전송하는 경우에만 그 사이 쌓인 초를 한 번 더 보낸다.
+    // 매번 이어 보내면 요청 1초 동안 틱이 1초 쌓여 매 초 서버를 부른다
+    // (실기기 2026-10-13: firestore save success가 1초마다 찍힘).
+    final retryingBacklog = _pendingFlushSeconds > 0;
+    if (_pendingFlushSeconds <= 0) {
+      if (_unflushedDeducted <= 0) return;
+      // 서버는 한 번에 600초까지만 받는다. 오래 실패해 밀린 초는 나눠 보낸다.
+      final batch = _unflushedDeducted.clamp(1, _kMaxDeductSecondsPerCall);
+      _pendingFlushSeconds = batch;
+      _unflushedDeducted -= batch;
+      _pendingFlushRequestId =
+          'flush_${DateTime.now().microsecondsSinceEpoch}_${++_flushSequence}';
+    }
     _lastFlushAt = DateTime.now();
     try {
-      await _callDeductTime(amount);
+      await _callDeductTime(_pendingFlushSeconds, _pendingFlushRequestId);
+      _pendingFlushSeconds = 0;
+      _pendingFlushRequestId = '';
     } catch (e) {
-      _unflushedDeducted += amount;
-      _addBillingLog('[BILLING] firestore save error: $e');
+      _addBillingLog('[BILLING] firestore save error: $e '
+          'pending=${_pendingFlushSeconds}s id=$_pendingFlushRequestId');
       debugPrint('[BillingTicker] flush failed: $e');
       _lastFlushResult =
           'FAIL: $e @ ${DateTime.now().toIso8601String().substring(11, 19)}';
+      return;
+    }
+    // 밀린 묶음이 정리됐으면 그 사이 쌓인 초도 한 번만 이어서 보낸다.
+    if (retryingBacklog && _unflushedDeducted > 0) {
+      await _flushPendingThenNew();
     }
   }
 
@@ -658,7 +696,7 @@ class BillingTicker with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _callDeductTime(int seconds) async {
+  Future<void> _callDeductTime(int seconds, String requestId) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -674,7 +712,7 @@ class BillingTicker with WidgetsBindingObserver {
             'Authorization': 'Bearer $idToken',
           },
           body: jsonEncode({
-            'data': {'seconds': seconds}
+            'data': {'seconds': seconds, 'request_id': requestId}
           }),
         )
         .timeout(const Duration(seconds: 10));
