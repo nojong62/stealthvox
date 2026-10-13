@@ -232,6 +232,12 @@ class OpenAiStreamingTranscribeSession {
   Completer<bool>? _configured;
   bool _disposed = false;
   bool _audioGateOpen = false;
+
+  /// 끊길 때 듣고 있었는가. 재연결 **사슬 전체**에 걸쳐 들고 간다.
+  /// 시도마다 `_audioGateOpen`을 다시 읽으면, 첫 시도가 이미 닫아 둔 값을
+  /// 읽어 두 번째 시도부터는 "안 듣고 있었다"가 된다 — 그러면 다시 붙어도
+  /// 게이트가 영영 안 열린다(실기기 2026-10-13: 1초 넘는 끊김마다 마이크 사망).
+  bool _reopenGateAfterReconnect = false;
   bool _firstAudioSent = false;
   bool _reconnectInProgress = false;
   int _retryCount = 0;
@@ -543,6 +549,8 @@ class OpenAiStreamingTranscribeSession {
   /// 오디오 전송을 닫는다. **소켓은 살려 둔다** — 다음 턴에 다시 열기 위해서다.
   /// AI TTS가 나가는 동안 유저 마이크가 전사로 들어가지 않게 하는 것도 이것이다.
   void closeAudioGate({required String reason}) {
+    // 끊긴 동안 호출부가 일부러 닫았다면(TTS 재생 등) 다시 붙어도 열지 않는다.
+    _reopenGateAfterReconnect = false;
     if (!_audioGateOpen) return;
     _audioGateOpen = false;
     _lg('🎙️ [STREAM-GATE]', 'close reason=$reason');
@@ -755,7 +763,7 @@ class OpenAiStreamingTranscribeSession {
   Future<void> _reconnect(String reason) async {
     if (_disposed || _reconnectInProgress) return;
     _reconnectInProgress = true;
-    final wasGateOpen = _audioGateOpen;
+    if (_audioGateOpen) _reopenGateAfterReconnect = true;
     _audioGateOpen = false;
     try {
       await _teardownSocket();
@@ -783,7 +791,8 @@ class OpenAiStreamingTranscribeSession {
         return;
       }
       final ok = await connect();
-      if (ok && wasGateOpen) {
+      if (ok && _reopenGateAfterReconnect) {
+        _reopenGateAfterReconnect = false;
         // 끊기기 전에 듣고 있었다면 그대로 다시 듣는다. 끊긴 동안의 발화는
         // 서버에 도달하지 않았으므로 복구하지 않는다(있지도 않은 말을
         // 만들어 내는 것보다 한 턴을 잃는 쪽이 낫다).

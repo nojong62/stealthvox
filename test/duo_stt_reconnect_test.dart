@@ -189,8 +189,28 @@ void main() {
       final String body =
           _region(stt, 'Future<void> _reconnect(String reason) async {',
               'Future<void> _teardownSocket() async {');
-      expect(body, contains('final wasGateOpen = _audioGateOpen;'));
+      expect(body, contains('if (_audioGateOpen) _reopenGateAfterReconnect = true;'));
       expect(body, contains("openAudioGate(reason: 'reconnected');"));
+    });
+
+    // 실기기 2026-10-13: 첫 시도가 실패하면 다음 시도가 이미 닫힌 게이트를
+    // 다시 읽어 "안 듣고 있었다"로 기억했다. 1초 넘는 끊김마다 다시 붙어도
+    // 마이크가 영영 안 열렸다("통역 준비 중"에서 멈춤).
+    test('여러 번 실패한 뒤 붙어도 게이트가 열린다 — 의도를 사슬 끝까지 들고 간다', () {
+      final String body =
+          _region(stt, 'Future<void> _reconnect(String reason) async {',
+              'Future<void> _teardownSocket() async {');
+      expect(body, isNot(contains('wasGateOpen')),
+          reason: '시도마다 지역 변수로 읽으면 두 번째 시도부터 false가 된다');
+      expect(body, contains('if (ok && _reopenGateAfterReconnect) {'));
+    });
+
+    test('끊긴 동안 호출부가 닫으면 다시 붙어도 열지 않는다', () {
+      final String close = _region(stt, 'void closeAudioGate({required String reason}) {',
+          'void appendAudio(');
+      expect(close.indexOf('_reopenGateAfterReconnect = false;'),
+          lessThan(close.indexOf('if (!_audioGateOpen) return;')),
+          reason: '이미 닫힌 상태에서 일찍 돌아가면 의도가 남아 TTS 중에 열린다');
     });
 
     test('방 재입장 없이 같은 세션이 이어진다', () {
