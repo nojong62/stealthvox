@@ -1250,6 +1250,10 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
       },
     );
 
+    // 첫 AI 문장이 도착한 뒤 플레이어를 열면 Android 오디오 세션 초기화와
+    // 첫 PCM 재생이 겹쳐 첫 문장만 무음이 될 수 있다. 방 진입 즉시 미리 연다.
+    unawaited(_ttsAdapter.preparePlayback());
+
     TrialFlowState.instance.restoreFromAppState();
     _initPermissions();
     _fetchKeys();

@@ -9,6 +9,8 @@ const {
   containsKorean,
   requestedAudioFormat,
   stripWavContainer,
+  koreanChirpVoiceForRequest,
+  koreanChirpInputWithOpeningCommaPause,
 } = require("../secure_ai_gateway");
 
 function claims(overrides = {}) {
@@ -53,6 +55,45 @@ test("Korean TTS routing accepts Korean and preserves other languages", () => {
   assert.equal(requestedAudioFormat({ response_format: "pcm" }), "pcm");
   assert.equal(requestedAudioFormat({ response_format: "mp3" }), "mp3");
   assert.equal(requestedAudioFormat({ response_format: "wav" }), null);
+});
+
+
+test("Korean TTS keeps Circle Talk female and Scenario Talk male", () => {
+  assert.equal(
+    koreanChirpVoiceForRequest({ voice: "shimmer" }),
+    "ko-KR-Chirp3-HD-Aoede",
+  );
+  assert.equal(
+    koreanChirpVoiceForRequest({ voice: "echo" }),
+    "ko-KR-Chirp3-HD-Charon",
+  );
+  assert.equal(
+    koreanChirpVoiceForRequest({ voice: "google-ko-female" }),
+    "ko-KR-Chirp3-HD-Aoede",
+  );
+  assert.equal(
+    koreanChirpVoiceForRequest({ voice: "google-ko-male" }),
+    "ko-KR-Chirp3-HD-Charon",
+  );
+});
+
+test("Korean TTS pauses after the first opening comma", () => {
+  assert.deepEqual(
+    koreanChirpInputWithOpeningCommaPause("네, 기본 포장은 무료예요."),
+    { markup: "네, [pause short] 기본 포장은 무료예요." },
+  );
+  assert.deepEqual(
+    koreanChirpInputWithOpeningCommaPause("회원님, PT 시간 변경을 도와드릴게요."),
+    { markup: "회원님, [pause short] PT 시간 변경을 도와드릴게요." },
+  );
+  assert.deepEqual(
+    koreanChirpInputWithOpeningCommaPause("기본 포장은 무료예요."),
+    { text: "기본 포장은 무료예요." },
+  );
+  assert.deepEqual(
+    koreanChirpInputWithOpeningCommaPause("오늘은 날씨가 좋고, 산책하기 좋아요."),
+    { markup: "오늘은 날씨가 좋고, [pause short] 산책하기 좋아요." },
+  );
 });
 
 test("LINEAR16 WAV container is removed before PCM playback", () => {

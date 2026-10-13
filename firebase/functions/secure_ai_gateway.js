@@ -17,7 +17,12 @@ const GATEWAY_TOKEN_TTL_SECONDS = 10 * 60;
 const DEEPGRAM_TOKEN_TTL_SECONDS = 10 * 60;
 const GOOGLE_TTS_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
 const GOOGLE_TTS_ENDPOINT = "https://texttospeech.googleapis.com/v1/text:synthesize";
-const KOREAN_CHIRP_VOICE = "ko-KR-Chirp3-HD-Aoede";
+// The app keeps its screen-level voice choices as OpenAI-compatible IDs, while
+// Korean speech is synthesized by Google Chirp 3 HD. Preserve those choices at
+// the provider boundary: Circle Talk sends `shimmer` (female), and Scenario
+// Talk sends `echo` (male).
+const KOREAN_CHIRP_FEMALE_VOICE = "ko-KR-Chirp3-HD-Aoede";
+const KOREAN_CHIRP_MALE_VOICE = "ko-KR-Chirp3-HD-Charon";
 const MAX_TTS_INPUT_CHARS = 5000;
 
 // This authentication object uses the Cloud Functions runtime service account.
@@ -127,6 +132,30 @@ function requestedAudioFormat(body) {
   return null;
 }
 
+
+function koreanChirpVoiceForRequest(body) {
+  const requestedVoice = String(body && body.voice || "").trim().toLowerCase();
+  return requestedVoice === "echo" || requestedVoice === "google-ko-male"
+    ? KOREAN_CHIRP_MALE_VOICE
+    : KOREAN_CHIRP_FEMALE_VOICE;
+}
+
+// At the start of a Korean reply, a vocative or lead-in ending in a comma can
+// run into the next word ("회원님,PT 시간..."). Add a short Chirp pause after
+// the first opening comma without changing the text shown in the UI or kept in
+// history. This is intentionally limited to the opening 80 characters so a
+// later comma in a longer reply retains the model's natural pacing.
+function koreanChirpInputWithOpeningCommaPause(text) {
+  const input = String(text || "").trim();
+  const match = /^([^,，\n]{1,80}[,，])(?=\s*\S)/u.exec(input);
+  if (!match) return { text: input };
+
+  const markup = input.slice(0, match[0].length) +
+    " [pause short]" + input.slice(match[0].length);
+  // Do not make a request that would exceed the provider's input cap solely
+  // because the audio-only pause marker was added.
+  return markup.length <= MAX_TTS_INPUT_CHARS ? { markup } : { text: input };
+}
 function stripWavContainer(audio) {
   const source = Buffer.from(audio || []);
   if (source.length < 12 || source.subarray(0, 4).toString("ascii") !== "RIFF" ||
@@ -155,13 +184,17 @@ async function synthesizeKoreanChirp(body) {
   }
   const format = requestedAudioFormat(body);
   if (!format) return null;
+  const speechInput = koreanChirpInputWithOpeningCommaPause(input);
   const client = await googleAuth.getClient();
   const response = await client.request({
     url: GOOGLE_TTS_ENDPOINT,
     method: "POST",
     data: {
-      input: { text: input },
-      voice: { languageCode: "ko-KR", name: KOREAN_CHIRP_VOICE },
+      input: speechInput,
+      voice: {
+        languageCode: "ko-KR",
+        name: koreanChirpVoiceForRequest(body),
+      },
       audioConfig: format === "pcm"
         ? { audioEncoding: "LINEAR16", sampleRateHertz: 24000 }
         : { audioEncoding: "MP3" },
@@ -188,7 +221,12 @@ async function tryProxyKoreanSpeech(req, res) {
     if (!synthesized || synthesized.audio.length === 0) return false;
     res.status(200);
     res.setHeader("cache-control", "no-store");
-    res.setHeader("x-stealthvox-tts-provider", "google-chirp3-hd-aoede");
+    res.setHeader(
+      "x-stealthvox-tts-provider",
+      "google-chirp3-hd-" + koreanChirpVoiceForRequest(body)
+        .replace("ko-KR-Chirp3-HD-", "")
+        .toLowerCase()
+    );
     res.setHeader(
       "content-type",
       synthesized.format === "pcm"
@@ -402,6 +440,8 @@ module.exports = {
   containsKorean,
   requestedAudioFormat,
   stripWavContainer,
+  koreanChirpVoiceForRequest,
+  koreanChirpInputWithOpeningCommaPause,
   mintAiGatewaySession,
   mintDeepgramToken,
   mintOpenAiRealtimeToken,

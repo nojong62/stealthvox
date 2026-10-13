@@ -381,6 +381,7 @@ abstract class TtsPcmSink {
 class PcmStreamPlayer implements TtsPcmSink {
   final FlutterSoundPlayer _player = FlutterSoundPlayer();
   bool _opened = false;
+  Future<void>? _openInFlight;
   bool _sessionActive = false;
   int _fedBytes = 0;
   DateTime? _feedStartAt;
@@ -389,14 +390,30 @@ class PcmStreamPlayer implements TtsPcmSink {
   /// 이미 열린 재생 세션이 있는가 (같은 발화의 다음 조각을 이어붙일 수 있는지).
   bool get isSessionActive => _sessionActive;
 
+  /// 첫 TTS 바이트가 도착한 뒤 플레이어 플러그인을 처음 여는 동안 Android
+  /// 오디오 세션이 늦게 붙어 첫 문장만 무음이 되는 것을 막는다. 여러 초기화
+  /// 경로가 동시에 호출돼도 실제 openPlayer 호출은 하나만 실행한다.
+  Future<void> prepare() {
+    if (_opened) return Future<void>.value();
+    final running = _openInFlight;
+    if (running != null) return running;
+    final future = _openPlayer();
+    _openInFlight = future;
+    return future.whenComplete(() {
+      if (identical(_openInFlight, future)) _openInFlight = null;
+    });
+  }
+
+  Future<void> _openPlayer() async {
+    await _player.openPlayer();
+    _opened = true;
+  }
+
   Future<void> begin({
     required int sampleRate,
     required double volume,
   }) async {
-    if (!_opened) {
-      await _player.openPlayer();
-      _opened = true;
-    }
+    await prepare();
     if (_sessionActive) await abort();
     await _player.startPlayerFromStream(
       codec: Codec.pcm16,
@@ -544,6 +561,23 @@ class TtsAdapter {
 
   /// 유저/AI 본 재생이 진행 중이거나 대기 중이면 busy.
   bool get isBusy => _current != null || _queue.isNotEmpty;
+
+  /// 기본 미디어 플레이어를 방 진입 직후 미리 연다. 듀오처럼 별도 PCM sink를
+  /// 주입한 경로에는 영향을 주지 않는다.
+  Future<bool> preparePlayback() async {
+    if (_disposed) return false;
+    final player = _pcmPlayer;
+    if (player is! PcmStreamPlayer) return true;
+    try {
+      await player.prepare();
+      _log('🔊 [TTS-PLAYER]', 'prepared');
+      return true;
+    } catch (error) {
+      _log('⚠️ [TTS-PLAYER]',
+          'prepare_failed reason=${error.runtimeType} detail=$error');
+      return false;
+    }
+  }
 
   /// 요청을 큐에 넣고 즉시 핸들을 돌려준다. 재생은 FIFO — 유저 음성과 AI 음성이
   /// 겹치지 않는 순서 보장은 이 직렬 큐가 담당한다.
@@ -1008,6 +1042,7 @@ class TtsAdapter {
           _log(
               '🔊 [TTS-HTTP]',
               'TTS_HTTP_STATUS turnId=${request.turnId} status=${response.statusCode} '
+                  'provider=${response.headers['x-stealthvox-tts-provider'] ?? 'openai'} '
                   'attempt=$attempt/$maxAttempts');
           if (response.statusCode != 200) {
             _log('❌ [TTS-API-ERR]',
@@ -1236,7 +1271,7 @@ class TtsAdapter {
         if (audioStarted) break; // 재생 중 끊김 — 재시도하면 앞부분이 중복 재생됨
       } catch (e) {
         _log('⚠️ [TTS-ADAPTER]',
-            'attempt=$attempt/$maxAttempts failed reason=${e.runtimeType}');
+            'attempt=$attempt/$maxAttempts failed reason=${e.runtimeType} detail=$e');
         if (audioStarted) break;
       }
       // 공유 클라이언트는 닫지 않는다 — 연결 재사용이 목적이다.

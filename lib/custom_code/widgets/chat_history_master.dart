@@ -103,6 +103,16 @@ const Color _p3BreathAccentColor = Color(0xFF7DD3FC);
 const List<String> _kP3EchoingVoices = <String>['coral', 'alloy', 'nova'];
 const List<String> _kP3ShadowingVoices = <String>['echo', 'ash', 'coral'];
 
+/// 한국어 학습 문장은 Gateway에서 Google Chirp 3 HD로 합성한다. OpenAI
+/// 음성 이름을 빌려 성별을 전달하면 일반 Voice 메뉴와 의미가 섞이므로,
+/// provider 경계에서만 쓰는 명시적인 ID를 별도로 둔다.
+const String _kP3KoreanFemaleVoice = 'google-ko-female';
+const String _kP3KoreanMaleVoice = 'google-ko-male';
+const List<String> _kP3KoreanVoices = <String>[
+  _kP3KoreanFemaleVoice,
+  _kP3KoreanMaleVoice,
+];
+
 /// 의미단위 낭독의 공통 뼈대. 무엇을 한 덩어리로 볼지, 덩어리 안을 어떻게
 /// 붙일지까지만 정한다. **덩어리 사이를 어떻게 다룰지는 아래 두 낭독 방식이
 /// 갈라서 정한다.**
@@ -172,6 +182,14 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   /// 언어 식별값 정규화: 대소문자·앞뒤 공백 차이를 흡수한다.
   String _normLangCode(String v) => v.trim().toLowerCase();
+
+  /// 레거시 문서나 외부 연동에서 언어 코드로 저장된 경우까지 받아들인다.
+  bool get _isKoreanTarget {
+    final target = _normLangCode(_sessionTargetLangName())
+        .replaceAll('_', '-')
+        .replaceAll(' ', '-');
+    return target == 'korean' || target == 'ko' || target == 'ko-kr';
+  }
 
   /// 텍스트 정규화(레거시 fallback 비교용): 대소문자·연속 공백 차이를 흡수한다.
   String _normLangText(String v) =>
@@ -7110,7 +7128,10 @@ RULES — follow exactly:
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // ── 메뉴 ── 첫 화면에서도, 연습 중에도 같은 자리에 있다.
-              _buildP3VoiceSelector(),
+              if (_isKoreanTarget)
+                _buildP3KoreanVoiceSelector()
+              else
+                _buildP3VoiceSelector(),
               const SizedBox(height: 10),
               _buildP3PracticeModePicker(),
               const SizedBox(height: 14),
@@ -7409,10 +7430,61 @@ RULES — follow exactly:
     );
   }
 
+  /// 🇰🇷 타겟이 한국어일 때만 보이는 Google 전용 음성 메뉴.
+  ///
+  /// 일반 Voice 칸과 분리해 `coral` 같은 OpenAI 이름이 Google 성별 선택처럼
+  /// 보이지 않게 한다. 실제 provider voice 이름은 서버가 이 ID를 받아
+  /// Aoede(여성) / Charon(남성)으로 매핑한다.
+  Widget _buildP3KoreanVoiceSelector() {
+    final enabled = !_p3Busy;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.035),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _p3ShadowingAccentColor.withValues(alpha: 0.34),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Text(
+            '한글 소리',
+            style: TextStyle(
+              color: Colors.white54,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _buildP3VoiceChip(
+              id: _kP3KoreanFemaleVoice,
+              label: 'Google 여성',
+              enabled: enabled,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _buildP3VoiceChip(
+              id: _kP3KoreanMaleVoice,
+              label: 'Google 남성',
+              enabled: enabled,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 지금 모드에서 고를 수 있는 목소리.
-  List<String> get _p3VoiceChoices => _p3PracticeMode == P3PracticeMode.echoing
-      ? _kP3EchoingVoices
-      : _kP3ShadowingVoices;
+  List<String> get _p3VoiceChoices {
+    if (_isKoreanTarget) return _kP3KoreanVoices;
+    return _p3PracticeMode == P3PracticeMode.echoing
+        ? _kP3EchoingVoices
+        : _kP3ShadowingVoices;
+  }
 
   /// 모드를 바꾸면 목소리도 그 모드의 것으로 맞춘다. 남의 모드 목소리가 그대로
   /// 남으면 어느 칸도 켜지지 않은 채 그 목소리로 소리가 난다.
@@ -8352,6 +8424,9 @@ RULES — follow exactly:
         _showRetryHint = false;
         _currentChunkIdx = -1;
         _phase = ShadowingPhase.chunkPractice;
+        // 한국어 타겟은 일반 OpenAI Voice가 아니라 별도 Google Voice 메뉴를
+        // 사용한다. 첫 진입에서도 어느 칸도 선택되지 않은 상태가 없게 맞춘다.
+        _coerceP3VoiceForMode();
         // 🎤 [P3-SPEAK] 새 세션으로 연다. 이전 녹음은 남기지 않는다 —
         //   AI 원본 TTS 캐시는 그대로 재사용된다.
         _p3Stage = P3Stage.idle;
