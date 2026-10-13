@@ -317,7 +317,8 @@ void main() {
       expect(originRetryLine('Japanese'), contains('もう一度'));
       expect(originRetryLine('English'), contains('Please'));
       expect(originRetryLine('unknown'), originRetryLine('English'));
-      expect(originRetryLine(''), originRetryLine('Korean'));
+      // 빈 값은 resolveNativeLanguageName 기본값(English)을 따른다.
+      expect(originRetryLine(''), originRetryLine('English'));
       expect(localizedSeedGuidanceLine('Japanese'), contains('出来事'));
       expect(
         localizedSeedGuidanceLine('unknown'),

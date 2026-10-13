@@ -18,7 +18,7 @@ void main() {
   test('Duo requires an actual online partner', () {
     expect(source, contains('_hasConversationPartner => _isPartnerOnline;'));
     expect(source, contains('if (!_isPartnerOnline) return;'));
-    expect(source, contains('final bool useWebrtcNow = _useWebrtcTransport;'));
+    expect(source, contains('bool useWebrtcNow = _useWebrtcTransport;'));
     expect(
         source, contains('String get _directSttSource => _useWebrtcTransport'));
   });

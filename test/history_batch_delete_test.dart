@@ -81,13 +81,16 @@ void main() {
 
   group('③ 결과를 사실대로 말한다', () {
     test('지운 개수를 문구에 넣는다', () {
-      expect(flatDel, contains(r'"$deleted개의 기록을 삭제했습니다."'));
+      // 문구는 12개 언어 표(_DeletionUiCopy)에서 온다.
+      expect(flatDel, contains("copy.count('success', deleted)"));
+      expect(list, contains("'success': '{count}개의 기록을 삭제했습니다.',"));
     });
 
     test('실패가 있으면 그것도 말한다', () {
-      expect(flatDel,
-          contains(r'"$deleted개를 삭제했습니다. ${failed.length}개는 실패했습니다."'));
-      expect(del, contains('failed.isEmpty ? Colors.redAccent : Colors.orangeAccent'));
+      expect(flatDel, contains("copy.result('partial', deleted, failed.length)"));
+      expect(list,
+          contains("'partial': '{deleted}개를 삭제했습니다. {failed}개는 실패했습니다.',"));
+      expect(_flat(del), contains('backgroundColor: failed.isEmpty ? const Color(0xFF2C2C2E) : Colors.orangeAccent'));
     });
 
     test('예전의 뭉뚱그린 문구는 없다', () {
@@ -133,7 +136,7 @@ void main() {
     });
 
     test('일괄 삭제가 이 길로 간다', () {
-      expect(del, contains('await _deleteHistoryRoomDeep(currentUserReference!'));
+      expect(_flat(del), contains('await _deleteHistoryRoomDeep( currentUserReference!'));
       expect(_flat(del), isNot(contains('.doc(docId) .delete()')),
           reason: '방 문서만 지우던 길이다');
     });

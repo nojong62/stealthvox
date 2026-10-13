@@ -139,7 +139,9 @@ Of course. Friends are welcome this time.''');
 
     test('시나리오톡: 태그가 확정될 때까지 화면·TTS로 내보내지 않는다', () {
       final source = _src(_scenario);
-      expect(source, contains("['[HEARD_CONFIRM]', '[CORRECTION]', kUserFixTag]"));
+      // 2026-10-08부터 [RETRY]가 맨 앞에 붙는다(불명확한 말은 되묻지 않고 재시도).
+      expect(source,
+          contains("['[RETRY]', '[HEARD_CONFIRM]', '[CORRECTION]', kUserFixTag]"));
       expect(source, contains("hostBubble['target'] = userKorean;"));
       expect(source, contains('userKorean = userFix.userLine;'));
     });

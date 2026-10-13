@@ -162,7 +162,7 @@ void main() {
       expect(mark, greaterThan(-1),
           reason: '없을 때 ✕가 보이면 무엇을 취소하는지 알 수 없다');
       expect(body.substring(mark), contains('Icons.close_rounded'));
-      expect(body.substring(mark), contains("'취소'"));
+      expect(body.substring(mark), contains("_surfaceCopy['cancel']"));
     });
 
     test('지우고 나면 기준점도 함께 사라진다', () {

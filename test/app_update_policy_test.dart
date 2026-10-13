@@ -2,6 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/app_update_policy.dart';
 import 'package:stealth_vox/custom_code/widgets/app_update_gate.dart';
+import 'package:stealth_vox/custom_code/services/origin_surface_localization.dart';
+
+/// 업데이트 안내는 폰 시스템 언어를 따른다. 테스트 환경 언어에 묶이지 않게
+/// 화면이 쓰는 같은 표에서 문구를 읽는다.
+String _t(String key) => OriginSurfaceCopy.forSystemLocale()[key];
 
 void main() {
   group('evaluateAndroidAppUpdate', () {
@@ -154,18 +159,18 @@ void main() {
           );
 
       await tester.pumpWidget(app());
-      expect(find.text('업데이트 안내'), findsOneWidget);
-      expect(find.text('나중에'), findsOneWidget);
+      expect(find.text(_t('updateAvailable')), findsOneWidget);
+      expect(find.text(_t('later')), findsOneWidget);
 
-      await tester.tap(find.text('나중에'));
+      await tester.tap(find.text(_t('later')));
       await tester.pump();
-      expect(find.text('업데이트 안내'), findsNothing);
+      expect(find.text(_t('updateAvailable')), findsNothing);
       expect(find.text('앱 본문'), findsOneWidget);
 
       // 같은 위젯 위치의 State가 유지되는 앱 재빌드는 같은 실행 세션이다.
       await tester.pumpWidget(app());
       await tester.pump();
-      expect(find.text('업데이트 안내'), findsNothing);
+      expect(find.text(_t('updateAvailable')), findsNothing);
     });
 
     testWidgets('강제 업데이트는 나중에 버튼과 뒤로가기 우회가 없다', (tester) async {
@@ -181,13 +186,13 @@ void main() {
         ),
       );
 
-      expect(find.text('업데이트 안내'), findsOneWidget);
-      expect(find.text('업데이트'), findsOneWidget);
-      expect(find.text('나중에'), findsNothing);
+      expect(find.text(_t('updateAvailable')), findsOneWidget);
+      expect(find.text(_t('update')), findsOneWidget);
+      expect(find.text(_t('later')), findsNothing);
 
       await tester.binding.handlePopRoute();
       await tester.pump();
-      expect(find.text('업데이트 안내'), findsOneWidget);
+      expect(find.text(_t('updateAvailable')), findsOneWidget);
     });
   });
 }

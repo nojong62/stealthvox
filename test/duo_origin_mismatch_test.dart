@@ -161,7 +161,7 @@ void main() {
     });
 
     test('ORIGIN은 로비 설정에도 저장한다 (세션 한정이 아니다)', () {
-      expect(duo, contains('FFAppState().nativeLang = native'));
+      expect(duo, contains('FFAppState().chatLang = native'));
     });
 
     test('🎯 Target은 사용자가 만졌을 때만 저장한다', () {
@@ -203,7 +203,7 @@ void main() {
       final int end = duo.indexOf('TtsAdapter? _ensureInterpreterTts(');
       expect(end, greaterThan(start));
       final region = duo.substring(start, end);
-      expect(region, isNot(contains('FFAppState().nativeLang =')));
+      expect(region, isNot(contains('FFAppState().chatLang =')));
       expect(region, isNot(contains('switchLanguage(')));
     });
   });

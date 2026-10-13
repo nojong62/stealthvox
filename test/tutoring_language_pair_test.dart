@@ -123,8 +123,8 @@ void main() {
     test('화면 문구도 배울 언어를 따라간다', () {
       expect(
           _flat(hist),
-          contains(
-              r"'위 문장을 ' '${koreanLanguageDisplayName(_sessionTargetLangName())}로 ' '말해보세요',"));
+          contains("_surfaceCopy['speakSentenceIn'].replaceAll('{language}', "
+              'koreanLanguageDisplayName(_sessionTargetLangName())),'));
     });
   });
 
@@ -154,85 +154,49 @@ void main() {
 
   // ── ⑤ Keepers 튜터링 ───────────────────────────────────────────
   //
-  // 키퍼는 여러 방에서 모인 목록이라 **방 문서가 없다.** 그래서 언어 짝을
-  // 읽어 올 데가 없었고, 그것이 한국어→영어 하드코딩이 남아 있던 이유다.
-  // 이제 줄마다 한 번 고르게 하고 그 값을 키퍼 문서에 적는다.
-  group('⑤ Keepers — 줄마다 한 번 고른다', () {
+  // 빌드 184(2026-10-01)부터 언어 짝을 묻지 않는다. 저장 당시 언어가 키퍼
+  // 문서에 있고, 없으면 출처 히스토리 방에서, 그것도 없으면 로비에서 읽는다.
+  group('⑤ Keepers — 저장 당시 언어 짝을 쓴다', () {
     final String keep = _read(_keep);
     final String kgen = _region(keep, 'Future<void> _generateKeeperAppText(',
         'Future<void> _playKeeperCorrectedAudio');
     final String kjudge =
         _region(keep, 'Future<void> _correctKeeperAnswer(', 'STEP 4');
+    final String langs = _region(keep,
+        'Future<List<String>> _keeperTutoringLanguages(',
+        'Future<void> _showKeeperTutoringPopup(');
 
-    test('줄에 매이는 것은 배울 언어 하나뿐이다', () {
-      expect(keep, contains("kKeeperTargetLangField = 'tutoring_target_lang'"));
-      expect(keep, isNot(contains('kKeeperNativeLangField')),
-          reason: '원문은 이 사람의 말이라 줄마다 달라지지 않는다');
+    test('키퍼 문서의 언어가 먼저다', () {
+      expect(_flat(langs),
+          contains("String native = (keeperData['native_lang'] ?? '').toString().trim();"));
+      expect(_flat(langs),
+          contains("String target = (keeperData['target_lang'] ?? '').toString().trim();"));
     });
 
-    test('원문 언어는 로비 설정에서 그때그때 읽는다', () {
+    test('구버전 키퍼는 출처 방에서 복원한다', () {
+      expect(langs, contains("keeperData['source_room_id']"));
+      expect(_flat(langs), contains("(sourceData['native_lang'] ?? '')"));
+      expect(_flat(langs), contains("(sourceData['target_lang'] ?? '')"));
+    });
+
+    test('마지막 기본값은 로비 설정이다', () {
+      expect(langs, contains('FFAppState().chatLang'));
+      expect(langs, contains('FFAppState().targetLang'));
+    });
+
+    test('복원한 언어는 키퍼에 채워 둔다 — 실패해도 연습은 돈다', () {
+      expect(_flat(langs),
+          contains("collection('keepers').doc(keeperId).update({"));
+      expect(langs, contains('lang_backfill_failed'));
+    });
+
+    test('시트를 열 때 짝을 정하고 바로 문제를 만든다', () {
       final String open =
-          _region(keep, 'void _showKeeperTutoringPopup(', '// 상태 초기화');
-      expect(_flat(open),
-          contains("_keeperTutoringNative = FFAppState().nativeLang.isNotEmpty "
-              "? FFAppState().nativeLang : 'Korean';"));
-    });
-
-    test('배울 언어가 적힌 줄은 묻지 않는다', () {
-      final String open =
-          _region(keep, 'void _showKeeperTutoringPopup(', '// 상태 초기화');
-      expect(open, contains('_keeperTutoringNeedsLangPick = savedTarget.isEmpty;'));
-    });
-
-    test('고르는 칸은 하나다 — 배울 언어', () {
-      final String pick = _region(keep, 'Widget _buildKeeperLangPickBody(',
-          'Future<void> _startKeeperTutoringWithLangs');
-      expect(pick, contains("label: '배울 언어'"));
-      expect(pick, isNot(contains("label: '문제(원문)'")));
-      // 문제가 어느 말로 나오는지는 글로 알려 준다.
-      expect(_flat(pick), contains(r"문제는 ${koreanLanguageDisplayName(_keeperTutoringNative)}로 나옵니다."));
-    });
-
-    test('모르는 줄은 문제부터 만들지 않는다 — 버릴 것에 과금하지 않는다', () {
-      final String open =
-          _region(keep, 'void _showKeeperTutoringPopup(', 'showModalBottomSheet');
-      expect(open,
-          contains('if (!_keeperTutoringNeedsLangPick) _generateKeeperAppText(baseText);'));
-    });
-
-    test('첫 단계는 시트 안에 있다 — 창이 두 번 뜨지 않는다', () {
-      expect(keep, contains('Widget _buildKeeperLangPickBody('));
-      final String body = _region(keep, 'Widget _buildKeeperTutoringBody(',
-          'crossAxisAlignment: CrossAxisAlignment.start');
-      expect(body, contains('if (_keeperTutoringNeedsLangPick) {'));
-      expect(body, contains('return _buildKeeperLangPickBody('));
-    });
-
-    test('고르면 키퍼 줄에 적는다', () {
-      final String start = _region(
-          keep, 'Future<void> _startKeeperTutoringWithLangs(', 'Widget _buildKeeperTutoringBody');
-      expect(start, contains('_keeperTutoringNeedsLangPick = false;'));
-      expect(start, contains('_generateKeeperAppText(baseText)'));
-      expect(_flat(start),
-          contains("collection('keepers').doc(docId).update({"));
-      expect(start, contains('kKeeperTargetLangField: _keeperTutoringTarget'));
-    });
-
-    test('못 적어도 이번 연습은 돈다', () {
-      final String start = _region(
-          keep, 'Future<void> _startKeeperTutoringWithLangs(', 'Widget _buildKeeperTutoringBody');
-      // 저장은 생성 뒤에 온다 — 실패해도 문제는 이미 만들어졌다.
-      expect(start.indexOf('_generateKeeperAppText(baseText)'),
-          lessThan(start.indexOf("collection('keepers')")));
-      expect(start, contains('lang_save_failed'));
-    });
-
-    test('같은 언어끼리는 시작을 막는다', () {
-      final String pick = _region(keep, 'Widget _buildKeeperLangPickBody(',
-          'Future<void> _startKeeperTutoringWithLangs');
-      expect(pick,
-          contains('_keeperTutoringNative == _keeperTutoringTarget'));
-      expect(pick, contains('옮겨 말할 것이 없습니다'));
+          _region(keep, 'Future<void> _showKeeperTutoringPopup(', 'showModalBottomSheet');
+      expect(open, contains('await _keeperTutoringLanguages(keeperId, keeperData);'));
+      expect(open, contains('_keeperTutoringNative = languages[0];'));
+      expect(open, contains('_keeperTutoringTarget = languages[1];'));
+      expect(open, contains('_generateKeeperAppText(baseText);'));
     });
 
     test('Keepers 프롬프트도 언어 짝을 따라간다', () {
@@ -268,9 +232,9 @@ void main() {
 
     test('키퍼 튜터링 시트가 시스템 영역을 비켜 준다', () {
       final String sheet = _region(keep,
-          'void _showKeeperTutoringPopup(', '.whenComplete(');
+          'Future<void> _showKeeperTutoringPopup(', '.whenComplete(');
       expect(_flat(sheet),
-          contains('padding: EdgeInsets.only( bottom: MediaQuery.of(ctx).padding.bottom + 24)'),
+          contains('padding: EdgeInsets.only( bottom: MediaQuery.of(ctx).padding.bottom + 24, )'),
           reason: '맨 아래 단추가 제스처 바에 걸렸다');
     });
 

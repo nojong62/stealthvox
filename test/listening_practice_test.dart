@@ -12,7 +12,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/listening_practice.dart';
 import 'package:stealth_vox/custom_code/widgets/first_utterance_context_judge.dart';
 
-String _src(String path) => File(path).readAsStringSync();
+String _src(String path) =>
+    File(path).readAsStringSync().replaceAll('\r\n', '\n');
+
+/// 줄바꿈·들여쓰기를 한 칸으로 접는다. 포매터가 인자를 여러 줄로 나눠도
+/// 같은 코드로 본다.
+String _flat(String s) => s.replaceAll(RegExp(r'\s+'), ' ');
 
 const String _circle = 'lib/custom_code/widgets/routine_mode_circle_talk.dart';
 const String _scenario =
@@ -197,7 +202,7 @@ void main() {
 
       test('$name: 턴 시작에 Step을 한 번 읽고 그 턴은 끝까지 같은 Step이다', () {
         expect(source, contains('final ListeningStep step = _listeningStep;'));
-        expect(source, contains('Instructions(step: step)'));
+        expect(source, matches(RegExp(r'MemberInstructions\(\s*step: step,')));
       });
 
       test('$name: Step 2는 프롬프트 끝과 유저 말 바로 앞에 언어 규칙을 한 번 더 둔다', () {
@@ -207,7 +212,7 @@ void main() {
         expect(source, contains('\$finalLanguageRule\'\'\';'));
         // 유저 메시지 앞 system 한 줄 — Step 2에서만.
         expect(source, contains('trailingSystemNote: step == ListeningStep.step2'));
-        expect(source, contains(
+        expect(_flat(source), contains(
             "if (trailingSystemNote != null && trailingSystemNote.trim().isNotEmpty)"));
       });
 
@@ -254,9 +259,9 @@ void main() {
       });
 
       test('$name: History 줄에 step을 남기고 Step 2 AI 줄만 source_lang을 얹는다', () {
-        expect(source,
+        expect(_flat(source),
             contains('...listeningStepFields(step, isAi: false, targetLang: _targetLangName())'));
-        expect(source,
+        expect(_flat(source),
             contains('...listeningStepFields(step, isAi: true, targetLang: _targetLangName())'));
         expect(source,
             contains("if (line['source_lang'] != null) 'source_lang': line['source_lang'],"));
@@ -285,14 +290,16 @@ void main() {
           contains('expectedPipelineGeneration: expectedPipelineGeneration, step: step);'));
     });
 
-    test('시나리오톡: [REPLY]만 Step을 따르고 [CORRECTION]·되묻기는 대화 언어 그대로', () {
+    // 2026-10-08(0341d407)부터 시나리오톡은 못 알아들은 말을 되묻지 않고
+    // [RETRY] 제어 신호만 낸다. 화면·TTS로 나가는 말이 없으니 언어 규칙도 없다.
+    test('시나리오톡: [REPLY]만 Step을 따르고 [CORRECTION]은 대화 언어, 불명확하면 [RETRY]', () {
       final source = _src(_scenario);
       expect(source, contains('reply to that replacement meaning in \$replyLang>'));
       expect(source,
           contains('replacement meaning as one natural standalone line in \$nativeLang>'));
-      expect(source,
-          contains('final askBackOutputRule = buildHeardConfirmOutputRule(nativeLang);'));
       expect(source, contains('final String replyLang = step2 ? targetLang : nativeLang;'));
+      expect(source, contains('output exactly [RETRY]'));
+      expect(source, isNot(contains('askBackOutputRule')));
     });
 
     test('시나리오톡: 정정 경로의 저장 줄에도 Step이 붙는다', () {

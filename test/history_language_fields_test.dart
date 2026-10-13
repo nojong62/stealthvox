@@ -1,6 +1,6 @@
 // 🏷️ [LANG-FIELDS] 유저가 고르는 언어는 **둘뿐이다.**
 //
-//   ChatLang  = 로비 "Origin (Chat Lang)"  = FFAppState().nativeLang
+//   ChatLang  = 로비 "Origin (Chat Lang)"  = FFAppState().chatLang
 //   LearnLang = 로비 "Target (Learn Lang)" = FFAppState().targetLang
 //
 // History 문서의 `native_lang` / `target_lang` / `source_lang`은 유저 설정
@@ -30,6 +30,10 @@ const List<String> _writers = <String>[
   'lib/custom_code/widgets/lobby_master.dart',
   'lib/custom_code/widgets/intro_master.dart',
   'lib/custom_code/services/duo_guest_handoff.dart',
+  // 히스토리 화면이 방 문서의 짝을 다시 적는 자리, 키퍼에 저장 당시 짝을
+  // 채워 두는 자리.
+  'lib/custom_code/widgets/chat_history_master.dart',
+  'lib/custom_code/widgets/chat_history_list_master.dart',
 ];
 
 String _read(String path) =>
@@ -75,7 +79,9 @@ void main() {
 
       test('${path.split('/').last}: native_lang에는 ChatLang만 들어간다', () {
         for (final String v in _values(src, 'native_lang')) {
-          expect(v.toLowerCase(), contains('native'),
+          // 2026-10-01부터 ChatLang은 FFAppState().chatLang에 산다.
+          final String lower = v.toLowerCase();
+          expect(lower.contains('native') || lower.contains('chatlang'), isTrue,
               reason: 'native_lang에 ChatLang이 아닌 값이 들어간다: $v');
           expect(v.toLowerCase(), isNot(contains('targetlang')),
               reason: 'ChatLang 자리에 LearnLang이 들어갔다: $v');

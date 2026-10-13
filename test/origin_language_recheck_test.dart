@@ -138,7 +138,7 @@ void main() {
           'Future<void> _syncHistoryRoomLanguages(');
 
       test('${entry.key}: ORIGIN을 로비 설정에 저장한다', () {
-        expect(region, contains('FFAppState().nativeLang = native'));
+        expect(region, contains('FFAppState().chatLang = native'));
       });
 
       test('${entry.key}: 만지지 않은 TARGET은 건드리지 않는다', () {
@@ -180,7 +180,7 @@ void main() {
       // `_myNative()`는 확정 뒤의 설정을 그대로 읽는다. 여기가 어긋나면
       // 원문이 배울글 자리에 그대로 복사된다.
       expect(duo, contains("'native_lang': _myNative(),"));
-      expect(duo, isNot(contains("'native_lang': FFAppState().nativeLang,")));
+      expect(duo, isNot(contains("'native_lang': FFAppState().chatLang,")));
     });
   });
 
@@ -193,7 +193,7 @@ void main() {
 
     /// 세 모드가 히스토리에 적는 값과 **같은 식**이다.
     ///   서클톡·시나리오톡 `_nativeLangName()` → `session.resolve(로비값)`
-    ///   만능통역 `_myNative()`               → 확정값(`FFAppState().nativeLang`)
+    ///   만능통역 `_myNative()`               → 확정값(`FFAppState().chatLang`)
     /// 확정하면 호출부가 두 곳에 같은 값을 적으므로 결국 하나로 모인다.
     String historyNativeLang(String lobbyOrigin) =>
         OriginLanguageSession.instance.resolve(lobbyOrigin);

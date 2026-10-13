@@ -114,7 +114,8 @@ void main() {
     test('guest seat claim and capability share one atomic update', () {
       final join = _region(
         duo,
-        "await _duoSessionRef!.update({\n        'isPartnerJoined': true,",
+        // 좌석 점유는 트랜잭션 안에서 한 번에 적는다.
+        "tx.update(_duoSessionRef!, <String, dynamic>{\n          'isPartnerJoined': true,",
         "      });\n      // 호스트 언어는",
       );
       expect(join, contains("'partnerUid': guestUid"));

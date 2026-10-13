@@ -228,7 +228,8 @@ void main() {
       expect(
         src,
         contains(
-            'if (headRaw.isNotEmpty && headRaw != turn.text)\n            kOriginalRawField: headRaw'),
+            // 2026-10-06부터 비교 대상은 개인 방의 Origin 문장(personalText)이다.
+            'if (headRaw.isNotEmpty && headRaw != personalText)\n            kOriginalRawField: headRaw'),
       );
     });
 
