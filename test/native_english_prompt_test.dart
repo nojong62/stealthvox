@@ -81,6 +81,21 @@ void main() {
       expect(noStyle, contains('SPEAKER IDENTITY — NATURAL & SHARP'));
     });
 
+    // 2026-10-13: "100% English"로 박혀 있어 타겟이 한국어인 방의 Natural &
+    // Sharp가 영어(그 유저의 ORIGIN)로 나왔다.
+    test('출력 언어는 타겟이다 — 한국어 타겟이면 한국어로 만든다', () {
+      final korean = buildNativeEnglishSpeechInstructions(targetLang: 'Korean');
+      expect(korean, contains('as natural spoken Korean.'));
+      expect(korean, contains('[THINK IN KOREAN]'));
+      expect(korean, contains('The result must be 100% Korean.'));
+      expect(korean, isNot(contains('100% English')));
+      expect(korean, isNot(contains('Hangul')));
+      // 영어 타겟은 예전 그대로다.
+      expect(prompt, contains('The result must be 100% English and\n'
+          'must NOT contain any Hangul characters.'));
+      expect(prompt, contains('decorative vocabulary.\nWhich vocabulary'));
+    });
+
     test('화자 안내가 앞 문장에 달라붙지 않는다', () {
       // `'''` 바로 뒤의 개행은 Dart가 먹는다. 그대로 두면 "…and paced.It
       // does NOT…"이 되어 두 문장이 한 줄로 뭉친다.

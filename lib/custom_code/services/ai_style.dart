@@ -189,11 +189,28 @@ String buildNativeEnglishSpeechInstructions({String targetLang = 'English'}) {
       ? '\nIf the active style is British, stay British and still speak with this pattern.'
       : '';
   final styleKeep = styled ? ', while preserving the active ENGLISH STYLE' : '';
+  // 🌐 출력 언어는 타겟이다. 영어 타겟이면 아래 프롬프트가 예전과 한 글자도
+  //   다르지 않다. 예전에는 "100% English"로 박혀 있어, 타겟이 한국어인 방의
+  //   Natural & Sharp가 영어(= 그 유저의 ORIGIN)로 나왔다(2026-10-13 실기기).
+  final lang = targetLang.trim().isEmpty ? 'English' : targetLang.trim();
+  final english = lang == 'English';
+  final langUpper = lang.toUpperCase();
+  // `'''` 바로 뒤의 개행은 Dart가 먹으므로 앞 줄바꿈을 이스케이프로 적는다.
+  final styleSectionRule = english
+      ? '\nWhich vocabulary and which regional wording to use is decided by the ENGLISH STYLE\n'
+          'section, never here.'
+      : '';
+  final outputLanguageRule = english
+      ? '''Render every participant name, role label, and situation in English (translate role or
+description phrases; romanize real personal names). The result must be 100% English and
+must NOT contain any Hangul characters.'''
+      : '''Render every participant name, role label, and situation in natural $lang.
+The result must be 100% $lang. Never answer in English or in any other language.''';
   return '''[SPEAKER IDENTITY — NATURAL & SHARP]
 You are not translating or polishing sentences one by one.
 Become the speaker of the user's complete thought.
 First understand the entire situation, meaning, intention, attitude, and point of view.
-Then rebuild the thought from scratch as natural spoken English$styleKeep.
+Then rebuild the thought from scratch as natural spoken $lang$styleKeep.
 
 Use Trevor Noah only as a reference for the way an experienced modern conversationalist organizes and develops a thought.
 The reference governs HOW the thought moves.$styleGuard
@@ -236,15 +253,15 @@ Never shorten the speech, never summarize it, and never drop material to sound m
 You are rebuilding ONE complete personal speech.
 
 What you are given is My English: a speaking-practice speech built for this learner from
-one or two topics in their own conversation, written in Standard spoken English. It is a
+one or two topics in their own conversation, written in Standard spoken $lang. It is a
 learning text, not a transcript. The thought in it is already complete and settled, and
 every fact, reason, and conclusion it contains is fixed the moment it reaches you.
 
 Your job is NOT to translate it and NOT to polish it word by word.
 Say what a fluent native speaker would naturally say if this entire thought had
-originally been formed in English from the start.
+originally been formed in $lang from the start.
 
-[THINK IN ENGLISH]
+[THINK IN $langUpper]
 Do not preserve the source information order merely because it appears in that order.
 Organize the thought the way a native speaker would naturally develop it.
 Commonly this means finding the most natural relationship among things such as:
@@ -271,17 +288,13 @@ Never change or soften the user's stance.
 Never turn uncertainty into certainty.
 Never manufacture a conclusion merely to make the speech sound complete.
 
-[SPOKEN ENGLISH, NOT WRITTEN PROSE]
+[SPOKEN $langUpper, NOT WRITTEN PROSE]
 Prefer ordinary verbs, natural collocations, contractions, clear spoken rhythm, and
 phrases a real person could comfortably say aloud.
 Avoid SAT vocabulary, literary prose, formal essay language, excessive idioms, and slang
 inserted merely to sound like a native.
-Polish means native thought organization, not decorative vocabulary.
-Which vocabulary and which regional wording to use is decided by the ENGLISH STYLE
-section, never here.
-Render every participant name, role label, and situation in English (translate role or
-description phrases; romanize real personal names). The result must be 100% English and
-must NOT contain any Hangul characters.
+Polish means native thought organization, not decorative vocabulary.$styleSectionRule
+$outputLanguageRule
 
 [OUTPUT]
 Output only the Natural & Sharp speech.
