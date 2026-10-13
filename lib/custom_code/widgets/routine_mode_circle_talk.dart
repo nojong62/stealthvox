@@ -72,6 +72,7 @@ import '/custom_code/services/transcript_text_clean.dart';
 import '/custom_code/services/short_reply_gate.dart';
 import '/custom_code/services/late_continuation.dart';
 import '/custom_code/services/listening_practice.dart';
+import '/custom_code/services/debug_stt_inject.dart';
 import '/custom_code/services/conversation_cancel_command.dart';
 import '/custom_code/services/circle_correction_intent.dart'
     as correction_intent;
@@ -419,6 +420,8 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
 
   Timer? _continuationWindowTimer;
   Timer? _continuationTranscriptTimeout;
+  // 🧪 [STT-INJECT] 디버그 빌드에서만 산다. 릴리스면 null.
+  Timer? _debugSttInject;
 
   /// 취소 손잡이. 지역 변수로 두면 밖에서 끊을 방법이 없다.
   TtsUtterance? _activeUtterance;
@@ -1197,6 +1200,13 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     _markFirstSpeech('MIC_INPUT', at: _micInputAt);
     _preparedCaptureFuture = _startImmediateLocalCapture();
     _costTracker = CircleTalkCostTracker(_log);
+    // 🧪 [STT-INJECT] 주입된 한 줄은 소켓의 completed와 같은 입구로 들어간다.
+    //   그 아래(말풍선·AI·TTS·History)는 실제 발화와 구분하지 않는다.
+    _debugSttInject = startDebugSttInject((text) {
+      _log('🧪 [STT-INJECT]', 'text="$text"');
+      _onStreamingTranscriptCompleted(
+          'inject-${DateTime.now().microsecondsSinceEpoch}', text);
+    });
     _costTracker.onOriginPcmSnapshot =
         () => OriginPcmStore.instance.logSnapshot(_myHistoryRef?.id ?? '');
     _ttsAdapter = TtsAdapter(
@@ -1271,6 +1281,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
 
   @override
   void dispose() {
+    _debugSttInject?.cancel();
     _continuationPulse.dispose();
     // 🧹 [DISPOSE-GUARD] dispose 중에는 setState가 금지된다(위젯이 이미 defunct).
     //   이 플래그를 먼저 세워 _stopEverything의 setState를 건너뛴다.
