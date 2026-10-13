@@ -8076,7 +8076,9 @@ RULES — follow exactly:
 
   /// 저장된 NATIVE ENGLISH를 그대로 써도 되는가.
   ///
-  /// 이 카드는 언제나 영어다. 한글이 섞여 있으면 만들다 만 값이라 버린다.
+  /// 영어 타겟 방에서 한글이 섞여 있으면 만들다 만 값이라 버린다. 타겟이
+  /// 한국어인 방은 한글이 정답이므로 이 검사를 하지 않는다 — 예전에는
+  /// 여기서 버려져 방을 열 때마다 다시 만들고 덮어썼다(2026-10-13).
   /// 두 카드가 같은 글자여도 버린다 — 견줄 것이 없으면 배울 것도 없다.
   bool _canReuseStoredNativeEnglish(
     Map<String, dynamic>? data,
@@ -8089,7 +8091,9 @@ RULES — follow exactly:
         _kNativeEnglishSchemaVersion) {
       return false;
     }
-    if (_hangul.hasMatch(text)) return false;
+    final roomTarget = _historyString(data, 'target_lang');
+    final target = roomTarget.isEmpty ? _sessionTargetLangName() : roomTarget;
+    if (target == 'English' && _hangul.hasMatch(text)) return false;
     if (text == mySpeech.trim()) return false;
     return true;
   }
