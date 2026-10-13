@@ -16,10 +16,23 @@ class SecureAiGateway {
 
   static String? _gatewayToken;
   static String _gatewayScope = '';
+  static DateTime _gatewayIssuedAt = DateTime.fromMillisecondsSinceEpoch(0);
   static DateTime _gatewayExpiresAt = DateTime.fromMillisecondsSinceEpoch(0);
   static String? _deepgramToken;
   static String _deepgramScope = '';
+  static DateTime _deepgramIssuedAt = DateTime.fromMillisecondsSinceEpoch(0);
   static DateTime _deepgramExpiresAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Screens keep the token they receive for the whole conversation and never
+  /// refresh it, so a cached token is handed out only while at least half of
+  /// its lifetime is left. A fixed "5 minutes left" margin let a room open with
+  /// a token that expired a few minutes into the call.
+  static bool _hasHalfLifeLeft(
+      DateTime now, DateTime issuedAt, DateTime expiresAt) {
+    final lifetime = expiresAt.difference(issuedAt);
+    if (lifetime <= Duration.zero) return false;
+    return expiresAt.difference(now) > lifetime ~/ 2;
+  }
 
   static String openAiUrl(String path) {
     final normalized = path.startsWith('/') ? path : '/$path';
@@ -60,7 +73,7 @@ class SecureAiGateway {
     if (!forceRefresh &&
         _gatewayToken != null &&
         _gatewayScope == scope &&
-        now.isBefore(_gatewayExpiresAt.subtract(const Duration(minutes: 5)))) {
+        _hasHalfLifeLeft(now, _gatewayIssuedAt, _gatewayExpiresAt)) {
       return _gatewayToken!;
     }
     final result = await _functions
@@ -74,6 +87,7 @@ class SecureAiGateway {
     }
     _gatewayToken = token;
     _gatewayScope = scope;
+    _gatewayIssuedAt = now;
     _gatewayExpiresAt =
         DateTime.fromMillisecondsSinceEpoch(expiresAt * 1000, isUtc: true);
     return token;
@@ -88,7 +102,7 @@ class SecureAiGateway {
     if (!forceRefresh &&
         _deepgramToken != null &&
         _deepgramScope == scope &&
-        now.isBefore(_deepgramExpiresAt.subtract(const Duration(minutes: 2)))) {
+        _hasHalfLifeLeft(now, _deepgramIssuedAt, _deepgramExpiresAt)) {
       return _deepgramToken!;
     }
     final result = await _functions
@@ -102,6 +116,7 @@ class SecureAiGateway {
     }
     _deepgramToken = token;
     _deepgramScope = scope;
+    _deepgramIssuedAt = now;
     _deepgramExpiresAt = now.add(Duration(seconds: expiresIn));
     return token;
   }

@@ -13,8 +13,12 @@ const gatewaySigningSecret = defineSecret("AI_GATEWAY_SIGNING_SECRET");
 
 const REGION = "asia-northeast3";
 const GATEWAY_AUDIENCE = "stealthvox-openai-proxy";
-const GATEWAY_TOKEN_TTL_SECONDS = 10 * 60;
-const DEEPGRAM_TOKEN_TTL_SECONDS = 10 * 60;
+// Screens mint these once on entry and hold them for the whole conversation
+// (Duo, Circle Talk, Scenario Talk, History) with no refresh-on-401 path.
+// A 10-minute TTL cut every longer session off mid-call, so keep the lifetimes
+// that sessions were verified with. Entitlement is still checked at mint time.
+const GATEWAY_TOKEN_TTL_SECONDS = 2 * 60 * 60;
+const DEEPGRAM_TOKEN_TTL_SECONDS = 60 * 60;
 const GOOGLE_TTS_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
 const GOOGLE_TTS_ENDPOINT = "https://texttospeech.googleapis.com/v1/text:synthesize";
 // The app keeps its screen-level voice choices as OpenAI-compatible IDs, while
@@ -156,6 +160,16 @@ function koreanChirpInputWithOpeningCommaPause(text) {
   // because the audio-only pause marker was added.
   return markup.length <= MAX_TTS_INPUT_CHARS ? { markup } : { text: input };
 }
+// GA returns `{ value, expires_at }` at the top level; the retired beta shape
+// nested it under `client_secret`. Accept both so a response-shape change is
+// not silently treated as an auth failure.
+function realtimeClientSecret(payload) {
+  const source = payload && payload.client_secret ? payload.client_secret : payload;
+  const token = source && typeof source.value === "string" ? source.value : "";
+  if (!token) return null;
+  return { token, expiresAt: Number(source.expires_at || 0) };
+}
+
 function stripWavContainer(audio) {
   const source = Buffer.from(audio || []);
   if (source.length < 12 || source.subarray(0, 4).toString("ascii") !== "RIFF" ||
@@ -353,24 +367,26 @@ const mintOpenAiRealtimeToken = onCall({
   await requireAiAccess(request, caller);
   const key = openAiApiKey.value();
   if (!key) throw callableError("failed-precondition", "OpenAI is not configured.");
-  const response = await fetch("https://api.openai.com/v1/realtime/transcription_sessions", {
+  // GA endpoint. The beta `/v1/realtime/transcription_sessions` returns 404,
+  // and the app already speaks the GA protocol (`session.type: transcription`).
+  const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
     method: "POST",
     headers: {
       Authorization: "Bearer " + key,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ session: { type: "transcription" } }),
   });
   const payload = await response.json().catch(() => ({}));
-  const token = payload && payload.client_secret && payload.client_secret.value;
-  if (!response.ok || !token) {
-    functions.logger.error("OpenAI realtime token mint failed", { status: response.status });
+  const minted = realtimeClientSecret(payload);
+  if (!response.ok || !minted) {
+    functions.logger.error("OpenAI realtime token mint failed", {
+      status: response.status,
+      message: payload && payload.error && payload.error.message,
+    });
     throw callableError("unavailable", "Realtime speech authentication failed.");
   }
-  return {
-    token,
-    expiresAt: Number(payload.client_secret.expires_at || 0),
-  };
+  return minted;
 });
 
 const claimAiTrial = onCall({
@@ -440,6 +456,7 @@ module.exports = {
   containsKorean,
   requestedAudioFormat,
   stripWavContainer,
+  realtimeClientSecret,
   koreanChirpVoiceForRequest,
   koreanChirpInputWithOpeningCommaPause,
   mintAiGatewaySession,

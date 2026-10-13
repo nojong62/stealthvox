@@ -11,7 +11,21 @@ const {
   stripWavContainer,
   koreanChirpVoiceForRequest,
   koreanChirpInputWithOpeningCommaPause,
+  realtimeClientSecret,
 } = require("../secure_ai_gateway");
+
+test("realtime client secret reads the GA shape and the retired beta shape", () => {
+  assert.deepEqual(
+    realtimeClientSecret({ value: "ek_ga", expires_at: 1700 }),
+    { token: "ek_ga", expiresAt: 1700 },
+  );
+  assert.deepEqual(
+    realtimeClientSecret({ client_secret: { value: "ek_beta", expires_at: 1800 } }),
+    { token: "ek_beta", expiresAt: 1800 },
+  );
+  assert.equal(realtimeClientSecret({ error: { message: "nope" } }), null);
+  assert.equal(realtimeClientSecret(null), null);
+});
 
 function claims(overrides = {}) {
   return {
