@@ -43,6 +43,10 @@ const String kDuoOriginCorrectorModel = 'gpt-6-luna';
 /// 2026-10-14: gpt-4.1-mini(2027-01-14 종료) → `gpt-6-luna`.
 const String kHistoryRepairModel = 'gpt-6-luna';
 
+/// ⚡ Snap Echoing 의미 단위 나누기. 글자는 안 바꾸고 끊는 자리만 정한다.
+/// ③과 따로 둔다 — 끊는 결과만 따로 A/B 할 수 있어야 한다.
+const String kSnapChunkModel = 'gpt-6-luna';
+
 /// ②③과 학습용 문장 생성의 `reasoning_effort`. 통화·대화가 끝난 뒤에 도는
 /// 일이라 지연보다 문맥 해석이 먼저다. 대화 중에 도는 후처리는
 /// [kLiveTextReasoningEffort]를 본다 — 이 값을 거기로 옮기지 말 것.

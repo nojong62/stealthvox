@@ -48,6 +48,7 @@ import '/custom_code/services/transcript_repair_guard.dart';
 import 'alt_style_popup.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
 import '/custom_code/services/chirp_pause_markup.dart';
+import '/custom_code/services/snap_echo_chunker.dart';
 import '/custom_code/services/breath_echoing_engine.dart';
 import '/custom_code/services/breath_segment.dart';
 import '/custom_code/services/p2_voice_styles.dart';
@@ -98,13 +99,15 @@ const Color _p3PracticeSurfaceColor = Color(0xFF1C1C1C);
 const Color _p3PracticeBorderColor = Color(0x22FFFFFF);
 const Color _p3BreathAccentColor = Color(0xFF7DD3FC);
 
-/// ⚡ [SNAP-ECHO] Snap Echoing의 호흡. 글자를 보지 않고 한 번 듣고 바로 따라
-/// 할 수 있는 길이 — 두세 단어, 1.2초 안쪽 — 로 자른다. 자르는 자리는 여전히
-/// 소리의 무음이다(텍스트는 보지 않는다). 쉐도잉은 기본값을 그대로 쓴다.
+/// ⚡ [SNAP-ECHO] Snap Echoing의 호흡. **끊는 자리는 문장 구조가 정한다** —
+/// [SnapEchoChunker]가 나눈 의미 단위 사이마다 Chirp이 쉬고, 여기서는 그 쉼을
+/// 소리로 찾아 자른다. 그래서 길이로 다시 쪼개지 않는다. [maxBreathMs]는
+/// 단위 나누기가 실패해 문장부호 쉼만 있을 때의 안전판이다.
+/// 2~3단어 단위가 이웃과 합쳐지지 않게 [minBreathMs]를 낮게 둔다.
 /// 실기기에서 조정할 값이다.
 const BreathAnalysisConfig _kSnapEchoBreathConfig = BreathAnalysisConfig(
-  minBreathMs: 500,
-  maxBreathMs: 1200,
+  minBreathMs: 300,
+  maxBreathMs: 2500,
   minSplitSilenceMs: 60,
 );
 
@@ -6703,13 +6706,26 @@ RULES — follow exactly:
     final double speed = shadowing ? _p3ShadowSpeed : _kSnapEchoSpeed;
     // 고른 쉼·속도마다 소리가 다르다 — 캐시 칸도 따로 선다.
     final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3'
-        '_${pause.name}_x$speed';
+        '_${pause.name}_x$speed${shadowing ? '' : '_$kSnapChunkVersion'}';
     final requestKey = '$ns|$text';
     final existing = _breathPcmInFlight[requestKey];
     if (existing != null) return existing;
     final future = () async {
       final cached = await TtsCache.get(text, ns);
       if (cached != null && cached.length > 44) return pcmFromWav(cached);
+      // ⚡ Snap Echoing은 문장 구조로 나눈 단위 사이마다 쉰다. 나누기에
+      //   실패하면 쉐도잉과 같은 문장부호 쉼으로 돌아간다.
+      String markup = chirpPauseMarkup(text, pause);
+      if (!shadowing && !text.contains('[') && !text.contains(']')) {
+        final chunks = await SnapEchoChunker.chunk(
+          apiKey: _apiKey,
+          text: text,
+          languageName: _sessionTargetLangName(),
+        );
+        debugPrint('[SNAP-CHUNK] ok=${chunks != null} '
+            'chunks=${chunks?.length ?? 0} pause=${pause.name}');
+        if (chunks != null) markup = SnapEchoChunker.markup(chunks, pause);
+      }
       // 낭독 지시(instructions)는 보내지 않는다 — 지시가 붙으면 Gateway가
       // 표현형으로 보고 Chirp 3 HD가 아닌 OpenAI로 넘긴다.
       final raw = await _fetchOpenAITTSInternal(
@@ -6719,7 +6735,7 @@ RULES — follow exactly:
         model: _historyPracticeTtsModel,
         instructionTag: '${style.id}_p3',
         responseFormat: 'pcm',
-        markup: chirpPauseMarkup(text, pause),
+        markup: markup,
       );
       if (raw == null || raw.isEmpty) return null;
       await TtsCache.put(
