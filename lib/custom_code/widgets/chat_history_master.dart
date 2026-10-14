@@ -103,10 +103,11 @@ const Color _p3BreathAccentColor = Color(0xFF7DD3FC);
 /// [SnapEchoChunker]가 나눈 한 호흡 단위 사이마다 Chirp이 쉬고, 여기서는 그
 /// 쉼을 소리로 찾아 자른다. 단위 안의 자연스러운 짧은 틈은 자르지 않는다.
 /// [maxBreathMs]는 단위 나누기가 실패해 문장부호 쉼만 있을 때의 안전판이다
-/// (4~7단어 한 호흡은 0.88배속에서 3초 안쪽이다). 실기기에서 조정할 값이다.
+/// (Full Breath의 6~9단어도 0.88배속에서 4초 안쪽이다). 실기기에서 조정할
+/// 값이다.
 const BreathAnalysisConfig _kSnapEchoBreathConfig = BreathAnalysisConfig(
   minBreathMs: 600,
-  maxBreathMs: 4000,
+  maxBreathMs: 5000,
   minSplitSilenceMs: 60,
 );
 
@@ -6286,9 +6287,10 @@ RULES — follow exactly:
           ? 'NATURAL & SHARP'
           : 'CLEAR & EASY';
 
-  /// 쉐도잉 호흡 사이의 여유. Chirp이 문장부호 뒤 `[pause]` 자리에서 직접
-  /// 쉰다. 고르는 칸은 없다 — 고르는 것은 속도뿐이다.
-  static const ChirpPause _p3ShadowPause = ChirpPause.medium;
+  /// 쉐도잉 호흡 사이의 여유. Chirp이 문장부호 뒤 태그 자리에서 직접 쉰다.
+  /// 기본은 `[pause]`, Long Pause를 켜면 `[pause long]`이다.
+  ChirpPause get _p3ShadowPause =>
+      _p3ShadowLongPause ? ChirpPause.long : ChirpPause.medium;
 
   /// 낭독 속도. Gateway가 Chirp의 speaking_rate로 넘긴다.
   /// ⚡ Snap Echoing은 고정, 쉐도잉은 셋 중에서 고른다.
@@ -6316,8 +6318,11 @@ RULES — follow exactly:
   int _p3BreathTotal = 0;
   double _p3ShadowSpeed = 0.88;
 
-  /// ⚡ [SNAP-ECHO] 문장부호 뒤 쉼 길이. 쉼은 호흡을 자르는 자리도 된다.
-  ChirpPause _p3EchoPause = ChirpPause.medium;
+  bool _p3ShadowLongPause = false;
+
+  /// ⚡ [SNAP-ECHO] 한 호흡 의미 단위의 길이. 쉼은 고르지 않는다 — 단위 사이
+  /// `[pause short]`는 소리에서 경계를 찾게 하는 표시일 뿐이다.
+  SnapUnitSize _p3SnapSize = SnapUnitSize.quick;
   String? _p3EchoPath;
   String? _p3ShadowPath;
   String? _p3Error;
@@ -6701,11 +6706,13 @@ RULES — follow exactly:
     final voice = _p3Voice;
     final style = _p3StyleFor(_p3PracticeMode);
     final bool shadowing = _p3PracticeMode == P3PracticeMode.shadowing;
-    final ChirpPause pause = shadowing ? _p3ShadowPause : _p3EchoPause;
+    final ChirpPause pause = shadowing ? _p3ShadowPause : ChirpPause.short;
     final double speed = shadowing ? _p3ShadowSpeed : _kSnapEchoSpeed;
-    // 고른 쉼·속도마다 소리가 다르다 — 캐시 칸도 따로 선다.
+    final SnapUnitSize size = _p3SnapSize;
+    // 고른 쉼·속도·단위 길이마다 소리가 다르다 — 캐시 칸도 따로 선다.
     final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3'
-        '_${pause.name}_x$speed${shadowing ? '' : '_$kSnapChunkVersion'}';
+        '_${pause.name}_x$speed'
+        '${shadowing ? '' : '_${kSnapChunkVersion}_${size.name}'}';
     final requestKey = '$ns|$text';
     final existing = _breathPcmInFlight[requestKey];
     if (existing != null) return existing;
@@ -6720,9 +6727,10 @@ RULES — follow exactly:
           apiKey: _apiKey,
           text: text,
           languageName: _sessionTargetLangName(),
+          size: size,
         );
         debugPrint('[SNAP-CHUNK] ok=${chunks != null} '
-            'chunks=${chunks?.length ?? 0} pause=${pause.name}');
+            'chunks=${chunks?.length ?? 0} size=${size.name}');
         if (chunks != null) markup = SnapEchoChunker.markup(chunks, pause);
       }
       // 낭독 지시(instructions)는 보내지 않는다 — 지시가 붙으면 Gateway가
@@ -7102,7 +7110,7 @@ RULES — follow exactly:
       case P3Stage.idle:
         return '';
       case P3Stage.preparing:
-        return 'Preparing voice…';
+        return _surfaceCopy['preparingVoice'];
       case P3Stage.breathListen:
         return 'Breath ${(_p3BreathIndex + 1).clamp(1, _p3BreathTotal)}/$_p3BreathTotal · Listen';
       case P3Stage.breathEcho:
@@ -7152,9 +7160,11 @@ RULES — follow exactly:
               if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
                 const SizedBox(height: 12),
                 _buildP3ShadowSpeedPicker(),
+                const SizedBox(height: 8),
+                _buildP3LongPauseToggle(),
               ] else ...[
                 const SizedBox(height: 12),
-                _buildP3EchoPausePicker(),
+                _buildP3SnapSizePicker(),
               ],
 
               // 오류는 연습이 시작되지 못했을 때도 보여야 하므로 밖에 둔다.
@@ -7187,10 +7197,35 @@ RULES — follow exactly:
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const SizedBox(height: 20),
+                    // ⏳ 소리를 만드는 동안(단위 나누기 + TTS)은 두 모드 모두
+                    //   같은 자리에 도는 표시와 함께 알린다.
+                    if (_p3Stage == P3Stage.preparing)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.8,
+                              color: _p3BreathAccentColor,
+                            ),
+                          ),
+                          const SizedBox(width: 9),
+                          Text(
+                            _surfaceCopy['preparingVoice'],
+                            style: const TextStyle(
+                              color: _p3BreathAccentColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      )
                     // 에코잉에서는 진도(Breath n/n · …)를 여기 두지 않는다.
                     //   귀로 따라오게 하는 연습이라 위쪽에 숫자가 있으면 눈이
                     //   먼저 간다. 호흡 위치는 문장 패널 안 카운터가 알린다.
-                    if (_p3PracticeMode == P3PracticeMode.echoing)
+                    else if (_p3PracticeMode == P3PracticeMode.echoing)
                       Text(
                         _surfaceCopy['readOneBreath'],
                         textAlign: TextAlign.center,
@@ -7659,108 +7694,97 @@ RULES — follow exactly:
   }
 
   /// 쉐도잉 속도 고르기. 간격 고르기와 같은 생김새다.
-  /// ⚡ [SNAP-ECHO] 쉼 길이 고르기. 버튼에는 Chirp 태그를 그대로 적는다.
-  Widget _buildP3EchoPausePicker() {
-    return Row(
-      children: [
-        for (final pause in ChirpPause.values) ...[
-          Expanded(
-            child: InkWell(
-              // 쉼이 바뀌면 소리와 호흡 경계가 달라진다. 받아 둔 것을 버리고
-              // 다음 Start에서 그 쉼으로 다시 받는다.
-              onTap: _p3Busy || _p3EchoPause == pause
-                  ? null
-                  : () => setState(() {
-                        _p3EchoPause = pause;
-                        _p3FullPcm = null;
-                        _p3Segments = const <BreathSegment>[];
-                      }),
-              borderRadius: BorderRadius.circular(10),
-              child: Container(
-                height: 38,
-                alignment: Alignment.center,
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                decoration: BoxDecoration(
-                  color: _p3EchoPause == pause
-                      ? _p3ShadowingAccentColor.withValues(alpha: 0.20)
-                      : Colors.white.withValues(alpha: 0.04),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: _p3EchoPause == pause
-                        ? _p3ShadowingAccentColor
-                        : Colors.white24,
-                    width: _p3EchoPause == pause ? 1.4 : 1,
-                  ),
-                ),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    pause.tag,
-                    maxLines: 1,
-                    style: TextStyle(
-                      color: _p3EchoPause == pause
-                          ? _p3ShadowingAccentColor
-                          : Colors.white60,
-                      fontSize: 12,
-                      fontWeight: _p3EchoPause == pause
-                          ? FontWeight.bold
-                          : FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
+  /// 고르기 칸 하나. 간격·속도·단위 고르기가 모두 이 생김새다.
+  Widget _p3OptionChip({
+    required String label,
+    required bool selected,
+    required VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        height: 38,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? _p3ShadowingAccentColor.withValues(alpha: 0.20)
+              : Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? _p3ShadowingAccentColor : Colors.white24,
+            width: selected ? 1.4 : 1,
+          ),
+        ),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            label,
+            maxLines: 1,
+            style: TextStyle(
+              color: selected ? _p3ShadowingAccentColor : Colors.white60,
+              fontSize: 12,
+              fontWeight: selected ? FontWeight.bold : FontWeight.w500,
             ),
           ),
-          if (pause != ChirpPause.values.last) const SizedBox(width: 6),
+        ),
+      ),
+    );
+  }
+
+  /// 고른 값이 바뀌면 소리와 호흡 경계가 달라진다. 받아 둔 것을 버리고
+  /// 다음 Start에서 그 값으로 다시 받는다.
+  void _resetP3Audio(VoidCallback change) => setState(() {
+        change();
+        _p3FullPcm = null;
+        _p3Segments = const <BreathSegment>[];
+      });
+
+  /// ⚡ [SNAP-ECHO] 한 호흡 단위 길이 고르기 — Quick Snap / Full Breath.
+  Widget _buildP3SnapSizePicker() {
+    return Row(
+      children: [
+        for (final size in SnapUnitSize.values) ...[
+          Expanded(
+            child: _p3OptionChip(
+              label: size.label,
+              selected: _p3SnapSize == size,
+              onTap: _p3Busy || _p3SnapSize == size
+                  ? null
+                  : () => _resetP3Audio(() => _p3SnapSize = size),
+            ),
+          ),
+          if (size != SnapUnitSize.values.last) const SizedBox(width: 6),
         ],
       ],
     );
   }
 
+  /// 쉐도잉 Long Pause 켜고 끄기. 끄면 `[pause]`, 켜면 `[pause long]`.
+  Widget _buildP3LongPauseToggle() {
+    return _p3OptionChip(
+      label: 'Long Pause',
+      selected: _p3ShadowLongPause,
+      onTap: _p3Busy
+          ? null
+          : () => _resetP3Audio(
+              () => _p3ShadowLongPause = !_p3ShadowLongPause),
+    );
+  }
+
+  /// 쉐도잉 속도 고르기.
   Widget _buildP3ShadowSpeedPicker() {
     return Row(
       children: [
         for (final speed in _kShadowSpeeds) ...[
           Expanded(
-            child: InkWell(
-              // 속도가 바뀌면 소리 자체가 달라진다. 받아 둔 소리와 호흡
-              // 경계를 버리고 다음 Start에서 그 속도로 다시 받는다.
+            child: _p3OptionChip(
+              label: '${speed}x',
+              selected: _p3ShadowSpeed == speed,
               onTap: _p3Busy || _p3ShadowSpeed == speed
                   ? null
-                  : () => setState(() {
-                        _p3ShadowSpeed = speed;
-                        _p3FullPcm = null;
-                        _p3Segments = const <BreathSegment>[];
-                      }),
-              borderRadius: BorderRadius.circular(10),
-              child: Container(
-                height: 38,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: _p3ShadowSpeed == speed
-                      ? _p3ShadowingAccentColor.withValues(alpha: 0.20)
-                      : Colors.white.withValues(alpha: 0.04),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: _p3ShadowSpeed == speed
-                        ? _p3ShadowingAccentColor
-                        : Colors.white24,
-                    width: _p3ShadowSpeed == speed ? 1.4 : 1,
-                  ),
-                ),
-                child: Text(
-                  '${speed}x',
-                  style: TextStyle(
-                    color: _p3ShadowSpeed == speed
-                        ? _p3ShadowingAccentColor
-                        : Colors.white60,
-                    fontSize: 12,
-                    fontWeight: _p3ShadowSpeed == speed
-                        ? FontWeight.bold
-                        : FontWeight.w500,
-                  ),
-                ),
-              ),
+                  : () => _resetP3Audio(() => _p3ShadowSpeed = speed),
             ),
           ),
           if (speed != _kShadowSpeeds.last) const SizedBox(width: 6),

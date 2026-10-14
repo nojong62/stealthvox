@@ -1,14 +1,16 @@
 // ⚡ [SNAP-CHUNK] Snap Echoing을 **한 호흡 의미 단위**로 끊는다.
 //
 //   몇 단어씩 쪼개는 것이 아니다. 뜻이 한 덩어리로 완결되고, 한 숨에 리듬을
-//   타며 읽을 만한 길이 — 강세 박자 2~3개, 대개 4~7단어 — 로 끊는다. 이웃
-//   덩어리끼리 길이가 비슷해 박자가 고르게 흐르도록 한다. 현지인이 빠르게
-//   한 숨에 몰아 읽는 긴 호흡도, 문법 성분마다 자르는 짧은 조각도 아니다
+//   타며 읽을 만한 길이로 끊는다. 이웃 덩어리끼리 길이가 비슷해 박자가 고르게
+//   흐르도록 한다. 길이는 둘 중에서 고른다([SnapUnitSize]):
+//     · Quick Snap — 박자 2개, 대개 3~5단어
+//     · Full Breath — 박자 3~4개, 대개 6~9단어
 //   (실장님 지시, 2026-10-15).
 //
 //   역할 분담:
 //     · 어디서 끊을지 — 여기(글자). 모델이 단위만 나누고 글자는 안 바꾼다.
-//     · 끊긴 자리의 쉼 — Chirp. 단위 사이마다 pause 태그를 넣는다.
+//     · 끊긴 자리의 쉼 — Chirp. 단위 사이마다 `[pause short]`를 넣는다.
+//       듣기용 쉼이 아니라 소리에서 경계를 찾게 하는 표시다.
 //     · 소리를 자르는 자리 — 여전히 소리의 무음(`analyzeBreaths`).
 //
 //   모델이 글자를 한 자라도 바꾸면 결과를 버린다(null). 그때 화면은 문장부호
@@ -23,19 +25,31 @@ import 'history_text_model.dart';
 import 'secure_ai_gateway.dart';
 
 /// 이 규칙으로 만든 소리를 캐시에서 가르는 판. 규칙을 바꾸면 올린다.
-const String kSnapChunkVersion = 'snap_chunk_v2';
+const String kSnapChunkVersion = 'snap_chunk_v3';
+
+/// 한 호흡 의미 단위의 길이.
+enum SnapUnitSize { quick, full }
+
+extension SnapUnitSizeLabel on SnapUnitSize {
+  /// 화면 이름. 고유명사처럼 쓰므로 번역하지 않는다.
+  String get label => this == SnapUnitSize.quick ? 'Quick Snap' : 'Full Breath';
+}
 
 class SnapEchoChunker {
   SnapEchoChunker._();
 
-  static String instructions(String languageName) => '''
+  static String _lengthRule(SnapUnitSize size) => size == SnapUnitSize.quick
+      ? '- Usually 2 stressed beats, about 3 to 5 words (in languages written without spaces, about 5 to 10 characters). Never under 2 words unless the passage leaves no choice. Never over 6 words.'
+      : '- Usually 3 to 4 stressed beats, about 6 to 9 words (in languages written without spaces, about 10 to 18 characters). Never under 4 words unless the passage leaves no choice. Never over 11 words.';
+
+  static String instructions(String languageName, SnapUnitSize size) => '''
 You divide a $languageName passage into breath groups for rhythmic read-aloud practice. A learner hears one group, then says it back.
 
 Each group is one complete unit of meaning that can be spoken in a single comfortable breath with a clear, steady rhythm — the way a skilled teacher reads aloud for learners, ideally phrased and evenly paced. It is not word-by-word chopping, and it is not the long, fast run a fluent native speaker might say in one go.
 
 Rules:
 - One group = one idea that makes sense on its own: a short clause, or a phrase that carries a complete piece of meaning.
-- Usually 2 to 3 stressed beats, about 4 to 7 words (in languages written without spaces, about 6 to 14 characters). Never under 3 words unless the passage leaves no choice. Never over 9 words.
+${_lengthRule(size)}
 - Keep neighbouring groups similar in length so the reading keeps an even beat.
 - Prefer to cut at punctuation and at clause boundaries; otherwise before a prepositional phrase or after a conjunction — wherever the meaning naturally rests.
 - Never cut inside a fixed expression, phrasal verb, name, number with its unit, or a noun phrase.
@@ -48,6 +62,7 @@ Return JSON only: {"chunks": ["...", "..."]}''';
     required String apiKey,
     required String text,
     required String languageName,
+    required SnapUnitSize size,
     Duration timeout = const Duration(seconds: 25),
   }) async {
     final input = text.trim();
@@ -68,7 +83,7 @@ Return JSON only: {"chunks": ["...", "..."]}''';
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',
-                  'content': instructions(languageName),
+                  'content': instructions(languageName, size),
                 },
                 <String, String>{'role': 'user', 'content': input},
               ],

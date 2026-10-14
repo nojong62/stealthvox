@@ -2485,6 +2485,20 @@ class OriginSurfaceCopy {
       'Lettura',
       'Lezen'
     ],
+    'preparingVoice': [
+      'Preparing voice…',
+      '음성 준비 중…',
+      '音声を準備中…',
+      '正在准备语音…',
+      'Preparando la voz…',
+      'Préparation de la voix…',
+      'Stimme wird vorbereitet…',
+      'आवाज़ तैयार हो रही है…',
+      'Готовим голос…',
+      'Preparando a voz…',
+      'Preparazione della voce…',
+      'Stem wordt voorbereid…'
+    ],
     'voiceFemale': [
       'Female',
       '여성',
