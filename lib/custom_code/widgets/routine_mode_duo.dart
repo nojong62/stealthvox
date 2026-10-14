@@ -5838,6 +5838,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final lat = DuoInterpLatency(
       turnId: 'duo-partner-${_interpTtsTurnSeq + 1}',
       path: kDuoInterpStreamingTts && !sameLang ? 'stream' : 'blocking',
+      translationModel: sameLang ? '' : kDuoLiveTranslationModel,
       remoteSpeechStarted: _duoEpochDateTime(data['spokenAt']),
       remoteTranscriptReady: _duoEpochDateTime(data['transcriptReadyAt']),
       remoteSent: _duoEpochDateTime(data['sentAt']),

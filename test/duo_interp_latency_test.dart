@@ -103,6 +103,15 @@ void main() {
       expect(line, contains('ttsChunks=0'));
     });
 
+    test('번역 모델이 남는다 — 모델 교체 전후를 가를 수 있어야 한다', () {
+      final line = DuoInterpLatency(
+              turnId: 't9', path: 'stream', translationModel: 'gpt-4o-mini')
+          .summary();
+      expect(line, contains('model=gpt-4o-mini'));
+      expect(DuoInterpLatency(turnId: 't10', path: 'blocking').summary(),
+          contains('model=-'));
+    });
+
     test('두 경로가 같은 모양으로 남는다 — 그래야 견줄 수 있다', () {
       final a = DuoInterpLatency(turnId: 'x', path: 'stream').summary();
       final b = DuoInterpLatency(turnId: 'x', path: 'blocking').summary();

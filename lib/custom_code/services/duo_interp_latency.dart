@@ -26,6 +26,7 @@ class DuoInterpLatency {
   DuoInterpLatency({
     required this.turnId,
     required this.path,
+    this.translationModel = '',
     this.remoteSpeechStarted,
     this.remoteTranscriptReady,
     this.remoteSent,
@@ -36,6 +37,9 @@ class DuoInterpLatency {
 
   /// 'stream'(새 경로) 또는 'blocking'(기존 경로). A/B 비교의 기준이다.
   final String path;
+
+  /// 번역을 맡은 모델. 모델 교체 전후의 `translateTtfbMs`를 가르는 기준이다.
+  final String translationModel;
 
   final DateTime incomingMessageReceived;
   final DateTime? remoteSpeechStarted;
@@ -99,6 +103,7 @@ class DuoInterpLatency {
 
   /// 실기기 로그 한 줄. 오디오 내용도 전사문도 싣지 않는다 — 숫자뿐이다.
   String summary() => 'turn=$turnId path=$path '
+      'model=${translationModel.isEmpty ? '-' : translationModel} '
       'speechToPlaybackMs=${speechToPlaybackMs ?? -1} '
       'transcriptToPlaybackMs=${transcriptToPlaybackMs ?? -1} '
       'transportMs=${transportMs ?? -1} '
