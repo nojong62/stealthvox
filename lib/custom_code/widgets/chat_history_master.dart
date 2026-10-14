@@ -6633,7 +6633,7 @@ RULES — follow exactly:
     if (!_guardPaidStudy()) return;
     final text = _p3TargetSentence;
     if (text.isEmpty) {
-      _showRoomEntryToast('No sentence is available for P3');
+      _showRoomEntryToast(_surfaceCopy['p3NoSentence']);
       return;
     }
     await _stopP3Shadowing();
@@ -6661,7 +6661,7 @@ RULES — follow exactly:
     if (pcm == null || pcm.isEmpty) {
       setState(() {
         _p3Stage = P3Stage.idle;
-        _p3Error = 'Could not create the practice voice';
+        _p3Error = _surfaceCopy['p3VoiceFailed'];
       });
       return;
     }
@@ -6674,7 +6674,7 @@ RULES — follow exactly:
     if (analysis.segments.isEmpty) {
       setState(() {
         _p3Stage = P3Stage.idle;
-        _p3Error = 'Could not detect breath groups';
+        _p3Error = _surfaceCopy['p3BreathFailed'];
       });
       return;
     }
@@ -6833,7 +6833,7 @@ RULES — follow exactly:
           // 말하지 않았다. 빈 파일을 성공한 녹음으로 취급하지 않는다.
           _deleteP3File(recorded ?? path);
           setState(() {
-            _p3Error = 'No speech was detected';
+            _p3Error = _surfaceCopy['p3NoSpeech'];
             _p3Stage = P3Stage.compare;
             _p3UserSpeaking = false;
           });
@@ -6969,7 +6969,7 @@ RULES — follow exactly:
     try {
       if (!await appAudioRecorder.hasPermission()) {
         if (mounted) {
-          setState(() => _p3Error = 'Microphone permission required');
+          setState(() => _p3Error = _surfaceCopy['p3MicRequired']);
         }
         return null;
       }
@@ -6988,7 +6988,8 @@ RULES — follow exactly:
       _p3Recording = true;
       return path;
     } catch (e) {
-      if (mounted) setState(() => _p3Error = 'Could not start recording: $e');
+      debugPrint('[P3-SPEAK] record start failed: $e');
+      if (mounted) setState(() => _p3Error = _surfaceCopy['p3RecordFailed']);
       return null;
     }
   }
@@ -7117,17 +7118,17 @@ RULES — follow exactly:
       case P3Stage.preparing:
         return _surfaceCopy['preparingVoice'];
       case P3Stage.breathListen:
-        return 'Breath ${(_p3BreathIndex + 1).clamp(1, _p3BreathTotal)}/$_p3BreathTotal · Listen';
+        return '${_surfaceCopy['p3Breath']} ${(_p3BreathIndex + 1).clamp(1, _p3BreathTotal)}/$_p3BreathTotal · ${_surfaceCopy['p3Listen']}';
       case P3Stage.breathEcho:
-        return 'Breath ${(_p3BreathIndex + 1).clamp(1, _p3BreathTotal)}/$_p3BreathTotal · Your turn';
+        return '${_surfaceCopy['p3Breath']} ${(_p3BreathIndex + 1).clamp(1, _p3BreathTotal)}/$_p3BreathTotal · ${_surfaceCopy['p3YourTurn']}';
       case P3Stage.fullEchoListen:
-        return 'Listen to the full sentence';
+        return _surfaceCopy['p3FullListen'];
       case P3Stage.fullEchoRecord:
-        return 'Now say it on your own';
+        return _surfaceCopy['p3SayAlone'];
       case P3Stage.fullShadowRecord:
-        return 'Speak along with the AI';
+        return _surfaceCopy['p3SpeakAlong'];
       case P3Stage.compare:
-        return 'Compare the recordings';
+        return _surfaceCopy['p3Compare'];
     }
   }
 
