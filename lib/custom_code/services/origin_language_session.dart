@@ -306,7 +306,7 @@ Future<String?> _judgeLatinOrigin({
           },
           body: jsonEncode(<String, dynamic>{
             'model': kPostProcessModel,
-            'reasoning_effort': kPostProcessReasoningEffort,
+            'reasoning_effort': kLiveTextReasoningEffort,
             'max_completion_tokens': 20,
             'response_format': <String, String>{'type': 'json_object'},
             'messages': <Map<String, String>>[

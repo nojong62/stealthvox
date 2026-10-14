@@ -17,4 +17,8 @@ void main() {
     expect(kPostProcessModel, 'gpt-6-luna');
     expect(kPostProcessReasoningEffort, 'none');
   });
+
+  test('in-conversation text work never reasons — reply speed comes first', () {
+    expect(kLiveTextReasoningEffort, 'none');
+  });
 }

@@ -59,7 +59,7 @@ class SessionRolloverSummary {
               },
               body: jsonEncode(<String, dynamic>{
                 'model': kPostProcessModel,
-                'reasoning_effort': kPostProcessReasoningEffort,
+                'reasoning_effort': kLiveTextReasoningEffort,
                 'max_completion_tokens': 260,
                 'messages': <Map<String, String>>[
                   <String, String>{

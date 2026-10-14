@@ -73,6 +73,13 @@ const String kPostProcessModel = 'gpt-6-luna';
 /// 후처리 `reasoning_effort`. 판정·번역은 첫 토큰이 먼저라 `none`으로 시작한다.
 const String kPostProcessReasoningEffort = 'none';
 
+/// 대화 **도중에** 도는 후처리의 `reasoning_effort`. 유저 턴 번역, 자막용
+/// 원문, 말투 교정, 세션 롤오버 요약, 원문 언어 판정이 본다.
+///
+/// [kPostProcessReasoningEffort]와 **일부러 따로 둔다.** History 품질을 위해
+/// 후처리를 올려도 대화 반응 속도는 흔들리지 않아야 한다. 올리지 말 것.
+const String kLiveTextReasoningEffort = 'none';
+
 // ====================================================================
 // 🗣️ [DUO LIVE TRANSLATION] 통화 중 현재 발화 번역 전용 모델.
 // --------------------------------------------------------------------

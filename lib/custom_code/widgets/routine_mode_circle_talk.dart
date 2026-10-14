@@ -7526,7 +7526,7 @@ ${buildHeardConfirmOutputRule(originLang)}
       });
       request.body = jsonEncode({
         'model': model,
-        'reasoning_effort': kPostProcessReasoningEffort,
+        'reasoning_effort': kLiveTextReasoningEffort,
         'stream': true,
         'max_completion_tokens': 120,
         'messages': [
@@ -7640,7 +7640,7 @@ ${buildHeardConfirmOutputRule(originLang)}
               },
               body: jsonEncode({
                 'model': kPostProcessModel,
-                'reasoning_effort': kPostProcessReasoningEffort,
+                'reasoning_effort': kLiveTextReasoningEffort,
                 'max_completion_tokens': 150,
                 'messages': [
                   {
@@ -7788,7 +7788,7 @@ Update the private memory:'''
             },
             body: jsonEncode({
               'model': kPostProcessModel,
-              'reasoning_effort': kPostProcessReasoningEffort,
+              'reasoning_effort': kLiveTextReasoningEffort,
               'max_completion_tokens': 120,
               'messages': [
                 {
