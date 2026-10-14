@@ -2485,6 +2485,34 @@ class OriginSurfaceCopy {
       'Lettura',
       'Lezen'
     ],
+    'voiceFemale': [
+      'Female',
+      '여성',
+      '女性',
+      '女声',
+      'Femenina',
+      'Féminine',
+      'Weiblich',
+      'महिला',
+      'Женский',
+      'Feminina',
+      'Femminile',
+      'Vrouw'
+    ],
+    'voiceMale': [
+      'Male',
+      '남성',
+      '男性',
+      '男声',
+      'Masculina',
+      'Masculine',
+      'Männlich',
+      'पुरुष',
+      'Мужской',
+      'Masculina',
+      'Maschile',
+      'Man'
+    ],
     'voice': [
       'Voice',
       '목소리',

@@ -47,6 +47,7 @@ import '/custom_code/services/deepgram_prewarm_session.dart'
 import '/custom_code/services/transcript_repair_guard.dart';
 import 'alt_style_popup.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
+import '/custom_code/services/chirp_pause_markup.dart';
 import '/custom_code/services/breath_echoing_engine.dart';
 import '/custom_code/services/breath_segment.dart';
 import '/custom_code/services/p2_voice_styles.dart';
@@ -69,7 +70,7 @@ import '/custom_code/services/pcm_audio_utils.dart'
 
 /// P3가 처음 열릴 때의 보이스. 에코잉이 기본 모드라 그 목록의 첫 칸을 든다 —
 /// 목록에 없는 값을 들고 열면 어느 칸도 켜지지 않은 채 소리만 난다.
-const String _kBreathVoice = 'coral';
+const String _kBreathVoice = _kP3FemaleVoice;
 
 /// 🎵 낭독 패턴. Voice Lab의 Smooth Jazz 한 벌과 달리 **훈련 모드마다**
 /// 갈린다.
@@ -97,23 +98,22 @@ const Color _p3PracticeSurfaceColor = Color(0xFF1C1C1C);
 const Color _p3PracticeBorderColor = Color(0x22FFFFFF);
 const Color _p3BreathAccentColor = Color(0xFF7DD3FC);
 
-/// 🗣️ [P3-VOICE] 모드마다 고를 수 있는 목소리가 다르다.
-///   · 에코잉 — 호흡을 끊어 따라 읽는 연습이라 둘만 둔다.
-///   · 쉐도잉 — 겹쳐 말하는 연습이라 결이 다른 셋을 준다.
-/// 어느 쪽도 성별은 적지 않는다. 캐시 키에 목소리가 들어가므로 목록을 바꿔도
-/// 이미 받아 둔 소리는 그대로 남는다.
-const List<String> _kP3EchoingVoices = <String>['coral', 'alloy', 'nova'];
-const List<String> _kP3ShadowingVoices = <String>['echo', 'ash', 'coral'];
+/// ⚡ [SNAP-ECHO] Snap Echoing의 호흡. 글자를 보지 않고 한 번 듣고 바로 따라
+/// 할 수 있는 길이 — 두세 단어, 1.2초 안쪽 — 로 자른다. 자르는 자리는 여전히
+/// 소리의 무음이다(텍스트는 보지 않는다). 쉐도잉은 기본값을 그대로 쓴다.
+/// 실기기에서 조정할 값이다.
+const BreathAnalysisConfig _kSnapEchoBreathConfig = BreathAnalysisConfig(
+  minBreathMs: 500,
+  maxBreathMs: 1200,
+  minSplitSilenceMs: 60,
+);
 
-/// 한국어 학습 문장은 Gateway에서 Google Chirp 3 HD로 합성한다. OpenAI
-/// 음성 이름을 빌려 성별을 전달하면 일반 Voice 메뉴와 의미가 섞이므로,
-/// provider 경계에서만 쓰는 명시적인 ID를 별도로 둔다.
-const String _kP3KoreanFemaleVoice = 'google-ko-female';
-const String _kP3KoreanMaleVoice = 'google-ko-male';
-const List<String> _kP3KoreanVoices = <String>[
-  _kP3KoreanFemaleVoice,
-  _kP3KoreanMaleVoice,
-];
+/// 🗣️ [P3-VOICE] 에코잉·쉐도잉은 어느 언어든 Chirp 3 HD 대표 목소리 둘 중에서
+/// 고른다. OpenAI 음성 이름을 빌리지 않고 Gateway 전용 ID를 보낸다 — 서버가
+/// 배울 언어의 Aoede(여성) / Charon(남성)으로 바꾼다.
+const String _kP3FemaleVoice = 'google-female';
+const String _kP3MaleVoice = 'google-male';
+const List<String> _kP3Voices = <String>[_kP3FemaleVoice, _kP3MaleVoice];
 
 /// 의미단위 낭독의 공통 뼈대. 무엇을 한 덩어리로 볼지, 덩어리 안을 어떻게
 /// 붙일지까지만 정한다. **덩어리 사이를 어떻게 다룰지는 아래 두 낭독 방식이
@@ -184,14 +184,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   /// 언어 식별값 정규화: 대소문자·앞뒤 공백 차이를 흡수한다.
   String _normLangCode(String v) => v.trim().toLowerCase();
-
-  /// 레거시 문서나 외부 연동에서 언어 코드로 저장된 경우까지 받아들인다.
-  bool get _isKoreanTarget {
-    final target = _normLangCode(_sessionTargetLangName())
-        .replaceAll('_', '-')
-        .replaceAll(' ', '-');
-    return target == 'korean' || target == 'ko' || target == 'ko-kr';
-  }
 
   /// 텍스트 정규화(레거시 fallback 비교용): 대소문자·연속 공백 차이를 흡수한다.
   String _normLangText(String v) =>
@@ -3133,6 +3125,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     String? instructions,
     String? instructionTag,
     String? responseFormat,
+    String? language,
+    String? markup,
   }) async {
     // 🎫 소리를 **새로 만드는** 유일한 자리다. 여기만 막으면 이미 받아 둔
     //   소리는 그대로 들리고, 새 비용만 나가지 않는다.
@@ -3158,7 +3152,19 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                 speed: speed,
                 instructions: instructions,
                 responseFormat: responseFormat,
-              )..['model'] = resolvedModel,
+                // History의 소리는 배울 언어 문장이다. 한글이 섞이면
+                // Gateway가 한국어로 읽는다.
+                language: language ?? _sessionTargetLangName(),
+              )
+                ..['model'] = resolvedModel
+                // Chirp 전용. 같은 문장에 pause 태그를 얹은 것이다.
+                ..addAll({
+                  if (markup != null && markup.trim().isNotEmpty)
+                    'markup': markup.trim(),
+                  // 표현형 프로필은 speed를 싣지 않는다. 1이 아니면 직접
+                  // 싣는다 — Chirp은 speaking_rate로 받는다.
+                  if (speed != 1.0) 'speed': speed,
+                }),
             ),
           )
           // PCM은 mp3보다 응답이 커서 10초로는 모자랄 수 있다.
@@ -6291,12 +6297,13 @@ RULES — follow exactly:
           ? 'NATURAL & SHARP'
           : 'CLEAR & EASY';
 
-  /// 🚧 Shadow 여유. **말하는 속도를 바꾸는 게 아니다** — AI의 발음·억양·속도는
-  /// 그대로 두고 **호흡 사이 빈 자리만** 늘린다. 실기기에서 조정한다.
-  static const Map<P3ShadowGap, int> _kP3ShadowGapMs = <P3ShadowGap, int>{
-    P3ShadowGap.tight: 300,
-    P3ShadowGap.normal: 500,
-    P3ShadowGap.relaxed: 800,
+  /// 쉐도잉 호흡 사이의 여유. Chirp이 문장부호 뒤 태그 자리에서 직접 쉰다.
+  /// 말하는 속도는 바꾸지 않는다.
+  static const Map<P3ShadowGap, ChirpPause> _kP3ShadowPause =
+      <P3ShadowGap, ChirpPause>{
+    P3ShadowGap.tight: ChirpPause.short,
+    P3ShadowGap.normal: ChirpPause.medium,
+    P3ShadowGap.relaxed: ChirpPause.long,
   };
 
   static const Map<P3ShadowGap, String> _kP3ShadowGapLabel =
@@ -6305,6 +6312,9 @@ RULES — follow exactly:
     P3ShadowGap.normal: 'Normal',
     P3ShadowGap.relaxed: 'Relaxed',
   };
+
+  /// ⚡ [SNAP-ECHO] 낭독 속도. Gateway가 Chirp의 speaking_rate로 넘긴다.
+  static const List<double> _kSnapEchoSpeeds = <double>[0.85, 0.95, 1.0];
 
   /// 🚧 P3 전용 timing. **다른 모드의 VAD 값과 무관하다.** 최종값 아님.
   static const int _kP3EchoSilenceMs = 1800;
@@ -6326,6 +6336,7 @@ RULES — follow exactly:
   int _p3BreathIndex = 0;
   int _p3BreathTotal = 0;
   P3ShadowGap _p3Gap = P3ShadowGap.normal;
+  double _p3EchoSpeed = 1.0;
   String? _p3EchoPath;
   String? _p3ShadowPath;
   String? _p3Error;
@@ -6369,7 +6380,8 @@ RULES — follow exactly:
       _p3Recording ||
       _p3Player != null;
 
-  int get _p3GapMs => _kP3ShadowGapMs[_p3Gap] ?? 500;
+  ChirpPause get _p3ShadowPause =>
+      _kP3ShadowPause[_p3Gap] ?? ChirpPause.medium;
 
   bool _p3Alive(int generation) =>
       mounted &&
@@ -6664,7 +6676,12 @@ RULES — follow exactly:
       });
       return;
     }
-    final analysis = analyzeBreaths(pcm, const BreathAnalysisConfig());
+    final analysis = analyzeBreaths(
+      pcm,
+      _p3PracticeMode == P3PracticeMode.echoing
+          ? _kSnapEchoBreathConfig
+          : const BreathAnalysisConfig(),
+    );
     if (analysis.segments.isEmpty) {
       setState(() {
         _p3Stage = P3Stage.idle;
@@ -6704,21 +6721,29 @@ RULES — follow exactly:
   Future<Uint8List?> _getP3OriginalPcm(String text) {
     final voice = _p3Voice;
     final style = _p3StyleFor(_p3PracticeMode);
-    final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3';
+    final bool shadowing = _p3PracticeMode == P3PracticeMode.shadowing;
+    final ChirpPause pause = _p3ShadowPause;
+    final double speed = shadowing ? 1.0 : _p3EchoSpeed;
+    // 쉐도잉은 고른 간격마다, Snap Echoing은 고른 속도마다 소리가 다르다 —
+    // 캐시 칸도 따로 선다.
+    final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3'
+        '${shadowing ? '_${pause.name}' : '_x$speed'}';
     final requestKey = '$ns|$text';
     final existing = _breathPcmInFlight[requestKey];
     if (existing != null) return existing;
     final future = () async {
       final cached = await TtsCache.get(text, ns);
       if (cached != null && cached.length > 44) return pcmFromWav(cached);
+      // 낭독 지시(instructions)는 보내지 않는다 — 지시가 붙으면 Gateway가
+      // 표현형으로 보고 Chirp 3 HD가 아닌 OpenAI로 넘긴다.
       final raw = await _fetchOpenAITTSInternal(
         text,
-        1.0,
+        speed,
         voice,
         model: _historyPracticeTtsModel,
-        instructions: style.instruction,
         instructionTag: '${style.id}_p3',
         responseFormat: 'pcm',
+        markup: shadowing ? chirpPauseMarkup(text, pause) : null,
       );
       if (raw == null || raw.isEmpty) return null;
       await TtsCache.put(
@@ -6825,7 +6850,8 @@ RULES — follow exactly:
     );
   }
 
-  /// 호흡 사이만 [_p3GapMs]만큼 벌린 AI와 **동시에** 말한다.
+  /// 호흡 사이를 [_p3ShadowPause] 태그로 쉬어 읽은 AI와 **동시에** 말한다.
+  /// 간격은 TTS가 이미 넣어 왔으므로 소리를 더 손대지 않는다.
   ///
   /// **recorder를 먼저 연 뒤 재생을 시작한다** — 반대로 하면 첫 음절이 잘린다.
   /// 발화 감지로 폐기하지 않는다: 스피커 소리가 마이크에 들어와 유저 목소리와
@@ -6837,19 +6863,13 @@ RULES — follow exactly:
     await _stopP3Playback();
     if (mounted) setState(() => _p3Error = null);
 
-    final gapped = buildGappedPcm(
-      pcm,
-      _p3Segments,
-      extraGapMs: _p3GapMs,
-      sampleRate: kStealthVoxSttSampleRate,
-    );
     final path = await _startP3Recording('shadow');
     if (!_p3Alive(generation) || path == null) {
       await _stopP3Recording();
       return;
     }
     _setP3Stage(P3Stage.fullShadowRecord);
-    await _playP3Pcm(gapped, generation);
+    await _playP3Pcm(pcm, generation);
     if (!_p3Alive(generation)) {
       await _stopP3Recording();
       return;
@@ -7131,19 +7151,19 @@ RULES — follow exactly:
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // ── 메뉴 ── 첫 화면에서도, 연습 중에도 같은 자리에 있다.
-              if (_isKoreanTarget)
-                _buildP3KoreanVoiceSelector()
-              else
-                _buildP3VoiceSelector(),
+              _buildP3VoiceSelector(),
               const SizedBox(height: 10),
               _buildP3PracticeModePicker(),
               const SizedBox(height: 14),
               // 라벨만 있으면 갈아타도 점 하나 옮겨진 것 말고는 달라진 게
               // 없어 보인다. 어느 문장으로 가는지 글자로 보여 준다.
-              _buildP3VariantPicker(showPreview: true),
+              _buildP3VariantPicker(),
               if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
                 const SizedBox(height: 12),
                 _buildP3GapPicker(),
+              ] else ...[
+                const SizedBox(height: 12),
+                _buildP3EchoSpeedPicker(),
               ],
 
               // 오류는 연습이 시작되지 못했을 때도 보여야 하므로 밖에 둔다.
@@ -7315,7 +7335,7 @@ RULES — follow exactly:
                 const SizedBox(width: 7),
                 Text(
                   _p3PracticeMode == P3PracticeMode.echoing
-                      ? 'ECHOING'
+                      ? 'SNAP ECHOING'
                       : 'SHADOWING',
                   style: TextStyle(
                     color: inBreathEcho ? _p3BreathAccentColor : Colors.white38,
@@ -7416,14 +7436,16 @@ RULES — follow exactly:
             ),
           ),
           const SizedBox(width: 12),
-          // 남는 폭을 똑같이 나눠 갖는다. 모드에 따라 둘이 되었다 셋이 되는데,
-          // 글자 폭에 맡기면 글꼴을 키운 기기에서 줄이 넘친다.
+          // 남는 폭을 똑같이 나눠 갖는다. 글자 폭에 맡기면 글꼴을 키운
+          // 기기에서 줄이 넘친다.
           for (int i = 0; i < voices.length; i++) ...[
             if (i > 0) const SizedBox(width: 8),
             Expanded(
               child: _buildP3VoiceChip(
                 id: voices[i],
-                label: voices[i],
+                label: voices[i] == _kP3MaleVoice
+                    ? _surfaceCopy['voiceMale']
+                    : _surfaceCopy['voiceFemale'],
                 enabled: enabled,
               ),
             ),
@@ -7433,61 +7455,8 @@ RULES — follow exactly:
     );
   }
 
-  /// 🇰🇷 타겟이 한국어일 때만 보이는 Google 전용 음성 메뉴.
-  ///
-  /// 일반 Voice 칸과 분리해 `coral` 같은 OpenAI 이름이 Google 성별 선택처럼
-  /// 보이지 않게 한다. 실제 provider voice 이름은 서버가 이 ID를 받아
-  /// Aoede(여성) / Charon(남성)으로 매핑한다.
-  Widget _buildP3KoreanVoiceSelector() {
-    final enabled = !_p3Busy;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.035),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _p3ShadowingAccentColor.withValues(alpha: 0.34),
-        ),
-      ),
-      child: Row(
-        children: [
-          const Text(
-            '한글 소리',
-            style: TextStyle(
-              color: Colors.white54,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.3,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _buildP3VoiceChip(
-              id: _kP3KoreanFemaleVoice,
-              label: 'Google 여성',
-              enabled: enabled,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _buildP3VoiceChip(
-              id: _kP3KoreanMaleVoice,
-              label: 'Google 남성',
-              enabled: enabled,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   /// 지금 모드에서 고를 수 있는 목소리.
-  List<String> get _p3VoiceChoices {
-    if (_isKoreanTarget) return _kP3KoreanVoices;
-    return _p3PracticeMode == P3PracticeMode.echoing
-        ? _kP3EchoingVoices
-        : _kP3ShadowingVoices;
-  }
+  List<String> get _p3VoiceChoices => _kP3Voices;
 
   /// 모드를 바꾸면 목소리도 그 모드의 것으로 맞춘다. 남의 모드 목소리가 그대로
   /// 남으면 어느 칸도 켜지지 않은 채 그 목소리로 소리가 난다.
@@ -7592,7 +7561,9 @@ RULES — follow exactly:
                   ),
                 ),
                 child: Text(
-                  mode == P3PracticeMode.echoing ? 'Echoing' : 'Shadowing',
+                  mode == P3PracticeMode.echoing
+                      ? 'Snap Echoing'
+                      : 'Shadowing',
                   style: TextStyle(
                     color:
                         _p3PracticeMode == mode ? Colors.white : Colors.white54,
@@ -7613,33 +7584,24 @@ RULES — follow exactly:
 
   /// P3의 두 학습 문장. 단순 label만 보여 주면 문장을 바꾸고도
   /// 무엇을 골랐는지 알기 어려워 짧은 preview를 함께 보여 준다.
-  Widget _buildP3VariantPicker({required bool showPreview}) {
+  Widget _buildP3VariantPicker() {
     return Column(
       children: [
         for (final variant in SentenceVariant.values) ...[
-          _buildP3VariantCard(variant, showPreview: showPreview),
+          _buildP3VariantCard(variant),
           if (variant != SentenceVariant.values.last) const SizedBox(height: 8),
         ],
       ],
     );
   }
 
-  Widget _buildP3VariantCard(
-    SentenceVariant variant, {
-    required bool showPreview,
-  }) {
-    final available = _p3VariantAvailable(variant);
+  Widget _buildP3VariantCard(SentenceVariant variant) {
     final building = variant == SentenceVariant.nativeEnglish
         ? _isBuildingNativeEnglish
         : _isBuildingMySpeech;
     final selected = _selectedVariant == variant;
-    final sentence = _speechFor(variant).trim();
-    // 아직 없는 문장이라고 잠그지 않는다 — 누르면 그 자리에서 만든다.
-    final String? note = building
-        ? '만드는 중…'
-        : !available
-            ? '눌러서 만들기'
-            : (showPreview ? sentence : null);
+    // 제목만 둔다. 아직 없는 문장이라고 잠그지 않는다 — 누르면 그 자리에서
+    // 만들고, 만드는 동안은 제목 옆에 도는 표시가 뜬다.
     return InkWell(
       onTap: building || _p3VariantSwitching
           ? null
@@ -7699,34 +7661,80 @@ RULES — follow exactly:
                 ],
               ],
             ),
-            if (note != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                note,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color:
-                      available && !building ? Colors.white54 : Colors.white38,
-                  fontSize: 11.5,
-                  height: 1.35,
-                ),
-              ),
-            ],
           ],
         ),
       ),
     );
   }
 
-  /// gap 3단계. **API를 다시 부르지 않는다** — 같은 PCM을 다시 조립할 뿐이다.
+  /// ⚡ [SNAP-ECHO] 속도 고르기. 간격 고르기와 같은 생김새다.
+  Widget _buildP3EchoSpeedPicker() {
+    return Row(
+      children: [
+        for (final speed in _kSnapEchoSpeeds) ...[
+          Expanded(
+            child: InkWell(
+              // 속도가 바뀌면 소리 자체가 달라진다. 받아 둔 소리와 호흡
+              // 경계를 버리고 다음 Start에서 그 속도로 다시 받는다.
+              onTap: _p3Busy || _p3EchoSpeed == speed
+                  ? null
+                  : () => setState(() {
+                        _p3EchoSpeed = speed;
+                        _p3FullPcm = null;
+                        _p3Segments = const <BreathSegment>[];
+                      }),
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                height: 38,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _p3EchoSpeed == speed
+                      ? _p3ShadowingAccentColor.withValues(alpha: 0.20)
+                      : Colors.white.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: _p3EchoSpeed == speed
+                        ? _p3ShadowingAccentColor
+                        : Colors.white24,
+                    width: _p3EchoSpeed == speed ? 1.4 : 1,
+                  ),
+                ),
+                child: Text(
+                  '${speed == 1.0 ? '1' : speed}x',
+                  style: TextStyle(
+                    color: _p3EchoSpeed == speed
+                        ? _p3ShadowingAccentColor
+                        : Colors.white60,
+                    fontSize: 12,
+                    fontWeight: _p3EchoSpeed == speed
+                        ? FontWeight.bold
+                        : FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (speed != _kSnapEchoSpeeds.last) const SizedBox(width: 6),
+        ],
+      ],
+    );
+  }
+
   Widget _buildP3GapPicker() {
     return Row(
       children: [
         for (final gap in P3ShadowGap.values) ...[
           Expanded(
             child: InkWell(
-              onTap: _p3Busy ? null : () => setState(() => _p3Gap = gap),
+              // 간격이 바뀌면 소리 자체가 달라진다. 받아 둔 소리와 호흡
+              // 경계를 버리고 다음 Start에서 그 간격으로 다시 받는다.
+              onTap: _p3Busy || _p3Gap == gap
+                  ? null
+                  : () => setState(() {
+                        _p3Gap = gap;
+                        _p3FullPcm = null;
+                        _p3Segments = const <BreathSegment>[];
+                      }),
               borderRadius: BorderRadius.circular(10),
               child: Container(
                 height: 38,
@@ -8431,8 +8439,7 @@ RULES — follow exactly:
         _showRetryHint = false;
         _currentChunkIdx = -1;
         _phase = ShadowingPhase.chunkPractice;
-        // 한국어 타겟은 일반 OpenAI Voice가 아니라 별도 Google Voice 메뉴를
-        // 사용한다. 첫 진입에서도 어느 칸도 선택되지 않은 상태가 없게 맞춘다.
+        // 첫 진입에서도 어느 칸도 선택되지 않은 상태가 없게 맞춘다.
         _coerceP3VoiceForMode();
         // 🎤 [P3-SPEAK] 새 세션으로 연다. 이전 녹음은 남기지 않는다 —
         //   AI 원본 TTS 캐시는 그대로 재사용된다.

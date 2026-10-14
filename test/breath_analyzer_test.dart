@@ -100,6 +100,56 @@ void main() {
       _assertInvariants(result);
     });
 
+    test('maxBreathMs를 넘는 호흡은 안의 가장 긴 무음에서 쪼개진다', () {
+      final pcm = _concat([
+        _speech(640),
+        _silence(80), // 호흡 경계(180) 미만 — 단어 사이 틈
+        _speech(640),
+        _silence(120), // 가장 긴 틈 → 여기서 자른다
+        _speech(640),
+      ]);
+      const cfg = BreathAnalysisConfig(
+        minSilenceMs: 180,
+        minBreathMs: 500,
+        maxBreathMs: 1400,
+        minSplitSilenceMs: 60,
+      );
+      final result = analyzeBreaths(pcm, cfg);
+      expect(result.segments.length, 2);
+      // 첫 조각은 앞의 두 단어(640+80+640)다. 1400 안쪽이라 더 쪼개지 않는다.
+      expect(result.segments.first.speechEndMs, 1360);
+      _assertInvariants(result);
+
+      // 끄면 한 덩어리 그대로다.
+      final off = analyzeBreaths(pcm, cfg.copyWith(maxBreathMs: 0));
+      expect(off.segments.length, 1);
+    });
+
+    test('쪼갤 무음이 없으면 maxBreathMs를 넘어도 자르지 않는다', () {
+      final pcm = _concat([_speech(3000)]);
+      final result = analyzeBreaths(
+        pcm,
+        const BreathAnalysisConfig(minBreathMs: 500, maxBreathMs: 1400),
+      );
+      expect(result.segments.length, 1);
+      _assertInvariants(result);
+    });
+
+    test('쪼갠 조각은 minBreathMs보다 짧아지지 않는다', () {
+      final pcm = _concat([
+        _speech(300),
+        _silence(150),
+        _speech(1500),
+      ]);
+      final result = analyzeBreaths(
+        pcm,
+        const BreathAnalysisConfig(
+            minSilenceMs: 180, minBreathMs: 500, maxBreathMs: 1400),
+      );
+      expect(result.segments.length, 1);
+      _assertInvariants(result);
+    });
+
     test('minBreathMs보다 짧은 조각은 이웃과 merge된다', () {
       // 300ms짜리 조각이 앞뒤로 긴 무음에 둘러싸여 있어도 살아남으면 안 된다.
       final pcm = _concat([

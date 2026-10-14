@@ -65,6 +65,8 @@ class BreathAnalysisConfig {
     this.minSilenceMs = 180,
     this.minBreathMs = 900,
     this.padMs = 80,
+    this.maxBreathMs = 0,
+    this.minSplitSilenceMs = 60,
     this.frameMs = 20,
     this.meanAbsThreshold = 180,
     this.peakThreshold = 1200,
@@ -80,6 +82,15 @@ class BreathAnalysisConfig {
   /// 경계 앞뒤로 남길 여유. 음절이 잘리는 것을 막는다.
   final int padMs;
 
+  /// 이보다 긴 호흡은 **그 안의 가장 긴 무음**에서 다시 쪼갠다. 0이면 끈다.
+  /// 쪼갠 양쪽은 [minBreathMs]보다 짧아지지 않는다. 쪼갤 무음이 없으면 길어도
+  /// 그대로 둔다 — 소리 한가운데를 자르지 않는다.
+  final int maxBreathMs;
+
+  /// [maxBreathMs]로 쪼갤 때 경계로 쓸 수 있는 가장 짧은 무음. 호흡 경계
+  /// ([minSilenceMs])보다 짧은, 단어 사이의 틈까지 본다.
+  final int minSplitSilenceMs;
+
   final int frameMs;
   final int meanAbsThreshold;
   final int peakThreshold;
@@ -89,11 +100,15 @@ class BreathAnalysisConfig {
     int? minSilenceMs,
     int? minBreathMs,
     int? padMs,
+    int? maxBreathMs,
+    int? minSplitSilenceMs,
   }) =>
       BreathAnalysisConfig(
         minSilenceMs: minSilenceMs ?? this.minSilenceMs,
         minBreathMs: minBreathMs ?? this.minBreathMs,
         padMs: padMs ?? this.padMs,
+        maxBreathMs: maxBreathMs ?? this.maxBreathMs,
+        minSplitSilenceMs: minSplitSilenceMs ?? this.minSplitSilenceMs,
         frameMs: frameMs,
         meanAbsThreshold: meanAbsThreshold,
         peakThreshold: peakThreshold,
@@ -155,6 +170,7 @@ bool isVoicedPcmFrame(
 ///   ② 발성 run 추출
 ///   ③ [BreathAnalysisConfig.minSilenceMs]보다 짧은 무음은 흡수
 ///   ④ [BreathAnalysisConfig.minBreathMs]보다 짧은 구간은 이웃과 merge
+///   ④-b [BreathAnalysisConfig.maxBreathMs]보다 긴 구간은 안의 가장 긴 무음에서 split
 ///   ⑤ padding 적용(무음을 나눠 갖는다 — 겹치지 않는다)
 ///   ⑥ [0, totalMs]로 clamp
 BreathAnalysis analyzeBreaths(Uint8List pcm, BreathAnalysisConfig cfg) {
@@ -228,6 +244,42 @@ BreathAnalysis analyzeBreaths(Uint8List pcm, BreathAnalysisConfig cfg) {
     final int hi = math.max(shortIdx, target);
     merged[lo] = <int>[merged[lo][0], merged[hi][1]];
     merged.removeAt(hi);
+  }
+
+  // ④-b 너무 긴 구간 split. ③에서 흡수된 짧은 무음(단어 사이 틈)까지
+  //    후보로 보고, 그중 **가장 긴 무음**에서 자른다 — 가장 자연스러운
+  //    끊김이다. 여전히 소리만 본다.
+  if (cfg.maxBreathMs > 0) {
+    final splitGaps = <List<int>>[];
+    for (int i = 1; i < runs.length; i++) {
+      final int gapStart = runs[i - 1][1];
+      final int gapEnd = runs[i][0];
+      if (gapEnd - gapStart >= cfg.minSplitSilenceMs) {
+        splitGaps.add(<int>[gapStart, gapEnd]);
+      }
+    }
+    int i = 0;
+    while (i < merged.length) {
+      final int segStart = merged[i][0];
+      final int segEnd = merged[i][1];
+      if (segEnd - segStart <= cfg.maxBreathMs) {
+        i++;
+        continue;
+      }
+      List<int>? best;
+      for (final gap in splitGaps) {
+        if (gap[0] - segStart < cfg.minBreathMs) continue;
+        if (segEnd - gap[1] < cfg.minBreathMs) continue;
+        if (best == null || gap[1] - gap[0] > best[1] - best[0]) best = gap;
+      }
+      if (best == null) {
+        i++;
+        continue;
+      }
+      // 왼쪽 조각은 같은 i에서 다시 본다. 조각은 매번 짧아지므로 끝난다.
+      merged[i] = <int>[segStart, best[0]];
+      merged.insert(i + 1, <int>[best[1], segEnd]);
+    }
   }
 
   // ⑤ padding. 무음을 지우지 않고 앞뒤가 나눠 갖는다.
