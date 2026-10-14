@@ -6284,21 +6284,9 @@ RULES — follow exactly:
           ? 'NATURAL & SHARP'
           : 'CLEAR & EASY';
 
-  /// 쉐도잉 호흡 사이의 여유. Chirp이 문장부호 뒤 태그 자리에서 직접 쉰다.
-  /// 말하는 속도는 바꾸지 않는다.
-  static const Map<P3ShadowGap, ChirpPause> _kP3ShadowPause =
-      <P3ShadowGap, ChirpPause>{
-    P3ShadowGap.tight: ChirpPause.short,
-    P3ShadowGap.normal: ChirpPause.medium,
-    P3ShadowGap.relaxed: ChirpPause.long,
-  };
-
-  static const Map<P3ShadowGap, String> _kP3ShadowGapLabel =
-      <P3ShadowGap, String>{
-    P3ShadowGap.tight: 'Tight',
-    P3ShadowGap.normal: 'Normal',
-    P3ShadowGap.relaxed: 'Relaxed',
-  };
+  /// 쉐도잉 호흡 사이의 여유. Chirp이 문장부호 뒤 `[pause]` 자리에서 직접
+  /// 쉰다. 고르는 칸은 없다 — 고르는 것은 속도뿐이다.
+  static const ChirpPause _p3ShadowPause = ChirpPause.medium;
 
   /// 낭독 속도. Gateway가 Chirp의 speaking_rate로 넘긴다.
   /// ⚡ Snap Echoing은 고정, 쉐도잉은 셋 중에서 고른다.
@@ -6324,7 +6312,6 @@ RULES — follow exactly:
   List<BreathSegment> _p3Segments = const <BreathSegment>[];
   int _p3BreathIndex = 0;
   int _p3BreathTotal = 0;
-  P3ShadowGap _p3Gap = P3ShadowGap.normal;
   double _p3ShadowSpeed = 0.88;
   String? _p3EchoPath;
   String? _p3ShadowPath;
@@ -6369,8 +6356,6 @@ RULES — follow exactly:
       _p3Recording ||
       _p3Player != null;
 
-  ChirpPause get _p3ShadowPause =>
-      _kP3ShadowPause[_p3Gap] ?? ChirpPause.medium;
 
   bool _p3Alive(int generation) =>
       mounted &&
@@ -6711,7 +6696,7 @@ RULES — follow exactly:
     final voice = _p3Voice;
     final style = _p3StyleFor(_p3PracticeMode);
     final bool shadowing = _p3PracticeMode == P3PracticeMode.shadowing;
-    final ChirpPause pause = _p3ShadowPause;
+    const ChirpPause pause = _p3ShadowPause;
     final double speed = shadowing ? _p3ShadowSpeed : _kSnapEchoSpeed;
     // 쉐도잉은 고른 간격·속도마다 소리가 다르다 — 캐시 칸도 따로 선다.
     final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3'
@@ -7148,8 +7133,6 @@ RULES — follow exactly:
               _buildP3VariantPicker(),
               if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
                 const SizedBox(height: 12),
-                _buildP3GapPicker(),
-                const SizedBox(height: 8),
                 _buildP3ShadowSpeedPicker(),
               ],
 
@@ -7702,57 +7685,6 @@ RULES — follow exactly:
             ),
           ),
           if (speed != _kShadowSpeeds.last) const SizedBox(width: 6),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildP3GapPicker() {
-    return Row(
-      children: [
-        for (final gap in P3ShadowGap.values) ...[
-          Expanded(
-            child: InkWell(
-              // 간격이 바뀌면 소리 자체가 달라진다. 받아 둔 소리와 호흡
-              // 경계를 버리고 다음 Start에서 그 간격으로 다시 받는다.
-              onTap: _p3Busy || _p3Gap == gap
-                  ? null
-                  : () => setState(() {
-                        _p3Gap = gap;
-                        _p3FullPcm = null;
-                        _p3Segments = const <BreathSegment>[];
-                      }),
-              borderRadius: BorderRadius.circular(10),
-              child: Container(
-                height: 38,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: _p3Gap == gap
-                      ? _p3ShadowingAccentColor.withValues(alpha: 0.20)
-                      : Colors.white.withValues(alpha: 0.04),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: _p3Gap == gap
-                        ? _p3ShadowingAccentColor
-                        : Colors.white24,
-                    width: _p3Gap == gap ? 1.4 : 1,
-                  ),
-                ),
-                child: Text(
-                  _kP3ShadowGapLabel[gap] ?? '',
-                  style: TextStyle(
-                    color: _p3Gap == gap
-                        ? _p3ShadowingAccentColor
-                        : Colors.white60,
-                    fontSize: 12,
-                    fontWeight:
-                        _p3Gap == gap ? FontWeight.bold : FontWeight.w500,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          if (gap != P3ShadowGap.values.last) const SizedBox(width: 6),
         ],
       ],
     );
@@ -8579,9 +8511,6 @@ enum P3Stage {
   fullShadowRecord,
   compare,
 }
-
-/// 🎤 [P3-SPEAK] 쉐도잉 여유. **속도가 아니라 호흡 사이 공간이다.**
-enum P3ShadowGap { tight, normal, relaxed }
 
 class PracticeChunk {
   final String text;
