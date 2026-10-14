@@ -24,8 +24,8 @@
 
 /// ② 듀오 통화 정돈(canonical reconciliation).
 ///
-/// 2026-08-28: `gpt-4o-mini` → `gpt-4.1-mini` 시험 중.
-const String kDuoCanonicalModel = 'gpt-4.1-mini';
+/// 2026-10-14: gpt-4.1-mini(2027-01-14 종료) → `gpt-6-luna` + [kHistoryTextReasoningEffort].
+const String kDuoCanonicalModel = 'gpt-6-luna';
 
 /// ②-a 통화 원문 문맥 교정(Duo Direct).
 ///
@@ -40,7 +40,16 @@ const String kDuoOriginCorrectorModel = 'gpt-6-luna';
 /// ③ 공부방 원문 교정 + 배울글.
 ///
 /// ②와 **일부러 따로 둔다.** 지금은 값이 같지만, 한쪽만 되돌릴 수 있어야 한다.
-const String kHistoryRepairModel = 'gpt-4.1-mini';
+/// 2026-10-14: gpt-4.1-mini(2027-01-14 종료) → `gpt-6-luna`.
+const String kHistoryRepairModel = 'gpt-6-luna';
+
+/// ②③과 학습용 문장 생성의 `reasoning_effort`. 통화·대화가 끝난 뒤에 도는
+/// 일이라 지연보다 문맥 해석이 먼저다. 대화 중에 도는 후처리는
+/// [kLiveTextReasoningEffort]를 본다 — 이 값을 거기로 옮기지 말 것.
+///
+/// 추론 토큰도 `max_completion_tokens`에서 나간다. 각 호출부는 옛
+/// `max_tokens`의 약 2.5배를 주고, 바닥나면 `[COMPLETION-BUDGET]`이 찍힌다.
+const String kHistoryTextReasoningEffort = 'low';
 
 /// Circle Talk History의 원문 복원 필요 여부를 먼저 가르는 Decisions 모델.
 ///

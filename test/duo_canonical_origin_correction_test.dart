@@ -194,10 +194,12 @@ void main() {
     });
 
     test('교정 모델은 구조 판정 모델과 다른 상수다', () {
+      // 2026-10-14부터 셋 다 gpt-6-luna다(gpt-4.1-mini 종료). **값**이 같아도
+      // 상수는 갈라 둔다 — 한쪽만 바꿔 비교할 수 있어야 한다.
       expect(kDuoOriginCorrectorModel, 'gpt-6-luna');
-      expect(kDuoOriginCorrectorModel, isNot(kDuoCanonicalModel));
-      expect(kDuoOriginCorrectorModel, isNot(kHistoryRepairModel));
       expect(src, contains('String correctorModel = kDuoOriginCorrectorModel'));
+      expect(src, isNot(contains('correctorModel = kDuoCanonicalModel')));
+      expect(src, isNot(contains('correctorModel = kHistoryRepairModel')));
     });
 
     test('교정 실패가 canonical을 무너뜨리지 않는다', () {

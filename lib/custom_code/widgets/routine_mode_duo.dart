@@ -29,6 +29,7 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 // 이름이 겹쳐 `kDebugMode`가 그냥은 안 잡히므로 접두사로 가져온다.
 import 'package:flutter/foundation.dart' as foundation;
 import '/custom_code/services/transcript_text_clean.dart';
+import '/custom_code/services/completion_budget.dart';
 import '/custom_code/services/duo_direct_audio.dart';
 import '/custom_code/services/duo_partner_echo.dart';
 import '/custom_code/services/duo_call_resolution.dart';
@@ -8812,8 +8813,8 @@ Return strict JSON only:
             },
             body: jsonEncode({
               'model': kDuoCanonicalModel,
-              'temperature': 0.1,
-              'max_tokens': 2400,
+              'reasoning_effort': kHistoryTextReasoningEffort,
+              'max_completion_tokens': 6000,
               'response_format': {'type': 'json_object'},
               'messages': [
                 {'role': 'system', 'content': prompt},
@@ -8830,6 +8831,7 @@ Return strict JSON only:
         return null;
       }
       final body = jsonDecode(utf8.decode(response.bodyBytes));
+      logCompletionBudget('[Duo][DirectCurate]', body);
       final content = body['choices']?[0]?['message']?['content']?.toString();
       if (content == null || content.trim().isEmpty) return null;
       final decoded = jsonDecode(_cleanJsonString(content));

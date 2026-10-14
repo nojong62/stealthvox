@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'duo_origin_corrector.dart';
 import 'duo_study_state.dart';
 import 'history_finalize.dart';
+import 'completion_budget.dart';
 import 'history_text_model.dart';
 import 'origin_restoration.dart' show kMessagePcmKeyField;
 
@@ -542,8 +543,8 @@ Future<List<DuoCanonicalTurn>?> reconcileDuoConversation({
           },
           body: jsonEncode(<String, dynamic>{
             'model': model,
-            'temperature': 0.1,
-            'max_tokens': 4000,
+            'reasoning_effort': kHistoryTextReasoningEffort,
+            'max_completion_tokens': 10000,
             'response_format': <String, String>{'type': 'json_object'},
             'messages': <Map<String, String>>[
               <String, String>{'role': 'system', 'content': _canonicalPrompt},
@@ -557,6 +558,7 @@ Future<List<DuoCanonicalTurn>?> reconcileDuoConversation({
       return null;
     }
     final body = jsonDecode(utf8.decode(response.bodyBytes));
+    logCompletionBudget('[DUO-CANON]', body);
     final content = body['choices']?[0]?['message']?['content']?.toString();
     if (content == null || content.trim().isEmpty) return null;
     final decoded = jsonDecode(content);

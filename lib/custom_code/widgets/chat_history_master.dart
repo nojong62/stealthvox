@@ -21,6 +21,7 @@ import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:record/record.dart';
+import '/custom_code/services/completion_budget.dart';
 import '/custom_code/services/transcript_text_clean.dart';
 import '/custom_code/services/mic_record_config.dart';
 import 'package:audioplayers/audioplayers.dart' hide Source;
@@ -1775,8 +1776,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
               },
               body: jsonEncode(<String, dynamic>{
                 'model': kHistoryRepairModel,
-                'temperature': 0.0,
-                'max_tokens': 220,
+                'reasoning_effort': kHistoryTextReasoningEffort,
+                'max_completion_tokens': 1000,
                 'response_format': <String, String>{'type': 'json_object'},
                 'messages': <Map<String, String>>[
                   <String, String>{
@@ -1826,6 +1827,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         }
         final body =
             jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+        logCompletionBudget('[HISTORY-TARGET]', body);
         final choices = body['choices'] as List? ?? const <dynamic>[];
         final firstChoice =
             choices.isEmpty ? null : choices.first as Map<String, dynamic>?;
