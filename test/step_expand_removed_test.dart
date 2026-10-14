@@ -75,29 +75,23 @@ void main() {
     test('유저에게 보이는 이름은 PRACTICE · Clear & Easy · Natural & Sharp다', () {
       // 2026-09-08 뒤 두 카드가 화자 라벨을 쓴다. 저장 칸(`my_speech` /
       // `native_english`)은 그대로이고 화면 이름만 바뀌었다.
-      expect(history, contains('"Clear & Easy"'));
-      expect(history, contains('"Natural & Sharp"'));
+      expect(history, contains('"CLEAR & EASY"'));
+      expect(history, contains('"NATURAL & SHARP"'));
       expect(history, contains('"Practice"'));
     });
 
-    test('카드 윗줄은 어떤 화자를 기준으로 만든 영어인지 밝힌다', () {
-      expect(history, contains('Larry King–style Plain Spoken English'));
-      expect(
-        history,
-        contains('Trevor Noah–style Natural Conversational English'),
-      );
+    test('두 발화 카드는 제목만 둔다 — 인물 윗줄·미리보기가 없다', () {
+      // 2026-10-14 실장님 지시. 생성 프롬프트의 reference persona는 그대로다.
+      expect(history, isNot(contains('Larry King–style Plain Spoken English')));
+      expect(history,
+          isNot(contains('Trevor Noah–style Natural Conversational English')));
+      expect(history, isNot(contains('preview: _mySpeech')));
+      expect(history, isNot(contains('preview: _nativeEnglish')));
     });
 
     test('옛 Anderson 결과를 Trevor 기준 결과로 다시 만든다', () {
       expect(history, contains('natural_sharp_trevor_v1'));
       expect(history, contains('native_english_schema_version'));
-    });
-
-    test('British를 고른 방에서는 인물 이름을 감춘다', () {
-      // 영국 영어를 고른 사람에게 미국 인물을 내걸면 카드가 제 내용과
-      // 어긋나 보인다. **표시만 접고 프롬프트는 그대로다.**
-      expect(history, contains('_hidesPersonaNames'));
-      expect(history, contains("== 'British'"));
     });
 
     test('옛 카드 이름은 화면에서 사라졌다', () {

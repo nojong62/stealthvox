@@ -5269,8 +5269,8 @@ RULES — follow exactly:
   //   뒤 둘의 저장 칸은 여전히 `my_speech` / `native_english`다 —
   //   **화면 이름만 화자 라벨로 바뀌었다.**
   //
-  //   🇬🇧 AI STYLE이 British면 윗줄의 미국 인물 이름만 빠진다
-  //      ([_hidesPersonaNames]). 생성은 그대로다.
+  //   두 발화 카드는 제목만 둔다 — 인물 윗줄·설명·미리보기 문장은 없다
+  //   (실장님 지시, 2026-10-14). 생성 프롬프트는 그대로다.
   //   **어느 하나가 다른 하나의 관문이 아니다.** Practice는 몇 번이고 다시
   //   들어오는 자리고, 나머지 둘은 대화 전체를 한 벌의 발화로 다루는 자리다.
   //
@@ -5286,8 +5286,6 @@ RULES — follow exactly:
     // 대화가 남지 않는 방이면 전체 발화 학습 자체가 성립하지 않는다. 눌러 보고
     // 실패를 읽게 하지 말고 아예 띄우지 않는다.
     final bool speechReady = _supportsSpeechPractice(_cachedRoomMode);
-    // 🇬🇧 British면 윗줄이 통째로 빠진다. 카드는 아랫줄 한 줄로 선다.
-    final bool hidePersona = _hidesPersonaNames;
     // 📐 시스템 글자 크기를 크게 써 둔 기기에서 짧은 라벨이 어절 중간에서
     //    끊기지 않게, 이 선택 화면에서만 배율에 천장을 씌운다.
     return MediaQuery.withClampedTextScaling(
@@ -5337,17 +5335,10 @@ RULES — follow exactly:
                     if (speechReady) ...[
                       const SizedBox(height: 12),
                       _buildStudyPathCard(
-                        titleTop: hidePersona
-                            ? ""
-                            : "Larry King–style Plain Spoken English",
-                        title: "Clear & Easy",
-                        subtitle: _surfaceCopy['speechPractice'],
+                        title: "CLEAR & EASY",
                         icon: Icons.record_voice_over_rounded,
                         color: const Color(0xFF38BDF8),
-                        preview: _mySpeech,
-                        emptyHint: locked
-                            ? access.gateLabel
-                            : _surfaceCopy['tapToCreate'],
+                        emptyHint: locked ? access.gateLabel : '',
                         error: _mySpeechError,
                         locked: locked,
                         isLoading: _isBuildingMySpeech,
@@ -5356,17 +5347,10 @@ RULES — follow exactly:
                       ),
                       const SizedBox(height: 12),
                       _buildStudyPathCard(
-                        titleTop: hidePersona
-                            ? ""
-                            : "Trevor Noah–style Natural Conversational English",
-                        title: "Natural & Sharp",
-                        subtitle: _surfaceCopy['naturalPractice'],
+                        title: "NATURAL & SHARP",
                         icon: Icons.auto_awesome,
                         color: const Color(0xFFFBBF24),
-                        preview: _nativeEnglish,
-                        emptyHint: locked
-                            ? access.gateLabel
-                            : _surfaceCopy['tapToCreate'],
+                        emptyHint: locked ? access.gateLabel : '',
                         error: _nativeEnglishError,
                         locked: locked,
                         isLoading: _isBuildingNativeEnglish,
@@ -5397,7 +5381,7 @@ RULES — follow exactly:
   /// 셋은 서로 배타적이라 카드가 거짓말을 하지 않는다.
   Widget _buildStudyPathCard({
     required String title,
-    required String subtitle,
+    String subtitle = '',
     String titleTop = '',
     required IconData icon,
     required Color color,
@@ -5470,9 +5454,12 @@ RULES — follow exactly:
                         color: color.withValues(alpha: 0.6), size: 20),
                 ],
               ),
-              const SizedBox(height: 5),
-              Text(subtitle,
-                  style: const TextStyle(color: Colors.white38, fontSize: 12)),
+              if (subtitle.isNotEmpty) ...[
+                const SizedBox(height: 5),
+                Text(subtitle,
+                    style:
+                        const TextStyle(color: Colors.white38, fontSize: 12)),
+              ],
               if (isLoading) ...[
                 const SizedBox(height: 10),
                 Text(_surfaceCopy['creating'],
@@ -8037,20 +8024,6 @@ RULES — follow exactly:
 
   bool _supportsSpeechPractice(String mode) =>
       _kSpeechPracticeModes.contains(_normalizeHistoryMode(mode));
-
-  /// 🇬🇧 [BRITISH-TITLE] British를 고른 방에서는 카드 윗줄의 **미국 인물
-  /// 이름을 감춘다.** 영국 영어를 고른 사람에게 Larry King·Trevor Noah를
-  /// 내걸면 카드가 제 내용과 어긋나 보인다(실장님 지시, 2026-09-08).
-  ///
-  /// ⚠️ **표시만 접는다. 기능은 그대로다.** 두 페르소나의 speaking pattern은
-  /// British에서도 똑같이 돌고, 어휘·철자·관용 표현만 AI STYLE이 정한다.
-  /// 프롬프트는 한 글자도 갈아 끼우지 않는다 — 인물은 애초에 dialect가 아니라
-  /// speaking-pattern reference라서, 이름을 감춰도 잃는 것이 없다.
-  ///
-  /// 이름을 감추는 대신 `British Clear & Easy`처럼 다시 적지도 않는다. 로비
-  /// 에서 이미 고른 값이라, 카드에서 되풀이하면 UI만 무거워진다.
-  bool get _hidesPersonaNames =>
-      effectiveAiStyle(targetLang: _sessionTargetLangName()) == 'British';
 
   /// 저장 모양의 판. 규칙이 바뀌면 이 값을 올려 옛 결과를 다시 만들게 한다.
   ///
