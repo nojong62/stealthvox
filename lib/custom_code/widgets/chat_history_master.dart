@@ -6296,7 +6296,7 @@ RULES — follow exactly:
   /// 쉐도잉은 셋 중에서 고른다. Snap Echoing은 [_snapEchoSpeed].
   /// ⚡ Snap Echoing 속도는 단위 길이를 따른다. 짧은 단위는 조금 천천히,
   /// 긴 단위는 보통 빠르기에 가깝게 — 리듬을 그대로 복사하게 한다.
-  double get _snapEchoSpeed => _p3SnapSize == SnapUnitSize.quick ? 0.9 : 0.98;
+  double get _snapEchoSpeed => _p3SnapSize == SnapUnitSize.quick ? 0.96 : 0.98;
   static const List<double> _kShadowSpeeds = <double>[0.83, 0.88, 0.93];
 
   /// 🚧 P3 전용 timing. **다른 모드의 VAD 값과 무관하다.** 최종값 아님.
