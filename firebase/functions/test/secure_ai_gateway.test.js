@@ -9,7 +9,13 @@ const {
   containsKorean,
   requestedAudioFormat,
   stripWavContainer,
-  koreanChirpVoiceForRequest,
+  chirpLocaleForRequest,
+  chirpVoiceForRequest,
+  shouldUseChirp,
+  openAiSpeechBody,
+  splitForGoogleTts,
+  chirpAudioConfig,
+  chirpMarkupForRequest,
   koreanChirpInputWithOpeningCommaPause,
   realtimeClientSecret,
 } = require("../secure_ai_gateway");
@@ -72,23 +78,77 @@ test("Korean TTS routing accepts Korean and preserves other languages", () => {
 });
 
 
-test("Korean TTS keeps Circle Talk female and Scenario Talk male", () => {
+test("Chirp voices keep Circle Talk female and Scenario Talk male in every locale", () => {
+  assert.equal(chirpVoiceForRequest({ voice: "shimmer" }, "ko-KR"), "ko-KR-Chirp3-HD-Aoede");
+  assert.equal(chirpVoiceForRequest({ voice: "echo" }, "ko-KR"), "ko-KR-Chirp3-HD-Charon");
+  assert.equal(chirpVoiceForRequest({ voice: "shimmer" }, "en-US"), "en-US-Chirp3-HD-Aoede");
+  assert.equal(chirpVoiceForRequest({ voice: "echo" }, "cmn-CN"), "cmn-CN-Chirp3-HD-Charon");
+  assert.equal(chirpVoiceForRequest({ voice: "google-female" }, "ja-JP"), "ja-JP-Chirp3-HD-Aoede");
+  assert.equal(chirpVoiceForRequest({ voice: "google-male" }, "fr-FR"), "fr-FR-Chirp3-HD-Charon");
+  assert.equal(chirpVoiceForRequest({ voice: "google-ko-male" }, "ko-KR"), "ko-KR-Chirp3-HD-Charon");
+  for (const voice of ["verse", "onyx", "ash", "cedar", "ballad", "fable"]) {
+    assert.equal(chirpVoiceForRequest({ voice }, "de-DE"), "de-DE-Chirp3-HD-Charon", voice);
+  }
+  for (const voice of ["nova", "coral", "marin", "sage", "alloy", "unknown"]) {
+    assert.equal(chirpVoiceForRequest({ voice }, "it-IT"), "it-IT-Chirp3-HD-Aoede", voice);
+  }
+});
+
+test("Chirp locale: Hangul first, then the app's language, then single-language scripts", () => {
+  assert.equal(chirpLocaleForRequest({ input: "안녕하세요", language: "en" }), "ko-KR");
+  assert.equal(chirpLocaleForRequest({ input: "Hola", language: "es" }), "es-ES");
+  assert.equal(chirpLocaleForRequest({ input: "Hallo", language: "nl-NL" }), "nl-NL");
+  assert.equal(chirpLocaleForRequest({ input: "Hello", language: "English" }), "en-US");
+  assert.equal(chirpLocaleForRequest({ input: "你好", language: "zh" }), "cmn-CN");
+  assert.equal(chirpLocaleForRequest({ input: "こんにちは" }), "ja-JP");
+  assert.equal(chirpLocaleForRequest({ input: "नमस्ते" }), "hi-IN");
+  assert.equal(chirpLocaleForRequest({ input: "Привет" }), "ru-RU");
+  assert.equal(chirpLocaleForRequest({ input: "Hello" }), null);
+  assert.equal(chirpLocaleForRequest({ input: "你好" }), null);
+  assert.equal(chirpLocaleForRequest({ input: "Hello", language: "xx" }), null);
+});
+
+test("expressive requests stay on OpenAI", () => {
+  assert.equal(shouldUseChirp({ input: "Hello", language: "en", voice: "nova" }), true);
   assert.equal(
-    koreanChirpVoiceForRequest({ voice: "shimmer" }),
-    "ko-KR-Chirp3-HD-Aoede",
+    shouldUseChirp({ input: "Hello", language: "en", voice: "nova", instructions: "warm" }),
+    false,
   );
   assert.equal(
-    koreanChirpVoiceForRequest({ voice: "echo" }),
-    "ko-KR-Chirp3-HD-Charon",
+    shouldUseChirp({ input: "안녕", voice: "nova", instructions: "warm" }),
+    false,
   );
   assert.equal(
-    koreanChirpVoiceForRequest({ voice: "google-ko-female" }),
-    "ko-KR-Chirp3-HD-Aoede",
+    shouldUseChirp({ input: "Hello", language: "en", response_format: "wav" }),
+    false,
   );
-  assert.equal(
-    koreanChirpVoiceForRequest({ voice: "google-ko-male" }),
-    "ko-KR-Chirp3-HD-Charon",
+});
+
+test("OpenAI fallback body drops language and provider-neutral voices", () => {
+  assert.deepEqual(
+    openAiSpeechBody({
+      model: "tts-1", input: "Hi", voice: "google-male", language: "en",
+      markup: "Hi [pause]",
+    }),
+    { model: "tts-1", input: "Hi", voice: "echo" },
   );
+  assert.deepEqual(
+    openAiSpeechBody({ input: "Hi", voice: "nova", instructions: "warm" }),
+    { input: "Hi", voice: "nova", instructions: "warm" },
+  );
+});
+
+test("Google TTS input is split by UTF-8 bytes, not characters", () => {
+  assert.deepEqual(splitForGoogleTts("짧은 문장."), ["짧은 문장."]);
+  const korean = "가".repeat(1600) + ". " + "나".repeat(1600) + ".";
+  const pieces = splitForGoogleTts(korean);
+  assert.equal(pieces.length, 2);
+  for (const piece of pieces) assert.ok(Buffer.byteLength(piece, "utf8") <= 5000);
+  assert.equal(pieces.join(" "), korean);
+  const unbroken = "가".repeat(4000);
+  const cut = splitForGoogleTts(unbroken);
+  assert.equal(cut.join(""), unbroken);
+  for (const piece of cut) assert.ok(Buffer.byteLength(piece, "utf8") <= 5000);
 });
 
 test("Korean TTS pauses after the first opening comma", () => {
@@ -122,4 +182,21 @@ test("LINEAR16 WAV container is removed before PCM playback", () => {
   const pcm = Buffer.from([1, 2, 3, 4]);
   assert.deepEqual(stripWavContainer(Buffer.concat([header, pcm])), pcm);
   assert.deepEqual(stripWavContainer(pcm), pcm);
+});
+
+test("OpenAI speed becomes Chirp pace only when it changes the pace", () => {
+  assert.deepEqual(chirpAudioConfig({ speed: 1 }, "mp3"), { audioEncoding: "MP3" });
+  assert.deepEqual(chirpAudioConfig({}, "pcm"), { audioEncoding: "LINEAR16", sampleRateHertz: 24000 });
+  assert.equal(chirpAudioConfig({ speed: 0.8 }, "mp3").speakingRate, 0.8);
+  assert.equal(chirpAudioConfig({ speed: 4 }, "mp3").speakingRate, 2);
+  assert.equal(chirpAudioConfig({ speed: 0.1 }, "mp3").speakingRate, 0.25);
+});
+
+test("app-written pause markup is used only when it fits one request", () => {
+  assert.equal(
+    chirpMarkupForRequest({ markup: " Hi, [pause long] there. " }),
+    "Hi, [pause long] there.",
+  );
+  assert.equal(chirpMarkupForRequest({ input: "Hi" }), null);
+  assert.equal(chirpMarkupForRequest({ markup: "가".repeat(1700) }), null);
 });
