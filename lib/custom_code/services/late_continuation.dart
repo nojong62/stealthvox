@@ -8,6 +8,8 @@
 // 모드가 자기 파일에서 들고, 이 함수들에 값으로 넘긴다.
 // ====================================================================
 
+import 'transcript_text_clean.dart';
+
 // ====================================================================
 // 🔁 [LATE-CONTINUATION] 늦은 이어 말하기 복구 창
 // --------------------------------------------------------------------
@@ -250,7 +252,7 @@ bool mergeUserTurnSegments(
 bool isHesitationOnlyTranscript(String text) {
   final clean = text
       .toLowerCase()
-      .replaceAll(RegExp(r'[^\w\s가-힣]'), '')
+      .replaceAll(kTranscriptNonLetterPattern, '')
       .replaceAll(RegExp(r'\s+'), '')
       .trim();
   if (clean.isEmpty) return true;

@@ -21,6 +21,7 @@ import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:record/record.dart';
+import '/custom_code/services/transcript_text_clean.dart';
 import '/custom_code/services/mic_record_config.dart';
 import 'package:audioplayers/audioplayers.dart' hide Source;
 import 'package:http/http.dart' as http;
@@ -7886,7 +7887,7 @@ RULES — follow exactly:
   ///
   /// 기준은 "줄 전체가 맞장구뿐인가"다. 다른 낱말이 하나라도 섞이면 남긴다 —
   /// "네, 그건 내일 할게요"는 맥락이 있는 말이다.
-  static final RegExp _kBackchannelStrip = RegExp(r'[^\w\s가-힣]');
+  static final RegExp _kBackchannelStrip = kTranscriptNonLetterPattern;
   static final RegExp _kBackchannelSplit = RegExp(r'\s+');
   static const Set<String> _kBackchannelTokens = <String>{
     '네',

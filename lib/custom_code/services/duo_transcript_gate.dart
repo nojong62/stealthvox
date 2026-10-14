@@ -13,6 +13,7 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'transcript_text_clean.dart';
 import 'pcm_audio_utils.dart';
 
 /// 전사문 한 줄의 처리 결과 이름. 로그·시험이 같은 문자열을 본다.
@@ -62,8 +63,9 @@ class DuoDropReason {
 /// 잡음 필터가 **남기는** 문자. 지우는 쪽이 아니라 남기는 쪽을 적어 둔다 —
 /// 무엇이 살아남는지가 [DuoDropReason.emptyAfterClean]의 전부라서다.
 ///
-/// `\w`는 Dart 정규식에서 유니코드가 아니라 **ASCII [A-Za-z0-9_]**다.
-final RegExp _kNoiseKeepPattern = RegExp(r'[^\w\s가-힣]');
+/// 모든 문자 체계의 문자·숫자를 남긴다. 예전 `[^\w\s가-힣]`은 중국어·일본어
+/// 발화를 빈 문자열로 만들어 통째로 버렸다 — [kTranscriptNonLetterPattern].
+final RegExp _kNoiseKeepPattern = kTranscriptNonLetterPattern;
 
 /// 무음 구간에서 전사 모델이 지어내는 자막 관용구.
 const List<String> kDuoHardGhostPhrases = <String>[

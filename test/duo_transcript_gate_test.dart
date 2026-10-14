@@ -61,26 +61,26 @@ void main() {
     });
   });
 
-  group('⚠️ 현재 필터가 조용히 버리는 것 (동작 고정 — 고치지 않았다)', () {
-    // `\w`는 Dart 정규식에서 ASCII다. 완성형 한글(가-힣)만 따로 살려 두었으므로
-    // 자모만 있는 말과 한글 아닌 비라틴 문자는 통째로 지워져 빈 줄이 된다.
-    test('한글 자모만 있는 말은 잡음으로 버려진다', () {
-      expect(noiseTranscriptReason('ㅋㅋ'), DuoDropReason.emptyAfterClean);
-      expect(noiseTranscriptReason('ㅇㅇ'), DuoDropReason.emptyAfterClean);
+  group('모든 문자 체계를 글자로 본다 (2026-10-14 수정)', () {
+    // 예전에는 `\w`(ASCII)와 가-힣만 남겨 아래가 전부 empty_after_clean이었다.
+    // 실기기에서 일본어 발화가 통째로 버려진 뒤 유니코드 문자 기준으로 바꿨다.
+    test('한글 자모도 글자다 — 잡음 판정은 소리 시간이 한다', () {
+      expect(noiseTranscriptReason('ㅋㅋ'), isNull);
+      expect(noiseTranscriptReason('ㅇㅇ'), isNull);
     });
 
-    test('일본어·중국어 발화는 통째로 버려진다', () {
-      expect(noiseTranscriptReason('はい'), DuoDropReason.emptyAfterClean);
-      expect(noiseTranscriptReason('好的'), DuoDropReason.emptyAfterClean);
-      expect(noiseTranscriptReason('こんにちは'), DuoDropReason.emptyAfterClean);
+    test('일본어·중국어 발화는 살아남는다', () {
+      expect(noiseTranscriptReason('はい'), isNull);
+      expect(noiseTranscriptReason('好的'), isNull);
+      expect(noiseTranscriptReason('こんにちは'), isNull);
     });
 
     test('키릴·아랍 문자도 마찬가지다', () {
-      expect(noiseTranscriptReason('да'), DuoDropReason.emptyAfterClean);
-      expect(noiseTranscriptReason('نعم'), DuoDropReason.emptyAfterClean);
+      expect(noiseTranscriptReason('да'), isNull);
+      expect(noiseTranscriptReason('نعم'), isNull);
     });
 
-    test('그 언어에 라틴 글자가 하나라도 섞이면 살아난다', () {
+    test('라틴 글자가 섞여도 그대로 산다', () {
       expect(noiseTranscriptReason('はい ok'), isNull);
     });
   });

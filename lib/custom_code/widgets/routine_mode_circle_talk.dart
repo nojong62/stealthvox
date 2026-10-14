@@ -68,6 +68,7 @@ import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/tts_adapter.dart';
 import '/custom_code/services/user_line_fix.dart';
+import '/custom_code/services/transcript_text_clean.dart';
 import '/custom_code/services/short_reply_gate.dart';
 import '/custom_code/services/late_continuation.dart';
 import '/custom_code/services/listening_practice.dart';
@@ -836,7 +837,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   bool _isNoiseTranscript(String text) {
     final clean = text
         .toLowerCase()
-        .replaceAll(RegExp(r'[^\w\s가-힣]'), '')
+        .replaceAll(kTranscriptNonLetterPattern, '')
         .replaceAll(RegExp(r'\s+'), '')
         .trim();
     if (clean.length < 2) return true;

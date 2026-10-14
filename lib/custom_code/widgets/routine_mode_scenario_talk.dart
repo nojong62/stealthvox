@@ -87,6 +87,7 @@ import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/tts_adapter.dart';
 import '/custom_code/services/tts_model_policy.dart';
 import '/custom_code/services/user_line_fix.dart';
+import '/custom_code/services/transcript_text_clean.dart';
 import '/custom_code/services/short_reply_gate.dart';
 import 'first_utterance_context_judge.dart'; // 3모드 공통 응답 길이 규칙
 import 'origin_language_recheck_dialog.dart'; // 🌐 [ORIGIN-RECHECK] 언어 확인 창
@@ -2512,7 +2513,7 @@ $finalLanguageRule''';
   bool _isNoiseTranscript(String text) {
     final clean = text
         .toLowerCase()
-        .replaceAll(RegExp(r'[^\w\s가-힣]'), '')
+        .replaceAll(kTranscriptNonLetterPattern, '')
         .replaceAll(RegExp(r'\s+'), '')
         .trim();
     if (clean.length < 2) return true;

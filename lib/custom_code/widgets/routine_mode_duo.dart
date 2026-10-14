@@ -28,6 +28,7 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 // 진단 로그를 개발 빌드에서만 남기기 위한 것. 이 파일의 다른 import들과
 // 이름이 겹쳐 `kDebugMode`가 그냥은 안 잡히므로 접두사로 가져온다.
 import 'package:flutter/foundation.dart' as foundation;
+import '/custom_code/services/transcript_text_clean.dart';
 import '/custom_code/services/duo_direct_audio.dart';
 import '/custom_code/services/duo_partner_echo.dart';
 import '/custom_code/services/duo_call_resolution.dart';
@@ -4512,7 +4513,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
     final String lowerRaw = trimmed.toLowerCase();
     final String lowerClean =
-        lowerRaw.replaceAll(RegExp(r'[^\w\s가-힣]'), '').trim();
+        lowerRaw.replaceAll(kTranscriptNonLetterPattern, '').trim();
     final String collapsed = lowerClean.replaceAll(' ', '');
     // whisper-1이 조용한 구간에서 자막 데이터를 흉내 내며 만들던 환청들이다.
     // gpt-4o-transcribe로 옮긴 뒤 줄어들 것으로 보지만, 줄어든 것을 확인하기
