@@ -23,6 +23,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'completion_budget.dart';
 import 'history_text_model.dart';
 
 const String kStep2NativeRenderMarker = 'step2_native_render';
@@ -63,8 +64,8 @@ Future<String?> renderStep2LineToNative({
           },
           body: jsonEncode(<String, dynamic>{
             'model': kHistoryRepairModel,
-            'temperature': 0.0,
-            'max_tokens': 220,
+            'reasoning_effort': kHistoryTextReasoningEffort,
+            'max_completion_tokens': 1000,
             'response_format': <String, String>{'type': 'json_object'},
             'messages': <Map<String, String>>[
               <String, String>{
@@ -93,6 +94,7 @@ Reply as JSON: {"native": "<the line in $nativeLang>"}''',
       return null;
     }
     final body = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    logCompletionBudget('[STEP2-NATIVE]', body);
     final choices = body['choices'] as List? ?? const <dynamic>[];
     if (choices.isEmpty) return null;
     final message = (choices.first as Map<String, dynamic>)['message']

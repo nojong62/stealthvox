@@ -26,6 +26,7 @@ import 'package:http/http.dart' as http;
 
 import 'duo_study_state.dart';
 import 'history_finalize.dart';
+import 'completion_budget.dart';
 import 'history_text_model.dart';
 import 'openai_transcribe_service.dart';
 import 'origin_pcm_store.dart';
@@ -549,8 +550,8 @@ The pipeline can listen to the original audio before changing anything. When unc
           body: jsonEncode(<String, dynamic>{
             'model': kHistoryRepairModel,
             // 판정이라 흔들리면 안 된다. 같은 대화는 같은 의심점을 낸다.
-            'temperature': 0.0,
-            'max_tokens': 700,
+            'reasoning_effort': kHistoryTextReasoningEffort,
+            'max_completion_tokens': 2000,
             'response_format': <String, String>{'type': 'json_object'},
             'messages': <Map<String, String>>[
               <String, String>{'role': 'system', 'content': instructions},
@@ -569,6 +570,7 @@ The pipeline can listen to the original audio before changing anything. When unc
     }
     final body =
         jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    logCompletionBudget('[ORIGIN-RESTORE] detect', body);
     final choices = body['choices'] as List? ?? const <dynamic>[];
     if (choices.isEmpty) return const <OriginSuspect>[];
     final message = (choices.first as Map<String, dynamic>)['message']

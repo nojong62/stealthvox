@@ -21,6 +21,9 @@ import '/custom_code/services/secure_ai_gateway.dart';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+
+import 'completion_budget.dart';
+import 'history_text_model.dart';
 import 'package:http/http.dart' as http;
 
 import 'ai_style.dart';
@@ -250,7 +253,7 @@ Output only My English.${aiStylePromptBlock(targetLang: language, scope: 'the My
 class MySpeechBuilder {
   MySpeechBuilder._();
 
-  static const String model = 'gpt-4.1-mini';
+  static const String model = kHistoryRepairModel;
   static const Duration timeout = Duration(seconds: 25);
 
   static Future<SpeechBuildResult> build({
@@ -288,8 +291,8 @@ class MySpeechBuilder {
               // 🌡️ 확장 생성이라 0.3은 원문에 붙어 버린다. 그렇다고 자유
               //   창작도 아니라 0.7은 대화와 무관한 디테일을 늘린다.
               //   0.6에서 시작하고 실기기 결과를 보고 조정한다(실장님 지시).
-              'temperature': 0.6,
-              'max_tokens': 600,
+              'reasoning_effort': kHistoryTextReasoningEffort,
+              'max_completion_tokens': 1500,
               'messages': <Map<String, String>>[
                 <String, String>{'role': 'system', 'content': sysPrompt},
                 <String, String>{
@@ -304,7 +307,9 @@ class MySpeechBuilder {
         onLog?.call('🗣️ [MY-ENGLISH]', 'status=${response.statusCode}');
         return const SpeechBuildResult.failed(SpeechBuildFailure.httpError);
       }
-      final text = parseResponse(utf8.decode(response.bodyBytes));
+      final raw = utf8.decode(response.bodyBytes);
+      logCompletionBudgetRaw('[MY-ENGLISH]', raw);
+      final text = parseResponse(raw);
       if (text.isEmpty) {
         return const SpeechBuildResult.failed(SpeechBuildFailure.emptyReply);
       }
@@ -353,7 +358,7 @@ class NativeEnglishSpeechBuilder {
   NativeEnglishSpeechBuilder._();
 
   /// 다듬기가 아니라 재구성이라, 값싼 모델은 원문 배열을 그대로 돌려준다.
-  static const String model = 'gpt-4.1-mini';
+  static const String model = kHistoryRepairModel;
   static const Duration timeout = Duration(seconds: 25);
 
   static Future<SpeechBuildResult> build({
@@ -379,8 +384,8 @@ class NativeEnglishSpeechBuilder {
             },
             body: jsonEncode(<String, dynamic>{
               'model': model,
-              'temperature': 0.5,
-              'max_tokens': 600,
+              'reasoning_effort': kHistoryTextReasoningEffort,
+              'max_completion_tokens': 1500,
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',
@@ -400,8 +405,9 @@ class NativeEnglishSpeechBuilder {
         onLog?.call('🇺🇸 [NATIVE-ENGLISH]', 'status=${response.statusCode}');
         return const SpeechBuildResult.failed(SpeechBuildFailure.httpError);
       }
-      final text =
-          MySpeechBuilder.parseResponse(utf8.decode(response.bodyBytes));
+      final raw = utf8.decode(response.bodyBytes);
+      logCompletionBudgetRaw('[NATIVE-ENGLISH]', raw);
+      final text = MySpeechBuilder.parseResponse(raw);
       if (text.isEmpty) {
         return const SpeechBuildResult.failed(SpeechBuildFailure.emptyReply);
       }
