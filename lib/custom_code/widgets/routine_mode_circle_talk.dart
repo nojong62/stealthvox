@@ -1044,6 +1044,12 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   /// 첫 발화 전사에 넘길 언어 코드. 판정 전에는 **빈 문자열 = 자동 감지**다.
   /// 언어를 박아 두면 다른 언어 발화가 그 언어 문자로 음차되어 나와,
   /// 어긋났다는 사실 자체가 전사문에서 사라진다.
+  /// 🔊 TTS로 읽을 말의 언어. Step 1은 ORIGIN, Step 2는 배울 언어다.
+  String _spokenLangName([ListeningStep? step]) =>
+      (step ?? _listeningStep) == ListeningStep.step1
+          ? _nativeLangName()
+          : _targetLangName();
+
   String _sttLangCode() =>
       OriginLanguageSession.instance.settled ? _nativeLangCode() : '';
 
@@ -4391,6 +4397,7 @@ $userFixPolicy$finalLanguageRule''';
       speakerType: TtsSpeakerType.system,
       turnId: 'sys-${DateTime.now().microsecondsSinceEpoch}',
       generationId: generationId,
+      language: _spokenLangName(step),
       playbackCategory: 'system',
     ));
     // 🔁 [LATE-CONTINUATION] 취소 손잡이. 지역 변수로만 두면 이어 말하기가
@@ -4427,6 +4434,7 @@ $userFixPolicy$finalLanguageRule''';
               speakerType: isAi ? TtsSpeakerType.ai : TtsSpeakerType.user,
               turnId: '${isAi ? 'ai' : 'user'}-history-$turnId',
               generationId: generationId,
+              language: _targetLangName(),
               saveToHistory: true,
               historyVoiceKey: historyVoiceKey,
               playbackCategory: 'history_only',
@@ -5140,6 +5148,7 @@ $userFixPolicy$finalLanguageRule''';
           speakerType: TtsSpeakerType.ai,
           turnId: aiTtsTurnId,
           generationId: pipelineGeneration,
+          language: _spokenLangName(),
           saveToHistory: false,
         ));
         _log(
@@ -7033,6 +7042,10 @@ Return only the line itself.'''
 //   → 경로: {앱로컬}/tts_cache/{해시키}.mp3
 class TtsCache {
   static String? _cacheDirPath;
+
+  /// 소리를 만든 공급자 세대. 공급자가 바뀌면 올린다 — 호출 측 키가 그대로여도
+  /// 이전 공급자의 소리가 다시 나오지 않는다. (2026-10: 전 언어 Chirp 3 HD)
+  static const String _providerTag = 'chirp3hd-v1';
   static final Map<String, Future<Uint8List?>> _inFlight = {};
 
   static String _key(
@@ -7041,7 +7054,7 @@ class TtsCache {
     double speed = 1.0,
     String language = 'en',
   }) {
-    final combined = '$text|$voice|$speed|$language';
+    final combined = '$_providerTag|$text|$voice|$speed|$language';
     final h = combined.hashCode.abs().toRadixString(16);
     return '${h}_${combined.length}';
   }

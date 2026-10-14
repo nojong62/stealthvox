@@ -321,6 +321,12 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   String _targetLangName() =>
       FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
 
+  /// 🔊 TTS로 읽을 AI 말의 언어. Step 1은 ORIGIN, Step 2는 배울 언어다.
+  String _spokenLangName([ListeningStep? step]) =>
+      (step ?? _listeningStep) == ListeningStep.step1
+          ? _nativeLangName()
+          : _targetLangName();
+
   /// 첫 발화 전사에 넘길 언어 코드. 판정 전에는 **빈 문자열 = 자동 감지**다.
   /// 언어를 박아 두면 다른 언어 발화가 그 언어 문자로 음차되어 나와,
   /// 어긋났다는 사실 자체가 전사문에서 사라진다.
@@ -695,7 +701,7 @@ $finalLanguageRule''';
     }).join('\n');
   }
 
-  Future<void> _speakKoreanLine(String text) async {
+  Future<void> _speakKoreanLine(String text, {ListeningStep? step}) async {
     final spoken = text.trim();
     if (spoken.isEmpty || _openAiKey.isEmpty) return;
     // 🔁 [LATE-CONTINUATION] 되묻기 문구도 이 길로 나간다. 소리가 나기 전에
@@ -710,6 +716,7 @@ $finalLanguageRule''';
       speakerType: TtsSpeakerType.ai,
       turnId: 'scenario-${DateTime.now().microsecondsSinceEpoch}',
       generationId: _pipelineGeneration,
+      language: _spokenLangName(step),
       playbackCategory: 'scenario_ai',
     ));
     _activeUtterances.add(utterance);
@@ -1374,7 +1381,8 @@ $finalLanguageRule''';
       final ChunkedTtsFetcher aiTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
-        "nova",
+        _aiVoice,
+        language: _spokenLangName(),
         isUser: false,
         onLog: _log,
       );
@@ -2900,6 +2908,7 @@ $finalLanguageRule''';
                 speakerType: TtsSpeakerType.ai,
                 turnId: ttsTurnId,
                 generationId: generation,
+                language: _spokenLangName(step),
                 playbackCategory: 'scenario_ai',
                 expectsMoreSegments: true,
               ));
@@ -3172,6 +3181,7 @@ $finalLanguageRule''';
             speakerType: TtsSpeakerType.ai,
             turnId: ttsTurnId,
             generationId: generation,
+            language: _spokenLangName(step),
             playbackCategory: 'scenario_ai',
             continuesPreviousSegment: true,
           ));
@@ -3193,11 +3203,11 @@ $finalLanguageRule''';
           }
         } else {
           headUtterance.cancel();
-          await _speakKoreanLine(aiKoreanFinal);
+          await _speakKoreanLine(aiKoreanFinal, step: step);
         }
       } else {
         headUtterance?.cancel();
-        await _speakKoreanLine(aiKoreanFinal);
+        await _speakKoreanLine(aiKoreanFinal, step: step);
       }
 
       // 🎧 [LISTENING] HOST 줄은 언제나 유저의 ORIGIN. Step 2의 AI 줄은 배울
@@ -3372,7 +3382,8 @@ $finalLanguageRule''';
     final fetcher = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
-      "nova",
+      _aiVoice,
+      language: lang,
       isUser: false,
       onLog: _log,
     );
@@ -3497,6 +3508,7 @@ $finalLanguageRule''';
         _openAiKey,
         _ttsQueueManager,
         userVoice,
+        language: _targetLangName(),
         onLog: _log,
       );
       _ttsQueueManager.setUserTurn(true);
@@ -3634,7 +3646,8 @@ $finalLanguageRule''';
         final misheardTts = ChunkedTtsFetcher(
           _openAiKey,
           _ttsQueueManager,
-          'nova',
+          _aiVoice,
+          language: targetLangName,
           isUser: false,
           onLog: _log,
         );
@@ -3688,7 +3701,8 @@ $finalLanguageRule''';
         final regenPhraseTts = ChunkedTtsFetcher(
           _openAiKey,
           _ttsQueueManager,
-          'nova',
+          _aiVoice,
+          language: targetLangName,
           isUser: false,
           onLog: _log,
         );
@@ -3714,7 +3728,8 @@ $finalLanguageRule''';
         final regenTts = ChunkedTtsFetcher(
           _openAiKey,
           _ttsQueueManager,
-          'nova',
+          _aiVoice,
+          language: _spokenLangName(),
           isUser: false,
           onLog: _log,
         );
@@ -3791,7 +3806,8 @@ $finalLanguageRule''';
         final clarifyTts = ChunkedTtsFetcher(
           _openAiKey,
           _ttsQueueManager,
-          'nova',
+          _aiVoice,
+          language: _targetLangName(),
           isUser: false,
           onLog: _log,
         );
@@ -3870,12 +3886,15 @@ $finalLanguageRule''';
       ChunkedTtsFetcher aiTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
-        "nova",
+        _aiVoice,
+        language: _spokenLangName(),
         isUser: false, // AI 큐로 분리
         onLog: _log,
       );
       hybridTtsPlayer = HybridTtsPlayer(
         apiKey: _openAiKey,
+        voice: _aiVoice,
+        language: _spokenLangName(),
         onLog: _log,
       );
       hybridTtsPlayer.reset();
@@ -4115,6 +4134,7 @@ $finalLanguageRule''';
           TtsModelPolicy.conversation.speechPayload(
             input: text,
             voice: 'nova',
+            language: _targetLangName(),
           ),
         ),
       )
@@ -5790,6 +5810,7 @@ class ChunkedTtsFetcher {
                   input: text,
                   voice: voice,
                   responseFormat: 'mp3',
+                  language: language,
                 ),
               ),
             )
@@ -5990,6 +6011,9 @@ class RelayPipeline {
 class HybridTtsPlayer {
   final String apiKey;
   final String voice;
+
+  /// 읽을 말의 언어. Gateway가 Chirp 3 HD 로케일을 고르는 데 쓴다.
+  final String? language;
   final void Function(String, String)? onLog;
 
   bool _firstChunkFired = false;
@@ -6001,6 +6025,7 @@ class HybridTtsPlayer {
   HybridTtsPlayer({
     required this.apiKey,
     this.voice = 'nova',
+    this.language,
     this.onLog,
   });
 
@@ -6131,6 +6156,7 @@ class HybridTtsPlayer {
                     input: fullSentence,
                     voice: voice,
                     responseFormat: 'mp3',
+                    language: language,
                   ),
                 ),
               )

@@ -42,6 +42,32 @@ void main() {
       expect(payload.containsKey('speed'), isFalse);
     });
 
+    test('language rides along for the gateway and is omitted when blank', () {
+      const profile = TtsModelProfile(
+        model: 'tts-1',
+        optionMode: TtsOptionMode.speed,
+        cacheVersion: 'v1',
+      );
+
+      expect(
+        profile.speechPayload(
+            input: 'hola', voice: 'echo', language: ' Spanish ')['language'],
+        'Spanish',
+      );
+      expect(
+        profile
+            .speechPayload(input: 'hola', voice: 'echo', language: '  ')
+            .containsKey('language'),
+        isFalse,
+      );
+      expect(
+        profile
+            .speechPayload(input: 'hola', voice: 'echo')
+            .containsKey('language'),
+        isFalse,
+      );
+    });
+
     test('none profile sends no model-specific option', () {
       const profile = TtsModelProfile(
         model: 'future-tts',

@@ -33,12 +33,16 @@ class TtsModelProfile {
     double speed = 1.0,
     String? instructions,
     String? responseFormat,
+    String? language,
   }) {
     final trimmedInstructions = instructions?.trim() ?? '';
+    final trimmedLanguage = language?.trim() ?? '';
     return <String, dynamic>{
       'model': model,
       'input': input,
       'voice': voice,
+      // Gateway 전용 칸. OpenAI로 넘길 때는 Gateway가 지운다.
+      if (trimmedLanguage.isNotEmpty) 'language': trimmedLanguage,
       if (responseFormat != null && responseFormat.isNotEmpty)
         'response_format': responseFormat,
       if (optionMode == TtsOptionMode.speed) 'speed': speed,
@@ -119,8 +123,9 @@ class TtsModelPolicy {
   ) {
     final profile = forWorkload(workload);
     // The audio provider can change without the caller's cache key changing.
-    // Keep prior OpenAI Korean bytes from being replayed after the Aoede route.
-    return '${profile.model}_${profile.cacheVersion}_tts-route-v2_$namespace';
+    // v3: every conversation language moved to Chirp 3 HD, so prior OpenAI
+    // bytes must not be replayed.
+    return '${profile.model}_${profile.cacheVersion}_tts-route-v3_$namespace';
   }
 
   static TtsModelProfile _resolve(TtsWorkload workload) {

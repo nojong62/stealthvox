@@ -4616,6 +4616,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       speakerType: TtsSpeakerType.system,
       turnId: 'duo-partner-${++_interpTtsTurnSeq}',
       generationId: _interpGeneration,
+      language: _myNative(),
       playbackCategory: 'duo_partner',
       // 🎚️ [INTERP-PREROLL] 0.75초 → 0.5초. 모든 턴에 붙는 고정 비용이라
       //   여기를 줄이는 것이 체감에 가장 곧다. 값은 새로 지어낸 것이 아니라
@@ -4691,6 +4692,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         speakerType: TtsSpeakerType.system,
         turnId: turnId,
         generationId: generation,
+        language: myNative,
         playbackCategory: 'duo_partner',
         prerollBytes: TtsAdapterConfig.duoPartnerPrerollBytes,
         // 🔗 [SEGMENT] 앞 조각이 있으면 재생 세션을 이어 붙인다(공백 없음).

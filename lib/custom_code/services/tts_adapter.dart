@@ -178,6 +178,7 @@ class TtsRequest {
     required this.speakerType,
     required this.turnId,
     required this.generationId,
+    this.language,
     this.speakingInstruction,
     this.saveToHistory = false,
     this.historyVoiceKey,
@@ -192,6 +193,10 @@ class TtsRequest {
   final TtsSpeakerType speakerType;
   final String turnId;
   final int generationId;
+
+  /// [text]의 언어(코드 'en' 또는 이름 'English'). Gateway가 이 값으로
+  /// Chirp 3 HD 로케일을 고른다 — 로마자 언어는 글자만으로 가를 수 없다.
+  final String? language;
   final String? speakingInstruction;
   final bool saveToHistory;
 
@@ -838,6 +843,7 @@ class TtsAdapter {
         voice: voice,
         responseFormat: TtsAdapterConfig.outputFormat,
         instructions: request.speakingInstruction,
+        language: request.language,
       ),
     );
     return httpRequest;
@@ -883,6 +889,7 @@ class TtsAdapter {
           speakerType: template.speakerType,
           turnId: template.turnId,
           generationId: template.generationId,
+          language: template.language,
           saveToHistory: true,
           historyVoiceKey: template.historyVoiceKey,
           playbackCategory: template.playbackCategory,
@@ -1254,6 +1261,7 @@ class TtsAdapter {
                 speakerType: request.speakerType,
                 turnId: request.turnId,
                 generationId: request.generationId,
+                language: request.language,
                 saveToHistory: true,
                 historyVoiceKey: request.historyVoiceKey,
                 playbackCategory: request.playbackCategory,
