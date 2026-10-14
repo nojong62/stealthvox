@@ -4231,7 +4231,7 @@ $userFixPolicy$finalLanguageRule''';
     }
     if (pipelineGeneration != _pipelineGeneration || !mounted) return;
 
-    // 모든 유저 턴 번역은 gpt-4o-mini 한 모델로 고정한다.
+    // 모든 유저 턴 번역은 [kFreeTalkTranslateModelFast] 한 모델로 고정한다.
     const translationModel = kFreeTalkTranslateModelFast;
     _log('🧠 [TRANSLATE-ROUTE]',
         'model=$translationModel firstTurn=$isFirstTurn fixed=true');
@@ -5505,7 +5505,7 @@ $userFixPolicy$finalLanguageRule''';
         final int? pcmSeq = _stashTurnPcm(line);
         await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
-          // Target은 History가 gpt-4o-mini로 최초 1회 생성해 채운다.
+          // Target은 History가 [kHistoryRepairModel]로 최초 1회 생성해 채운다.
           'original_text': original,
           if (pcmSeq != null) 'pcm_seq': pcmSeq,
           // 🎧 [LISTENING] Step 2의 AI 줄은 배울 언어 그대로다. source_lang이
@@ -6779,7 +6779,7 @@ Return only the line itself.'''
   ///
   /// 2026-09-12: 모델만 [kCircleDialogBrainModel]로 옮겼다. `temperature`는 뺐고
   /// `max_tokens`는 `max_completion_tokens`로, 추론은 `reasoning_effort`로
-  /// 준다. 번역·교정 호출부는 그대로 gpt-4o-mini다.
+  /// 준다. 번역·교정 호출부는 [kPostProcessModel]·[kHistoryRepairModel]을 본다.
   ///
   /// 실패해도 이전 모델로 다시 묻지 않는다. 400·파싱 오류를 그대로 봐야
   /// 하는 시험 단계라 [onLog]로 status와 본문을 올린다.
