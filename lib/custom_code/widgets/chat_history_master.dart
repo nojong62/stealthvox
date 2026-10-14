@@ -6313,6 +6313,9 @@ RULES — follow exactly:
   int _p3BreathIndex = 0;
   int _p3BreathTotal = 0;
   double _p3ShadowSpeed = 0.88;
+
+  /// ⚡ [SNAP-ECHO] 문장부호 뒤 쉼 길이. 쉼은 호흡을 자르는 자리도 된다.
+  ChirpPause _p3EchoPause = ChirpPause.medium;
   String? _p3EchoPath;
   String? _p3ShadowPath;
   String? _p3Error;
@@ -6696,11 +6699,11 @@ RULES — follow exactly:
     final voice = _p3Voice;
     final style = _p3StyleFor(_p3PracticeMode);
     final bool shadowing = _p3PracticeMode == P3PracticeMode.shadowing;
-    const ChirpPause pause = _p3ShadowPause;
+    final ChirpPause pause = shadowing ? _p3ShadowPause : _p3EchoPause;
     final double speed = shadowing ? _p3ShadowSpeed : _kSnapEchoSpeed;
-    // 쉐도잉은 고른 간격·속도마다 소리가 다르다 — 캐시 칸도 따로 선다.
+    // 고른 쉼·속도마다 소리가 다르다 — 캐시 칸도 따로 선다.
     final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3'
-        '${shadowing ? '_${pause.name}' : ''}_x$speed';
+        '_${pause.name}_x$speed';
     final requestKey = '$ns|$text';
     final existing = _breathPcmInFlight[requestKey];
     if (existing != null) return existing;
@@ -6716,7 +6719,7 @@ RULES — follow exactly:
         model: _historyPracticeTtsModel,
         instructionTag: '${style.id}_p3',
         responseFormat: 'pcm',
-        markup: shadowing ? chirpPauseMarkup(text, pause) : null,
+        markup: chirpPauseMarkup(text, pause),
       );
       if (raw == null || raw.isEmpty) return null;
       await TtsCache.put(
@@ -7134,6 +7137,9 @@ RULES — follow exactly:
               if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
                 const SizedBox(height: 12),
                 _buildP3ShadowSpeedPicker(),
+              ] else ...[
+                const SizedBox(height: 12),
+                _buildP3EchoPausePicker(),
               ],
 
               // 오류는 연습이 시작되지 못했을 때도 보여야 하므로 밖에 둔다.
@@ -7638,6 +7644,64 @@ RULES — follow exactly:
   }
 
   /// 쉐도잉 속도 고르기. 간격 고르기와 같은 생김새다.
+  /// ⚡ [SNAP-ECHO] 쉼 길이 고르기. 버튼에는 Chirp 태그를 그대로 적는다.
+  Widget _buildP3EchoPausePicker() {
+    return Row(
+      children: [
+        for (final pause in ChirpPause.values) ...[
+          Expanded(
+            child: InkWell(
+              // 쉼이 바뀌면 소리와 호흡 경계가 달라진다. 받아 둔 것을 버리고
+              // 다음 Start에서 그 쉼으로 다시 받는다.
+              onTap: _p3Busy || _p3EchoPause == pause
+                  ? null
+                  : () => setState(() {
+                        _p3EchoPause = pause;
+                        _p3FullPcm = null;
+                        _p3Segments = const <BreathSegment>[];
+                      }),
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                height: 38,
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                decoration: BoxDecoration(
+                  color: _p3EchoPause == pause
+                      ? _p3ShadowingAccentColor.withValues(alpha: 0.20)
+                      : Colors.white.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: _p3EchoPause == pause
+                        ? _p3ShadowingAccentColor
+                        : Colors.white24,
+                    width: _p3EchoPause == pause ? 1.4 : 1,
+                  ),
+                ),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    pause.tag,
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: _p3EchoPause == pause
+                          ? _p3ShadowingAccentColor
+                          : Colors.white60,
+                      fontSize: 12,
+                      fontWeight: _p3EchoPause == pause
+                          ? FontWeight.bold
+                          : FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (pause != ChirpPause.values.last) const SizedBox(width: 6),
+        ],
+      ],
+    );
+  }
+
   Widget _buildP3ShadowSpeedPicker() {
     return Row(
       children: [

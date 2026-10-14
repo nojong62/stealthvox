@@ -1,7 +1,7 @@
 // ⏸️ [CHIRP-PAUSE] Chirp 3 HD의 pause control markup.
 //
-//   쉐도잉의 호흡 사이 여유를 **TTS가 직접 쉬게** 만든다. 예전에는 소리를 받은
-//   뒤 호흡 경계에 무음을 끼워 넣었다(`buildGappedPcm`).
+//   쉐도잉·Snap Echoing의 호흡 사이 여유를 **TTS가 직접 쉬게** 만든다. 예전
+//   에는 소리를 받은 뒤 호흡 경계에 무음을 끼워 넣었다(`buildGappedPcm`).
 //
 //   태그는 문장부호 뒤에만 넣는다 — 문장부호 없는 긴 구절 안에는 넣지 않는다.
 //   호흡 경계 자체는 여전히 소리의 무음으로 찾는다(`analyzeBreaths`).
