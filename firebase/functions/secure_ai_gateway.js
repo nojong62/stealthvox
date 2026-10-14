@@ -39,6 +39,7 @@ const OPENAI_ROUTES = new Map([
   ["POST /v1/audio/transcriptions", "/v1/audio/transcriptions"],
   ["POST /v1/decisions", "/v1/decisions"],
   ["GET /v1/models/gpt-4o-mini", "/v1/models/gpt-4o-mini"],
+  ["GET /v1/models/gpt-6-luna", "/v1/models/gpt-6-luna"],
 ]);
 
 function callableError(code, message) {

@@ -45,7 +45,7 @@ class OpenAiConnectionPool {
     try {
       final request = http.Request(
         'GET',
-        SecureAiGateway.openAiUri('/v1/models/gpt-4o-mini'),
+        SecureAiGateway.openAiUri('/v1/models/gpt-6-luna'),
       );
       request.headers['Authorization'] = 'Bearer $apiKey';
 

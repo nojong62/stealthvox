@@ -4,7 +4,9 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-const String kFirstUtteranceJudgeModel = 'gpt-4.1';
+/// 2027-01-14 gpt-4.1 종료에 맞춰 공식 대체 모델로 옮겼다. 판정이라 추론은 끈다.
+const String kFirstUtteranceJudgeModel = 'gpt-6-luna';
+const String kFirstUtteranceJudgeReasoningEffort = 'none';
 const int kFirstUtteranceJudgeMaxOutputTokens = 160;
 const Duration kFirstUtteranceJudgeTimeout = Duration(milliseconds: 2500);
 
@@ -556,7 +558,7 @@ class FirstUtteranceContextJudgeSession {
   }
 
   /// 네트워크 문맥 판정 없이 "첫 정상 발화를 봤다"는 상태만 로컬로 확정한다.
-  /// GPT-4.1을 쓰지 않는 모드(Anyone)가 [judgeIfNeeded] 대신 호출한다.
+  /// 판정 모델을 쓰지 않는 모드(Anyone)가 [judgeIfNeeded] 대신 호출한다.
   /// 판정 조건은 [judgeIfNeeded]의 로컬 검열부와 동일하다.
   void consumeFirstNormalUtterance(
     String transcript, {
@@ -621,7 +623,7 @@ class FirstUtteranceContextJudgeSession {
             },
             body: jsonEncode({
               'model': kFirstUtteranceJudgeModel,
-              'temperature': 0,
+              'reasoning_effort': kFirstUtteranceJudgeReasoningEffort,
               'max_completion_tokens': kFirstUtteranceJudgeMaxOutputTokens,
               'response_format': {
                 'type': 'json_schema',
@@ -839,7 +841,7 @@ Use ambiguity_reason only for a short reason when uncertain; otherwise return an
       return const _FirstUtteranceEligibility(false, false);
     }
 
-    // 문맥 판정의 실익이 큰 경우만 GPT-4.1을 사용한다. 한국어 평서문의 생략
+    // 문맥 판정의 실익이 큰 경우만 판정 모델을 사용한다. 한국어 평서문의 생략
     // 주어는 보통 화자 자신이라 Realtime 번역만으로 충분하고, 첫 질문에서
     // 화자/청자 중 누가 행동 주체인지 불분명할 때만 별도 판정을 요청한다.
     //
