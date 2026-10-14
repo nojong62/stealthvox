@@ -79,18 +79,18 @@ test("Korean TTS routing accepts Korean and preserves other languages", () => {
 
 
 test("Chirp voices keep Circle Talk female and Scenario Talk male in every locale", () => {
-  assert.equal(chirpVoiceForRequest({ voice: "shimmer" }, "ko-KR"), "ko-KR-Chirp3-HD-Aoede");
+  assert.equal(chirpVoiceForRequest({ voice: "shimmer" }, "ko-KR"), "ko-KR-Chirp3-HD-Leda");
   assert.equal(chirpVoiceForRequest({ voice: "echo" }, "ko-KR"), "ko-KR-Chirp3-HD-Charon");
-  assert.equal(chirpVoiceForRequest({ voice: "shimmer" }, "en-US"), "en-US-Chirp3-HD-Aoede");
+  assert.equal(chirpVoiceForRequest({ voice: "shimmer" }, "en-US"), "en-US-Chirp3-HD-Leda");
   assert.equal(chirpVoiceForRequest({ voice: "echo" }, "cmn-CN"), "cmn-CN-Chirp3-HD-Charon");
-  assert.equal(chirpVoiceForRequest({ voice: "google-female" }, "ja-JP"), "ja-JP-Chirp3-HD-Aoede");
+  assert.equal(chirpVoiceForRequest({ voice: "google-female" }, "ja-JP"), "ja-JP-Chirp3-HD-Leda");
   assert.equal(chirpVoiceForRequest({ voice: "google-male" }, "fr-FR"), "fr-FR-Chirp3-HD-Charon");
   assert.equal(chirpVoiceForRequest({ voice: "google-ko-male" }, "ko-KR"), "ko-KR-Chirp3-HD-Charon");
   for (const voice of ["verse", "onyx", "ash", "cedar", "ballad", "fable"]) {
     assert.equal(chirpVoiceForRequest({ voice }, "de-DE"), "de-DE-Chirp3-HD-Charon", voice);
   }
   for (const voice of ["nova", "coral", "marin", "sage", "alloy", "unknown"]) {
-    assert.equal(chirpVoiceForRequest({ voice }, "it-IT"), "it-IT-Chirp3-HD-Aoede", voice);
+    assert.equal(chirpVoiceForRequest({ voice }, "it-IT"), "it-IT-Chirp3-HD-Leda", voice);
   }
 });
 

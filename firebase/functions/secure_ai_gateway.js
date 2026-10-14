@@ -24,9 +24,9 @@ const GOOGLE_TTS_ENDPOINT = "https://texttospeech.googleapis.com/v1/text:synthes
 // Plain speech in the app's 12 conversation languages is synthesized by Google
 // Chirp 3 HD. The app still sends OpenAI-compatible voice IDs; only their
 // gender survives the provider boundary, as one representative Chirp voice
-// per gender: Circle Talk sends `shimmer` (female), Scenario Talk sends `echo`
+// per gender (Leda / Charon): Circle Talk sends `shimmer` (female), Scenario Talk sends `echo`
 // (male), and History practice sends `google-female` / `google-male`.
-const CHIRP_FEMALE_VOICE = "Aoede";
+const CHIRP_FEMALE_VOICE = "Leda";
 const CHIRP_MALE_VOICE = "Charon";
 const CHIRP_LOCALES = new Map([
   ["ko", "ko-KR"], ["korean", "ko-KR"],

@@ -110,7 +110,7 @@ const BreathAnalysisConfig _kSnapEchoBreathConfig = BreathAnalysisConfig(
 
 /// 🗣️ [P3-VOICE] 에코잉·쉐도잉은 어느 언어든 Chirp 3 HD 대표 목소리 둘 중에서
 /// 고른다. OpenAI 음성 이름을 빌리지 않고 Gateway 전용 ID를 보낸다 — 서버가
-/// 배울 언어의 Aoede(여성) / Charon(남성)으로 바꾼다.
+/// 배울 언어의 Leda(여성) / Charon(남성)으로 바꾼다.
 const String _kP3FemaleVoice = 'google-female';
 const String _kP3MaleVoice = 'google-male';
 const List<String> _kP3Voices = <String>[_kP3FemaleVoice, _kP3MaleVoice];
@@ -6300,8 +6300,10 @@ RULES — follow exactly:
     P3ShadowGap.relaxed: 'Relaxed',
   };
 
-  /// ⚡ [SNAP-ECHO] 낭독 속도. Gateway가 Chirp의 speaking_rate로 넘긴다.
-  static const List<double> _kSnapEchoSpeeds = <double>[0.85, 0.95, 1.0];
+  /// 낭독 속도. Gateway가 Chirp의 speaking_rate로 넘긴다.
+  /// ⚡ Snap Echoing은 고정, 쉐도잉은 셋 중에서 고른다.
+  static const double _kSnapEchoSpeed = 0.88;
+  static const List<double> _kShadowSpeeds = <double>[0.83, 0.88, 0.93];
 
   /// 🚧 P3 전용 timing. **다른 모드의 VAD 값과 무관하다.** 최종값 아님.
   static const int _kP3EchoSilenceMs = 1800;
@@ -6323,7 +6325,7 @@ RULES — follow exactly:
   int _p3BreathIndex = 0;
   int _p3BreathTotal = 0;
   P3ShadowGap _p3Gap = P3ShadowGap.normal;
-  double _p3EchoSpeed = 1.0;
+  double _p3ShadowSpeed = 0.88;
   String? _p3EchoPath;
   String? _p3ShadowPath;
   String? _p3Error;
@@ -6710,11 +6712,10 @@ RULES — follow exactly:
     final style = _p3StyleFor(_p3PracticeMode);
     final bool shadowing = _p3PracticeMode == P3PracticeMode.shadowing;
     final ChirpPause pause = _p3ShadowPause;
-    final double speed = shadowing ? 1.0 : _p3EchoSpeed;
-    // 쉐도잉은 고른 간격마다, Snap Echoing은 고른 속도마다 소리가 다르다 —
-    // 캐시 칸도 따로 선다.
+    final double speed = shadowing ? _p3ShadowSpeed : _kSnapEchoSpeed;
+    // 쉐도잉은 고른 간격·속도마다 소리가 다르다 — 캐시 칸도 따로 선다.
     final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3'
-        '${shadowing ? '_${pause.name}' : '_x$speed'}';
+        '${shadowing ? '_${pause.name}' : ''}_x$speed';
     final requestKey = '$ns|$text';
     final existing = _breathPcmInFlight[requestKey];
     if (existing != null) return existing;
@@ -7148,9 +7149,8 @@ RULES — follow exactly:
               if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
                 const SizedBox(height: 12),
                 _buildP3GapPicker(),
-              ] else ...[
-                const SizedBox(height: 12),
-                _buildP3EchoSpeedPicker(),
+                const SizedBox(height: 8),
+                _buildP3ShadowSpeedPicker(),
               ],
 
               // 오류는 연습이 시작되지 못했을 때도 보여야 하므로 밖에 둔다.
@@ -7654,19 +7654,19 @@ RULES — follow exactly:
     );
   }
 
-  /// ⚡ [SNAP-ECHO] 속도 고르기. 간격 고르기와 같은 생김새다.
-  Widget _buildP3EchoSpeedPicker() {
+  /// 쉐도잉 속도 고르기. 간격 고르기와 같은 생김새다.
+  Widget _buildP3ShadowSpeedPicker() {
     return Row(
       children: [
-        for (final speed in _kSnapEchoSpeeds) ...[
+        for (final speed in _kShadowSpeeds) ...[
           Expanded(
             child: InkWell(
               // 속도가 바뀌면 소리 자체가 달라진다. 받아 둔 소리와 호흡
               // 경계를 버리고 다음 Start에서 그 속도로 다시 받는다.
-              onTap: _p3Busy || _p3EchoSpeed == speed
+              onTap: _p3Busy || _p3ShadowSpeed == speed
                   ? null
                   : () => setState(() {
-                        _p3EchoSpeed = speed;
+                        _p3ShadowSpeed = speed;
                         _p3FullPcm = null;
                         _p3Segments = const <BreathSegment>[];
                       }),
@@ -7675,25 +7675,25 @@ RULES — follow exactly:
                 height: 38,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: _p3EchoSpeed == speed
+                  color: _p3ShadowSpeed == speed
                       ? _p3ShadowingAccentColor.withValues(alpha: 0.20)
                       : Colors.white.withValues(alpha: 0.04),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: _p3EchoSpeed == speed
+                    color: _p3ShadowSpeed == speed
                         ? _p3ShadowingAccentColor
                         : Colors.white24,
-                    width: _p3EchoSpeed == speed ? 1.4 : 1,
+                    width: _p3ShadowSpeed == speed ? 1.4 : 1,
                   ),
                 ),
                 child: Text(
-                  '${speed == 1.0 ? '1' : speed}x',
+                  '${speed}x',
                   style: TextStyle(
-                    color: _p3EchoSpeed == speed
+                    color: _p3ShadowSpeed == speed
                         ? _p3ShadowingAccentColor
                         : Colors.white60,
                     fontSize: 12,
-                    fontWeight: _p3EchoSpeed == speed
+                    fontWeight: _p3ShadowSpeed == speed
                         ? FontWeight.bold
                         : FontWeight.w500,
                   ),
@@ -7701,7 +7701,7 @@ RULES — follow exactly:
               ),
             ),
           ),
-          if (speed != _kSnapEchoSpeeds.last) const SizedBox(width: 6),
+          if (speed != _kShadowSpeeds.last) const SizedBox(width: 6),
         ],
       ],
     );

@@ -1025,7 +1025,7 @@ $finalLanguageRule''';
     );
 
     _initPermissions();
-    // Circle Talk과 같은 첫 재생 경로다. 첫 Aoede PCM이 도착하기 전에
+    // Circle Talk과 같은 첫 재생 경로다. 첫 Chirp PCM이 도착하기 전에
     // flutter_sound 플레이어와 Android 오디오 세션을 준비한다.
     unawaited(_aiTtsAdapter.preparePlayback());
 
