@@ -125,4 +125,84 @@ void main() {
       expect(next.reason, 'normal_turn');
     });
   });
+
+  group('Origin이 한국어·영어가 아닐 때 (2026-10-14)', () {
+    String reasonOf(String text) => selectDialogBrainReasoning(
+          userText: text,
+          hasConversationContext: true,
+        ).reason;
+
+    test('실기기에서 low에 머물던 일본어 지시어가 이제 medium이다', () {
+      expect(reasonOf('さっきの話ですけど、指揮者の先生は厳しい方なんですか？'),
+          'context_reference');
+    });
+
+    test('앞 대화를 가리키는 말', () {
+      for (final text in <String>[
+        '先ほど言った件ですが',
+        '刚才说的那家餐厅在哪里？',
+        'Lo que dijiste sobre el restaurante me interesa.',
+        'Ce que tu as dit tout à l’heure, c’était vrai ?',
+        'Was du vorhin gesagt hast, stimmt das?',
+        'आपने पहले कहा था कि आप दिल्ली में रहते हैं।',
+        'То, что ты говорил раньше, правда?',
+        'O que você disse sobre o hotel é verdade?',
+        'Quello che hai detto prima era interessante.',
+        'Wat je net zei over het weer klopt.',
+      ]) {
+        expect(reasonOf(text), 'context_reference', reason: text);
+      }
+    });
+
+    test('정정하는 말', () {
+      for (final text in <String>[
+        'いや、そういう意味じゃなくて、明日です。',
+        '我不是那个意思，我说的是明天。',
+        'No, quiero decir mañana.',
+        'Non, je veux dire demain.',
+        'Nein, ich meine morgen.',
+        'मेरा मतलब यह नहीं था।',
+        'Нет, я имею в виду завтра.',
+        'Não, quero dizer amanhã.',
+        'No, intendo domani.',
+        'Nee, ik bedoel morgen.',
+      ]) {
+        expect(reasonOf(text), 'user_correction', reason: text);
+      }
+    });
+
+    test('그게 무슨 뜻이냐고 묻는 말', () {
+      for (final text in <String>[
+        'それはどういう意味ですか？',
+        '这是什么意思？',
+        '¿Qué quieres decir?',
+        'Qu’est-ce que ça veut dire ?',
+        'Was meinst du damit?',
+        'इसका क्या मतलब है?',
+        'Что это значит?',
+        'O que isso significa?',
+        'Cosa significa?',
+        'Wat bedoel je?',
+      ]) {
+        expect(reasonOf(text), 'meaning_scope', reason: text);
+      }
+    });
+
+    test('평범한 문장은 그대로 low다 — 대답이 느려지면 안 된다', () {
+      for (final text in <String>[
+        '明日は友達と映画を見に行きます。',
+        '我今天想吃那个饺子。',
+        'Eso es muy interesante, me gusta mucho.',
+        'Je vais au marché ce matin.',
+        'Ich gehe heute Abend ins Kino.',
+        'मैं कल बाज़ार जाऊँगा।',
+        'Я сегодня иду в кино.',
+        'Eu gosto muito de café.',
+        'Oggi vado al mare con la famiglia.',
+        'Ik ga morgen naar de markt.',
+      ]) {
+        expect(reasonOf(text), 'normal_turn', reason: text);
+      }
+    });
+  });
 }

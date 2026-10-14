@@ -83,7 +83,9 @@ DialogBrainReasoningDecision selectDialogBrainReasoning({
   return const DialogBrainReasoningDecision('low', 'normal_turn');
 }
 
-bool _containsUserCorrection(String text) => RegExp(
+bool _containsUserCorrection(String text) =>
+    _kOtherLangCorrection.hasMatch(text) ||
+    RegExp(
       r'(아니\s*(그|제가|내가|그게|그건)?\s*(뜻|말|사람|거|것)?\s*(이|가)?\s*아니|'
       r'그\s*(뜻|말|사람|거|것)\s*(이|가)?\s*아니|제가\s*말한\s*(건|것은)|'
       r'내가\s*말한\s*(건|것은)|잘못\s*(이해|알아들|들었)|'
@@ -92,7 +94,9 @@ bool _containsUserCorrection(String text) => RegExp(
       caseSensitive: false,
     ).hasMatch(text);
 
-bool _containsContextReference(String text) => RegExp(
+bool _containsContextReference(String text) =>
+    _kOtherLangContextReference.hasMatch(text) ||
+    RegExp(
       r'(아까\s*(말|얘기|이야기)?|전에\s*(말|얘기|이야기)했던|앞에서\s*(말|얘기)한|'
       r'방금\s*(말|얘기)한|그\s*(사람|말|뜻|얘기|이야기|거|것|때|곳)|'
       r'그전에\s*(말|얘기)한|앞서\s*(말|언급)한|'
@@ -103,6 +107,8 @@ bool _containsContextReference(String text) => RegExp(
     ).hasMatch(text);
 
 bool _hasAmbiguousMeaningScope(String text) {
+  // 다른 언어는 "그게 무슨 뜻"이 한 덩어리 표현이라 대상까지 들어 있다.
+  if (_kOtherLangMeaningQuestion.hasMatch(text)) return true;
   final asksMeaning = RegExp(
     r'(무슨\s*뜻|뜻이\s*뭐|의미가\s*뭐|뭘\s*의미|what\s+does\s+(?:that|it|this)\s+mean|what\s+do\s+you\s+mean)',
     caseSensitive: false,
@@ -141,3 +147,60 @@ bool _looksLikePartialAnswer(String text) {
     caseSensitive: false,
   ).hasMatch(text);
 }
+
+// ====================================================================
+// 🌐 한국어·영어 밖의 Origin. 앱이 고를 수 있는 나머지 열 언어다
+//   (ja·zh·es·fr·de·hi·ru·pt·it·nl). 2026-10-14 실기기에서 일본어
+//   "さっきの話ですけど"가 `low`에 머물러 추가했다.
+//
+// **낱말 하나가 아니라 구(句)로 잡는다.** "eso"·"那个" 하나로 올리면 평범한
+// 문장까지 `medium`이 되어 대답이 느려진다. 호출부가 이미 소문자로 바꿔 넘긴다.
+// ====================================================================
+
+/// 앞에서 나온 말·사람을 다시 가리킨다.
+final RegExp _kOtherLangContextReference = RegExp(
+  r"(さっき(の|言った|話した|言ってた)|先ほど(の|言った|話した)|前に(言った|話した)|あの(人|話|件)|"
+  r"刚才(说|提|讲|那)|之前(说|提|讲)的|前面(说|提|讲)的|那个人|"
+  r"lo que (dijiste|dije|mencionaste|comentaste)|lo de antes|esa persona|"
+  r"ce que (tu as|vous avez|j[’']ai) (dit|mentionné)|tout à l[’']heure|cette personne|"
+  r"(du|sie|ich) (hast|haben|habe) (vorhin|vorher|eben|gerade)|(du|sie|ich) (vorhin|vorher|eben|gerade) (gesagt|erwähnt)|von vorhin|diese person|"
+  r"पहले (कहा|बताया|बोला)|अभी (कहा|बताया|बोला)|वो (आदमी|बात|इंसान)|"
+  r"(ты|вы|я) (говорил|сказал|упоминал)\w* (раньше|только что)|только что (сказал|говорил)\w*|тот человек|"
+  r"o que (você|eu) (disse|falou|mencionou)|aquilo que (você|eu) (disse|falou)|essa pessoa|"
+  r"quello che (hai|ho|avete) detto|di prima|quella persona|"
+  r"wat (je|jij|ik|u) (eerder|net|daarnet) (zei|gezegd)|van daarnet|die persoon)",
+  caseSensitive: false,
+  unicode: true,
+);
+
+/// 앞에서 잘못 알아들은 것을 바로잡는다.
+final RegExp _kOtherLangCorrection = RegExp(
+  r"(そういう意味じゃ|そうじゃなくて|聞き間違え|言ったのは|"
+  r"我不是(那个|这个)?意思|不是(那个|这个)意思|我说的是|你(理解|听)错了|"
+  r"no,? (quiero decir|me refiero)|no es lo que (quise decir|dije)|me entendiste mal|"
+  r"non,? je veux dire|ce n[’']est pas ce que (je voulais dire|j[’']ai dit)|(tu as|vous avez) mal compris|"
+  r"nein,? ich meine|nicht,? was ich (meinte|gemeint habe|gesagt habe)|(du hast|sie haben) (mich )?falsch verstanden|"
+  r"मेरा मतलब (यह|ये|वो) नहीं|मेरा मतलब था|(आपने|तुमने) गलत समझा|"
+  r"я имею в виду|я не это имел\w* в виду|(ты|вы) не так понял\w*|"
+  r"não,? quero dizer|não foi isso que eu (quis dizer|disse)|você entendeu errado|"
+  r"no,? (intendo|voglio dire)|non è quello che (intendevo|ho detto)|hai capito male|"
+  r"nee,? ik bedoel|dat is niet wat ik (bedoelde|zei)|je hebt me verkeerd begrepen)",
+  caseSensitive: false,
+  unicode: true,
+);
+
+/// "그게 무슨 뜻이에요?" — 대상까지 한 덩어리로 묻는 표현.
+final RegExp _kOtherLangMeaningQuestion = RegExp(
+  r"(どういう意味|何のこと|"
+  r"(这|那|你)(是)?什么意思|"
+  r"qué (quieres decir|significa eso|quiere decir eso)|"
+  r"qu[’']est-ce que (ça|cela) veut dire|que (veux-tu|voulez-vous) dire|"
+  r"was (meinst du|meinen sie|bedeutet das|heißt das)|"
+  r"(इसका|उसका|इस बात का) (क्या )?मतलब|"
+  r"что (это|ты|вы) (значит|имеешь в виду|имеете в виду)|"
+  r"o que (isso significa|você quer dizer|quer dizer isso)|"
+  r"cosa (significa|vuol dire|intendi)|"
+  r"wat (bedoel je|bedoelt u|betekent dat))",
+  caseSensitive: false,
+  unicode: true,
+);
