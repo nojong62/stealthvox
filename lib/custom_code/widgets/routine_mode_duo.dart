@@ -29,6 +29,7 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 // 이름이 겹쳐 `kDebugMode`가 그냥은 안 잡히므로 접두사로 가져온다.
 import 'package:flutter/foundation.dart' as foundation;
 import '/custom_code/services/transcript_text_clean.dart';
+import '/custom_code/services/debug_stt_inject.dart';
 import '/custom_code/services/duo_direct_audio.dart';
 import '/custom_code/services/duo_partner_echo.dart';
 import '/custom_code/services/duo_call_resolution.dart';
@@ -986,6 +987,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 전사 완료는 무시된다.
   int _interpGeneration = 0;
 
+  // 🧪 [STT-INJECT] 디버그 빌드에서만 산다. 릴리스면 null.
+  Timer? _debugSttInject;
+
   // ── 🔵 [만능 통역 Always-on] 마이크 수명과 상태 축 ───────────────────────
   // 마이크는 상대가 들어온 뒤 **한 번만** 열고 세션이 끝날 때까지 유지한다.
   // 턴 경계는 서버 VAD와 오디오 게이트가 전담한다 — recorder를 턴마다
@@ -1834,6 +1838,18 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
     WidgetsBinding.instance.addObserver(this);
     unawaited(_probeDuoNetwork('session_start'));
+    // 🧪 [STT-INJECT] 주입된 한 줄은 통역 소켓의 completed와 같은 입구로
+    //   들어간다. 소리가 없으므로 소리 게이트 세 개만 건너뛴다.
+    _debugSttInject = startDebugSttInject((text) {
+      if (_interpStt == null) {
+        _lgDuo('🧪 [STT-INJECT]', 'skipped=no_interp_session');
+        return;
+      }
+      _lgDuo('🧪 [STT-INJECT]', 'text="$text"');
+      unawaited(_onInterpreterTranscript(_interpGeneration,
+          'inject-${DateTime.now().microsecondsSinceEpoch}', text,
+          injected: true));
+    });
     // 상태등 맥박. 발화 중에만 돈다(`_setInterpMicPhase`가 켜고 끈다).
     _interpPulse = AnimationController(
       vsync: this,
@@ -1965,6 +1981,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   @override
   void dispose() {
+    _debugSttInject?.cancel();
     if (StealthRoomMaster.saveAndExitCurrentMode == _handleAutoSaveAndExit) {
       StealthRoomMaster.saveAndExitCurrentMode = null;
     }
@@ -4414,7 +4431,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 때마다 캡처를 stop했고 다음 턴은 버튼이 열었다 — 그 한 줄이 연속 발화를
   /// 막던 장본인이다. 이제 캡처도 게이트도 그대로 두고 다음 발화를 받는다.
   Future<void> _onInterpreterTranscript(
-      int generation, String itemId, String text) async {
+      int generation, String itemId, String text,
+      {bool injected = false}) async {
     if (generation != _interpGeneration || _isExiting) return;
     final String trimmed = text.trim();
 
@@ -4467,7 +4485,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             'snrDb=${_fmtDb(_utteranceRms?.snrDbOf(itemId))}');
 
     // 🔇 길이. 직통화와 같은 문턱이다.
-    if (belowVoicedGate(voicedMs, minMs: kDuoMinVoicedMs)) {
+    if (!injected && belowVoicedGate(voicedMs, minMs: kDuoMinVoicedMs)) {
       _lgDuo(
           '[INTERP-DROP]',
           'reason=${DuoDropReason.voicedMs} item=$itemId '
@@ -4484,7 +4502,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   게이트가 `flush_on_close`로 말하던 중의 버퍼를 강제 확정시키고, 그
     //   조각이 VAD 침묵 시간(800ms)보다 짧으면 서버도 로컬도 길이를 못 잰다
     //   (`local_span_too_short`). 즉 이 값이 없다는 것 자체가 근거다.
-    if (voicedMs == null) {
+    if (!injected && voicedMs == null) {
       _lgDuo(
           '[INTERP-DROP]',
           'reason=${DuoDropReason.voicedMs}(unmeasured_truncation) '
@@ -4496,7 +4514,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 🔉 길이 다음은 세기다. 직통화와 같은 문턱(-42.0dBFS)이다.
     //   세기를 못 잰 발화(null)는 통과시킨다 — 모르는 것으로 사람 말을
     //   버리지 않는다.
-    if (belowLevelGate(rmsDbfs, minDbfs: kDuoMinUtteranceRmsDbfs)) {
+    if (!injected &&
+        belowLevelGate(rmsDbfs, minDbfs: kDuoMinUtteranceRmsDbfs)) {
       _lgDuo(
           '[INTERP-DROP]',
           'reason=${DuoDropReason.lowLevel} item=$itemId '
