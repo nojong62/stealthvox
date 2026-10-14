@@ -99,15 +99,14 @@ const Color _p3PracticeSurfaceColor = Color(0xFF1C1C1C);
 const Color _p3PracticeBorderColor = Color(0x22FFFFFF);
 const Color _p3BreathAccentColor = Color(0xFF7DD3FC);
 
-/// ⚡ [SNAP-ECHO] Snap Echoing의 호흡. **끊는 자리는 문장 구조가 정한다** —
-/// [SnapEchoChunker]가 나눈 의미 단위 사이마다 Chirp이 쉬고, 여기서는 그 쉼을
-/// 소리로 찾아 자른다. 그래서 길이로 다시 쪼개지 않는다. [maxBreathMs]는
-/// 단위 나누기가 실패해 문장부호 쉼만 있을 때의 안전판이다.
-/// 2~3단어 단위가 이웃과 합쳐지지 않게 [minBreathMs]를 낮게 둔다.
-/// 실기기에서 조정할 값이다.
+/// ⚡ [SNAP-ECHO] Snap Echoing의 호흡. **끊는 자리는 의미 단위가 정한다** —
+/// [SnapEchoChunker]가 나눈 한 호흡 단위 사이마다 Chirp이 쉬고, 여기서는 그
+/// 쉼을 소리로 찾아 자른다. 단위 안의 자연스러운 짧은 틈은 자르지 않는다.
+/// [maxBreathMs]는 단위 나누기가 실패해 문장부호 쉼만 있을 때의 안전판이다
+/// (4~7단어 한 호흡은 0.88배속에서 3초 안쪽이다). 실기기에서 조정할 값이다.
 const BreathAnalysisConfig _kSnapEchoBreathConfig = BreathAnalysisConfig(
-  minBreathMs: 300,
-  maxBreathMs: 2500,
+  minBreathMs: 600,
+  maxBreathMs: 4000,
   minSplitSilenceMs: 60,
 );
 

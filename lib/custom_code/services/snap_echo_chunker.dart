@@ -1,8 +1,10 @@
-// ⚡ [SNAP-CHUNK] Snap Echoing을 문장 구조로 짧게 끊는다.
+// ⚡ [SNAP-CHUNK] Snap Echoing을 **한 호흡 의미 단위**로 끊는다.
 //
-//   현지인이 한 숨에 읽는 호흡이 아니라, **배우는 사람이 구조를 알아보게**
-//   짧게 나눈 의미 단위다(실장님 지시, 2026-10-14). 주어 | 동사구 | 목적어 |
-//   전치사구 | 절 머리처럼 문법 이음매에서 끊는다.
+//   몇 단어씩 쪼개는 것이 아니다. 뜻이 한 덩어리로 완결되고, 한 숨에 리듬을
+//   타며 읽을 만한 길이 — 강세 박자 2~3개, 대개 4~7단어 — 로 끊는다. 이웃
+//   덩어리끼리 길이가 비슷해 박자가 고르게 흐르도록 한다. 현지인이 빠르게
+//   한 숨에 몰아 읽는 긴 호흡도, 문법 성분마다 자르는 짧은 조각도 아니다
+//   (실장님 지시, 2026-10-15).
 //
 //   역할 분담:
 //     · 어디서 끊을지 — 여기(글자). 모델이 단위만 나누고 글자는 안 바꾼다.
@@ -21,20 +23,22 @@ import 'history_text_model.dart';
 import 'secure_ai_gateway.dart';
 
 /// 이 규칙으로 만든 소리를 캐시에서 가르는 판. 규칙을 바꾸면 올린다.
-const String kSnapChunkVersion = 'snap_chunk_v1';
+const String kSnapChunkVersion = 'snap_chunk_v2';
 
 class SnapEchoChunker {
   SnapEchoChunker._();
 
   static String instructions(String languageName) => '''
-You split a $languageName passage into short sense groups for a language learner doing listen-and-repeat practice.
+You divide a $languageName passage into breath groups for rhythmic read-aloud practice. A learner hears one group, then says it back.
 
-Goal: each group is something a learner can hear once and repeat at once without reading. Cut at grammatical seams so the structure is easy to see — not where a fluent native speaker would breathe.
+Each group is one complete unit of meaning that can be spoken in a single comfortable breath with a clear, steady rhythm — the way a skilled teacher reads aloud for learners, ideally phrased and evenly paced. It is not word-by-word chopping, and it is not the long, fast run a fluent native speaker might say in one go.
 
 Rules:
-- Usually 2 to 4 words per group (in languages written without spaces, about 3 to 8 characters). Never more than 5 words.
-- Cut between: subject | verb phrase | object or complement | each prepositional phrase | the start of a subordinate or relative clause | after a conjunction.
-- Never cut inside: article/determiner + noun, adjective + noun, auxiliary + main verb, phrasal verb, fixed expression, name, number with its unit.
+- One group = one idea that makes sense on its own: a short clause, or a phrase that carries a complete piece of meaning.
+- Usually 2 to 3 stressed beats, about 4 to 7 words (in languages written without spaces, about 6 to 14 characters). Never under 3 words unless the passage leaves no choice. Never over 9 words.
+- Keep neighbouring groups similar in length so the reading keeps an even beat.
+- Prefer to cut at punctuation and at clause boundaries; otherwise before a prepositional phrase or after a conjunction — wherever the meaning naturally rests.
+- Never cut inside a fixed expression, phrasal verb, name, number with its unit, or a noun phrase.
 - Keep every character of the passage, in order. Do not add, drop, reorder, or change any word or punctuation mark. Punctuation stays attached to the word before it.
 
 Return JSON only: {"chunks": ["...", "..."]}''';
