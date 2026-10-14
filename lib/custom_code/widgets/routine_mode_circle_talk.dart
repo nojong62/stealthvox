@@ -7597,13 +7597,25 @@ ${buildHeardConfirmOutputRule(originLang)}
               }),
             )
             .timeout(const Duration(seconds: 15));
-        if (response.statusCode == 200) {
+        // ⚠️ Luna에 temperature/max_tokens를 보내는 자리다. 거부되면 예전에는
+        //   로그 없이 ''만 돌아갔다 — 상태와 오류 본문(전사문 없음)을 남긴다.
+        if (response.statusCode != 200) {
+          final body = utf8.decode(response.bodyBytes);
+          debugPrint('[FreeTalkBrain.translateOriginalToTarget] '
+              'status=${response.statusCode} attempt=${attempt + 1}/2 '
+              'model=$kFreeTalkTranslateModelFast '
+              'body=${body.length > 200 ? body.substring(0, 200) : body}');
+        } else {
           final data = jsonDecode(utf8.decode(response.bodyBytes));
           final translated =
               data['choices'][0]['message']['content'].toString().trim();
           if (translated.isNotEmpty) return translated;
+          debugPrint('[FreeTalkBrain.translateOriginalToTarget] '
+              'empty_content attempt=${attempt + 1}/2');
         }
-      } catch (_) {
+      } catch (e) {
+        debugPrint('[FreeTalkBrain.translateOriginalToTarget] '
+            'failed=${e.runtimeType} attempt=${attempt + 1}/2');
         if (attempt == 0) {
           await Future.delayed(const Duration(milliseconds: 400));
         }
@@ -7757,11 +7769,22 @@ Update the private memory:'''
             }),
           )
           .timeout(const Duration(seconds: 8));
-      if (response.statusCode != 200) return previousMemory;
+      if (response.statusCode != 200) {
+        // ⚠️ translateOriginalToTarget와 같은 형식 문제를 가린다.
+        final body = utf8.decode(response.bodyBytes);
+        debugPrint('[FreeTalkBrain.updateCharacterMemory] '
+            'status=${response.statusCode} model=$kFreeTalkTranslateModelFast '
+            'body=${body.length > 200 ? body.substring(0, 200) : body}');
+        return previousMemory;
+      }
       final data = jsonDecode(utf8.decode(response.bodyBytes));
       final result = data['choices'][0]['message']['content'].toString().trim();
+      debugPrint('[FreeTalkBrain.updateCharacterMemory] status=200 '
+          'empty=${result.isEmpty}');
       return result.isEmpty ? previousMemory : result;
-    } catch (_) {
+    } catch (e) {
+      debugPrint(
+          '[FreeTalkBrain.updateCharacterMemory] failed=${e.runtimeType}');
       return previousMemory;
     } finally {
       client.close();
