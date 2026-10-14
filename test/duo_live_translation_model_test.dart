@@ -2,14 +2,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/history_text_model.dart';
 
 void main() {
-  test('Duo live translation uses the isolated GPT-4o mini configuration', () {
-    expect(kDuoLiveTranslationModel, 'gpt-4o-mini');
-    expect(kDuoLiveTranslationTemperature, 0);
+  test('Duo live translation uses the isolated GPT-6 Luna none configuration',
+      () {
+    expect(kDuoLiveTranslationModel, 'gpt-6-luna');
+    expect(kDuoLiveTranslationReasoningEffort, 'none');
     expect(kDuoLiveTranslationModelOptions, <String, dynamic>{
-      'model': 'gpt-4o-mini',
-      'temperature': 0,
+      'model': 'gpt-6-luna',
+      'reasoning_effort': 'none',
     });
-    expect(kDuoLiveTranslationModelOptions.containsKey('reasoning_effort'),
+    // Luna는 temperature를 받지 않는 형식으로 부른다.
+    expect(kDuoLiveTranslationModelOptions.containsKey('temperature'),
         isFalse);
   });
 

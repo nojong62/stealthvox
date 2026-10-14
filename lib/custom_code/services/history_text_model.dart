@@ -85,14 +85,17 @@ const String kLiveTextReasoningEffort = 'none';
 // --------------------------------------------------------------------
 // 공용 후처리와 분리한다. 듀오 번역만 되돌려 비교할 수 있어야 하며,
 // Circle/Scenario와 히스토리 정돈·복원·요약에는 이 설정을 쓰지 않는다.
-// 문맥을 덧붙이지 않고 현재 발화 하나만 보내며, 비추론 모델이므로
-// `reasoning_effort`는 요청에 포함하지 않는다.
+// 문맥을 덧붙이지 않고 현재 발화 하나만 보낸다.
+//
+// 2026-10-14: gpt-4o-mini(2027-01-14 종료) → gpt-6-luna `none`.
+// 기준선(gpt-4o-mini, 독일어↔중국어 10턴): translateTotalMs 895~1604ms.
+// 추론을 켜면 통화가 그만큼 굼떠진다 — `none`에서 올리지 말 것.
 // ====================================================================
 
-const String kDuoLiveTranslationModel = 'gpt-4o-mini';
-const double kDuoLiveTranslationTemperature = 0;
+const String kDuoLiveTranslationModel = 'gpt-6-luna';
+const String kDuoLiveTranslationReasoningEffort = 'none';
 
 const Map<String, dynamic> kDuoLiveTranslationModelOptions = <String, dynamic>{
   'model': kDuoLiveTranslationModel,
-  'temperature': kDuoLiveTranslationTemperature,
+  'reasoning_effort': kDuoLiveTranslationReasoningEffort,
 };
