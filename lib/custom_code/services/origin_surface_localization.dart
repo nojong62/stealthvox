@@ -2485,6 +2485,20 @@ class OriginSurfaceCopy {
       'Lettura',
       'Lezen'
     ],
+    'listenNoText': [
+      'Listen, then say it back',
+      '듣고 그대로 따라 말해 보세요',
+      '聞いて、そのまま言ってみましょう',
+      '听完后照着说出来',
+      'Escucha y repítelo',
+      'Écoutez, puis répétez',
+      'Hören und nachsprechen',
+      'सुनिए, फिर वैसे ही बोलिए',
+      'Послушайте и повторите',
+      'Ouça e repita',
+      'Ascolta e ripeti',
+      'Luister en zeg het na'
+    ],
     'preparingVoice': [
       'Preparing voice…',
       '음성 준비 중…',

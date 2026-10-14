@@ -6293,8 +6293,10 @@ RULES — follow exactly:
       _p3ShadowLongPause ? ChirpPause.long : ChirpPause.medium;
 
   /// 낭독 속도. Gateway가 Chirp의 speaking_rate로 넘긴다.
-  /// ⚡ Snap Echoing은 고정, 쉐도잉은 셋 중에서 고른다.
-  static const double _kSnapEchoSpeed = 0.88;
+  /// 쉐도잉은 셋 중에서 고른다. Snap Echoing은 [_snapEchoSpeed].
+  /// ⚡ Snap Echoing 속도는 단위 길이를 따른다. 짧은 단위는 조금 천천히,
+  /// 긴 단위는 보통 빠르기에 가깝게 — 리듬을 그대로 복사하게 한다.
+  double get _snapEchoSpeed => _p3SnapSize == SnapUnitSize.quick ? 0.9 : 0.98;
   static const List<double> _kShadowSpeeds = <double>[0.83, 0.88, 0.93];
 
   /// 🚧 P3 전용 timing. **다른 모드의 VAD 값과 무관하다.** 최종값 아님.
@@ -6323,6 +6325,10 @@ RULES — follow exactly:
   /// ⚡ [SNAP-ECHO] 한 호흡 의미 단위의 길이. 쉼은 고르지 않는다 — 단위 사이
   /// `[pause short]`는 소리에서 경계를 찾게 하는 표시일 뿐이다.
   SnapUnitSize _p3SnapSize = SnapUnitSize.quick;
+
+  /// ⚡ [SNAP-ECHO] 한 단위를 따라 하기 전에 몇 번 듣는가. 소리는 같으므로
+  /// 바꿔도 다시 받지 않는다.
+  int _p3EchoRepeat = 1;
   String? _p3EchoPath;
   String? _p3ShadowPath;
   String? _p3Error;
@@ -6365,7 +6371,6 @@ RULES — follow exactly:
       _p3Stage == P3Stage.fullShadowRecord ||
       _p3Recording ||
       _p3Player != null;
-
 
   bool _p3Alive(int generation) =>
       mounted &&
@@ -6694,7 +6699,7 @@ RULES — follow exactly:
       await _ensureP3Engine().start(
         aiPcm: pcm,
         segments: analysis.segments,
-        repeatCount: 1,
+        repeatCount: _p3EchoRepeat,
       );
     } else {
       await _runP3FullShadow();
@@ -6707,7 +6712,7 @@ RULES — follow exactly:
     final style = _p3StyleFor(_p3PracticeMode);
     final bool shadowing = _p3PracticeMode == P3PracticeMode.shadowing;
     final ChirpPause pause = shadowing ? _p3ShadowPause : ChirpPause.short;
-    final double speed = shadowing ? _p3ShadowSpeed : _kSnapEchoSpeed;
+    final double speed = shadowing ? _p3ShadowSpeed : _snapEchoSpeed;
     final SnapUnitSize size = _p3SnapSize;
     // 고른 쉼·속도·단위 길이마다 소리가 다르다 — 캐시 칸도 따로 선다.
     final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3'
@@ -7165,6 +7170,8 @@ RULES — follow exactly:
               ] else ...[
                 const SizedBox(height: 12),
                 _buildP3SnapSizePicker(),
+                const SizedBox(height: 8),
+                _buildP3EchoRepeatPicker(),
               ],
 
               // 오류는 연습이 시작되지 못했을 때도 보여야 하므로 밖에 둔다.
@@ -7306,6 +7313,10 @@ RULES — follow exactly:
     final Color userTurnAccent = _p3PracticeMode == P3PracticeMode.echoing
         ? _p3BreathAccentColor
         : _p3ShadowingAccentColor;
+    // 🙈 [SNAP-ECHO] 에코잉은 귀로만 한다. 준비·호흡 단계에서는 글을 가리고,
+    //   전체 문장 단계부터 보여 준다.
+    final bool hideText = _p3PracticeMode == P3PracticeMode.echoing &&
+        (inBreathEcho || _p3Stage == P3Stage.preparing);
     final int safeTotal = _p3BreathTotal.clamp(0, 24);
     final int safeIndex =
         safeTotal == 0 ? 0 : _p3BreathIndex.clamp(0, safeTotal - 1);
@@ -7419,18 +7430,43 @@ RULES — follow exactly:
           // 📜 [P3-READ-SCROLL] 문장 칸을 따로 스크롤시키지 않는다. 스크롤
           //    면이 둘이면 손가락이 안쪽에 갇혀 페이지가 안 밀리고, 아래 버튼에
           //    닿지 못한다. 읽는 진행은 페이지째 민다 — _p3ScrollReadingTo.
-          Text(
-            text.isEmpty ? 'Sentence unavailable' : text,
-            style: TextStyle(
-              color: userTurn
-                  ? Color.lerp(Colors.white, userTurnAccent, 0.34)!
-                      .withValues(alpha: 0.96)
-                  : Colors.white.withValues(alpha: 0.90),
-              fontSize: 16 * _fontScale,
-              fontWeight: FontWeight.w400,
-              height: 1.6,
+          if (hideText)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 18),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.hearing_rounded,
+                      color: _p3BreathAccentColor.withValues(alpha: 0.8),
+                      size: 20),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      _surfaceCopy['listenNoText'],
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.6),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            Text(
+              text.isEmpty ? 'Sentence unavailable' : text,
+              style: TextStyle(
+                color: userTurn
+                    ? Color.lerp(Colors.white, userTurnAccent, 0.34)!
+                        .withValues(alpha: 0.96)
+                    : Colors.white.withValues(alpha: 0.90),
+                fontSize: 16 * _fontScale,
+                fontWeight: FontWeight.w400,
+                height: 1.6,
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -7587,9 +7623,7 @@ RULES — follow exactly:
                   ),
                 ),
                 child: Text(
-                  mode == P3PracticeMode.echoing
-                      ? 'Snap Echoing'
-                      : 'Shadowing',
+                  mode == P3PracticeMode.echoing ? 'Snap Echoing' : 'Shadowing',
                   style: TextStyle(
                     color:
                         _p3PracticeMode == mode ? Colors.white : Colors.white54,
@@ -7761,6 +7795,26 @@ RULES — follow exactly:
     );
   }
 
+  /// ⚡ [SNAP-ECHO] 반복 횟수 고르기 — 한 단위를 1번 / 2번 듣고 따라 한다.
+  Widget _buildP3EchoRepeatPicker() {
+    return Row(
+      children: [
+        for (final count in const <int>[1, 2]) ...[
+          Expanded(
+            child: _p3OptionChip(
+              label: 'Repeat ×$count',
+              selected: _p3EchoRepeat == count,
+              onTap: _p3Busy || _p3EchoRepeat == count
+                  ? null
+                  : () => setState(() => _p3EchoRepeat = count),
+            ),
+          ),
+          if (count != 2) const SizedBox(width: 6),
+        ],
+      ],
+    );
+  }
+
   /// 쉐도잉 Long Pause 켜고 끄기. 끄면 `[pause]`, 켜면 `[pause long]`.
   Widget _buildP3LongPauseToggle() {
     return _p3OptionChip(
@@ -7768,8 +7822,7 @@ RULES — follow exactly:
       selected: _p3ShadowLongPause,
       onTap: _p3Busy
           ? null
-          : () => _resetP3Audio(
-              () => _p3ShadowLongPause = !_p3ShadowLongPause),
+          : () => _resetP3Audio(() => _p3ShadowLongPause = !_p3ShadowLongPause),
     );
   }
 
