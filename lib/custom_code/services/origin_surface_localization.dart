@@ -2891,19 +2891,49 @@ class OriginSurfaceCopy {
       'Errore',
       'Fout'
     ],
+    // 이메일 보호(enumeration protection)가 켜져 있어 없는 주소도 성공으로
+    // 돌아온다. "보냈다"고 단정하지 않는다(2026-10-15).
     'passwordResetSent': [
-      'Password reset email sent.',
-      '비밀번호 재설정 이메일을 보냈습니다.',
-      'パスワード再設定メールを送信しました。',
-      '密码重置邮件已发送。',
-      'Se envió el correo para restablecer la contraseña.',
-      'E-mail de réinitialisation du mot de passe envoyé.',
-      'E-Mail zum Zurücksetzen des Passworts wurde gesendet.',
-      'पासवर्ड रीसेट ईमेल भेज दिया गया है।',
-      'Письмо для сброса пароля отправлено.',
-      'E-mail de redefinição de senha enviado.',
-      'E-mail per reimpostare la password inviata.',
-      'E-mail voor wachtwoordherstel verzonden.'
+      'If an account exists for this address, a reset email has been sent. Check that the address is correct and look in your spam folder too.',
+      '이 주소로 가입된 계정이 있으면 재설정 메일을 보냈습니다. 주소가 맞는지, 스팸함도 확인해 주세요.',
+      'このアドレスで登録されたアカウントがあれば、再設定メールを送信しました。アドレスが正しいか、迷惑メールフォルダもご確認ください。',
+      '如果此地址已注册账号，我们已发送重置邮件。请确认地址是否正确，并检查垃圾邮件文件夹。',
+      'Si existe una cuenta con esta dirección, enviamos un correo para restablecerla. Comprueba que la dirección sea correcta y revisa también el correo no deseado.',
+      "Si un compte existe pour cette adresse, un e-mail de réinitialisation a été envoyé. Vérifiez l'adresse et consultez aussi vos spams.",
+      'Falls ein Konto mit dieser Adresse existiert, wurde eine E-Mail zum Zurücksetzen gesendet. Prüfe die Adresse und auch den Spam-Ordner.',
+      'अगर इस पते से कोई खाता है, तो रीसेट ईमेल भेज दिया गया है। पता सही है या नहीं देखें और स्पैम फ़ोल्डर भी जाँचें।',
+      'Если для этого адреса есть аккаунт, мы отправили письмо для сброса. Проверьте адрес и папку «Спам».',
+      'Se existir uma conta com este endereço, enviamos um e-mail de redefinição. Confira o endereço e verifique também o spam.',
+      "Se esiste un account con questo indirizzo, abbiamo inviato un'e-mail di reimpostazione. Controlla l'indirizzo e anche la cartella spam.",
+      'Als er een account met dit adres bestaat, is er een herstelmail verzonden. Controleer het adres en ook je spammap.'
+    ],
+    'enterEmailFirst': [
+      'Enter your email first.',
+      '이메일을 먼저 입력해 주세요.',
+      '先にメールアドレスを入力してください。',
+      '请先输入邮箱。',
+      'Primero introduce tu correo.',
+      "Saisissez d'abord votre e-mail.",
+      'Gib zuerst deine E-Mail-Adresse ein.',
+      'पहले अपना ईमेल दर्ज करें।',
+      'Сначала введите e-mail.',
+      'Digite seu e-mail primeiro.',
+      'Inserisci prima la tua e-mail.',
+      'Vul eerst je e-mailadres in.'
+    ],
+    'resetSendFailed': [
+      'Could not send the reset email. Please try again.',
+      '재설정 메일을 보내지 못했습니다. 다시 시도해 주세요.',
+      '再設定メールを送信できませんでした。もう一度お試しください。',
+      '无法发送重置邮件，请重试。',
+      'No se pudo enviar el correo. Inténtalo de nuevo.',
+      "Impossible d'envoyer l'e-mail. Réessayez.",
+      'Die E-Mail konnte nicht gesendet werden. Bitte versuche es erneut.',
+      'रीसेट ईमेल नहीं भेजा जा सका। फिर से कोशिश करें।',
+      'Не удалось отправить письмо. Попробуйте ещё раз.',
+      'Não foi possível enviar o e-mail. Tente novamente.',
+      "Impossibile inviare l'e-mail. Riprova.",
+      'De e-mail kon niet worden verzonden. Probeer het opnieuw.'
     ],
     'speakSentenceIn': [
       'Say the sentence above in {language}.',

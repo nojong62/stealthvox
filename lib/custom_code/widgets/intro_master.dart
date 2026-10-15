@@ -351,12 +351,13 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Future<void> _resetPassword() async {
+    final copy = OriginSurfaceCopy.forSystemLocale();
     if (emailController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            "Enter your email first.",
-            style: TextStyle(fontWeight: FontWeight.bold),
+            copy['enterEmailFirst'],
+            style: const TextStyle(fontWeight: FontWeight.bold),
           ),
         ),
       );
@@ -367,21 +368,22 @@ class _IntroMasterState extends State<IntroMaster>
         email: emailController.text.trim(),
       );
       if (!mounted) return;
+      // 이메일 보호가 켜져 있어 없는 주소도 여기로 온다 — 문구가 단정하지 않는다.
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            "Reset email sent. Check your inbox and spam folder.",
-            style: TextStyle(fontWeight: FontWeight.bold),
+            copy['passwordResetSent'],
+            style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           backgroundColor: Colors.green,
+          duration: const Duration(seconds: 6),
         ),
       );
     } catch (e) {
+      debugPrint('[PASSWORD-RESET] failed $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
-          SnackBar(content: Text("Failed to send: ${e.toString()}")));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(copy['resetSendFailed'])));
     }
   }
 
