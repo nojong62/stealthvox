@@ -318,6 +318,7 @@ async function showMember(uid) {
       userSnap.exists() ? timeCard(uid, u.remainingTime) : null,
       adjustmentTable(adjustments.docs),
       testAccountCard(uid, flagSnap.exists() ? flagSnap.data() : {}),
+      blockCard(uid, flagSnap.exists() ? flagSnap.data() : {}),
       notesCard(uid, notes.docs.filter((d) => d.data().deleted !== true)),
       purchaseTable(purchases.docs),
       usageTable(usage.docs),
@@ -409,6 +410,47 @@ function adjustmentTable(docs) {
           el("td", {class: "num"}, `${fmtSeconds(a.before_seconds)} → ${fmtSeconds(a.after_seconds)}`),
           el("td", {}, a.reason || ""));
       })));
+}
+
+// 이용 차단. 서버가 AI 토큰 발급·통역·게시판·TURN을 거절한다.
+// 차감·사용 기록은 막지 않는다. 이미 받은 음성 토큰은 최대 1시간 남을 수 있다.
+function blockCard(uid, flags) {
+  const blocked = flags.blocked === true;
+  if (blocked) {
+    const button = el("button", {
+      class: "ghost",
+      onclick: () => {
+        if (!confirm("차단을 해제할까요?")) return;
+        runAction(button, uid, () => call("adminSetBlocked", {uid, blocked: false}));
+      },
+    }, "차단 해제");
+    return el("div", {class: "card blocked-card"},
+      el("h3", {}, "이용 차단됨"),
+      kv([
+        ["사유", flags.blockReason || "—"],
+        ["차단 시각", fmtTime(flags.blockedAt)],
+      ]),
+      el("div", {class: "inline"}, button));
+  }
+  const reason = el("input", {type: "text", maxlength: "200", placeholder: "차단 사유 (필수)"});
+  const button = el("button", {
+    class: "danger",
+    onclick: () => {
+      if (!reason.value.trim()) {
+        alertLine(button, "차단 사유를 입력하세요.");
+        reason.focus();
+        return;
+      }
+      if (!confirm(`이 회원의 이용을 차단할까요?\n사유: ${reason.value.trim()}\n\n` +
+          "AI 대화·통역·Duo 게시판이 막힙니다. 남은 시간은 그대로 둡니다.")) return;
+      runAction(button, uid, () => call("adminSetBlocked", {uid, blocked: true, reason: reason.value}));
+    },
+  }, "이용 차단");
+  return el("div", {class: "card"},
+    el("h3", {}, "이용 차단"),
+    el("p", {class: "muted"}, "AI 대화·통역·Duo 게시판·체험 지급을 서버에서 거절합니다. 15초 안에 반영됩니다."),
+    el("div", {class: "inline"}, reason, button),
+    flags.unblockedAt ? el("p", {class: "muted"}, `마지막 해제 ${fmtTime(flags.unblockedAt)}`) : null);
 }
 
 function testAccountCard(uid, flags) {
