@@ -62,10 +62,15 @@ class StudyTrialAuthorRelay {
     required String chatLang,
     required String learnLang,
     required bool aiAlreadySpoke,
+    List<Map<String, String>> existing = const <Map<String, String>>[],
   }) async {
-    _history.clear();
-    // 제작을 AI 첫 마디 뒤에 켰으면 바로 받을 수 있다.
-    _aiSpoke = aiAlreadySpoke;
+    // 제작을 AI 첫 마디 뒤에 켜도 그 줄이 웹 화면에서 빠지지 않게, 이미
+    // 저장된 줄을 먼저 싣는다. 마지막 줄이 AI면 바로 다음 대사를 받는다.
+    _history
+      ..clear()
+      ..addAll(existing);
+    _aiSpoke = aiAlreadySpoke ||
+        (existing.isNotEmpty && existing.last['role'] == 'AI');
     try {
       await _state.set(<String, dynamic>{
         'active': true,

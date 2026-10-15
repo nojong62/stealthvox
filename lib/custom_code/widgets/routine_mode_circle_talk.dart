@@ -401,6 +401,10 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   /// 다른 폰(관리자 웹)에서 친 대사를 받는 통로. 제작 중에만 산다.
   StudyTrialAuthorRelay? _authorRelay;
 
+  /// 이 방에 저장된 줄. 제작을 늦게 켜도 통로가 처음부터 싣게 한다.
+  final List<Map<String, String>> _savedLinesForRelay =
+      <Map<String, String>>[];
+
   /// AI가 말하지 않고 처리 중인 턴도 없다 — 다음 대사를 넣어도 된다.
   bool get _authorCanTakeLine =>
       _isConversationActive &&
@@ -5520,6 +5524,14 @@ $userFixPolicy$finalLanguageRule''';
 
       // 🎟️ [TRIAL-RELAY] 제작 중이면 다른 폰 화면에도 대화를 올린다.
       _authorRelay?.recordLines(chatLines);
+      for (final line in chatLines) {
+        final text = (line['original_text'] ?? '').toString().trim();
+        if (text.isEmpty) continue;
+        _savedLinesForRelay.add(<String, String>{
+          'role': line['role'] == 'HOST' ? 'USER' : 'AI',
+          'text': text,
+        });
+      }
       // messages 서브컬렉션에 각 발화 저장
       for (final line in chatLines) {
         final original = (line['original_text'] ?? '').toString().trim();
@@ -5799,8 +5811,15 @@ $userFixPolicy$finalLanguageRule''';
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                // 🎟️ [STUDY-TRIAL] 관리자에게만 보인다.
-                if (_isTrialAuthor) _buildTrialAuthorToggle(),
+                // 🎟️ [STUDY-TRIAL] 관리자에게만 보인다. 자리가 모자라면
+                //   줄어든다 — 고정 폭이면 상단 줄이 넘친다(실기기 22px).
+                if (_isTrialAuthor)
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: _buildTrialAuthorToggle(),
+                    ),
+                  ),
                 // 📚 [STUDY-ROOM] 저장하고 바로 공부방으로.
                 IconButton(
                   icon: const Icon(Icons.menu_book_rounded,
@@ -6012,6 +6031,7 @@ $userFixPolicy$finalLanguageRule''';
       chatLang: chatLang,
       learnLang: _targetLangName(),
       aiAlreadySpoke: _openerDone,
+      existing: List<Map<String, String>>.of(_savedLinesForRelay),
     );
   }
 
