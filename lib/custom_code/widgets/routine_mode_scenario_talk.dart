@@ -694,7 +694,9 @@ $finalLanguageRule''';
       final text = message['target']?.toString().trim() ?? '';
       return (role == 'HOST' || role == 'SYSTEM') && text.isNotEmpty;
     }).toList();
-    final recent = turns.length > 12 ? turns.sublist(turns.length - 12) : turns;
+    final recent = turns.length > kDialogMemoryLines
+        ? turns.sublist(turns.length - kDialogMemoryLines)
+        : turns;
     return recent.map((message) {
       final speaker = message['role'] == 'HOST' ? 'USER' : 'AI';
       return '$speaker: ${message['target']}';
@@ -3494,8 +3496,9 @@ $finalLanguageRule''';
         final target = (m['target'] ?? '').toString().trim();
         return target.isNotEmpty && target != '...';
       }).toList();
-      if (validMsgs.length > 10)
-        validMsgs = validMsgs.sublist(validMsgs.length - 10);
+      if (validMsgs.length > kDialogMemoryLines) {
+        validMsgs = validMsgs.sublist(validMsgs.length - kDialogMemoryLines);
+      }
       String contextStr = validMsgs
           .map((m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
           .join("\n");
@@ -3713,8 +3716,9 @@ $finalLanguageRule''';
           final target = (m['target'] ?? '').toString().trim();
           return target.isNotEmpty && target != '...';
         }).toList();
-        if (regenMsgs.length > 10)
-          regenMsgs = regenMsgs.sublist(regenMsgs.length - 10);
+        if (regenMsgs.length > kDialogMemoryLines) {
+          regenMsgs = regenMsgs.sublist(regenMsgs.length - kDialogMemoryLines);
+        }
         final String regenContextStr = regenMsgs
             .map(
                 (m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")

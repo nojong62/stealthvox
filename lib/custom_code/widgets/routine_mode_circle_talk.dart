@@ -1795,7 +1795,7 @@ $userFixPolicy$finalLanguageRule''';
   void _saveRecentHistory(String userText, String aiText) {
     _recentHistory.add({'role': 'user', 'content': userText});
     _recentHistory.add({'role': 'assistant', 'content': aiText});
-    while (_recentHistory.length > 12) {
+    while (_recentHistory.length > kDialogMemoryLines) {
       _recentHistory.removeAt(0);
     }
   }
@@ -4623,8 +4623,9 @@ $userFixPolicy$finalLanguageRule''';
           final original = (m['original'] ?? '').toString().trim();
           return original.isNotEmpty && original != '...';
         }).toList();
-        if (validMsgs.length > 10) {
-          validMsgs = validMsgs.sublist(validMsgs.length - 10);
+        if (validMsgs.length > kDialogMemoryLines) {
+          validMsgs =
+              validMsgs.sublist(validMsgs.length - kDialogMemoryLines);
         }
         contextStr = validMsgs
             .map((m) =>

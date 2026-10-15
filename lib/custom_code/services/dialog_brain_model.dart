@@ -29,6 +29,13 @@ const String kDialogBrainModelPrevious = 'gpt-4o-mini';
 /// Chat Completions다.
 const String kDialogBrainReasoningEffort = 'low';
 
+/// 🧠 대화 두뇌가 보는 최근 대화 줄 수(유저·AI 한 줄씩, 40 = 20번 주고받기).
+///
+/// 12줄일 때 앞에서 정한 장소·사실이 창 밖으로 밀려나 AI가 새로 지어냈다
+/// (2026-10-15 실기기, historyTurns가 12에서 멈춤). 추론을 올려도 못 본 줄은
+/// 되살아나지 않는다. 서클톡·시나리오톡이 이 값 하나를 같이 쓴다.
+const int kDialogMemoryLines = 40;
+
 /// Circle/Scenario의 한 Dialog Brain 호출에만 적용되는 추론 선택 결과.
 /// 상태를 들고 있지 않으므로 `medium`은 다음 턴으로 이어지지 않는다.
 class DialogBrainReasoningDecision {
