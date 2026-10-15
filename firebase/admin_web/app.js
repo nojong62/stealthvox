@@ -10,8 +10,8 @@ import {
   getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
-  collection, doc, getDoc, getDocs, getFirestore, limit, orderBy, query,
-  Timestamp, where,
+  collection, doc, getCountFromServer, getDoc, getDocs, getFirestore, limit,
+  orderBy, query, startAfter, Timestamp, where,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import {
   getFunctions, httpsCallable,
@@ -33,6 +33,10 @@ const call = (name, data) =>
   httpsCallable(functions, name)({...data, requestId: crypto.randomUUID()}).then((r) => r.data);
 
 const LIST_LIMIT = 30;
+
+// "전체"는 가입 순으로 한 쪽씩 끝까지 넘겨 본다.
+const ALL_PAGE = 100;
+let allCursor = null;
 
 // 테스트·차단 표시는 수가 적으니 한 번에 읽어 두고 목록 태그에 쓴다.
 let flagsByUid = new Map();
@@ -224,11 +228,14 @@ async function runSearch(q) {
       for (const d of [...byEmail.docs, ...byName.docs]) seen.set(d.id, {id: d.id, data: d.data()});
       rows = [...seen.values()];
       label = `"${q}"로 시작하는 이메일·이름`;
-    } else {
+    } else if (filter === "recent") {
       const snap = await getDocs(query(collection(db, "real_members"),
         orderBy("lastSeenAt", "desc"), limit(LIST_LIMIT)));
       rows = snap.docs.map((d) => ({id: d.id, data: d.data()}));
       label = "최근 접속";
+    } else {
+      await showAllMembers();
+      return;
     }
 
     // 필터 목록 안에서도 검색어가 있으면 이메일·이름·UID로 거른다.
@@ -247,11 +254,38 @@ async function runSearch(q) {
   }
 }
 
+// 가입한 회원 전체(real_members). 최근 가입이 위, [더 보기]로 끝까지 넘긴다.
+async function showAllMembers(more = false) {
+  const members = collection(db, "real_members");
+  if (!more) allCursor = null;
+  const [countSnap, snap] = await Promise.all([
+    more ? null : getCountFromServer(members),
+    getDocs(allCursor
+      ? query(members, orderBy("joinedAt", "desc"), startAfter(allCursor), limit(ALL_PAGE))
+      : query(members, orderBy("joinedAt", "desc"), limit(ALL_PAGE))),
+  ]);
+  if (countSnap) showAllMembers.total = countSnap.data().count;
+  allCursor = snap.docs.length ? snap.docs[snap.docs.length - 1] : allCursor;
+  const rows = snap.docs.map((d) => ({id: d.id, data: d.data()}));
+  renderList(rows, more);
+  const shown = $("results").querySelectorAll(".row").length;
+  setStatus(`전체 회원 ${showAllMembers.total}명 · 가입 순 · ${shown}명 표시`);
+  if (snap.docs.length === ALL_PAGE && shown < showAllMembers.total) {
+    $("results").append(el("button", {
+      class: "more",
+      onclick: async (e) => {
+        e.target.remove();
+        try { await showAllMembers(true); } catch (err) { setStatus(explain(err), "error"); }
+      },
+    }, "더 보기"));
+  }
+}
+
 function timeValue(v) {
   return v instanceof Timestamp ? v.toMillis() : 0;
 }
 
-function renderList(rows) {
+function renderList(rows, append = false) {
   const nodes = rows.map(({id, data: m}) => {
     const row = el("div", {
       class: "row",
@@ -266,10 +300,11 @@ function renderList(rows) {
       m.hasPurchase ? [" ", el("span", {class: "tag"}, `구매 ${m.purchaseCount || 0}`)] : null,
       flagTags(id)),
     el("div", {class: "sub"},
-      `${(m.providers || []).join(", ") || "익명"} · 최근 ${fmtTime(m.lastSeenAt)}`));
+      `${(m.providers || []).join(", ") || "익명"} · 가입 ${fmtTime(m.joinedAt)} · 최근 ${fmtTime(m.lastSeenAt)}`));
     return row;
   });
-  $("results").replaceChildren(...nodes);
+  if (append) $("results").append(...nodes);
+  else $("results").replaceChildren(...nodes);
 }
 
 // ── 회원 상세 ─────────────────────────────────────────────────────────────

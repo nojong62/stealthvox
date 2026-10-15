@@ -93,3 +93,5 @@ button.danger { background: var(--error); border-color: var(--error); }
 .inline input[type="number"] { flex: 0 0 110px; }
 .inline span { align-self: center; }
 .card.blocked-card { border-color: #efa6a6; background: #fdf3f3; }
+.list .more { display: block; width: 100%; padding: 10px; border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; }
+.list .more:hover { background: var(--line); }
