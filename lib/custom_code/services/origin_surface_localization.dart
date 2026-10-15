@@ -2611,20 +2611,6 @@ class OriginSurfaceCopy {
       'Si sceglie una volta per conversazione — non modificabile dopo l\'avvio',
       'Eén keer per gesprek gekozen — na de start niet te wijzigen'
     ],
-    'p3SettingsLocked': [
-      'Fixed for this conversation',
-      '이 대화의 설정으로 고정됨',
-      'この会話の設定で固定',
-      '已固定为本段对话的设置',
-      'Fijado para esta conversación',
-      'Fixé pour cette conversation',
-      'Für dieses Gespräch festgelegt',
-      'इस बातचीत के लिए तय',
-      'Закреплено для этого разговора',
-      'Fixado para esta conversa',
-      'Fissato per questa conversazione',
-      'Vastgezet voor dit gesprek'
-    ],
     'voiceMale': [
       'Male',
       '남성',

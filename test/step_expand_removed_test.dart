@@ -93,6 +93,13 @@ void main() {
       expect(history, contains('<double>[0.83, 0.87, 0.93, 0.97]'));
     });
 
+    test('목소리는 모드마다 따로, 고정 전엔 풀다운이다', () {
+      // 2026-10-15 실장님 지시. 고정된 뒤에는 고른 글자만 남는다.
+      expect(history, contains('final Map<P3PracticeMode, String> _p3Voices'));
+      expect(history, contains('DropdownButton<T>('));
+      expect(history, contains('previewScrollable: true'));
+    });
+
     test('에코잉·쉐도잉 설정은 대화마다 한 번 고르면 고정된다', () {
       expect(history, contains("'practice_settings.\${mode.name}'"));
       expect(history, contains('_p3SettingsLocked'));

@@ -5337,7 +5337,7 @@ RULES — follow exactly:
                         color: const Color(0xFF38BDF8),
                         // 📖 만들어 둔 글이 있으면 누르기 전에 읽어 볼 수 있다.
                         preview: _mySpeech,
-                        previewMaxLines: 8,
+                        previewScrollable: true,
                         emptyHint: locked ? access.gateLabel : '',
                         error: _mySpeechError,
                         locked: locked,
@@ -5374,7 +5374,7 @@ RULES — follow exactly:
     required Color color,
     VoidCallback? onTap,
     String preview = '',
-    int previewMaxLines = 3,
+    bool previewScrollable = false,
     String emptyHint = '',
     String? error,
     bool isLoading = false,
@@ -5452,11 +5452,32 @@ RULES — follow exactly:
                 const SizedBox(height: 10),
                 Text(_surfaceCopy['creating'],
                     style: TextStyle(color: Colors.white54, fontSize: 13)),
+              ] else if (body.isNotEmpty && previewScrollable) ...[
+                const SizedBox(height: 10),
+                // 📖 글 전체를 카드 안에서 굴려 본다. 카드가 화면을 다 먹지
+                //    않도록 높이에 천장을 둔다.
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.45),
+                  child: Scrollbar(
+                    thumbVisibility: true,
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.only(right: 10),
+                      child: Text(
+                        body,
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14 * _fontScale,
+                            height: 1.5),
+                      ),
+                    ),
+                  ),
+                ),
               ] else if (body.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Text(
                   body,
-                  maxLines: previewMaxLines,
+                  maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                       color: Colors.white,
@@ -6286,7 +6307,13 @@ RULES — follow exactly:
   // ── P3 상태 ───────────────────────────────────────────────────────
   P3Stage _p3Stage = P3Stage.idle;
   P3PracticeMode _p3PracticeMode = P3PracticeMode.echoing;
-  String _p3Voice = _kBreathVoice;
+  /// 🗣️ 목소리는 에코잉·쉐도잉이 **따로** 든다(실장님 지시, 2026-10-15).
+  final Map<P3PracticeMode, String> _p3Voices = <P3PracticeMode, String>{
+    P3PracticeMode.echoing: _kBreathVoice,
+    P3PracticeMode.shadowing: _kBreathVoice,
+  };
+
+  String get _p3Voice => _p3Voices[_p3PracticeMode] ?? _kBreathVoice;
   int _p3Generation = 0;
   Uint8List? _p3FullPcm;
   List<BreathSegment> _p3Segments = const <BreathSegment>[];
@@ -7048,20 +7075,14 @@ RULES — follow exactly:
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // ── 메뉴 ── 첫 화면에서도, 연습 중에도 같은 자리에 있다.
-              _buildP3VoiceSelector(),
-              const SizedBox(height: 10),
+              //   모드를 먼저 고르고, 그 아래가 그 모드만의 설정이다.
               _buildP3PracticeModePicker(),
-              if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
-                const SizedBox(height: 12),
-                _buildP3ShadowSpeedPicker(),
-              ] else ...[
-                const SizedBox(height: 12),
-                _buildP3SnapSizePicker(),
+              const SizedBox(height: 12),
+              _buildP3ModeSettings(),
+              if (_p3PracticeMode == P3PracticeMode.echoing) ...[
                 const SizedBox(height: 8),
-                _buildP3EchoRepeatPicker(),
+                _buildP3SnapSizePicker(),
               ],
-              const SizedBox(height: 8),
-              _buildP3LockNote(),
 
               // 오류는 연습이 시작되지 못했을 때도 보여야 하므로 밖에 둔다.
               if (_p3Error != null) ...[
@@ -7361,56 +7382,13 @@ RULES — follow exactly:
     );
   }
 
-  /// 목소리는 모드와 같은 규칙으로 연다 — 한 바퀴가 끝난 뒤에도 바꿀 수 있고,
-  /// 바꾸면 그 자리에서 다시 시작한다. 도는 중에만 잠근다.
-  Widget _buildP3VoiceSelector() {
-    final enabled = !_p3Busy && !_p3SettingsLocked;
-    final List<String> voices = _p3VoiceChoices;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.035),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _p3ShadowingAccentColor.withValues(alpha: 0.34),
-        ),
-      ),
-      child: Row(
-        children: [
-          Text(
-            _surfaceCopy['voice'].toUpperCase(),
-            style: TextStyle(
-              color: Colors.white38,
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.1,
-            ),
-          ),
-          const SizedBox(width: 12),
-          // 남는 폭을 똑같이 나눠 갖는다. 글자 폭에 맡기면 글꼴을 키운
-          // 기기에서 줄이 넘친다.
-          for (int i = 0; i < voices.length; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
-            Expanded(
-              child: _buildP3VoiceChip(
-                id: voices[i],
-                label: voices[i] == _kP3MaleVoice
-                    ? _surfaceCopy['voiceMale']
-                    : _surfaceCopy['voiceFemale'],
-                enabled: enabled,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
   /// 🔒 [P3-LOCK] 지금 모드에 고정된 설정이 있으면 그 값으로 맞춘다.
   void _applyP3Lock() {
     final lock = _p3Locks[_p3PracticeMode];
     if (lock == null) return;
-    if (_kP3Voices.contains(lock.voice)) _p3Voice = lock.voice;
+    if (_kP3Voices.contains(lock.voice)) {
+      _p3Voices[_p3PracticeMode] = lock.voice;
+    }
     if (lock.repeat != null) _p3EchoRepeat = lock.repeat!;
     if (lock.speed != null) _p3ShadowSpeed = lock.speed!;
     _p3FullPcm = null;
@@ -7442,23 +7420,166 @@ RULES — follow exactly:
     }
   }
 
-  /// 고르기 전에는 "한 번 고르면 고정", 고른 뒤에는 "이 대화에서 고정"을 적는다.
-  Widget _buildP3LockNote() {
-    final bool locked = _p3SettingsLocked;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+  String _p3VoiceLabel(String voice) => voice == _kP3MaleVoice
+      ? _surfaceCopy['voiceMale']
+      : _surfaceCopy['voiceFemale'];
+
+  /// 🔒 [P3-LOCK] 지금 모드의 고정 설정 — 목소리 + (에코잉 반복 | 쉐도잉 속도).
+  ///
+  /// 아직 안 묶였으면 풀다운 두 개로 고른다. 첫 Start로 묶인 뒤에는 고른
+  /// 글자만 남는다 — 바꿀 수 없는 칸을 메뉴 모양으로 두지 않는다.
+  Widget _buildP3ModeSettings() {
+    final bool echoing = _p3PracticeMode == P3PracticeMode.echoing;
+    final String second =
+        echoing ? 'Repeat ×$_p3EchoRepeat' : '${_p3ShadowSpeed}x';
+    if (_p3SettingsLocked) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.035),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: _p3ShadowingAccentColor.withValues(alpha: 0.34)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.lock_rounded, size: 14, color: Colors.white38),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                '${_p3VoiceLabel(_p3Voice)} · $second',
+                style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    final bool enabled = !_p3Busy;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Icon(locked ? Icons.lock_rounded : Icons.info_outline_rounded,
-            size: 13, color: Colors.white38),
-        const SizedBox(width: 6),
-        Flexible(
-          child: Text(
-            _surfaceCopy[locked ? 'p3SettingsLocked' : 'p3SettingsOnce'],
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white38, fontSize: 11.5),
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: _p3Dropdown<String>(
+                label: _surfaceCopy['voice'],
+                value: _p3Voice,
+                items: <String, String>{
+                  for (final v in _kP3Voices) v: _p3VoiceLabel(v),
+                },
+                onChanged: enabled
+                    ? (v) => unawaited(_selectP3Voice(v))
+                    : null,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: echoing
+                  ? _p3Dropdown<int>(
+                      label: 'Repeat',
+                      value: _p3EchoRepeat,
+                      items: const <int, String>{
+                        1: 'Repeat ×1',
+                        2: 'Repeat ×2',
+                      },
+                      onChanged: enabled
+                          ? (v) => setState(() => _p3EchoRepeat = v)
+                          : null,
+                    )
+                  : _p3Dropdown<double>(
+                      label: 'Speed',
+                      value: _p3ShadowSpeed,
+                      items: <double, String>{
+                        for (final sp in _kShadowSpeeds) sp: '${sp}x',
+                      },
+                      onChanged: enabled
+                          ? (v) => _resetP3Audio(() => _p3ShadowSpeed = v)
+                          : null,
+                    ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.info_outline_rounded,
+                size: 13, color: Colors.white38),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                _surfaceCopy['p3SettingsOnce'],
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white38, fontSize: 11.5),
+              ),
+            ),
+          ],
         ),
       ],
+    );
+  }
+
+  /// 풀다운 하나. 위에 작은 이름, 아래에 고른 값.
+  Widget _p3Dropdown<T>({
+    required String label,
+    required T value,
+    required Map<T, String> items,
+    required ValueChanged<T>? onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 4, 6, 2),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label.toUpperCase(),
+            style: const TextStyle(
+              color: Colors.white38,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.1,
+            ),
+          ),
+          DropdownButtonHideUnderline(
+            child: DropdownButton<T>(
+              value: value,
+              isExpanded: true,
+              isDense: true,
+              dropdownColor: const Color(0xFF1C1C1C),
+              iconEnabledColor: _p3ShadowingAccentColor,
+              iconDisabledColor: Colors.white24,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600),
+              items: <DropdownMenuItem<T>>[
+                for (final e in items.entries)
+                  DropdownMenuItem<T>(
+                    value: e.key,
+                    child: Text(e.value, maxLines: 1),
+                  ),
+              ],
+              onChanged: onChanged == null
+                  ? null
+                  : (v) {
+                      if (v != null && v != value) onChanged(v);
+                    },
+            ),
+          ),
+          const SizedBox(height: 4),
+        ],
+      ),
     );
   }
 
@@ -7470,57 +7591,9 @@ RULES — follow exactly:
   void _coerceP3VoiceForMode() {
     final choices = _p3VoiceChoices;
     if (choices.contains(_p3Voice)) return;
-    _p3Voice = choices.first;
+    _p3Voices[_p3PracticeMode] = choices.first;
     _p3FullPcm = null;
     _p3Segments = const <BreathSegment>[];
-  }
-
-  /// 🗣️ [P3-VOICE] 고를 목소리를 한 줄에 나란히 펼쳐 둔다.
-  ///
-  /// 풀다운은 열어 봐야 무엇이 있는지 알 수 있었는데 고를 것은 둘 또는 셋뿐이다.
-  /// 아래 모드/문장 고르는 줄과 같은 생김새로 맞춰, 한 번 눌러 바꾼다.
-  Widget _buildP3VoiceChip({
-    required String id,
-    required String label,
-    required bool enabled,
-  }) {
-    final bool selected = _p3Voice == id;
-    return InkWell(
-      onTap: enabled ? () => unawaited(_selectP3Voice(id)) : null,
-      borderRadius: BorderRadius.circular(9),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        decoration: BoxDecoration(
-          color: selected
-              ? _p3ShadowingAccentColor.withValues(alpha: enabled ? 0.18 : 0.10)
-              : Colors.white.withValues(alpha: 0.035),
-          borderRadius: BorderRadius.circular(9),
-          border: Border.all(
-            color: selected
-                ? _p3ShadowingAccentColor.withValues(
-                    alpha: enabled ? 1.0 : 0.40)
-                : Colors.white12,
-            width: selected ? 1.4 : 1,
-          ),
-        ),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text(
-            label,
-            maxLines: 1,
-            style: TextStyle(
-              color: selected
-                  ? (enabled ? Colors.white : Colors.white54)
-                  : (enabled ? Colors.white70 : Colors.white24),
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   /// 목소리를 바꾸면 만들어 둔 소리와 호흡 경계는 버린다 — 그 목소리로 뜬
@@ -7532,7 +7605,7 @@ RULES — follow exactly:
   Future<void> _selectP3Voice(String voice) async {
     if (voice == _p3Voice) return;
     setState(() {
-      _p3Voice = voice;
+      _p3Voices[_p3PracticeMode] = voice;
       _p3FullPcm = null;
       _p3Segments = const <BreathSegment>[];
       _p3Stage = P3Stage.idle;
@@ -7650,46 +7723,6 @@ RULES — follow exactly:
             ),
           ),
           if (size != SnapUnitSize.values.last) const SizedBox(width: 6),
-        ],
-      ],
-    );
-  }
-
-  /// ⚡ [SNAP-ECHO] 반복 횟수 고르기 — 한 단위를 1번 / 2번 듣고 따라 한다.
-  Widget _buildP3EchoRepeatPicker() {
-    return Row(
-      children: [
-        for (final count in const <int>[1, 2]) ...[
-          Expanded(
-            child: _p3OptionChip(
-              label: 'Repeat ×$count',
-              selected: _p3EchoRepeat == count,
-              onTap: _p3Busy || _p3SettingsLocked || _p3EchoRepeat == count
-                  ? null
-                  : () => setState(() => _p3EchoRepeat = count),
-            ),
-          ),
-          if (count != 2) const SizedBox(width: 6),
-        ],
-      ],
-    );
-  }
-
-  /// 쉐도잉 속도 고르기.
-  Widget _buildP3ShadowSpeedPicker() {
-    return Row(
-      children: [
-        for (final speed in _kShadowSpeeds) ...[
-          Expanded(
-            child: _p3OptionChip(
-              label: '${speed}x',
-              selected: _p3ShadowSpeed == speed,
-              onTap: _p3Busy || _p3SettingsLocked || _p3ShadowSpeed == speed
-                  ? null
-                  : () => _resetP3Audio(() => _p3ShadowSpeed = speed),
-            ),
-          ),
-          if (speed != _kShadowSpeeds.last) const SizedBox(width: 6),
         ],
       ],
     );
