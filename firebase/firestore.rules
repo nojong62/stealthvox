@@ -28,6 +28,23 @@ service cloud.firestore {
       }
     }
 
+    // 관리자 전용 장부. 쓰기는 admin_ops.js(Admin SDK)만 한다.
+    // users/{uid}에 두지 않는 이유: 사용자가 자기 문서 대부분을 고칠 수 있다.
+    match /user_flags/{uid} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /admin_notes/{uid}/notes/{noteId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /admin_audit/{entryId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     // Duo 게시판은 인증된 익명 Guest도 읽을 수 있다. 작성과 선점은 서버
     // callable만 수행하며, 초대 roomId가 있는 runtime은 클라이언트에 숨긴다.
     match /duo_board_posts/{postId} {

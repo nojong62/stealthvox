@@ -89,6 +89,12 @@ exports.openAiProxy = secureAiGateway.openAiProxy;
 exports.syncRealMemberProfile =
   memberRegistry.createSyncRealMemberProfile(admin);
 
+// 관리자 웹 전용 (Claim admin == true). firebase/functions/admin_ops.js
+const adminOps = require("./admin_ops").createAdminOps(admin);
+exports.adminAddNote = adminOps.adminAddNote;
+exports.adminDeleteNote = adminOps.adminDeleteNote;
+exports.adminSetTestAccount = adminOps.adminSetTestAccount;
+
 
 async function verifyGoogleOAuthIdToken(idToken) {
   if (!idToken || typeof idToken !== "string") {
