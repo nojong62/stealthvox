@@ -80,3 +80,25 @@ test("a leftover trial grant no longer opens AI access", async () => {
   });
   assert.deepEqual(result, { allowed: false, reason: "no_entitlement" });
 });
+
+test("study trial grants AI access only inside its window", async () => {
+  const { activeStudyTrialUntil } = require("../ai_access");
+  const now = 1_000_000;
+  assert.equal(activeStudyTrialUntil({ expiresAtMs: now + 1000 }, now), now + 61_000);
+  assert.equal(activeStudyTrialUntil({ expiresAtMs: now - 59_000 }, now), now + 1000);
+  assert.equal(activeStudyTrialUntil({ expiresAtMs: now - 61_000 }, now), 0);
+  assert.equal(activeStudyTrialUntil({}, now), 0);
+
+  const live = await resolveAiAccess({
+    db: fakeDb({ "study_trial_users/anon": { expiresAtMs: Date.now() + 60_000 } }),
+    uid: "anon",
+  });
+  assert.equal(live.reason, "study_trial");
+  assert.ok(live.untilMs > Date.now());
+
+  const over = await resolveAiAccess({
+    db: fakeDb({ "study_trial_users/anon": { expiresAtMs: Date.now() - 120_000 } }),
+    uid: "anon",
+  });
+  assert.equal(over.allowed, false);
+});

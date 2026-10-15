@@ -462,6 +462,11 @@ const mintAiGatewaySession = onCall({
   const now = Math.floor(Date.now() / 1000);
   const secret = gatewaySigningSecret.value();
   if (!secret) throw callableError("failed-precondition", "Gateway is not configured.");
+  // 공부방 체험의 토큰은 체험이 끝나는 시각을 넘지 않는다. 2시간짜리를 주면
+  // 5분 체험이 2시간 무료 AI가 된다.
+  const exp = access.untilMs
+    ? Math.min(now + GATEWAY_TOKEN_TTL_SECONDS, Math.floor(access.untilMs / 1000))
+    : now + GATEWAY_TOKEN_TTL_SECONDS;
   return {
     token: signGatewayToken({
       aud: GATEWAY_AUDIENCE,
@@ -469,10 +474,10 @@ const mintAiGatewaySession = onCall({
       appId: caller.appId,
       access: access.reason,
       iat: now,
-      exp: now + GATEWAY_TOKEN_TTL_SECONDS,
+      exp,
       nonce: crypto.randomBytes(12).toString("base64url"),
     }, secret),
-    expiresAt: now + GATEWAY_TOKEN_TTL_SECONDS,
+    expiresAt: exp,
   };
 });
 
