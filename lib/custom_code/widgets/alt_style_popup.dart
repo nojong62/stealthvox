@@ -49,16 +49,30 @@ void showAltStylePopup({
   required String apiKey,
   required String baseText,
   required String targetLang,
+  Map<String, String> cached = const <String, String>{},
+  void Function(Map<String, String> all)? onFetched,
 }) {
   final copy = OriginSurfaceCopy.forSystemLocale();
   final styles = otherAiStyles(targetLang);
   if (styles.isEmpty) return;
-  final future = fetchAltStyleSentences(
-    apiKey: apiKey,
-    baseText: baseText,
-    styles: styles,
-    targetLang: targetLang,
-  );
+  // 💾 [ALT-CACHE] 저장된 문장으로 다 채워지면 부르지 않는다. 모자라면
+  //   빠진 스타일을 **전부**(지금 스타일 포함) 받아 둔다 — 다른 스타일을 쓰는
+  //   사람이 열어도 다시 부르지 않게.
+  final bool complete = styles.every(cached.containsKey);
+  final Future<Map<String, String>> future = complete
+      ? Future<Map<String, String>>.value(cached)
+      : fetchAltStyleSentences(
+          apiKey: apiKey,
+          baseText: baseText,
+          styles: allAltStyles(targetLang)
+              .where((s) => !cached.containsKey(s))
+              .toList(),
+          targetLang: targetLang,
+        ).then((fetched) {
+          final all = <String, String>{...cached, ...fetched};
+          if (fetched.isNotEmpty) onFetched?.call(all);
+          return all;
+        });
   final currentStyle = effectiveAiStyle(targetLang: targetLang);
 
   showDialog<void>(

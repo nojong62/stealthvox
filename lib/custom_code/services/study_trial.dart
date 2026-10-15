@@ -64,6 +64,13 @@ String? studyTrialPairProblem({
   return null;
 }
 
+/// 서버가 체험자 계정에 복사한 사본에 붙이는 표시(`study_trial.js`).
+const String kStudyTrialCopyField = 'study_trial_copy';
+
+/// 체험 원본이거나 그 사본인가. 연습 소리를 Storage에서 함께 쓰는 방이다.
+bool isStudyTrialRoom(Map<String, dynamic>? room) =>
+    room?[kStudyTrialField] == true || room?[kStudyTrialCopyField] == true;
+
 /// 방을 만들 때 함께 적는 체험 표시.
 Map<String, dynamic> studyTrialRoomFields(String chatLang) => <String, dynamic>{
       kStudyTrialField: true,

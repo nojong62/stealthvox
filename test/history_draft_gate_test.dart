@@ -181,7 +181,7 @@ void main() {
 
     test('나머지 두 아이콘은 그대로다', () {
       expect(master, contains('_buildAppBtn(docs[index].id, translated),'));
-      expect(master, contains('_buildAltStyleBtn(translated),'));
+      expect(master, contains('_buildAltStyleBtn(docs[index], translated),'));
       expect(master, contains('Icons.school_rounded'));
     });
 

@@ -46,6 +46,9 @@ import '/custom_code/services/deepgram_prewarm_session.dart'
     show deepgramLanguageCode;
 import '/custom_code/services/transcript_repair_guard.dart';
 import 'alt_style_popup.dart';
+import '/custom_code/services/alt_style.dart';
+import '/custom_code/services/study_trial.dart';
+import '/custom_code/services/study_trial_audio.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
 import '/custom_code/services/chirp_pause_markup.dart';
 import '/custom_code/services/snap_echo_chunker.dart';
@@ -3253,8 +3256,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   // 📦 [Box 17-B: 다른 표현 보기]
   //   버튼도 팝업도 Keepers와 함께 쓴다 — `widgets/alt_style_popup.dart`.
   //   화면마다 사본을 두면 같은 이름의 Native가 서로 다른 문장이 된다.
-  Widget _buildAltStyleBtn(String baseText) =>
-      buildAltStyleButton(onPressed: () => _showAltStylePopup(baseText));
+  Widget _buildAltStyleBtn(DocumentSnapshot doc, String baseText) =>
+      buildAltStyleButton(onPressed: () => _showAltStylePopup(doc, baseText));
 
   /// 이 세션의 TARGET 언어 이름. 비어 있으면 영어로 본다(기존 동작).
   String _sessionTargetLangName() {
@@ -3274,7 +3277,11 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   }
 
   /// 같은 뜻을 스타일만 바꿔 늘어놓는다. 목록도 생성 규칙도 공용이다.
-  void _showAltStylePopup(String baseText) {
+  ///
+  /// 💾 [ALT-CACHE] 한 번 만든 문장은 그 줄 문서에 남긴다. 대사가 정해진
+  ///   줄이라 다시 만들 이유가 없다 — 공부방 체험 사본도 이 값을 그대로
+  ///   들고 가서 체험자는 부르지 않고 본다.
+  void _showAltStylePopup(DocumentSnapshot doc, String baseText) {
     if (!_guardFinalizedStudyFeature()) return;
     if (!_guardPaidStudy()) return;
     _resumeHistoryFromUserAction();
@@ -3283,6 +3290,11 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       apiKey: _apiKey,
       baseText: baseText,
       targetLang: _sessionTargetLangName(),
+      cached: cachedAltStyles(doc.data() as Map<String, dynamic>?, baseText),
+      onFetched: (all) => unawaited(doc.reference.update(<String, dynamic>{
+        kAltStylesField: all,
+        kAltStylesBaseField: baseText.trim(),
+      }).catchError((Object e) => debugPrint('[ALT-CACHE] write $e'))),
     );
   }
 
@@ -4572,7 +4584,7 @@ RULES — follow exactly:
                 children: [
                   _buildAppBtn(docs[index].id, translated),
                   const SizedBox(height: 4),
-                  _buildAltStyleBtn(translated),
+                  _buildAltStyleBtn(docs[index], translated),
                 ],
               ),
             ),
@@ -6718,6 +6730,16 @@ RULES — follow exactly:
     final future = () async {
       final cached = await TtsCache.get(text, ns);
       if (cached != null && cached.length > 44) return pcmFromWav(cached);
+      // 🎟️🔊 [STUDY-TRIAL-AUDIO] 체험 원본·사본은 관리자가 올려 둔 소리를
+      //   먼저 받는다. 받으면 TTS·단위 나누기 호출이 모두 빠진다.
+      final bool trialRoom = isStudyTrialRoom(_cachedRoomData);
+      if (trialRoom) {
+        final shared = await StudyTrialAudio.download(ns, text);
+        if (shared != null && shared.length > 44) {
+          await TtsCache.put(text, ns, shared);
+          return pcmFromWav(shared);
+        }
+      }
       // ⚡ Snap Echoing은 문장 구조로 나눈 단위 사이마다 쉰다. 나누기에
       //   실패하면 쉐도잉과 같은 문장부호 쉼으로 돌아간다.
       String markup = chirpPauseMarkup(text, pause);
@@ -6744,8 +6766,12 @@ RULES — follow exactly:
         markup: markup,
       );
       if (raw == null || raw.isEmpty) return null;
-      await TtsCache.put(
-          text, ns, pcm16ToWav(raw, sampleRate: kStealthVoxSttSampleRate));
+      final wav = pcm16ToWav(raw, sampleRate: kStealthVoxSttSampleRate);
+      await TtsCache.put(text, ns, wav);
+      // 원본(관리자 방)에서 만든 소리만 올린다. 올리기 권한도 관리자뿐이다.
+      if (trialRoom && _cachedRoomData?[kStudyTrialField] == true) {
+        unawaited(StudyTrialAudio.upload(ns, text, wav));
+      }
       return raw;
     }();
     _breathPcmInFlight[requestKey] = future;

@@ -22,11 +22,33 @@ import 'history_text_model.dart';
 /// 영어가 타겟일 때만 American/British가 존재한다(로비와 같은 규칙).
 /// 순서는 Standard → American → British → Native로 고정한다.
 List<String> otherAiStyles(String targetLang) {
-  final available = isAiStyleTargetLanguage(targetLang)
-      ? kAiStyles
-      : const <String>['Standard', 'Native'];
   final current = effectiveAiStyle(targetLang: targetLang);
-  return available.where((style) => style != current).toList();
+  return allAltStyles(targetLang).where((style) => style != current).toList();
+}
+
+/// 이 타겟 언어에서 고를 수 있는 스타일 전부.
+List<String> allAltStyles(String targetLang) =>
+    isAiStyleTargetLanguage(targetLang)
+        ? kAiStyles
+        : const <String>['Standard', 'Native'];
+
+/// 💾 [ALT-CACHE] 줄 문서에 남긴 다른 표현. 이 줄의 배울글이 그때와 같을
+/// 때만 쓴다 — 고친 줄에 옛 문장을 띄우지 않는다.
+const String kAltStylesField = 'alt_styles';
+const String kAltStylesBaseField = 'alt_styles_base';
+
+Map<String, String> cachedAltStyles(Map<String, dynamic>? data, String base) {
+  if (data == null) return const <String, String>{};
+  if ((data[kAltStylesBaseField] ?? '').toString().trim() != base.trim()) {
+    return const <String, String>{};
+  }
+  final raw = data[kAltStylesField];
+  if (raw is! Map) return const <String, String>{};
+  return <String, String>{
+    for (final e in raw.entries)
+      if (e.value is String && (e.value as String).trim().isNotEmpty)
+        e.key.toString(): (e.value as String).trim(),
+  };
 }
 
 /// 같은 뜻을 스타일만 바꿔 다시 쓴다.
