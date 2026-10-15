@@ -278,13 +278,14 @@ async function showMember(uid) {
   box.replaceChildren(el("p", {class: "muted"}, "불러오는 중…"));
   try {
     const userRef = doc(db, "users", uid);
-    const [memberSnap, userSnap, purchases, usage, flagSnap, notes] = await Promise.all([
+    const [memberSnap, userSnap, purchases, usage, flagSnap, notes, adjustments] = await Promise.all([
       getDoc(doc(db, "real_members", uid)),
       getDoc(userRef),
       getDocs(query(collection(userRef, "purchases"), orderBy("purchased_at", "desc"), limit(50))),
       getDocs(query(collection(userRef, "usage_logs"), orderBy("created_at", "desc"), limit(LIST_LIMIT))),
       getDoc(doc(db, "user_flags", uid)),
       getDocs(query(collection(db, "admin_notes", uid, "notes"), orderBy("createdAt", "desc"), limit(100))),
+      getDocs(query(collection(userRef, "admin_adjustments"), orderBy("created_at", "desc"), limit(LIST_LIMIT))),
     ]);
     if (!memberSnap.exists() && !userSnap.exists()) {
       box.replaceChildren(el("p", {class: "error"}, `UID ${uid}: 회원 문서가 없습니다.`));
@@ -314,6 +315,8 @@ async function showMember(uid) {
             ? `${fmtTime(m.lastPurchasedAt)} · ${m.lastProductId || ""} · ${m.lastPurchaseEnvironment || ""}`
             : "—"],
         ])),
+      userSnap.exists() ? timeCard(uid, u.remainingTime) : null,
+      adjustmentTable(adjustments.docs),
       testAccountCard(uid, flagSnap.exists() ? flagSnap.data() : {}),
       notesCard(uid, notes.docs.filter((d) => d.data().deleted !== true)),
       purchaseTable(purchases.docs),
@@ -345,6 +348,67 @@ function alertLine(anchor, text) {
   const card = anchor.closest(".card");
   card.querySelector(".action-error")?.remove();
   card.append(el("p", {class: "error action-error"}, text));
+}
+
+// 이용 시간 지급·회수. 사유는 필수, 확인창에서 "현재 → 변경 후"를 보여 준다.
+function timeCard(uid, remaining) {
+  const current = typeof remaining === "number" ? remaining : 0;
+  const reason = el("input", {type: "text", maxlength: "200", placeholder: "사유 (필수, 예: 장애 보상)"});
+  const minutes = el("input", {type: "number", min: "1", max: "6000", step: "1", placeholder: "분"});
+
+  const adjust = (button, deltaSeconds) => {
+    if (!reason.value.trim()) {
+      alertLine(button, "사유를 입력하세요.");
+      reason.focus();
+      return;
+    }
+    const after = Math.max(0, current + deltaSeconds);
+    const verb = deltaSeconds > 0 ? "지급" : "회수";
+    if (!confirm(`${verb}: ${fmtSeconds(Math.abs(deltaSeconds))}\n\n` +
+        `${fmtSeconds(current)} → ${fmtSeconds(after)}\n사유: ${reason.value.trim()}`)) return;
+    runAction(button, uid, () => call("adminAdjustTime", {uid, deltaSeconds, reason: reason.value}));
+  };
+  const preset = (label, seconds) => {
+    const b = el("button", {class: "ghost", onclick: () => adjust(b, seconds)}, label);
+    return b;
+  };
+  const customMinutes = () => {
+    const m = Number(minutes.value);
+    return Number.isInteger(m) && m > 0 && m <= 6000 ? m * 60 : 0;
+  };
+  const grant = el("button", {
+    onclick: () => customMinutes() ? adjust(grant, customMinutes()) : alertLine(grant, "1~6000분 사이 정수를 입력하세요."),
+  }, "지급");
+  const revoke = el("button", {
+    class: "danger",
+    onclick: () => customMinutes() ? adjust(revoke, -customMinutes()) : alertLine(revoke, "1~6000분 사이 정수를 입력하세요."),
+  }, "회수");
+
+  return el("div", {class: "card"},
+    el("h3", {}, "이용 시간 조정"),
+    el("p", {}, "현재 남은 시간 ", el("strong", {}, fmtSeconds(current))),
+    el("div", {class: "inline"}, reason),
+    el("div", {class: "inline"},
+      preset("+30분", 1800), preset("+1시간", 3600), preset("+10시간", 36000)),
+    el("div", {class: "inline"}, minutes, el("span", {class: "muted"}, "분"), grant, revoke),
+    el("p", {class: "muted"}, "구매 기록·구매 합계에는 들어가지 않습니다. 0 밑으로는 내려가지 않습니다."));
+}
+
+function adjustmentTable(docs) {
+  if (docs.length === 0) return null;
+  return el("div", {class: "card"},
+    el("h3", {}, `관리자 조정 이력 (${docs.length})`),
+    el("table", {},
+      el("tr", {}, el("th", {}, "시각"), el("th", {}, "반영"), el("th", {}, "잔여 (전 → 후)"), el("th", {}, "사유")),
+      docs.map((d) => {
+        const a = d.data();
+        const sign = a.applied_seconds > 0 ? "+" : "";
+        return el("tr", {},
+          el("td", {}, fmtTime(a.created_at)),
+          el("td", {class: a.applied_seconds < 0 ? "num error" : "num ok"}, sign + fmtSeconds(a.applied_seconds)),
+          el("td", {class: "num"}, `${fmtSeconds(a.before_seconds)} → ${fmtSeconds(a.after_seconds)}`),
+          el("td", {}, a.reason || ""));
+      })));
 }
 
 function testAccountCard(uid, flags) {
