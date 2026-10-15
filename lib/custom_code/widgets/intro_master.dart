@@ -329,6 +329,9 @@ class _IntroMasterState extends State<IntroMaster>
         await _checkAgeAndRoute();
       }
     } on FirebaseAuthException catch (e) {
+      // 📏 화면 안내만 있고 로그가 없어 실패 이유를 못 찾았다(2026-10-15).
+      debugPrint('[EMAIL-AUTH] failed mode=${isLoginMode ? 'login' : 'signup'} '
+          'code=${e.code} anon=${FirebaseAuth.instance.currentUser?.isAnonymous}');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
