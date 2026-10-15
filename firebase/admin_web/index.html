@@ -25,8 +25,14 @@
     <!-- 로그인 후 -->
     <section id="console" hidden>
       <form id="searchForm" class="search">
+        <select id="filter">
+          <option value="all">전체</option>
+          <option value="buyers">구매자</option>
+          <option value="test">테스트</option>
+          <option value="blocked">차단</option>
+        </select>
         <input id="q" type="search" autocomplete="off" spellcheck="false"
-               placeholder="이메일 앞부분 또는 UID (비우면 최근 접속 30명)">
+               placeholder="이메일·이름 앞부분 또는 UID (비우면 최근 접속 30명)">
         <button type="submit">검색</button>
       </form>
       <p id="status" class="muted"></p>

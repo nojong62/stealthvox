@@ -1,9 +1,8 @@
-// StealthVox 관리자 웹 — 1단계: 회원 검색·조회 (읽기 전용).
+// StealthVox 관리자 웹 — 회원 검색·조회, 메모, 테스트 계정.
 //
 //   · 통과 조건은 Custom Claim admin == true 하나다. 화면 검사는 편의일 뿐이고
-//     실제 문은 firestore.rules의 isAdmin()이 지킨다.
-//   · 이 페이지는 아무것도 쓰지 않는다. 지급·차단·메모는 다음 단계에서
-//     Cloud Function을 거쳐서 붙인다.
+//     실제 문은 firestore.rules의 isAdmin()과 admin_ops.js의 requireAdmin()이 지킨다.
+//   · 이 페이지는 Firestore에 직접 쓰지 않는다. 쓰기는 전부 admin* callable로.
 //   · 서버에서 온 값은 전부 textContent로만 그린다(innerHTML 금지).
 
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
@@ -14,6 +13,9 @@ import {
   collection, doc, getDoc, getDocs, getFirestore, limit, orderBy, query,
   Timestamp, where,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import {
+  getFunctions, httpsCallable,
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-functions.js";
 
 // 기존 "StealthVox Web" 앱 설정 (lib/backend/firebase/firebase_config.dart와 같은 값).
 const app = initializeApp({
@@ -26,8 +28,30 @@ const app = initializeApp({
 });
 const auth = getAuth(app);
 const db = getFirestore(app);
+const functions = getFunctions(app, "asia-northeast3");
+const call = (name, data) =>
+  httpsCallable(functions, name)({...data, requestId: crypto.randomUUID()}).then((r) => r.data);
 
 const LIST_LIMIT = 30;
+
+// 테스트·차단 표시는 수가 적으니 한 번에 읽어 두고 목록 태그에 쓴다.
+let flagsByUid = new Map();
+async function loadFlags() {
+  const [tests, blocked] = await Promise.all([
+    getDocs(query(collection(db, "user_flags"), where("isTest", "==", true))),
+    getDocs(query(collection(db, "user_flags"), where("blocked", "==", true))),
+  ]);
+  flagsByUid = new Map();
+  for (const d of [...tests.docs, ...blocked.docs]) flagsByUid.set(d.id, d.data());
+}
+
+function flagTags(uid) {
+  const f = flagsByUid.get(uid) || {};
+  return [
+    f.isTest ? [" ", el("span", {class: "tag test"}, f.testLabel ? `TEST · ${f.testLabel}` : "TEST")] : null,
+    f.blocked ? [" ", el("span", {class: "tag blocked"}, "차단")] : null,
+  ];
+}
 const $ = (id) => document.getElementById(id);
 
 // ── 작은 DOM 도우미 ───────────────────────────────────────────────────────
@@ -88,7 +112,8 @@ function plain(value) {
 }
 
 function explain(err) {
-  if (err && err.code === "permission-denied") {
+  const code = err && String(err.code || "").replace(/^functions\//, "");
+  if (code === "permission-denied") {
     return "권한 거부 — 관리자 Claim 또는 Firestore 규칙이 아직 반영되지 않았습니다.";
   }
   return (err && (err.code || err.message)) || String(err);
@@ -145,55 +170,106 @@ $("searchForm").addEventListener("submit", (e) => {
   e.preventDefault();
   runSearch($("q").value.trim());
 });
+$("filter").addEventListener("change", () => runSearch($("q").value.trim()));
 
 // Firebase UID: 영숫자 20~36자, '@' 없음.
 const looksLikeUid = (q) => /^[A-Za-z0-9]{20,36}$/.test(q);
+
+function prefixQuery(field, q) {
+  return query(collection(db, "real_members"),
+    where(field, ">=", q),
+    where(field, "<=", q + "\uf8ff"),
+    orderBy(field), limit(LIST_LIMIT));
+}
+
+// user_flags 목록 → 회원 행. 익명이면 real_members가 없어 UID만 보인다.
+async function membersForUids(uids) {
+  const snaps = await Promise.all(uids.map((uid) => getDoc(doc(db, "real_members", uid))));
+  return snaps.map((s, i) => ({id: uids[i], data: s.exists() ? s.data() : {}}));
+}
 
 async function runSearch(q) {
   $("results").replaceChildren();
   $("detail").replaceChildren();
   setStatus("검색 중…");
+  const filter = $("filter").value;
   try {
+    await loadFlags();
     if (looksLikeUid(q)) {
       setStatus(`UID ${q}`);
       await showMember(q);
       return;
     }
-    const members = collection(db, "real_members");
-    const snap = q
-      ? await getDocs(query(members,
-        where("email", ">=", q.toLowerCase()),
-        where("email", "<=", q.toLowerCase() + ""),
-        orderBy("email"), limit(LIST_LIMIT)))
-      : await getDocs(query(members, orderBy("lastSeenAt", "desc"), limit(LIST_LIMIT)));
 
-    setStatus(q
-      ? `"${q}"로 시작하는 이메일 ${snap.size}명${snap.size === LIST_LIMIT ? " (최대치, 더 좁혀 주세요)" : ""}`
-      : `최근 접속 ${snap.size}명`);
-    renderList(snap.docs);
+    let rows;
+    let label;
+    if (filter === "test" || filter === "blocked") {
+      const uids = [...flagsByUid.entries()]
+        .filter(([, f]) => (filter === "test" ? f.isTest : f.blocked))
+        .map(([uid]) => uid);
+      rows = await membersForUids(uids);
+      label = filter === "test" ? "테스트 계정" : "차단 계정";
+    } else if (filter === "buyers") {
+      const snap = await getDocs(query(collection(db, "real_members"),
+        where("hasPurchase", "==", true), limit(200)));
+      rows = snap.docs.map((d) => ({id: d.id, data: d.data()}));
+      label = "구매자";
+    } else if (q) {
+      // 이메일 앞부분과 이름 앞부분을 같이 찾는다(카카오 회원은 이메일이 없을 수 있다).
+      const [byEmail, byName] = await Promise.all([
+        getDocs(prefixQuery("email", q.toLowerCase())),
+        getDocs(prefixQuery("displayName", q)),
+      ]);
+      const seen = new Map();
+      for (const d of [...byEmail.docs, ...byName.docs]) seen.set(d.id, {id: d.id, data: d.data()});
+      rows = [...seen.values()];
+      label = `"${q}"로 시작하는 이메일·이름`;
+    } else {
+      const snap = await getDocs(query(collection(db, "real_members"),
+        orderBy("lastSeenAt", "desc"), limit(LIST_LIMIT)));
+      rows = snap.docs.map((d) => ({id: d.id, data: d.data()}));
+      label = "최근 접속";
+    }
+
+    // 필터 목록 안에서도 검색어가 있으면 이메일·이름·UID로 거른다.
+    if (q && filter !== "all") {
+      const needle = q.toLowerCase();
+      rows = rows.filter(({id, data}) =>
+        [data.email, data.displayName, id].some((v) => String(v || "").toLowerCase().includes(needle)));
+    }
+    if (filter !== "all") {
+      rows.sort((a, b) => timeValue(b.data.lastSeenAt) - timeValue(a.data.lastSeenAt));
+    }
+    setStatus(`${label} ${rows.length}명`);
+    renderList(rows);
   } catch (err) {
     setStatus(explain(err), "error");
   }
 }
 
-function renderList(docs) {
-  const rows = docs.map((d) => {
-    const m = d.data();
+function timeValue(v) {
+  return v instanceof Timestamp ? v.toMillis() : 0;
+}
+
+function renderList(rows) {
+  const nodes = rows.map(({id, data: m}) => {
     const row = el("div", {
       class: "row",
       onclick: () => {
         for (const r of $("results").children) r.classList.remove("active");
         row.classList.add("active");
-        showMember(d.id);
+        showMember(id);
       },
     },
-    el("div", {}, m.email || el("span", {class: "muted"}, "(이메일 없음)"),
-      m.hasPurchase ? [" ", el("span", {class: "tag"}, `구매 ${m.purchaseCount || 0}`)] : null),
+    el("div", {},
+      m.email || m.displayName || el("span", {class: "muted mono"}, id),
+      m.hasPurchase ? [" ", el("span", {class: "tag"}, `구매 ${m.purchaseCount || 0}`)] : null,
+      flagTags(id)),
     el("div", {class: "sub"},
-      `${(m.providers || []).join(", ") || "—"} · 최근 ${fmtTime(m.lastSeenAt)}`));
+      `${(m.providers || []).join(", ") || "익명"} · 최근 ${fmtTime(m.lastSeenAt)}`));
     return row;
   });
-  $("results").replaceChildren(...rows);
+  $("results").replaceChildren(...nodes);
 }
 
 // ── 회원 상세 ─────────────────────────────────────────────────────────────
@@ -202,11 +278,13 @@ async function showMember(uid) {
   box.replaceChildren(el("p", {class: "muted"}, "불러오는 중…"));
   try {
     const userRef = doc(db, "users", uid);
-    const [memberSnap, userSnap, purchases, usage] = await Promise.all([
+    const [memberSnap, userSnap, purchases, usage, flagSnap, notes] = await Promise.all([
       getDoc(doc(db, "real_members", uid)),
       getDoc(userRef),
       getDocs(query(collection(userRef, "purchases"), orderBy("purchased_at", "desc"), limit(50))),
       getDocs(query(collection(userRef, "usage_logs"), orderBy("created_at", "desc"), limit(LIST_LIMIT))),
+      getDoc(doc(db, "user_flags", uid)),
+      getDocs(query(collection(db, "admin_notes", uid, "notes"), orderBy("createdAt", "desc"), limit(100))),
     ]);
     if (!memberSnap.exists() && !userSnap.exists()) {
       box.replaceChildren(el("p", {class: "error"}, `UID ${uid}: 회원 문서가 없습니다.`));
@@ -219,7 +297,7 @@ async function showMember(uid) {
       el("div", {class: "card"},
         el("h2", {}, m.email || (memberSnap.exists() ? "(이메일 없음)" : "체험(익명) 사용자")),
         el("div", {class: "muted"}, m.displayName || ""),
-        el("div", {class: "mono"}, uid, " ", copyButton(uid)),
+        el("div", {class: "mono"}, uid, " ", copyButton(uid), flagTags(uid)),
         el("h3", {}, "계정"),
         kv([
           ["로그인 방식", (m.providers || []).join(", ") || "익명"],
@@ -236,6 +314,8 @@ async function showMember(uid) {
             ? `${fmtTime(m.lastPurchasedAt)} · ${m.lastProductId || ""} · ${m.lastPurchaseEnvironment || ""}`
             : "—"],
         ])),
+      testAccountCard(uid, flagSnap.exists() ? flagSnap.data() : {}),
+      notesCard(uid, notes.docs.filter((d) => d.data().deleted !== true)),
       purchaseTable(purchases.docs),
       usageTable(usage.docs),
       el("div", {class: "card"},
@@ -246,6 +326,68 @@ async function showMember(uid) {
   } catch (err) {
     box.replaceChildren(el("p", {class: "error"}, explain(err)));
   }
+}
+
+// 버튼을 누르는 동안 잠그고, 끝나면 목록 태그와 상세를 새로 읽는다.
+async function runAction(button, uid, work) {
+  button.disabled = true;
+  try {
+    await work();
+    await loadFlags();
+    await showMember(uid);
+  } catch (err) {
+    button.disabled = false;
+    alertLine(button, explain(err));
+  }
+}
+
+function alertLine(anchor, text) {
+  const card = anchor.closest(".card");
+  card.querySelector(".action-error")?.remove();
+  card.append(el("p", {class: "error action-error"}, text));
+}
+
+function testAccountCard(uid, flags) {
+  const isTest = flags.isTest === true;
+  const label = el("input", {type: "text", maxlength: "60", placeholder: "라벨 (예: QA 폰)"});
+  label.value = flags.testLabel || "";
+  const button = el("button", {
+    class: isTest ? "ghost" : "",
+    onclick: () => runAction(button, uid, () =>
+      call("adminSetTestAccount", {uid, isTest: !isTest, label: label.value})),
+  }, isTest ? "테스트 계정 해제" : "테스트 계정으로 지정");
+  return el("div", {class: "card"},
+    el("h3", {}, "테스트 계정"),
+    el("p", {class: "muted"}, isTest
+      ? `지정됨${flags.testLabel ? ` · ${flags.testLabel}` : ""} — SANDBOX 결제가 시간으로 충전됩니다.`
+      : "지정하면 SANDBOX(테스트) 결제가 시간으로 충전됩니다. 과금 면제는 아닙니다."),
+    el("div", {class: "inline"}, isTest ? null : label, button));
+}
+
+function notesCard(uid, docs) {
+  const text = el("textarea", {rows: "3", maxlength: "2000", placeholder: "메모 (관리자만 보임)"});
+  const add = el("button", {
+    onclick: () => {
+      if (!text.value.trim()) return;
+      runAction(add, uid, () => call("adminAddNote", {uid, text: text.value}));
+    },
+  }, "메모 추가");
+  return el("div", {class: "card"},
+    el("h3", {}, `메모 (${docs.length})`),
+    docs.map((d) => {
+      const n = d.data();
+      const del = el("button", {
+        class: "ghost small",
+        onclick: () => {
+          if (!confirm("이 메모를 지울까요?")) return;
+          runAction(del, uid, () => call("adminDeleteNote", {uid, noteId: d.id}));
+        },
+      }, "삭제");
+      return el("div", {class: "note"},
+        el("div", {class: "note-text"}, n.text),
+        el("div", {class: "sub"}, fmtTime(n.createdAt), " ", del));
+    }),
+    text, el("div", {class: "inline"}, add));
 }
 
 function purchaseTable(docs) {

@@ -60,3 +60,6 @@ tool/rules_test/node_modules/
 /anonymous_cleanup_*.json
 /designated_google_cleanup_*.json
 /test_account_cleanup_*.json
+
+# firebase hosting deploy cache
+firebase/.firebase/

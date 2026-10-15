@@ -76,3 +76,16 @@ pre { margin: 8px 0 0; font-size: 12px; white-space: pre-wrap; word-break: break
 .error { color: var(--error); }
 .ok { color: var(--ok); }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+
+.search select {
+  font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--text);
+}
+.tag.test { color: #1f5fa8; border-color: #9cc0ec; background: #eaf2fc; }
+.tag.blocked { color: var(--error); border-color: #efa6a6; background: #fdecec; }
+.inline { display: flex; gap: 8px; margin-top: 8px; }
+.inline input { flex: 1; font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; }
+textarea { width: 100%; font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: 6px; resize: vertical; margin-top: 8px; }
+.note { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.note-text { white-space: pre-wrap; word-break: break-word; }
+.note .sub { font-size: 12px; color: var(--muted); }
+button:disabled { opacity: .5; cursor: default; }
