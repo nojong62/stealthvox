@@ -1,5 +1,6 @@
 const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
+const { readBlocked } = require('./block_check');
 
 const db = () => admin.firestore();
 const badTopic = /(https?:\/\/|www\.|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b\d{2,3}[- .]?\d{3,4}[- .]?\d{4}\b|시발|씨발|섹스|강간|마약|살인|fuck|porn|rape)/iu;
@@ -15,6 +16,13 @@ function text(value, max) {
 function uidOf(context) {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
   return context.auth.uid;
+}
+
+// 관리자 웹에서 차단된 계정은 게시판에 새로 올리거나 들어갈 수 없다.
+async function assertNotBlocked(uid) {
+  if (await readBlocked(db(), uid)) {
+    throw new functions.https.HttpsError('permission-denied', '이용이 제한된 계정입니다.');
+  }
 }
 
 const hostPresenceRef = uid => admin.database().ref(`duo_board_hosts/${uid}`);
@@ -34,6 +42,7 @@ async function isHostForeground(uid) {
 
 exports.publishDuoBoardPost = functions.https.onCall(async (data, context) => {
   const uid = uidOf(context);
+  await assertNotBlocked(uid);
   if (context.auth.token.firebase?.sign_in_provider === 'anonymous') {
     throw new functions.https.HttpsError('permission-denied', '게시글은 회원만 작성할 수 있습니다.');
   }
@@ -101,6 +110,7 @@ exports.withdrawDuoBoardPost = functions.https.onCall(async (data, context) => {
 
 exports.claimDuoBoardPost = functions.https.onCall(async (data, context) => {
   const uid = uidOf(context);
+  await assertNotBlocked(uid);
   const postId = String(data.postId || '').trim();
   if (!postId) throw new functions.https.HttpsError('invalid-argument', 'postId가 필요합니다.');
   const postRef = db().collection('duo_board_posts').doc(postId);
@@ -139,6 +149,7 @@ exports.claimDuoBoardPost = functions.https.onCall(async (data, context) => {
 
 exports.requestDuoBoardPost = functions.https.onCall(async (data, context) => {
   const uid = uidOf(context);
+  await assertNotBlocked(uid);
   const postId = String(data.postId || '').trim();
   const rawAttemptId = String(data.attemptId || '').trim();
   const attemptId = /^[A-Za-z0-9_-]{8,80}$/.test(rawAttemptId)

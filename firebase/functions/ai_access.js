@@ -1,3 +1,5 @@
+const { readBlocked } = require("./block_check");
+
 const TRIAL_GRANT_TTL_MS = 30 * 60 * 1000;
 
 function positiveRemainingTime(data) {
@@ -28,7 +30,12 @@ function normalizedRoomId(value) {
 }
 
 async function resolveAiAccess({ db, uid, isAnonymous, roomId, nowMs = Date.now() }) {
-  const userSnap = await db.doc(`users/${uid}`).get();
+  // 관리자 차단이 시간·체험·Duo 게스트 자격보다 먼저다.
+  const [blocked, userSnap] = await Promise.all([
+    readBlocked(db, uid),
+    db.doc(`users/${uid}`).get(),
+  ]);
+  if (blocked) return { allowed: false, reason: "blocked" };
   if (userSnap.exists && positiveRemainingTime(userSnap.data())) {
     return { allowed: true, reason: "paid" };
   }

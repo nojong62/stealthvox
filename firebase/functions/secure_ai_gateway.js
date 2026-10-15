@@ -6,6 +6,7 @@ const { onCall } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { GoogleAuth } = require("google-auth-library");
 const { claimTrialGrant, resolveAiAccess } = require("./ai_access");
+const { createBlockedCache, readBlocked } = require("./block_check");
 
 const openAiApiKey = defineSecret("OPENAI_API_KEY");
 const deepgramApiKey = defineSecret("DEEPGRAM_API_KEY");
@@ -98,6 +99,9 @@ async function requireAiAccess(request, caller) {
     isAnonymous: caller.isAnonymous,
     roomId: request.data && request.data.roomId,
   });
+  if (access.reason === "blocked") {
+    throw callableError("permission-denied", "This account is restricted.");
+  }
   if (!access.allowed) {
     throw callableError("permission-denied", "AI access requires available time or an active session.");
   }
@@ -544,6 +548,9 @@ const claimAiTrial = onCall({
   if (!caller.isAnonymous) {
     throw callableError("failed-precondition", "Trial access is available only before account registration.");
   }
+  if (await readBlocked(admin.firestore(), caller.uid)) {
+    throw callableError("permission-denied", "This account is restricted.");
+  }
   const installationId = String(request.data && request.data.installationId || "").trim();
   if (!/^[A-Za-z0-9_-]{10,200}$/.test(installationId)) {
     throw callableError("invalid-argument", "A valid installation id is required.");
@@ -557,6 +564,11 @@ const claimAiTrial = onCall({
     throw callableError("permission-denied", "This device has already used its trial.");
   }
   return { granted: true, expiresAt: result.expiresAtMs };
+});
+
+// 게이트웨이 토큰은 2시간 유효하므로 차단은 요청마다 다시 본다(15초 캐시).
+const proxyIsBlocked = createBlockedCache({
+  onError: err => functions.logger.warn("openAiProxy block check failed", { message: err.message }),
 });
 
 const openAiProxy = functions
@@ -579,6 +591,11 @@ const openAiProxy = functions
     const identity = secret ? verifyGatewayToken(token, secret) : null;
     if (!identity) {
       res.status(401).json({ error: { message: "Unauthorized" } });
+      return;
+    }
+    if (await proxyIsBlocked(admin.firestore(), identity.uid)) {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.status(403).json({ error: { message: "This account is restricted." } });
       return;
     }
     const path = normalizedProxyPath(req);

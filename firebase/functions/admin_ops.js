@@ -188,6 +188,40 @@ async function adjustTime({db, adminUid, uid, deltaSeconds, reason, requestId, n
   });
 }
 
+// 이용 차단·해제. 실제로 막는 곳은 block_check.js를 부르는 서버 함수들이다.
+async function setBlocked({db, adminUid, uid, blocked, reason, requestId, now}) {
+  if (typeof blocked !== "boolean") {
+    throw new HttpsError("invalid-argument", "blocked must be boolean.");
+  }
+  const why = typeof reason === "string" ? reason.trim() : "";
+  if (blocked && (!why || why.length > REASON_MAX_LENGTH)) {
+    throw new HttpsError("invalid-argument", "reason is required (max 200 characters).");
+  }
+  if (uid === adminUid) {
+    throw new HttpsError("failed-precondition", "Admins cannot block themselves.");
+  }
+  const flagRef = db.doc(`user_flags/${uid}`);
+  const logRef = auditRef(db, "set_blocked", requestId);
+
+  return db.runTransaction(async (tx) => {
+    const [logSnap, flagSnap] = await Promise.all([tx.get(logRef), tx.get(flagRef)]);
+    if (logSnap.exists) return {duplicate: true};
+    const flags = flagSnap.exists ? flagSnap.data() || {} : {};
+    const before = {blocked: flags.blocked === true, blockReason: flags.blockReason || ""};
+    const after = blocked
+      ? {blocked: true, blockReason: why, blockedAt: now, blockedBy: adminUid}
+      : {blocked: false, blockReason: "", unblockedAt: now, unblockedBy: adminUid};
+
+    tx.set(flagRef, {...after, updatedAt: now}, {merge: true});
+    tx.set(logRef, auditEntry({
+      action: "set_blocked", targetUid: uid, before,
+      after: {blocked, blockReason: blocked ? why : ""},
+      reason: why, adminUid, now,
+    }));
+    return {duplicate: false, blocked};
+  });
+}
+
 function createAdminOps(admin) {
   const db = () => admin.firestore();
   const now = () => admin.firestore.FieldValue.serverTimestamp();
@@ -224,6 +258,17 @@ function createAdminOps(admin) {
         requestId: requireRequestId(data.requestId),
       });
     }),
+    adminSetBlocked: onCall(options, async (request) => {
+      const adminUid = requireAdmin(request);
+      const data = request.data || {};
+      return setBlocked({
+        db: db(), adminUid, now: now(),
+        uid: requireUid(data.uid),
+        blocked: data.blocked,
+        reason: data.reason,
+        requestId: requireRequestId(data.requestId),
+      });
+    }),
     adminAdjustTime: onCall(options, async (request) => {
       const adminUid = requireAdmin(request);
       const data = request.data || {};
@@ -246,5 +291,6 @@ module.exports = {
   requireAdmin,
   requireRequestId,
   requireUid,
+  setBlocked,
   setTestAccount,
 };

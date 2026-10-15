@@ -3,6 +3,7 @@ const admin = require("firebase-admin");
 const functions = require("firebase-functions/v1");
 const { onCall } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
+const { createBlockedCache } = require("./block_check");
 
 const openAiApiKey = defineSecret("OPENAI_API_KEY");
 
@@ -13,6 +14,10 @@ const PROCESSING = "processing";
 const READY = "ready";
 const FAILED = "failed";
 const LEASE_MS = 120000;
+// 발화마다 불리므로 차단 확인은 15초 캐시를 쓴다(대부분 추가 지연 0).
+const interpretIsBlocked = createBlockedCache({
+  onError: err => functions.logger.warn("interpretUtterance block check failed", { message: err.message }),
+});
 const MAX_SOURCE_LENGTH = 12000;
 
 function callableError(code, message) {
@@ -350,10 +355,15 @@ function createInterpretUtteranceHandler({
   fetchImpl = fetch,
   now = () => Date.now(),
   tokenFactory = () => crypto.randomUUID(),
+  isBlocked = interpretIsBlocked,
 } = {}) {
   return async (data, context) => {
     const firestore = db || admin.firestore();
     const startedAt = now();
+    const callerUid = context && context.auth && context.auth.uid;
+    if (await isBlocked(firestore, callerUid)) {
+      throw callableError("permission-denied", "This account is restricted.");
+    }
     const reservation = await reserveUtterance({
       db,
       context,

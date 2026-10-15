@@ -19,6 +19,7 @@ const { resolveLegacyGoogleAccount } = require("./legacy_google_account");
 const { processRevenueCatPurchase } = require("./revenuecat_purchase");
 const { writeUsageLogIdempotently } = require("./usage_log");
 const { deductTimeIdempotently } = require("./deduct_time");
+const { readBlocked } = require("./block_check");
 const revenueCatWebhookSecret = defineSecret("REVENUECAT_WEBHOOK_SECRET");
 
 // ----------------------------------------------------------------------------
@@ -95,6 +96,7 @@ exports.adminAddNote = adminOps.adminAddNote;
 exports.adminDeleteNote = adminOps.adminDeleteNote;
 exports.adminSetTestAccount = adminOps.adminSetTestAccount;
 exports.adminAdjustTime = adminOps.adminAdjustTime;
+exports.adminSetBlocked = adminOps.adminSetBlocked;
 
 
 async function verifyGoogleOAuthIdToken(idToken) {
@@ -220,6 +222,12 @@ exports.createTurnCredential = functions
       throw new functions.https.HttpsError(
         "unauthenticated",
         "Authentication is required."
+      );
+    }
+    if (await readBlocked(admin.firestore(), context.auth.uid)) {
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "This account is restricted."
       );
     }
     if (!checkTurnRateLimit(context.auth.uid)) {
@@ -370,6 +378,12 @@ exports.grantSignupBonus = functions.https.onCall(async (data, context) => {
   }
 
   const uid = context.auth.uid;
+  if (await readBlocked(admin.firestore(), uid)) {
+    throw new functions.https.HttpsError(
+      "permission-denied",
+      "This account is restricted."
+    );
+  }
   const userRef = admin.firestore().doc("users/" + uid);
   const bonusSeconds = 5 * 60; // 5 minutes
 

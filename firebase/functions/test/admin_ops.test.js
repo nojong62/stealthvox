@@ -7,6 +7,7 @@ const {
   requireAdmin,
   requireRequestId,
   requireUid,
+  setBlocked,
   setTestAccount,
 } = require("../admin_ops");
 
@@ -198,4 +199,37 @@ test("adjustTime rejects bad input and missing users without writing", async () 
   await assert.rejects(adjustTime({...ok, uid: "nobody-1"}), {code: "not-found"});
   assert.deepEqual([...db.docs.keys()], ["users/user-1"]);
   assert.equal(db.get("users/user-1").remainingTime, 10);
+});
+
+test("setBlocked records who and why, keeps other flags, and retries are no-ops", async () => {
+  const db = new FakeDb({"user_flags/user-1": {isTest: true, testLabel: "QA"}});
+  const input = {...base, db, uid: "user-1", blocked: true, reason: " 결제 악용 ", requestId: "req-00020"};
+  assert.deepEqual(await setBlocked(input), {duplicate: false, blocked: true});
+  assert.deepEqual(await setBlocked(input), {duplicate: true});
+  assert.deepEqual(db.get("user_flags/user-1"), {
+    isTest: true, testLabel: "QA",
+    blocked: true, blockReason: "결제 악용", blockedAt: "server-time", blockedBy: "admin-1",
+    updatedAt: "server-time",
+  });
+  const audit = db.get("admin_audit/set_blocked_req-00020");
+  assert.deepEqual(audit.before, {blocked: false, blockReason: ""});
+  assert.deepEqual(audit.after, {blocked: true, blockReason: "결제 악용"});
+
+  await setBlocked({...base, db, uid: "user-1", blocked: false, requestId: "req-00021"});
+  const flags = db.get("user_flags/user-1");
+  assert.equal(flags.blocked, false);
+  assert.equal(flags.blockReason, "");
+  assert.equal(flags.unblockedBy, "admin-1");
+  assert.equal(flags.isTest, true);
+});
+
+test("setBlocked requires a reason to block and refuses self-block", async () => {
+  const db = new FakeDb();
+  await assert.rejects(setBlocked({...base, db, uid: "user-1", blocked: true, reason: " ", requestId: "req-00022"}),
+    {code: "invalid-argument"});
+  await assert.rejects(setBlocked({...base, db, uid: "user-1", blocked: "yes", requestId: "req-00022"}),
+    {code: "invalid-argument"});
+  await assert.rejects(setBlocked({...base, db, uid: "admin-1", blocked: true, reason: "x", requestId: "req-00022"}),
+    {code: "failed-precondition"});
+  assert.equal(db.docs.size, 0);
 });
