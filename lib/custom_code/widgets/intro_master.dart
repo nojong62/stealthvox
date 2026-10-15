@@ -617,57 +617,85 @@ class _IntroMasterState extends State<IntroMaster>
     }
   }
 
-  /// Duo 초대 버튼과 같은 크기, 다른 옷. 금색 테두리에 어두운 바탕이다.
+  /// Duo 초대 버튼과 짝. **같은 색, 반대 구조**다(실장님, 2026-10-16).
+  ///   Duo   — 청록→보라 그라데이션으로 꽉 찬 버튼, 흰 글자
+  ///   체험  — 같은 그라데이션을 **반대로(보라→청록)** 테두리에만, 안은 어둡게,
+  ///           글자에 그라데이션
+  /// 움직임도 Duo와 같은 컨트롤러를 반대로 탄다.
   Widget _buildWelcomeStudyTrialAction() {
     final copy = IntroWelcomePageCopy.forSystemLocale();
-    const gold = Color(0xFFF5B942);
-    return Container(
-      width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 48),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1A12),
-        borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: gold.withValues(alpha: 0.85), width: 1.4),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(99),
-        child: InkWell(
-          onTap: _startingStudyTrial ? null : _startStudyTrial,
-          borderRadius: BorderRadius.circular(99),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _startingStudyTrial
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: gold),
-                      )
-                    : const Icon(Icons.menu_book_rounded,
-                        size: 19, color: gold),
-                const SizedBox(width: 10),
-                Flexible(
-                  child: Text(
-                    copy['studyTrial']!,
-                    maxLines: 2,
-                    style: const TextStyle(
-                      color: gold,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.35,
+    const teal = Color(0xFF45CDBD);
+    const violet = Color(0xFF765EEB);
+    return AnimatedBuilder(
+      animation: _welcomeMotionController,
+      builder: (context, child) {
+        final shift = 1 - _welcomeMotionController.value * 4;
+        final gradient = LinearGradient(
+          begin: Alignment(shift, 0),
+          end: Alignment(shift + 2, 0),
+          colors: const [violet, teal, violet],
+        );
+        return Container(
+          width: double.infinity,
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.all(1.6),
+          decoration: BoxDecoration(
+            gradient: gradient,
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 44.8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF14151B),
+              borderRadius: BorderRadius.circular(99),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(99),
+              child: InkWell(
+                onTap: _startingStudyTrial ? null : _startStudyTrial,
+                borderRadius: BorderRadius.circular(99),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+                  child: ShaderMask(
+                    blendMode: BlendMode.srcIn,
+                    shaderCallback: (rect) => gradient.createShader(rect),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _startingStudyTrial
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.auto_stories_rounded,
+                                size: 19, color: Colors.white),
+                        const SizedBox(width: 10),
+                        Flexible(
+                          child: Text(
+                            copy['studyTrial']!,
+                            maxLines: 2,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.35,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
