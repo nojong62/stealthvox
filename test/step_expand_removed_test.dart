@@ -72,21 +72,30 @@ void main() {
     final history = File('lib/custom_code/widgets/chat_history_master.dart')
         .readAsStringSync();
 
-    test('유저에게 보이는 이름은 PRACTICE · Clear & Easy · Natural & Sharp다', () {
-      // 2026-09-08 뒤 두 카드가 화자 라벨을 쓴다. 저장 칸(`my_speech` /
-      // `native_english`)은 그대로이고 화면 이름만 바뀌었다.
-      expect(history, contains('"CLEAR & EASY"'));
-      expect(history, contains('"NATURAL & SHARP"'));
+    test('유저에게 보이는 이름은 PRACTICE · ESSAY다', () {
+      // 2026-10-15 실장님 지시. NATURAL & SHARP는 빠지고 CLEAR & EASY 글이
+      // ESSAY라는 이름으로 남는다. 저장 칸(`my_speech`)은 그대로다.
+      expect(history, contains('"ESSAY"'));
+      expect(history, isNot(contains('"CLEAR & EASY"')));
+      expect(history, isNot(contains('"NATURAL & SHARP"')));
       expect(history, contains('"Practice"'));
     });
 
-    test('두 발화 카드는 제목만 둔다 — 인물 윗줄·미리보기가 없다', () {
-      // 2026-10-14 실장님 지시. 생성 프롬프트의 reference persona는 그대로다.
+    test('ESSAY 카드는 글을 미리 보여 준다', () {
+      // 2026-10-15 실장님 지시 — 누르기 전에 내용을 읽어 볼 수 있다.
       expect(history, isNot(contains('Larry King–style Plain Spoken English')));
-      expect(history,
-          isNot(contains('Trevor Noah–style Natural Conversational English')));
-      expect(history, isNot(contains('preview: _mySpeech')));
-      expect(history, isNot(contains('preview: _nativeEnglish')));
+      expect(history, contains('preview: _mySpeech'));
+    });
+
+    test('쉐도잉 Long Pause는 고르는 칸 없이 늘 켜져 있다', () {
+      expect(history, contains('_p3ShadowPause = ChirpPause.long'));
+      expect(history, isNot(contains("label: 'Long Pause'")));
+      expect(history, contains('<double>[0.83, 0.87, 0.93, 0.97]'));
+    });
+
+    test('에코잉·쉐도잉 설정은 대화마다 한 번 고르면 고정된다', () {
+      expect(history, contains("'practice_settings.\${mode.name}'"));
+      expect(history, contains('_p3SettingsLocked'));
     });
 
     test('옛 Anderson 결과를 Trevor 기준 결과로 다시 만든다', () {
@@ -113,7 +122,6 @@ void main() {
       for (final opener in <String>[
         '_openPracticeStudy',
         '_openMySpeechStudy',
-        '_openNativeEnglishStudy',
       ]) {
         expect(history, contains(opener), reason: opener);
       }
@@ -121,20 +129,10 @@ void main() {
       expect(history, isNot(contains('isComplete ? _open')));
     });
 
-    test('Native English는 My English를 거치지 않고 만들어지지 않는다', () {
-      final start = history.indexOf('Future<void> _openNativeEnglishStudy');
-      expect(start, greaterThan(-1));
-      final block = history.substring(start, start + 600);
-      expect(block, contains('_ensureMySpeech'));
-      expect(block, contains('_ensureNativeEnglish'));
-      // 생성기 자체가 transcript를 받을 수 없는 서명이라 한 번 더 막힌다.
-      final builder =
-          File('lib/custom_code/services/speech_reconstruction.dart')
-              .readAsStringSync();
-      final ne = builder
-          .substring(builder.indexOf('class NativeEnglishSpeechBuilder'));
-      expect(ne, isNot(contains('SpeechTranscriptTurn')));
-      expect(ne, isNot(contains('formatSpeechTranscript')));
+    test('ESSAY 한 벌만 만든다 — Native English 생성이 없다', () {
+      // 2026-10-15 실장님 지시. 토큰을 아끼려 두 번째 글을 뺐다.
+      expect(history, isNot(contains('NativeEnglishSpeechBuilder.build')));
+      expect(history, isNot(contains('_openNativeEnglishStudy')));
     });
 
     // 저장 칸 이름은 화면 이름과 따로 간다. 화면은 MY ENGLISH지만 칸은

@@ -73,13 +73,9 @@ void main() {
       expect(body, contains('if (!historyGenerationAllowed(roomData)) {'));
     });
 
-    test('Native English가 DRAFT에서 만들어지지 않는다', () {
-      final int at = master.indexOf('Future<bool> _ensureNativeEnglish(');
-      expect(at, greaterThan(0));
-      final String body = master.substring(
-          at, master.indexOf('NativeEnglishSpeechBuilder.build', at));
-      expect(
-          body, contains('if (!historyGenerationAllowed(_cachedRoomData)) {'));
+    test('Native English는 더 만들지 않는다', () {
+      // 2026-10-15 실장님 지시 — 공부방은 ESSAY 한 벌만 만든다.
+      expect(master, isNot(contains('NativeEnglishSpeechBuilder.build')));
     });
 
     test('다른 표현은 DRAFT에서 요청 전에 안내하고 멈춘다', () {

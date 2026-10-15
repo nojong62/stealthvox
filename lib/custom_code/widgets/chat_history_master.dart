@@ -357,7 +357,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   /// 못 만든 이유. null이면 실패한 적이 없다. 카드에 그대로 뜬다.
   String? _mySpeechError;
-  String? _nativeEnglishError;
   // 다시 읽어 달라는 힌트
   bool _showRetryHint = false;
   int _turnPracticeRetryCount = 0;
@@ -2062,13 +2061,13 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         setState(() {
           isPracticeMode = true;
           _phase = ShadowingPhase.studySelect;
+          _loadP3Locks(data);
           _mySpeech = storedMySpeech;
           _nativeEnglish = _canReuseStoredNativeEnglish(
                   data, storedNativeEnglish, storedMySpeech)
               ? storedNativeEnglish
               : '';
           _mySpeechError = null;
-          _nativeEnglishError = null;
           currentIndex = 0;
           _isAutoRecording = false;
           _tutorAwaitingStart = true;
@@ -2690,7 +2689,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         _tutorAiSpeaking = false; // 🆕 [BOX-31]
         _tutorUserRecording = false; // 🆕 [BOX-31]
         _tutorPlayingFullback = false; // 🆕 [BOX-34]
-        _nativeEnglishError = null;
         _showRetryHint = false;
       });
     }
@@ -5268,17 +5266,13 @@ RULES — follow exactly:
   // ══════════════════════════════════════════════════════════════════
   // 📦 [Box 22-B: 학습 경로 고르는 자리 — History Study의 첫 화면]
   //
-  //   PRACTICE | CLEAR & EASY | NATURAL & SHARP 셋을 나란히 둔다.
-  //   뒤 둘의 저장 칸은 여전히 `my_speech` / `native_english`다 —
-  //   **화면 이름만 화자 라벨로 바뀌었다.**
+  //   PRACTICE | ESSAY 둘을 나란히 둔다.
   //
-  //   두 발화 카드는 제목만 둔다 — 인물 윗줄·설명·미리보기 문장은 없다
-  //   (실장님 지시, 2026-10-14). 생성 프롬프트는 그대로다.
+  //   ESSAY는 예전 CLEAR & EASY(`my_speech`) 그 글이다. NATURAL & SHARP는
+  //   뺐다 — 글 한 벌을 더 만드는 값만 들었다(실장님 지시, 2026-10-15).
+  //   만들어 둔 글은 카드에 미리 보인다.
   //   **어느 하나가 다른 하나의 관문이 아니다.** Practice는 몇 번이고 다시
-  //   들어오는 자리고, 나머지 둘은 대화 전체를 한 벌의 발화로 다루는 자리다.
-  //
-  //   ⚠️ 두 발화 카드는 **절대 같은 글자를 보이지 않는다.** Native English를
-  //      못 만들었으면 그 카드는 비어 있고 "다시 시도"만 있다.
+  //   들어오는 자리고, ESSAY는 대화 전체를 한 벌의 발화로 다루는 자리다.
   // ══════════════════════════════════════════════════════════════════
   Widget _buildStudySelectScreen() {
     final bool busy = _isBuildingMySpeech || _isBuildingNativeEnglish;
@@ -5338,28 +5332,18 @@ RULES — follow exactly:
                     if (speechReady) ...[
                       const SizedBox(height: 12),
                       _buildStudyPathCard(
-                        title: "CLEAR & EASY",
+                        title: "ESSAY",
                         icon: Icons.record_voice_over_rounded,
                         color: const Color(0xFF38BDF8),
+                        // 📖 만들어 둔 글이 있으면 누르기 전에 읽어 볼 수 있다.
+                        preview: _mySpeech,
+                        previewMaxLines: 8,
                         emptyHint: locked ? access.gateLabel : '',
                         error: _mySpeechError,
                         locked: locked,
                         isLoading: _isBuildingMySpeech,
                         onTap:
                             busy ? null : () => unawaited(_openMySpeechStudy()),
-                      ),
-                      const SizedBox(height: 12),
-                      _buildStudyPathCard(
-                        title: "NATURAL & SHARP",
-                        icon: Icons.auto_awesome,
-                        color: const Color(0xFFFBBF24),
-                        emptyHint: locked ? access.gateLabel : '',
-                        error: _nativeEnglishError,
-                        locked: locked,
-                        isLoading: _isBuildingNativeEnglish,
-                        onTap: busy
-                            ? null
-                            : () => unawaited(_openNativeEnglishStudy()),
                       ),
                     ],
                   ],
@@ -5390,6 +5374,7 @@ RULES — follow exactly:
     required Color color,
     VoidCallback? onTap,
     String preview = '',
+    int previewMaxLines = 3,
     String emptyHint = '',
     String? error,
     bool isLoading = false,
@@ -5471,7 +5456,7 @@ RULES — follow exactly:
                 const SizedBox(height: 10),
                 Text(
                   body,
-                  maxLines: 3,
+                  maxLines: previewMaxLines,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                       color: Colors.white,
@@ -6271,33 +6256,22 @@ RULES — follow exactly:
   /// NATURAL & SHARP(`native_english`) 두 벌을 각각 같은 Speaking
   /// Practice 흐름으로 연다.
   ///
-  /// ⚠️ **없으면 빈 문자열이다.** 고른 쪽이 비었다고 다른 쪽을 대신 걸지
-  ///    않는다 — 두 카드가 같은 문장이 되면 견줄 것이 사라진다. 카드 자체가
-  ///    [_p3VariantAvailable]로 잠기므로 빈 채로 들어올 일도 없다.
+  /// ⚠️ **없으면 빈 문자열이다.** Start가 그 경우를 막는다.
   String get _p3TargetSentence => _speechFor(_selectedVariant).trim();
 
   String _speechFor(SentenceVariant variant) =>
       variant == SentenceVariant.nativeEnglish ? _nativeEnglish : _mySpeech;
 
-  bool _p3VariantAvailable(SentenceVariant variant) =>
-      _speechFor(variant).trim().isNotEmpty;
-
-  String _p3VariantLabel(SentenceVariant variant) =>
-      variant == SentenceVariant.nativeEnglish
-          ? 'NATURAL & SHARP'
-          : 'CLEAR & EASY';
-
   /// 쉐도잉 호흡 사이의 여유. Chirp이 문장부호 뒤 태그 자리에서 직접 쉰다.
-  /// 기본은 `[pause]`, Long Pause를 켜면 `[pause long]`이다.
-  ChirpPause get _p3ShadowPause =>
-      _p3ShadowLongPause ? ChirpPause.long : ChirpPause.medium;
+  /// **늘 `[pause long]`이다** — 고르는 칸은 없다(실장님 지시, 2026-10-15).
+  static const ChirpPause _p3ShadowPause = ChirpPause.long;
 
   /// 낭독 속도. Gateway가 Chirp의 speaking_rate로 넘긴다.
-  /// 쉐도잉은 셋 중에서 고른다. Snap Echoing은 [_snapEchoSpeed].
+  /// 쉐도잉은 넷 중에서 고른다. Snap Echoing은 [_snapEchoSpeed].
   /// ⚡ Snap Echoing 속도는 단위 길이를 따른다. 짧은 단위는 조금 천천히,
   /// 긴 단위는 보통 빠르기에 가깝게 — 리듬을 그대로 복사하게 한다.
   double get _snapEchoSpeed => _p3SnapSize == SnapUnitSize.quick ? 0.96 : 0.98;
-  static const List<double> _kShadowSpeeds = <double>[0.83, 0.88, 0.93];
+  static const List<double> _kShadowSpeeds = <double>[0.83, 0.87, 0.93, 0.97];
 
   /// 🚧 P3 전용 timing. **다른 모드의 VAD 값과 무관하다.** 최종값 아님.
   static const int _kP3EchoSilenceMs = 1800;
@@ -6318,9 +6292,15 @@ RULES — follow exactly:
   List<BreathSegment> _p3Segments = const <BreathSegment>[];
   int _p3BreathIndex = 0;
   int _p3BreathTotal = 0;
-  double _p3ShadowSpeed = 0.88;
+  double _p3ShadowSpeed = 0.87;
 
-  bool _p3ShadowLongPause = false;
+  /// 🔒 [P3-LOCK] 이 대화에서 모드별로 한 번 고른 설정. 있으면 그 모드의
+  /// 목소리·속도·반복은 바뀌지 않는다 — 같은 대화는 같은 소리 한 벌로만
+  /// 연습한다. 방 문서 `practice_settings`에 남는다.
+  final Map<P3PracticeMode, _P3ModeLock> _p3Locks =
+      <P3PracticeMode, _P3ModeLock>{};
+
+  bool get _p3SettingsLocked => _p3Locks.containsKey(_p3PracticeMode);
 
   /// ⚡ [SNAP-ECHO] 한 호흡 의미 단위의 길이. 쉼은 고르지 않는다 — 단위 사이
   /// `[pause short]`는 소리에서 경계를 찾게 하는 표시일 뿐이다.
@@ -6355,14 +6335,7 @@ RULES — follow exactly:
   /// 영역과 손가락에 가려지므로, 마지막 대사 몇 줄과 버튼이 함께 보이게 한다.
   static const double _kP3ReadEndClearance = 32.0;
 
-  /// 문장을 갈아 끼우는 동안만 참. 없는 문장은 여기서 만들어 오느라 몇 초가
-  /// 걸리는데, 그 사이 두 번째 탭이 들어오면 두 벌이 겹쳐 돈다.
-  bool _p3VariantSwitching = false;
-
   bool get _p3Busy =>
-      // 문장을 갈아 끼우는 동안은 Start·모드·보이스를 함께 잠근다. 문장 카드는
-      // 제 잠금(`_p3VariantSwitching`)을 따로 본다 — 그래야 갈아탈 수 있다.
-      _p3VariantSwitching ||
       _p3Stage == P3Stage.preparing ||
       _p3Stage == P3Stage.breathListen ||
       _p3Stage == P3Stage.breathEcho ||
@@ -6516,89 +6489,6 @@ RULES — follow exactly:
     _p3ShadowPath = null;
   }
 
-  /// 완성/세련 문장은 TTS·호흡·사용자 녹음이 서로 다른 한 벌이다.
-  /// 문장을 바꾸면 현재 회차를 완전히 접고 새 선택을 준비한다. 원본 TTS는
-  /// text가 캐시 identity에 들어가므로 각 문장별로 재사용된다.
-  ///
-  /// **첫 화면에서는 고르기만 한다** — 시작은 ▶ Start가 연다. 한 번 시작한
-  /// 뒤에는 Start가 화면에 없으므로, 메뉴에서 고르는 것이 곧 다시 시작이다.
-  /// `_stopP3Shadowing`이 stage를 idle로 되돌리므로 **멈추기 전에** 진행
-  /// 중이었는지를 기억해 둬야 한다.
-  ///
-  /// 🔁 **듣는 중에도 갈아탈 수 있다.** 돌고 있다고 잠가 두면 X로 나갔다
-  /// 학습 경로에서 다시 들어오는 수밖에 없었다 — 두 문장을 번갈아 보는 것이
-  /// 이 화면의 전부인데 그 길이 막혀 있었다. 누르면 돌던 회차를 접고 그
-  /// 자리에서 새 문장으로 다시 돈다.
-  ///
-  /// 아직 만들지 않은 문장도 여기서 만든다. 순서는 [_ensureSpeechVariant]가
-  /// 지킨다 — NATIVE ENGLISH의 재료는 언제나 My English다.
-  ///
-  /// 모드·보이스와 같은 규칙으로 **화면부터 칠한다.** `_stopP3Shadowing`이
-  /// 실기기에서 1초 가까이 걸려서, 그걸 기다렸다 칠하니 눌러도 안 바뀌는
-  /// 것처럼 보였다. 다만 **아직 없는 문장은 미리 칠하지 않는다** — 빈 문장을
-  /// 고른 상태가 한 순간도 생기면 안 된다. 그쪽은 카드의 스피너가 알린다.
-  Future<void> _selectP3Variant(SentenceVariant variant) async {
-    if (_p3VariantSwitching) return;
-    final bool wasStarted = _p3Stage != P3Stage.idle;
-    final bool hasSentence = _p3VariantAvailable(variant);
-    if (_selectedVariant == variant && !wasStarted && hasSentence) return;
-    setState(() {
-      _p3VariantSwitching = true;
-      if (hasSentence) {
-        _selectedVariant = variant;
-        _p3Stage = P3Stage.idle;
-        _p3Error = null;
-        _p3UserSpeaking = false;
-      }
-    });
-    bool ready = hasSentence;
-    try {
-      await _stopP3Shadowing(resetSelection: true);
-      if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
-      if (!ready) {
-        final bool built = await _ensureSpeechVariant(variant);
-        if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
-        if (!built) {
-          setState(() => _p3Error = _variantBuildError(variant));
-          return;
-        }
-        setState(() {
-          _selectedVariant = variant;
-          _p3Stage = P3Stage.idle;
-          _p3Error = null;
-          _p3UserSpeaking = false;
-        });
-        ready = true;
-      }
-    } finally {
-      // 다시 도는 동안까지 잠가 두면 그 회차 내내 갈아탈 수 없다. 잠금은
-      // 여기서 풀고, 시작은 밖에서 한다.
-      if (mounted) {
-        setState(() => _p3VariantSwitching = false);
-      } else {
-        _p3VariantSwitching = false;
-      }
-    }
-    if (ready && wasStarted) await _startP3Speaking();
-  }
-
-  /// 고른 쪽이 비어 있으면 만들어 온다. 생성 순서는 하나뿐이다 —
-  /// Conversation → My English → Native English. 실패하면 false이고 그 자리는
-  /// 빈 채로 둔다 — 다른 쪽 문장을 대신 걸지 않는다.
-  Future<bool> _ensureSpeechVariant(SentenceVariant variant) async {
-    if (_mySpeech.trim().isEmpty && !await _ensureMySpeech()) return false;
-    if (!mounted) return false;
-    if (variant == SentenceVariant.mySpeech) return _mySpeech.trim().isNotEmpty;
-    if (_nativeEnglish.trim().isNotEmpty) return true;
-    return _ensureNativeEnglish();
-  }
-
-  String _variantBuildError(SentenceVariant variant) =>
-      (variant == SentenceVariant.nativeEnglish
-          ? _nativeEnglishError ?? _mySpeechError
-          : _mySpeechError) ??
-      '만들지 못했습니다 — 다시 시도해 주세요';
-
   /// 고르는 것은 **고르기까지만** 한다. 시작은 Start 버튼이다 — 누르지도
   /// 않았는데 소리가 나면 놀란다.
   ///
@@ -6611,6 +6501,7 @@ RULES — follow exactly:
     setState(() {
       _p3PracticeMode = mode;
       _coerceP3VoiceForMode();
+      _applyP3Lock();
       _p3Stage = P3Stage.idle;
       _p3Error = null;
       _p3UserSpeaking = false;
@@ -6680,6 +6571,7 @@ RULES — follow exactly:
     }
     _p3FullPcm = pcm;
     _p3Segments = analysis.segments;
+    _lockP3Settings();
     if (mounted) {
       setState(() {
         _p3BreathIndex = 0;
@@ -7159,21 +7051,17 @@ RULES — follow exactly:
               _buildP3VoiceSelector(),
               const SizedBox(height: 10),
               _buildP3PracticeModePicker(),
-              const SizedBox(height: 14),
-              // 라벨만 있으면 갈아타도 점 하나 옮겨진 것 말고는 달라진 게
-              // 없어 보인다. 어느 문장으로 가는지 글자로 보여 준다.
-              _buildP3VariantPicker(),
               if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
                 const SizedBox(height: 12),
                 _buildP3ShadowSpeedPicker(),
-                const SizedBox(height: 8),
-                _buildP3LongPauseToggle(),
               ] else ...[
                 const SizedBox(height: 12),
                 _buildP3SnapSizePicker(),
                 const SizedBox(height: 8),
                 _buildP3EchoRepeatPicker(),
               ],
+              const SizedBox(height: 8),
+              _buildP3LockNote(),
 
               // 오류는 연습이 시작되지 못했을 때도 보여야 하므로 밖에 둔다.
               if (_p3Error != null) ...[
@@ -7476,7 +7364,7 @@ RULES — follow exactly:
   /// 목소리는 모드와 같은 규칙으로 연다 — 한 바퀴가 끝난 뒤에도 바꿀 수 있고,
   /// 바꾸면 그 자리에서 다시 시작한다. 도는 중에만 잠근다.
   Widget _buildP3VoiceSelector() {
-    final enabled = !_p3Busy;
+    final enabled = !_p3Busy && !_p3SettingsLocked;
     final List<String> voices = _p3VoiceChoices;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -7515,6 +7403,62 @@ RULES — follow exactly:
           ],
         ],
       ),
+    );
+  }
+
+  /// 🔒 [P3-LOCK] 지금 모드에 고정된 설정이 있으면 그 값으로 맞춘다.
+  void _applyP3Lock() {
+    final lock = _p3Locks[_p3PracticeMode];
+    if (lock == null) return;
+    if (_kP3Voices.contains(lock.voice)) _p3Voice = lock.voice;
+    if (lock.repeat != null) _p3EchoRepeat = lock.repeat!;
+    if (lock.speed != null) _p3ShadowSpeed = lock.speed!;
+    _p3FullPcm = null;
+    _p3Segments = const <BreathSegment>[];
+  }
+
+  /// 🔒 [P3-LOCK] 첫 Start가 소리를 받아 오면 그 설정을 이 대화에 묶는다.
+  /// 소리를 못 받은 시도는 아무것도 묶지 않는다.
+  void _lockP3Settings() {
+    final mode = _p3PracticeMode;
+    if (_p3Locks.containsKey(mode)) return;
+    final lock = mode == P3PracticeMode.echoing
+        ? _P3ModeLock(voice: _p3Voice, repeat: _p3EchoRepeat)
+        : _P3ModeLock(voice: _p3Voice, speed: _p3ShadowSpeed);
+    if (mounted) setState(() => _p3Locks[mode] = lock);
+    unawaited(widget.historyDoc.update(<String, dynamic>{
+      'practice_settings.${mode.name}': lock.toMap(),
+    }).catchError((Object e) => debugPrint('[P3-LOCK] write $e')));
+  }
+
+  /// 방 문서의 `practice_settings`를 읽는다. 모르는 값은 버린다.
+  void _loadP3Locks(Map<String, dynamic>? data) {
+    _p3Locks.clear();
+    final raw = data?['practice_settings'];
+    if (raw is! Map) return;
+    for (final mode in P3PracticeMode.values) {
+      final lock = _P3ModeLock.fromMap(raw[mode.name]);
+      if (lock != null) _p3Locks[mode] = lock;
+    }
+  }
+
+  /// 고르기 전에는 "한 번 고르면 고정", 고른 뒤에는 "이 대화에서 고정"을 적는다.
+  Widget _buildP3LockNote() {
+    final bool locked = _p3SettingsLocked;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(locked ? Icons.lock_rounded : Icons.info_outline_rounded,
+            size: 13, color: Colors.white38),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            _surfaceCopy[locked ? 'p3SettingsLocked' : 'p3SettingsOnce'],
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white38, fontSize: 11.5),
+          ),
+        ),
+      ],
     );
   }
 
@@ -7643,91 +7587,6 @@ RULES — follow exactly:
     );
   }
 
-  /// P3의 두 학습 문장. 단순 label만 보여 주면 문장을 바꾸고도
-  /// 무엇을 골랐는지 알기 어려워 짧은 preview를 함께 보여 준다.
-  Widget _buildP3VariantPicker() {
-    return Column(
-      children: [
-        for (final variant in SentenceVariant.values) ...[
-          _buildP3VariantCard(variant),
-          if (variant != SentenceVariant.values.last) const SizedBox(height: 8),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildP3VariantCard(SentenceVariant variant) {
-    final building = variant == SentenceVariant.nativeEnglish
-        ? _isBuildingNativeEnglish
-        : _isBuildingMySpeech;
-    final selected = _selectedVariant == variant;
-    // 제목만 둔다. 아직 없는 문장이라고 잠그지 않는다 — 누르면 그 자리에서
-    // 만들고, 만드는 동안은 제목 옆에 도는 표시가 뜬다.
-    return InkWell(
-      onTap: building || _p3VariantSwitching
-          ? null
-          : () => unawaited(_selectP3Variant(variant)),
-      borderRadius: BorderRadius.circular(12),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(13, 11, 13, 12),
-        decoration: BoxDecoration(
-          color: selected
-              ? _p3ShadowingAccentColor.withValues(alpha: 0.16)
-              : Colors.white.withValues(alpha: 0.035),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? _p3ShadowingAccentColor : Colors.white12,
-            width: selected ? 1.4 : 1,
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  selected
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  color: building
-                      ? Colors.white24
-                      : (selected ? _p3ShadowingAccentColor : Colors.white38),
-                  size: 17,
-                ),
-                const SizedBox(width: 7),
-                Flexible(
-                  child: Text(
-                    _p3VariantLabel(variant),
-                    style: TextStyle(
-                      color: building
-                          ? Colors.white38
-                          : (selected ? Colors.white : Colors.white60),
-                      fontSize: 13,
-                      fontWeight: selected ? FontWeight.bold : FontWeight.w600,
-                    ),
-                  ),
-                ),
-                if (building) ...[
-                  const SizedBox(width: 8),
-                  const SizedBox(
-                    width: 13,
-                    height: 13,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.6,
-                      color: Colors.white38,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// 쉐도잉 속도 고르기. 간격 고르기와 같은 생김새다.
   /// 고르기 칸 하나. 간격·속도·단위 고르기가 모두 이 생김새다.
   Widget _p3OptionChip({
@@ -7805,7 +7664,7 @@ RULES — follow exactly:
             child: _p3OptionChip(
               label: 'Repeat ×$count',
               selected: _p3EchoRepeat == count,
-              onTap: _p3Busy || _p3EchoRepeat == count
+              onTap: _p3Busy || _p3SettingsLocked || _p3EchoRepeat == count
                   ? null
                   : () => setState(() => _p3EchoRepeat = count),
             ),
@@ -7813,17 +7672,6 @@ RULES — follow exactly:
           if (count != 2) const SizedBox(width: 6),
         ],
       ],
-    );
-  }
-
-  /// 쉐도잉 Long Pause 켜고 끄기. 끄면 `[pause]`, 켜면 `[pause long]`.
-  Widget _buildP3LongPauseToggle() {
-    return _p3OptionChip(
-      label: 'Long Pause',
-      selected: _p3ShadowLongPause,
-      onTap: _p3Busy
-          ? null
-          : () => _resetP3Audio(() => _p3ShadowLongPause = !_p3ShadowLongPause),
     );
   }
 
@@ -7836,7 +7684,7 @@ RULES — follow exactly:
             child: _p3OptionChip(
               label: '${speed}x',
               selected: _p3ShadowSpeed == speed,
-              onTap: _p3Busy || _p3ShadowSpeed == speed
+              onTap: _p3Busy || _p3SettingsLocked || _p3ShadowSpeed == speed
                   ? null
                   : () => _resetP3Audio(() => _p3ShadowSpeed = speed),
             ),
@@ -8119,7 +7967,9 @@ RULES — follow exactly:
   /// `my_speech_v1`은 **유저가 실제로 한 말만** 모으던 시절의 결과다. 지금
   /// My English는 대화를 seed로 삼아 새로 짓는 확장 스피치라, 두 글은 같은
   /// 칸에 들어 있어도 전혀 다른 물건이다. 판을 올려 옛 글을 안 읽는다.
-  static const String _kSpeechSchemaVersion = 'my_english_v2';
+  /// `my_english_v2`는 대화에 없던 내용을 붙이던 확장 글이다. v3부터는
+  /// 대화 안에서만, 유저 1인칭으로 쓴다(2026-10-15).
+  static const String _kSpeechSchemaVersion = 'my_english_v3';
   static const String _kNativeEnglishSchemaVersion = 'natural_sharp_trevor_v1';
 
   /// 저장된 MY ENGLISH를 그대로 써도 되는가.
@@ -8267,19 +8117,6 @@ RULES — follow exactly:
     _openSpeechStage(SentenceVariant.mySpeech);
   }
 
-  /// 🇺🇸 NATIVE ENGLISH — My English가 없으면 그것부터 만든 뒤 이어서 만든다.
-  Future<void> _openNativeEnglishStudy() async {
-    if (!_guardPaidStudy()) return;
-    if (_isBuildingMySpeech || _isBuildingNativeEnglish) return;
-    if (_nativeEnglish.trim().isEmpty) {
-      if (_mySpeech.trim().isEmpty && !await _ensureMySpeech()) return;
-      if (!mounted) return;
-      if (!await _ensureNativeEnglish()) return;
-    }
-    if (!mounted) return;
-    _openSpeechStage(SentenceVariant.nativeEnglish);
-  }
-
   /// 대화를 seed로 MY ENGLISH 한 벌을 확보한다. 이미 있으면 그대로 쓴다.
   ///
   /// 실패하면 **false다.** 아무 문장이나 만들어 채우지 않는다 — 대화와
@@ -8359,7 +8196,6 @@ RULES — follow exactly:
         // 새로 만든 My English에는 짝이 없다. 옛 Native English를 그대로
         // 걸어 두면 서로 다른 두 생각이 한 쌍인 척한다.
         _nativeEnglish = '';
-        _nativeEnglishError = null;
         _practicingNativeEnglish = false;
         _nativeEnglishUnits = <String>[];
         _nativeEnglishUnitIdx = -1;
@@ -8386,69 +8222,6 @@ RULES — follow exactly:
       return false;
     } finally {
       if (mounted) setState(() => _isBuildingMySpeech = false);
-    }
-  }
-
-  /// 🇺🇸 [NATIVE-ENGLISH] **입력은 언제나 My English다.**
-  ///
-  /// 대화 원문을 직접 읽지 않는다 — 그러면 두 단계가 같은 일을 한다. 실패하면
-  /// false이고, 그 자리는 **빈 채로 둔다.** My English를 복사해 채우면 두
-  /// 카드가 같은 글자가 되어 견줄 것이 사라진다.
-  Future<bool> _ensureNativeEnglish() async {
-    if (!_paidStudySilentlyAllowed('native_english')) return false;
-    // 📝 [DRAFT-GATE] 확정 전에는 만들지 않는다. My English를 거쳐 오므로
-    //   보통 여기까지 오지 않지만, 캐시가 남은 방에서 곧장 들어올 수 있다.
-    if (!historyGenerationAllowed(_cachedRoomData)) {
-      if (mounted) {
-        setState(() => _nativeEnglishError = '먼저 대화를 최종 확정해 주세요');
-      }
-      return false;
-    }
-    final source = _mySpeech.trim();
-    if (source.isEmpty || _isBuildingNativeEnglish) return false;
-    if (mounted) {
-      setState(() {
-        _isBuildingNativeEnglish = true;
-        _nativeEnglishError = null;
-      });
-    }
-    try {
-      final result = await NativeEnglishSpeechBuilder.build(
-        apiKey: _apiKey,
-        mySpeech: source,
-        targetLang: _sessionTargetLangName(),
-        onLog: (tag, message) => debugPrint('$tag $message'),
-      );
-      if (!mounted) return false;
-      if (!result.isUsable) {
-        setState(
-            () => _nativeEnglishError = _speechFailureMessage(result.failure));
-        return false;
-      }
-      final text = result.text;
-      setState(() {
-        _nativeEnglish = text;
-        _nativeEnglishError = null;
-        _nativeEnglishUnits = <String>[];
-        _nativeEnglishUnitIdx = -1;
-      });
-      try {
-        await widget.historyDoc.update(<String, dynamic>{
-          'native_english': text,
-          'native_english_schema_version': _kNativeEnglishSchemaVersion,
-          'speech_schema_version': _kSpeechSchemaVersion,
-          'has_practice': true,
-        });
-      } catch (e) {
-        debugPrint('[NATIVE-ENGLISH] cache write $e');
-      }
-      return true;
-    } catch (e) {
-      debugPrint('[NATIVE-ENGLISH] $e');
-      if (mounted) setState(() => _nativeEnglishError = '오류: $e');
-      return false;
-    } finally {
-      if (mounted) setState(() => _isBuildingNativeEnglish = false);
     }
   }
 
@@ -8503,6 +8276,7 @@ RULES — follow exactly:
         _phase = ShadowingPhase.chunkPractice;
         // 첫 진입에서도 어느 칸도 선택되지 않은 상태가 없게 맞춘다.
         _coerceP3VoiceForMode();
+        _applyP3Lock();
         // 🎤 [P3-SPEAK] 새 세션으로 연다. 이전 녹음은 남기지 않는다 —
         //   AI 원본 TTS 캐시는 그대로 재사용된다.
         _p3Stage = P3Stage.idle;
@@ -8654,6 +8428,34 @@ enum ShadowingPhase {
 
 /// 두 학습 문장. 화면 이름은 MY ENGLISH / NATIVE ENGLISH다.
 enum SentenceVariant { mySpeech, nativeEnglish }
+
+/// 🔒 [P3-LOCK] 한 모드에 묶인 설정. 에코잉은 반복, 쉐도잉은 속도를 든다.
+class _P3ModeLock {
+  const _P3ModeLock({required this.voice, this.repeat, this.speed});
+
+  final String voice;
+  final int? repeat;
+  final double? speed;
+
+  Map<String, dynamic> toMap() => <String, dynamic>{
+        'voice': voice,
+        if (repeat != null) 'repeat': repeat,
+        if (speed != null) 'speed': speed,
+      };
+
+  static _P3ModeLock? fromMap(Object? raw) {
+    if (raw is! Map) return null;
+    final voice = raw['voice'];
+    if (voice is! String || voice.isEmpty) return null;
+    final repeat = raw['repeat'];
+    final speed = raw['speed'];
+    return _P3ModeLock(
+      voice: voice,
+      repeat: repeat is num ? repeat.toInt() : null,
+      speed: speed is num ? speed.toDouble() : null,
+    );
+  }
+}
 
 enum P3PracticeMode { echoing, shadowing }
 

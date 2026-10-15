@@ -2597,6 +2597,34 @@ class OriginSurfaceCopy {
       'Femminile',
       'Vrouw'
     ],
+    'p3SettingsOnce': [
+      'Chosen once per conversation — it can\'t be changed after you start',
+      '대화마다 한 번만 고릅니다 — 시작하면 바꿀 수 없어요',
+      '会話ごとに一度だけ選びます — 開始後は変更できません',
+      '每段对话只选一次 — 开始后无法更改',
+      'Se elige una vez por conversación; no se puede cambiar tras empezar',
+      'Choisi une fois par conversation — impossible à modifier après le début',
+      'Einmal pro Gespräch gewählt — nach dem Start nicht änderbar',
+      'हर बातचीत में एक बार चुनें — शुरू करने के बाद बदल नहीं सकते',
+      'Выбирается один раз для разговора — после начала изменить нельзя',
+      'Escolhido uma vez por conversa — não pode ser alterado após começar',
+      'Si sceglie una volta per conversazione — non modificabile dopo l\'avvio',
+      'Eén keer per gesprek gekozen — na de start niet te wijzigen'
+    ],
+    'p3SettingsLocked': [
+      'Fixed for this conversation',
+      '이 대화의 설정으로 고정됨',
+      'この会話の設定で固定',
+      '已固定为本段对话的设置',
+      'Fijado para esta conversación',
+      'Fixé pour cette conversation',
+      'Für dieses Gespräch festgelegt',
+      'इस बातचीत के लिए तय',
+      'Закреплено для этого разговора',
+      'Fixado para esta conversa',
+      'Fissato per questa conversazione',
+      'Vastgezet voor dit gesprek'
+    ],
     'voiceMale': [
       'Male',
       '남성',
