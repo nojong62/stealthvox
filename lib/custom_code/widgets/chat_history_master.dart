@@ -607,6 +607,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _messagesStream = _newMessagesStream();
     _remoteConfigFuture = _fetchRemoteConfig();
     _fetchRoomData();
+    unawaited(isStudyTrialAuthor().then((author) {
+      if (author && mounted) setState(() => _isTrialAuthor = true);
+    }));
     _initPermissions();
     BillingTicker.instance.balanceExhausted.addListener(_onBalanceExhausted);
     // 💰 [BILLING-IDLE] 입장 즉시 과금 + 60초 유휴 감시. 규칙은 공용이다.
@@ -4235,6 +4238,7 @@ RULES — follow exactly:
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          if (_isTrialAuthor && _isTrialMasterRoom) _buildTrialPrepButton(),
           ValueListenableBuilder<int>(
             valueListenable: BillingTicker.instance.billingState,
             builder: (_, s, __) => GestureDetector(
@@ -6713,7 +6717,8 @@ RULES — follow exactly:
   }
 
   /// 원본 PCM. **강조 지시가 없는 순수 낭독**이라 Lab 캐시와 키가 다르다.
-  Future<Uint8List?> _getP3OriginalPcm(String text) {
+  Future<Uint8List?> _getP3OriginalPcm(String text,
+      {bool forceTrialUpload = false}) {
     final voice = _p3Voice;
     final style = _p3StyleFor(_p3PracticeMode);
     final bool shadowing = _p3PracticeMode == P3PracticeMode.shadowing;
@@ -6729,7 +6734,13 @@ RULES — follow exactly:
     if (existing != null) return existing;
     final future = () async {
       final cached = await TtsCache.get(text, ns);
-      if (cached != null && cached.length > 44) return pcmFromWav(cached);
+      if (cached != null && cached.length > 44) {
+        // 🎟️ 체험 준비: 폰에 이미 있던 소리도 원본이면 올린다.
+        if (forceTrialUpload && _cachedRoomData?[kStudyTrialField] == true) {
+          await StudyTrialAudio.upload(ns, text, cached);
+        }
+        return pcmFromWav(cached);
+      }
       // 🎟️🔊 [STUDY-TRIAL-AUDIO] 체험 원본·사본은 관리자가 올려 둔 소리를
       //   먼저 받는다. 받으면 TTS·단위 나누기 호출이 모두 빠진다.
       final bool trialRoom = isStudyTrialRoom(_cachedRoomData);
@@ -7495,6 +7506,113 @@ RULES — follow exactly:
   }
 
   /// 🔒 [P3-LOCK] 지금 모드에 고정된 설정이 있으면 그 값으로 맞춘다.
+  // ── 🎟️ [STUDY-TRIAL] 체험 원본 준비 ─────────────────────────────────
+  //   관리자가 원본 방에서 한 번 누르면 체험자가 쓸 것을 미리 만들어 둔다.
+  //   ESSAY → 줄마다 다른 표현 → 연습 소리 3벌(에코잉 Quick·Full, 쉐도잉).
+  //   이미 있는 것은 건너뛰므로 몇 번을 눌러도 같은 결과다. 소리는 폰에
+  //   있어도 다시 올린다 — 규칙 배포 전에 만든 소리를 배포 뒤에 올리려고.
+  bool _isTrialAuthor = false;
+  bool _preparingTrial = false;
+  String _trialPrepStatus = '';
+
+  bool get _isTrialMasterRoom => _cachedRoomData?[kStudyTrialField] == true;
+
+  void _setTrialPrep(String status) {
+    debugPrint('[TRIAL-PREP] $status');
+    if (mounted) setState(() => _trialPrepStatus = status);
+  }
+
+  Future<void> _prepareStudyTrialRoom() async {
+    if (_preparingTrial || !_isTrialMasterRoom) return;
+    if (!_guardFinalizedStudyFeature()) return;
+    setState(() => _preparingTrial = true);
+    final savedMode = _p3PracticeMode;
+    final savedSize = _p3SnapSize;
+    try {
+      // ① ESSAY
+      if (_mySpeech.trim().isEmpty) {
+        _setTrialPrep('ESSAY 만드는 중');
+        if (!await _ensureMySpeech()) throw StateError('essay');
+      }
+      // ② 다른 표현
+      final target = _sessionTargetLangName();
+      final allStyles = allAltStyles(target);
+      int made = 0;
+      final docs = List<DocumentSnapshot>.of(_cachedDocs);
+      for (int i = 0; i < docs.length; i++) {
+        if (!mounted) return;
+        final data = docs[i].data() as Map<String, dynamic>?;
+        final base = (data?['translated_text'] ?? '').toString().trim();
+        if (base.isEmpty) continue;
+        final cached = cachedAltStyles(data, base);
+        final missing =
+            allStyles.where((s) => !cached.containsKey(s)).toList();
+        if (missing.isEmpty) continue;
+        _setTrialPrep('다른 표현 ${i + 1}/${docs.length}');
+        final fetched = await fetchAltStyleSentences(
+          apiKey: _apiKey,
+          baseText: base,
+          styles: missing,
+          targetLang: target,
+        );
+        if (fetched.isEmpty) continue;
+        await docs[i].reference.update(<String, dynamic>{
+          kAltStylesField: <String, String>{...cached, ...fetched},
+          kAltStylesBaseField: base,
+        });
+        made++;
+      }
+      // ③ 연습 소리 — 체험의 고정 설정으로.
+      final essay = _mySpeech.trim();
+      _p3Voices[P3PracticeMode.echoing] = _kP3FemaleVoice;
+      _p3Voices[P3PracticeMode.shadowing] = _kP3MaleVoice;
+      _p3ShadowSpeed = 0.87;
+      int sounds = 0;
+      for (final step in <(P3PracticeMode, SnapUnitSize)>[
+        (P3PracticeMode.echoing, SnapUnitSize.quick),
+        (P3PracticeMode.echoing, SnapUnitSize.full),
+        (P3PracticeMode.shadowing, SnapUnitSize.quick),
+      ]) {
+        if (!mounted) return;
+        _p3PracticeMode = step.$1;
+        _p3SnapSize = step.$2;
+        _setTrialPrep('연습 소리 ${sounds + 1}/3');
+        final pcm = await _getP3OriginalPcm(essay, forceTrialUpload: true);
+        if (pcm != null && pcm.isNotEmpty) sounds++;
+      }
+      _setTrialPrep('완료 · 다른 표현 $made줄 · 소리 $sounds/3');
+      _showRoomEntryToast('체험 준비 완료 · 다른 표현 $made줄 · 소리 $sounds/3');
+    } catch (e) {
+      _setTrialPrep('실패: $e');
+      _showRoomEntryToast('체험 준비 실패: $e');
+    } finally {
+      _p3PracticeMode = savedMode;
+      _p3SnapSize = savedSize;
+      _p3FullPcm = null;
+      if (mounted) setState(() => _preparingTrial = false);
+    }
+  }
+
+  Widget _buildTrialPrepButton() {
+    return Tooltip(
+      message: _trialPrepStatus.isEmpty ? '체험 준비' : _trialPrepStatus,
+      child: GestureDetector(
+        onTap: _prepareStudyTrialRoom,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: _preparingTrial
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Color(0xFFF59E0B)))
+              : const Icon(Icons.auto_fix_high_rounded,
+                  color: Color(0xFFF59E0B), size: 24),
+        ),
+      ),
+    );
+  }
+
   void _applyP3Lock() {
     final lock = _p3Locks[_p3PracticeMode];
     if (lock == null) return;
