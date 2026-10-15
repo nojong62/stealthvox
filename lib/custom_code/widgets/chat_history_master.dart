@@ -148,6 +148,7 @@ class ChatHistoryMaster extends StatefulWidget {
     this.height,
     required this.historyDoc,
     this.allowDuoGuestStudyPreview = false,
+    this.studyTrial = false,
   }) : super(key: key);
 
   final double? width;
@@ -157,6 +158,10 @@ class ChatHistoryMaster extends StatefulWidget {
   /// 초대받은 익명 게스트가 통화 직후 받는 5분 공부방 체험.
   /// 일반 History 진입에는 전달하지 않으므로 무료 권한이 다른 방으로 새지 않는다.
   final bool allowDuoGuestStudyPreview;
+
+  /// 🎟️ 인트로 "공부방 체험"으로 받은 사본. 이 방 하나만 5분간 연다 —
+  /// 다른 대화로 옮기는 앞뒤 버튼과 방 지우기는 그리지 않는다.
+  final bool studyTrial;
 
   @override
   _ChatHistoryMasterState createState() => _ChatHistoryMasterState();
@@ -2163,6 +2168,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   StudyAccess get _studyAccess => currentStudyAccess(
         hasDuoGuestStudyPreview: widget.allowDuoGuestStudyPreview,
+        hasStudyTrial: widget.studyTrial,
       );
 
   bool get _paidStudyAllowed => _studyAccess.canUsePaidStudy;
@@ -4736,63 +4742,64 @@ RULES — follow exactly:
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 0, 0, 4),
-          child: Row(
-            children: [
-              IconButton(
-                onPressed: _isOpeningAdjacentHistory
-                    ? null
-                    : () => _openAdjacentHistoryInSameMode(-1),
-                tooltip: _surfaceCopy['previousConversation'],
-                icon: _isOpeningAdjacentHistory && _openingHistoryOffset == -1
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
+        if (!widget.studyTrial)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 0, 4),
+            child: Row(
+              children: [
+                IconButton(
+                  onPressed: _isOpeningAdjacentHistory
+                      ? null
+                      : () => _openAdjacentHistoryInSameMode(-1),
+                  tooltip: _surfaceCopy['previousConversation'],
+                  icon: _isOpeningAdjacentHistory && _openingHistoryOffset == -1
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.amber,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.arrow_back_rounded,
                           color: Colors.amber,
+                          size: 24,
                         ),
-                      )
-                    : const Icon(
-                        Icons.arrow_back_rounded,
-                        color: Colors.amber,
-                        size: 24,
-                      ),
-              ),
-              IconButton(
-                onPressed: _isOpeningAdjacentHistory
-                    ? null
-                    : () => _openAdjacentHistoryInSameMode(1),
-                tooltip: _surfaceCopy['nextConversation'],
-                icon: _isOpeningAdjacentHistory && _openingHistoryOffset == 1
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.amber,
-                        ),
-                      )
-                    : const Icon(
-                        Icons.arrow_forward_rounded,
-                        color: Colors.amber,
-                        size: 24,
-                      ),
-              ),
-              const Spacer(),
-              IconButton(
-                onPressed: _deleteHistoryRoom,
-                tooltip: _surfaceCopy['deleteConversation'],
-                icon: const Icon(
-                  Icons.delete_outline_rounded,
-                  color: Colors.white54,
-                  size: 22,
                 ),
-              ),
-            ],
+                IconButton(
+                  onPressed: _isOpeningAdjacentHistory
+                      ? null
+                      : () => _openAdjacentHistoryInSameMode(1),
+                  tooltip: _surfaceCopy['nextConversation'],
+                  icon: _isOpeningAdjacentHistory && _openingHistoryOffset == 1
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.amber,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.arrow_forward_rounded,
+                          color: Colors.amber,
+                          size: 24,
+                        ),
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: _deleteHistoryRoom,
+                  tooltip: _surfaceCopy['deleteConversation'],
+                  icon: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: Colors.white54,
+                    size: 22,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
         _buildFinalizeSection(hasLines: hasLines),
         const SizedBox(width: double.infinity, height: 64),
       ],
@@ -6373,6 +6380,7 @@ RULES — follow exactly:
   // ── P3 상태 ───────────────────────────────────────────────────────
   P3Stage _p3Stage = P3Stage.idle;
   P3PracticeMode _p3PracticeMode = P3PracticeMode.echoing;
+
   /// 🗣️ 목소리는 에코잉·쉐도잉이 **따로** 든다(실장님 지시, 2026-10-15).
   final Map<P3PracticeMode, String> _p3Voices = <P3PracticeMode, String>{
     P3PracticeMode.echoing: _kBreathVoice,
@@ -7550,9 +7558,7 @@ RULES — follow exactly:
                 items: <String, String>{
                   for (final v in _kP3Voices) v: _p3VoiceLabel(v),
                 },
-                onChanged: enabled
-                    ? (v) => unawaited(_selectP3Voice(v))
-                    : null,
+                onChanged: enabled ? (v) => unawaited(_selectP3Voice(v)) : null,
               ),
             ),
             const SizedBox(width: 8),

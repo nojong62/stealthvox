@@ -24,6 +24,8 @@ import '/custom_code/services/duo_board_push_service.dart';
 import '/custom_code/services/duo_board_intro_notice.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/system_ui_language.dart';
+import 'package:android_id/android_id.dart';
+import 'study_trial_page.dart';
 
 enum IntroScreen { welcome, auth, accountDiscovery }
 
@@ -129,6 +131,9 @@ class _IntroMasterState extends State<IntroMaster>
   bool _welcomeForward = true;
   bool _showEmailForm = false;
   bool _isValidatingDuoInvite = false;
+
+  /// 🎟️ [STUDY-TRIAL] 체험 준비 중(익명 로그인 → 서버 복사). 두 번 누르지 않게.
+  bool _startingStudyTrial = false;
 
   // =======================================================
   // [Account Discovery] Existing-account lookup state
@@ -547,6 +552,122 @@ class _IntroMasterState extends State<IntroMaster>
           ),
         );
       }),
+    );
+  }
+
+  // ── 🎟️ [STUDY-TRIAL] 공부방 체험 ────────────────────────────────────
+  //   서버가 이 폰 언어에 맞는 체험 대화를 이 사람 계정에 복사해 주고, 그
+  //   대화 하나만 5분간 연다. 폰 하나에 한 번이다(`startStudyTrial`).
+
+  Future<void> _startStudyTrial() async {
+    if (_startingStudyTrial) return;
+    final copy = IntroWelcomePageCopy.forSystemLocale();
+    setState(() => _startingStudyTrial = true);
+    String? failure;
+    try {
+      final deviceId = await const AndroidId().getId();
+      if (deviceId == null || deviceId.isEmpty) {
+        throw StateError('no_device_id');
+      }
+      if (FirebaseAuth.instance.currentUser == null) {
+        await FirebaseAuth.instance.signInAnonymously();
+      }
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final result = await FirebaseFunctions.instanceFor(
+        region: 'asia-northeast3',
+      ).httpsCallable('startStudyTrial').call(<String, dynamic>{
+        'deviceId': deviceId,
+        'systemLanguage': systemUiLanguageName(),
+      });
+      final data = Map<String, dynamic>.from(result.data as Map);
+      final roomId = (data['roomId'] ?? '').toString();
+      final remaining = (data['remainingSeconds'] as num?)?.toInt() ?? 0;
+      debugPrint('[STUDY-TRIAL] start room=$roomId remaining=$remaining '
+          'resumed=${data['resumed']}');
+      if (roomId.isEmpty || remaining <= 0) {
+        failure = copy['studyTrialFailed'];
+      } else if (mounted) {
+        await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => StudyTrialPage(
+            historyRef: FirebaseFirestore.instance
+                .collection('users')
+                .doc(uid)
+                .collection('chat_history')
+                .doc(roomId),
+            remainingSeconds: remaining,
+          ),
+        ));
+      }
+    } on FirebaseFunctionsException catch (e) {
+      debugPrint('[STUDY-TRIAL] refused code=${e.code} ${e.message}');
+      failure = switch (e.code) {
+        'failed-precondition' => copy['studyTrialUsed'],
+        'not-found' => copy['studyTrialUnavailable'],
+        _ => copy['studyTrialFailed'],
+      };
+    } catch (e) {
+      debugPrint('[STUDY-TRIAL] failed $e');
+      failure = copy['studyTrialFailed'];
+    } finally {
+      if (mounted) setState(() => _startingStudyTrial = false);
+    }
+    if (failure != null && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failure)));
+    }
+  }
+
+  /// Duo 초대 버튼과 같은 크기, 다른 옷. 금색 테두리에 어두운 바탕이다.
+  Widget _buildWelcomeStudyTrialAction() {
+    final copy = IntroWelcomePageCopy.forSystemLocale();
+    const gold = Color(0xFFF5B942);
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(minHeight: 48),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1A12),
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: gold.withValues(alpha: 0.85), width: 1.4),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(99),
+        child: InkWell(
+          onTap: _startingStudyTrial ? null : _startStudyTrial,
+          borderRadius: BorderRadius.circular(99),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _startingStudyTrial
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: gold),
+                      )
+                    : const Icon(Icons.menu_book_rounded,
+                        size: 19, color: gold),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    copy['studyTrial']!,
+                    maxLines: 2,
+                    style: const TextStyle(
+                      color: gold,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1525,6 +1646,10 @@ class _IntroMasterState extends State<IntroMaster>
                   ),
                   SizedBox(height: veryCompact ? 28 : 42),
                   const Spacer(flex: 5),
+                  if (!_showEnglishTesterGoogleEntry) ...[
+                    _buildWelcomeStudyTrialAction(),
+                    const SizedBox(height: 10),
+                  ],
                   _showEnglishTesterGoogleEntry
                       ? _buildEnglishTesterGoogleAction()
                       : _buildWelcomeDuoAction(),

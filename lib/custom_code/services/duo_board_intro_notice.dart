@@ -455,7 +455,11 @@ class IntroWelcomePageCopy {
       'headlineAfter': ' Becomes\nLanguage.',
       'duoInvite': 'Duo Invite',
       'loginOrJoin': 'Login or Join',
-      'swipeContinue': 'Swipe to Continue'
+      'swipeContinue': 'Swipe to Continue',
+      'studyTrial': 'Try the Study Room',
+      'studyTrialUsed': 'This phone has already used the trial.',
+      'studyTrialUnavailable': "The trial isn't ready yet. Please try again later.",
+      'studyTrialFailed': "Couldn't start the trial. Please try again."
     },
     'ko': {
       'tagline': '자유롭게 말하고, 자연스럽게 익히세요',
@@ -464,7 +468,11 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Duo 초대',
       'loginOrJoin': '로그인 또는 가입',
-      'swipeContinue': '스와이프하여 계속'
+      'swipeContinue': '스와이프하여 계속',
+      'studyTrial': '공부방 체험',
+      'studyTrialUsed': '이 폰에서는 이미 체험했어요.',
+      'studyTrialUnavailable': '체험 대화를 준비 중이에요. 잠시 후 다시 시도해 주세요.',
+      'studyTrialFailed': '체험을 시작하지 못했어요. 다시 시도해 주세요.'
     },
     'ja': {
       'tagline': '自由に話して、自然に身につけよう',
@@ -473,7 +481,11 @@ class IntroWelcomePageCopy {
       'headlineAfter': 'が言語になります。',
       'duoInvite': 'Duo 招待',
       'loginOrJoin': 'ログイン・新規登録',
-      'swipeContinue': 'スワイプして続ける'
+      'swipeContinue': 'スワイプして続ける',
+      'studyTrial': '学習ルーム体験',
+      'studyTrialUsed': 'この端末ではすでに体験済みです。',
+      'studyTrialUnavailable': '体験の準備中です。しばらくしてからお試しください。',
+      'studyTrialFailed': '体験を開始できませんでした。もう一度お試しください。'
     },
     'zh': {
       'tagline': '自在开口，自然习得',
@@ -482,7 +494,11 @@ class IntroWelcomePageCopy {
       'headlineAfter': '会成为语言。',
       'duoInvite': 'Duo 邀请',
       'loginOrJoin': '登录或注册',
-      'swipeContinue': '滑动以继续'
+      'swipeContinue': '滑动以继续',
+      'studyTrial': '体验学习室',
+      'studyTrialUsed': '此手机已体验过。',
+      'studyTrialUnavailable': '体验内容准备中，请稍后再试。',
+      'studyTrialFailed': '无法开始体验，请重试。'
     },
     'es': {
       'tagline': 'Habla con libertad, aprende de forma natural',
@@ -491,7 +507,11 @@ class IntroWelcomePageCopy {
       'headlineAfter': ' se convierte\nen idioma.',
       'duoInvite': 'Invitación Duo',
       'loginOrJoin': 'Iniciar sesión o unirse',
-      'swipeContinue': 'Desliza para continuar'
+      'swipeContinue': 'Desliza para continuar',
+      'studyTrial': 'Prueba la sala de estudio',
+      'studyTrialUsed': 'Este teléfono ya usó la prueba.',
+      'studyTrialUnavailable': 'La prueba aún no está lista. Inténtalo más tarde.',
+      'studyTrialFailed': 'No se pudo iniciar la prueba. Inténtalo de nuevo.'
     },
     'fr': {
       'tagline': 'Parlez librement, apprenez naturellement',
@@ -500,7 +520,11 @@ class IntroWelcomePageCopy {
       'headlineAfter': ' devient\nlangue.',
       'duoInvite': 'Invitation Duo',
       'loginOrJoin': 'Se connecter ou s’inscrire',
-      'swipeContinue': 'Balayez pour continuer'
+      'swipeContinue': 'Balayez pour continuer',
+      'studyTrial': 'Essayer la salle d’étude',
+      'studyTrialUsed': 'Ce téléphone a déjà utilisé l’essai.',
+      'studyTrialUnavailable': 'L’essai n’est pas encore prêt. Réessayez plus tard.',
+      'studyTrialFailed': 'Impossible de lancer l’essai. Réessayez.'
     },
     'de': {
       'tagline': 'Sprich frei, lerne ganz natürlich',
@@ -509,7 +533,11 @@ class IntroWelcomePageCopy {
       'headlineAfter': ' wird\nSprache.',
       'duoInvite': 'Duo-Einladung',
       'loginOrJoin': 'Anmelden oder registrieren',
-      'swipeContinue': 'Wischen zum Fortfahren'
+      'swipeContinue': 'Wischen zum Fortfahren',
+      'studyTrial': 'Lernraum testen',
+      'studyTrialUsed': 'Dieses Telefon hat den Test bereits genutzt.',
+      'studyTrialUnavailable': 'Der Test ist noch nicht bereit. Bitte später erneut versuchen.',
+      'studyTrialFailed': 'Der Test konnte nicht gestartet werden. Bitte erneut versuchen.'
     },
     'hi': {
       'tagline': 'बेझिझक बोलें, स्वाभाविक रूप से सीखें',
@@ -518,7 +546,11 @@ class IntroWelcomePageCopy {
       'headlineAfter': ' भाषा बनती है।',
       'duoInvite': 'Duo आमंत्रण',
       'loginOrJoin': 'लॉग इन या जुड़ें',
-      'swipeContinue': 'जारी रखने के लिए स्वाइप करें'
+      'swipeContinue': 'जारी रखने के लिए स्वाइप करें',
+      'studyTrial': 'स्टडी रूम आज़माएँ',
+      'studyTrialUsed': 'इस फ़ोन पर ट्रायल पहले ही उपयोग हो चुका है।',
+      'studyTrialUnavailable': 'ट्रायल अभी तैयार नहीं है। बाद में फिर कोशिश करें।',
+      'studyTrialFailed': 'ट्रायल शुरू नहीं हो सका। फिर से कोशिश करें।'
     },
     'ru': {
       'tagline': 'Говорите свободно, учитесь естественно',
@@ -527,7 +559,11 @@ class IntroWelcomePageCopy {
       'headlineAfter': ' становится\nязыком.',
       'duoInvite': 'Приглашение Duo',
       'loginOrJoin': 'Войти или зарегистрироваться',
-      'swipeContinue': 'Смахните, чтобы продолжить'
+      'swipeContinue': 'Смахните, чтобы продолжить',
+      'studyTrial': 'Попробовать учебную комнату',
+      'studyTrialUsed': 'На этом телефоне пробный доступ уже использован.',
+      'studyTrialUnavailable': 'Пробный доступ ещё не готов. Попробуйте позже.',
+      'studyTrialFailed': 'Не удалось начать пробный доступ. Попробуйте снова.'
     },
     'pt': {
       'tagline': 'Fale livremente, aprenda naturalmente',
@@ -536,7 +572,11 @@ class IntroWelcomePageCopy {
       'headlineAfter': ' torna-se\nlinguagem.',
       'duoInvite': 'Convite Duo',
       'loginOrJoin': 'Entrar ou cadastrar-se',
-      'swipeContinue': 'Deslize para continuar'
+      'swipeContinue': 'Deslize para continuar',
+      'studyTrial': 'Experimente a sala de estudo',
+      'studyTrialUsed': 'Este telefone já usou o teste.',
+      'studyTrialUnavailable': 'O teste ainda não está pronto. Tente mais tarde.',
+      'studyTrialFailed': 'Não foi possível iniciar o teste. Tente novamente.'
     },
     'it': {
       'tagline': 'Parla liberamente, impara in modo naturale',
@@ -545,7 +585,11 @@ class IntroWelcomePageCopy {
       'headlineAfter': ' diventa\nlinguaggio.',
       'duoInvite': 'Invito Duo',
       'loginOrJoin': 'Accedi o iscriviti',
-      'swipeContinue': 'Scorri per continuare'
+      'swipeContinue': 'Scorri per continuare',
+      'studyTrial': 'Prova la sala studio',
+      'studyTrialUsed': 'Questo telefono ha già usato la prova.',
+      'studyTrialUnavailable': 'La prova non è ancora pronta. Riprova più tardi.',
+      'studyTrialFailed': 'Impossibile avviare la prova. Riprova.'
     },
     'nl': {
       'tagline': 'Spreek vrijuit, leer vanzelf',
@@ -554,7 +598,11 @@ class IntroWelcomePageCopy {
       'headlineAfter': ' wordt\ntaal.',
       'duoInvite': 'Duo-uitnodiging',
       'loginOrJoin': 'Inloggen of aanmelden',
-      'swipeContinue': 'Veeg om door te gaan'
+      'swipeContinue': 'Veeg om door te gaan',
+      'studyTrial': 'Probeer de studieruimte',
+      'studyTrialUsed': 'Deze telefoon heeft de proef al gebruikt.',
+      'studyTrialUnavailable': 'De proef is nog niet klaar. Probeer het later opnieuw.',
+      'studyTrialFailed': 'De proef kon niet starten. Probeer het opnieuw.'
     },
   };
 }

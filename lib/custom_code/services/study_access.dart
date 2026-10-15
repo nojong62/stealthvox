@@ -118,12 +118,21 @@ const StudyAccess _kDuoGuest = StudyAccess._(false, StudyBlockReason.duoGuest);
 /// 지금 차감을 **하지 않기로 되어 있는** 상태인가.
 ///
 /// 과금 티커의 차감 조건과 이 파일의 버튼 조건이 같은 자리를 보게 하려고
-/// 따로 뽑았다. 의도된 무료는 하나뿐이다.
+/// 따로 뽑았다. 의도된 무료는 둘이다.
 ///   · Duo 게스트 — 회원이든 아니든 초대한 호스트만 부담한다
+///   · 공부방 체험 5분 — 인트로 버튼으로 들어온 체험 화면이 살아 있는 동안
+///     ([StudyTrialSession.active]). AI 자격은 서버가 5분으로 묶는다.
 bool isDuoBillingSuppressed({
   required bool isDuoGuest,
+  bool isStudyTrial = false,
 }) =>
-    isDuoGuest;
+    isDuoGuest || isStudyTrial;
+
+/// 🎟️ 공부방 체험 화면이 지금 떠 있는가. 체험 화면만 켜고 끈다.
+class StudyTrialSession {
+  StudyTrialSession._();
+  static bool active = false;
+}
 
 /// 상태 셋으로 권한을 정한다. **순서가 정책이다.**
 ///
@@ -139,7 +148,10 @@ StudyAccess resolveStudyAccess({
   required bool isDuoGuest,
   required bool isSignedInMember,
   bool hasDuoGuestStudyPreview = false,
+  bool hasStudyTrial = false,
 }) {
+  // ⓪ 공부방 체험 — 인트로 버튼으로 받은 사본 하나. 그 화면이 넘겨줄 때만.
+  if (hasStudyTrial) return _kAllowed;
   if (isDuoGuest && hasDuoGuestStudyPreview) return _kAllowed;
   if (isDuoGuest) return _kDuoGuest;
   if (!isSignedInMember) return _kNotSignedIn;
@@ -147,11 +159,15 @@ StudyAccess resolveStudyAccess({
 }
 
 /// 지금 이 앱의 상태로 판정한다. 화면은 이것만 부른다.
-StudyAccess currentStudyAccess({bool hasDuoGuestStudyPreview = false}) {
+StudyAccess currentStudyAccess({
+  bool hasDuoGuestStudyPreview = false,
+  bool hasStudyTrial = false,
+}) {
   final user = FirebaseAuth.instance.currentUser;
   return resolveStudyAccess(
     isDuoGuest: FFAppState().isGuestSession,
     isSignedInMember: user != null && !user.isAnonymous,
     hasDuoGuestStudyPreview: hasDuoGuestStudyPreview,
+    hasStudyTrial: hasStudyTrial,
   );
 }

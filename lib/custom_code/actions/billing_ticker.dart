@@ -174,6 +174,7 @@ class BillingTicker with WidgetsBindingObserver {
   /// 호출이 된다. 두 화면이 같은 자리를 보게 하는 것이 요점이다.
   bool get _billingSuppressed => isDuoBillingSuppressed(
         isDuoGuest: FFAppState().isGuestSession,
+        isStudyTrial: StudyTrialSession.active,
       );
 
   /// 잔여시간이 0으로 **확정된** 유료 회원인가.

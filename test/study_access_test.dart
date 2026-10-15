@@ -217,4 +217,31 @@ void main() {
       expect(guestPreview().canUsePaidStudy, isTrue);
     });
   });
+
+  group('🎟️ 공부방 체험', () {
+    test('체험 화면이 넘겨주면 익명이어도 공부 기능이 열린다', () {
+      final access = resolveStudyAccess(
+          isDuoGuest: false, isSignedInMember: false, hasStudyTrial: true);
+      expect(access.canUsePaidStudy, isTrue);
+    });
+
+    test('Duo 게스트 딱지가 남아 있어도 체험은 열린다', () {
+      final access = resolveStudyAccess(
+          isDuoGuest: true, isSignedInMember: false, hasStudyTrial: true);
+      expect(access.canUsePaidStudy, isTrue);
+    });
+
+    test('체험 화면 밖의 익명은 그대로 잠긴다', () {
+      expect(
+          resolveStudyAccess(isDuoGuest: false, isSignedInMember: false)
+              .canUsePaidStudy,
+          isFalse);
+    });
+
+    test('버튼이 열리는 체험 구간은 차감도 멈춘다', () {
+      expect(isDuoBillingSuppressed(isDuoGuest: false, isStudyTrial: true),
+          isTrue);
+      expect(isDuoBillingSuppressed(isDuoGuest: false), isFalse);
+    });
+  });
 }
