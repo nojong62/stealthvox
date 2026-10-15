@@ -439,6 +439,48 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   final Map<String, Future<bool>> _targetTranslationInFlight =
       <String, Future<bool>>{};
 
+  /// 배울글 요청은 한 번에 이만큼만 나간다. 확정 직후 빈 줄이 100개면
+  /// 100개가 한꺼번에 나가 429·타임아웃으로 줄줄이 실패했다. 나머지는 줄을
+  /// 서고, 화면에는 그대로 "번역 중"으로 보인다.
+  static const int _kTargetConcurrency = 4;
+  int _targetSlotsBusy = 0;
+  final List<Completer<void>> _targetSlotWaiters = <Completer<void>>[];
+
+  Future<bool> _runInTargetSlot(Future<bool> Function() task) async {
+    if (_targetSlotsBusy < _kTargetConcurrency) {
+      _targetSlotsBusy++;
+    } else {
+      final waiter = Completer<void>();
+      _targetSlotWaiters.add(waiter);
+      await waiter.future; // 자리는 내놓는 쪽이 넘겨준다
+    }
+    try {
+      if (!mounted) return false; // 줄 서 있는 사이 화면을 떠났다
+      return await task();
+    } finally {
+      if (_targetSlotWaiters.isNotEmpty) {
+        _targetSlotWaiters.removeAt(0).complete();
+      } else {
+        _targetSlotsBusy--;
+      }
+    }
+  }
+
+  /// 요청을 보냈다가 실패한 종류. 이 줄은 **자동으로 다시 보내지 않는다.**
+  ///
+  /// `_scheduleMissingTargetGeneration`은 빌드마다 불린다. 실패 → setState →
+  /// 빌드 → 다시 요청이 그대로 고리가 되어, 오프라인이면 프레임마다 줄 수만큼
+  /// 요청이 나갔다. 다시 시도는 배지의 버튼으로만 한다.
+  /// `no_key`·`locked`는 요청 전에 찍힌 것이라 풀리면 저절로 다시 돈다.
+  static const Set<String> _kRequestFailureKinds = <String>{
+    'auth',
+    'quota',
+    'server',
+    'http',
+    'network',
+    'empty',
+  };
+
   /// 타겟 문장을 끝내 못 만든 줄. docId → 실패 종류(`_targetFailureLabel` 참고).
   ///
   /// 예전에는 실패가 아무 데도 남지 않았다. 화면에서는 원문만 있는 줄이 정상인
@@ -1431,6 +1473,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     for (final doc in docs) {
       final data = doc.data() as Map<String, dynamic>?;
       if (data == null) continue;
+      if (_kRequestFailureKinds.contains(_targetFailures[doc.id])) continue;
       if (!_historyTargetNeedsWork(doc.id, data)) continue;
       unawaited(_generateAndCacheHistoryTarget(
         doc.reference,
@@ -1605,9 +1648,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }) {
     final existing = _targetTranslationInFlight[messageRef.id];
     if (existing != null) return existing;
-    final future = _performHistoryTargetGeneration(
+    final future = _runInTargetSlot(() => _performHistoryTargetGeneration(
         messageRef, originalText, sourceLanguage,
-        renderToNative: renderToNative);
+        renderToNative: renderToNative));
     _targetTranslationInFlight[messageRef.id] = future;
     // 진행 중 표시("번역 중")를 띄우고 지우기 위한 rebuild. 이 맵은 원래
     // 중복 요청 방지용이었고 화면에는 전혀 드러나지 않았다.
