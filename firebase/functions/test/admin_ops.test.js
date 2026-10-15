@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   addNote,
+  adjustTime,
   deleteNote,
   requireAdmin,
   requireRequestId,
@@ -27,6 +28,10 @@ class FakeDb {
       set: (ref, value, options) => {
         const base = options && options.merge ? staged.get(ref.path) || {} : {};
         staged.set(ref.path, {...base, ...value});
+      },
+      update: (ref, value) => {
+        if (!staged.has(ref.path)) throw new Error("update on missing doc");
+        staged.set(ref.path, {...staged.get(ref.path), ...value});
       },
     });
     this.docs = staged;
@@ -139,4 +144,58 @@ test("setTestAccount creates the allowlist doc when it does not exist", async ()
   await assert.rejects(
     setTestAccount({...base, db, uid: "user-1", isTest: "yes", requestId: "req-00004"}),
     {code: "invalid-argument"});
+});
+
+test("adjustTime grants time and writes the adjustment and audit rows once", async () => {
+  const db = new FakeDb({"users/user-1": {remainingTime: 600, name: "kept"}});
+  const input = {...base, db, uid: "user-1", deltaSeconds: 3600, reason: " 보상 ", requestId: "req-00010"};
+  assert.deepEqual(await adjustTime(input),
+    {duplicate: false, beforeSeconds: 600, afterSeconds: 4200, appliedSeconds: 3600});
+  assert.deepEqual(await adjustTime(input),
+    {duplicate: true, beforeSeconds: 600, afterSeconds: 4200, appliedSeconds: 3600});
+
+  assert.deepEqual(db.get("users/user-1"), {remainingTime: 4200, name: "kept"});
+  assert.deepEqual(db.get("users/user-1/admin_adjustments/req-00010"), {
+    created_at: "server-time",
+    requested_seconds: 3600,
+    applied_seconds: 3600,
+    before_seconds: 600,
+    after_seconds: 4200,
+    reason: "보상",
+    admin_uid: "admin-1",
+  });
+  assert.equal(db.get("admin_audit/adjust_time_req-00010").reason, "보상");
+  assert.equal(db.paths("users/user-1/purchases").length, 0);
+  assert.equal(db.paths("real_members/").length, 0);
+});
+
+test("adjustTime revoke stops at zero and records what was actually removed", async () => {
+  const db = new FakeDb({"users/user-1": {remainingTime: 100}});
+  const result = await adjustTime({
+    ...base, db, uid: "user-1", deltaSeconds: -1800, reason: "오지급 회수", requestId: "req-00011",
+  });
+  assert.deepEqual(result, {duplicate: false, beforeSeconds: 100, afterSeconds: 0, appliedSeconds: -100});
+  assert.equal(db.get("users/user-1").remainingTime, 0);
+});
+
+test("adjustTime treats a missing remainingTime as zero", async () => {
+  const db = new FakeDb({"users/user-1": {}});
+  const result = await adjustTime({
+    ...base, db, uid: "user-1", deltaSeconds: 60, reason: "테스트", requestId: "req-00012",
+  });
+  assert.equal(result.afterSeconds, 60);
+});
+
+test("adjustTime rejects bad input and missing users without writing", async () => {
+  const db = new FakeDb({"users/user-1": {remainingTime: 10}});
+  const ok = {...base, db, uid: "user-1", deltaSeconds: 60, reason: "사유", requestId: "req-00013"};
+  for (const deltaSeconds of [0, 1.5, "60", 360001, -360001, null]) {
+    await assert.rejects(adjustTime({...ok, deltaSeconds}), {code: "invalid-argument"});
+  }
+  for (const reason of ["", "  ", "x".repeat(201), undefined]) {
+    await assert.rejects(adjustTime({...ok, reason}), {code: "invalid-argument"});
+  }
+  await assert.rejects(adjustTime({...ok, uid: "nobody-1"}), {code: "not-found"});
+  assert.deepEqual([...db.docs.keys()], ["users/user-1"]);
+  assert.equal(db.get("users/user-1").remainingTime, 10);
 });

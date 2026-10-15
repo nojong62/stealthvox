@@ -94,6 +94,7 @@ const adminOps = require("./admin_ops").createAdminOps(admin);
 exports.adminAddNote = adminOps.adminAddNote;
 exports.adminDeleteNote = adminOps.adminDeleteNote;
 exports.adminSetTestAccount = adminOps.adminSetTestAccount;
+exports.adminAdjustTime = adminOps.adminAdjustTime;
 
 
 async function verifyGoogleOAuthIdToken(idToken) {

@@ -13,6 +13,8 @@ const {SANDBOX_ALLOWLIST_PATH} = require("./revenuecat_purchase");
 const REGION = "asia-northeast3";
 const NOTE_MAX_LENGTH = 2000;
 const LABEL_MAX_LENGTH = 60;
+const REASON_MAX_LENGTH = 200;
+const MAX_ADJUST_SECONDS = 100 * 60 * 60;
 
 function requireAdmin(request) {
   const auth = request && request.auth;
@@ -133,6 +135,59 @@ async function setTestAccount({db, adminUid, uid, isTest, label, requestId, now}
   });
 }
 
+// 이용 시간 지급(+)·회수(-). 0 밑으로는 내려가지 않고, 실제로 반영된 차이를 남긴다.
+// purchases와 real_members의 구매 합계는 건드리지 않는다 — 그쪽은 실제 결제 장부다.
+async function adjustTime({db, adminUid, uid, deltaSeconds, reason, requestId, now}) {
+  if (!Number.isInteger(deltaSeconds) || deltaSeconds === 0 ||
+      Math.abs(deltaSeconds) > MAX_ADJUST_SECONDS) {
+    throw new HttpsError("invalid-argument", "deltaSeconds must be a non-zero integer within 100 hours.");
+  }
+  const why = typeof reason === "string" ? reason.trim() : "";
+  if (!why || why.length > REASON_MAX_LENGTH) {
+    throw new HttpsError("invalid-argument", "reason is required (max 200 characters).");
+  }
+  const userRef = db.doc(`users/${uid}`);
+  const adjustRef = db.doc(`users/${uid}/admin_adjustments/${requestId}`);
+  const logRef = auditRef(db, "adjust_time", requestId);
+
+  return db.runTransaction(async (tx) => {
+    const [adjustSnap, userSnap] = await Promise.all([tx.get(adjustRef), tx.get(userRef)]);
+    if (adjustSnap.exists) {
+      const prev = adjustSnap.data() || {};
+      return {
+        duplicate: true,
+        beforeSeconds: prev.before_seconds,
+        afterSeconds: prev.after_seconds,
+        appliedSeconds: prev.applied_seconds,
+      };
+    }
+    if (!userSnap.exists) throw new HttpsError("not-found", "User document not found.");
+
+    const current = userSnap.data().remainingTime;
+    const before = typeof current === "number" && Number.isFinite(current) ? current : 0;
+    const after = Math.max(0, before + deltaSeconds);
+    const applied = after - before;
+
+    tx.update(userRef, {remainingTime: after});
+    tx.set(adjustRef, {
+      created_at: now,
+      requested_seconds: deltaSeconds,
+      applied_seconds: applied,
+      before_seconds: before,
+      after_seconds: after,
+      reason: why,
+      admin_uid: adminUid,
+    });
+    tx.set(logRef, auditEntry({
+      action: "adjust_time", targetUid: uid,
+      before: {remainingTime: before},
+      after: {remainingTime: after, requested: deltaSeconds, applied},
+      reason: why, adminUid, now,
+    }));
+    return {duplicate: false, beforeSeconds: before, afterSeconds: after, appliedSeconds: applied};
+  });
+}
+
 function createAdminOps(admin) {
   const db = () => admin.firestore();
   const now = () => admin.firestore.FieldValue.serverTimestamp();
@@ -169,11 +224,23 @@ function createAdminOps(admin) {
         requestId: requireRequestId(data.requestId),
       });
     }),
+    adminAdjustTime: onCall(options, async (request) => {
+      const adminUid = requireAdmin(request);
+      const data = request.data || {};
+      return adjustTime({
+        db: db(), adminUid, now: now(),
+        uid: requireUid(data.uid),
+        deltaSeconds: data.deltaSeconds,
+        reason: data.reason,
+        requestId: requireRequestId(data.requestId),
+      });
+    }),
   };
 }
 
 module.exports = {
   addNote,
+  adjustTime,
   createAdminOps,
   deleteNote,
   requireAdmin,
