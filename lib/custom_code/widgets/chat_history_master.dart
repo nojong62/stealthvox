@@ -5338,7 +5338,9 @@ RULES — follow exactly:
                         // 📖 만들어 둔 글이 있으면 누르기 전에 읽어 볼 수 있다.
                         preview: _mySpeech,
                         previewScrollable: true,
-                        emptyHint: locked ? access.gateLabel : '',
+                        emptyHint: locked
+                            ? access.gateLabel
+                            : _surfaceCopy['tapToCreate'],
                         error: _mySpeechError,
                         locked: locked,
                         isLoading: _isBuildingMySpeech,
@@ -5472,6 +5474,16 @@ RULES — follow exactly:
                       ),
                     ),
                   ),
+                ),
+                const SizedBox(height: 10),
+                // 다 읽고 누르면 연습으로 간다는 표시.
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Text('▶ ${_surfaceCopy['start']}',
+                      style: TextStyle(
+                          color: color,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold)),
                 ),
               ] else if (body.isNotEmpty) ...[
                 const SizedBox(height: 10),
@@ -8145,7 +8157,12 @@ RULES — follow exactly:
   Future<void> _openMySpeechStudy() async {
     if (!_guardPaidStudy()) return;
     if (_isBuildingMySpeech || _isBuildingNativeEnglish) return;
-    if (_mySpeech.trim().isEmpty && !await _ensureMySpeech()) return;
+    // 📖 처음 만든 글은 이 자리에서 먼저 보여 준다. 다 읽고 한 번 더 누르면
+    //   연습으로 간다(실장님 지시, 2026-10-15).
+    if (_mySpeech.trim().isEmpty) {
+      await _ensureMySpeech();
+      return;
+    }
     if (!mounted) return;
     _openSpeechStage(SentenceVariant.mySpeech);
   }
