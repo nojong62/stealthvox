@@ -19,7 +19,7 @@ import 'package:flutter/material.dart';
 import '/custom_code/services/study_access.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'chat_history_master.dart';
-import 'trial/trial_study_timer_overlay.dart';
+import 'study_timer_overlay.dart';
 
 class DuoGuestStudyPage extends StatelessWidget {
   const DuoGuestStudyPage({super.key, required this.historyRef});
@@ -52,7 +52,7 @@ class DuoGuestStudyPage extends StatelessWidget {
               allowDuoGuestStudyPreview: limitedGuestStudy,
             ),
             if (limitedGuestStudy)
-              TrialStudyTimerOverlay(
+              StudyTimerOverlay(
                 durationSeconds: kDuoAnonymousGuestStudySeconds,
                 onTimeUp: () {
                   if (context.mounted) context.goNamed('Intro');

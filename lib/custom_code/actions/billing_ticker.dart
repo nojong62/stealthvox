@@ -18,7 +18,6 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '/custom_code/widgets/trial/trial_flow_state.dart';
 import '/custom_code/services/study_access.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 
@@ -168,13 +167,12 @@ class BillingTicker with WidgetsBindingObserver {
       FFAppState().remainingTimeLoaded &&
       !FFAppState().hasConfirmedZeroTime;
 
-  /// 지금이 **의도된 무료 구간**인가(맛보기·Duo 게스트).
+  /// 지금이 **의도된 무료 구간**인가(Duo 게스트).
   ///
   /// 식은 `services/study_access.dart`에 한 벌만 둔다. 공부방 버튼이 열리는
   /// 조건과 차감이 도는 조건이 갈리면, 버튼만 열린 구간이 통째로 무료 API
   /// 호출이 된다. 두 화면이 같은 자리를 보게 하는 것이 요점이다.
   bool get _billingSuppressed => isDuoBillingSuppressed(
-        isTrial: TrialFlowState.instance.isTrial,
         isDuoGuest: FFAppState().isGuestSession,
       );
 

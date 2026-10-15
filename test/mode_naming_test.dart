@@ -26,7 +26,6 @@ void main() {
       for (final path in <String>[
         'lib/custom_code/widgets/routine_mode_circle_talk.dart',
         'lib/custom_code/widgets/routine_mode_scenario_talk.dart',
-        'lib/custom_code/widgets/trial/trial_circle_talk_timer_mixin.dart',
       ]) {
         expect(File(path).existsSync(), isTrue, reason: path);
       }

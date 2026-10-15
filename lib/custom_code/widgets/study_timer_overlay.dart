@@ -1,10 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '/flutter_flow/flutter_flow_util.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 
-class TrialStudyTimerOverlay extends StatefulWidget {
-  const TrialStudyTimerOverlay({
+class StudyTimerOverlay extends StatefulWidget {
+  const StudyTimerOverlay({
     super.key,
     this.durationSeconds = 300,
     required this.onTimeUp,
@@ -14,10 +13,10 @@ class TrialStudyTimerOverlay extends StatefulWidget {
   final VoidCallback onTimeUp;
 
   @override
-  State<TrialStudyTimerOverlay> createState() => _TrialStudyTimerOverlayState();
+  State<StudyTimerOverlay> createState() => _StudyTimerOverlayState();
 }
 
-class _TrialStudyTimerOverlayState extends State<TrialStudyTimerOverlay> {
+class _StudyTimerOverlayState extends State<StudyTimerOverlay> {
   late int _remaining;
   Timer? _timer;
   bool _showEndMessage = false;

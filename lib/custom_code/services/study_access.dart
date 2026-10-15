@@ -26,7 +26,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '/flutter_flow/flutter_flow_util.dart';
-import '/custom_code/widgets/trial/trial_flow_state.dart';
 
 /// 초대 링크로 들어온 익명 비회원에게 허용하는 공부방 열람 시간.
 const int kDuoAnonymousGuestStudySeconds = 5 * 60;
@@ -119,34 +118,28 @@ const StudyAccess _kDuoGuest = StudyAccess._(false, StudyBlockReason.duoGuest);
 /// 지금 차감을 **하지 않기로 되어 있는** 상태인가.
 ///
 /// 과금 티커의 차감 조건과 이 파일의 버튼 조건이 같은 자리를 보게 하려고
-/// 따로 뽑았다. 두 경우뿐이고 둘 다 의도된 무료다.
-///   · 맛보기 — Duo 10분과 이어지는 공부방 5분은 잔여시간과 무관하다
+/// 따로 뽑았다. 의도된 무료는 하나뿐이다.
 ///   · Duo 게스트 — 회원이든 아니든 초대한 호스트만 부담한다
 bool isDuoBillingSuppressed({
-  required bool isTrial,
   required bool isDuoGuest,
 }) =>
-    isTrial || isDuoGuest;
+    isDuoGuest;
 
 /// 상태 셋으로 권한을 정한다. **순서가 정책이다.**
 ///
-///   ① 맛보기 — 폰 한 대에 한 번 주는 무료 이용권이다. 익명이라고 막으면
-///      맛보기 자체가 성립하지 않는다.
-///   ② 초대 비회원의 5분 공부방 — 호스트가 만든 대화로 한 번 제공하는
+///   ① 초대 비회원의 5분 공부방 — 호스트가 만든 대화로 한 번 제공하는
 ///      가입 전 체험이다. 이 화면이 살아 있는 동안만 호출부가 명시적으로 연다.
-///   ③ Duo 게스트 — 회원이어도 막는다. 이 구간은 차감이 안 되므로, 버튼만
+///   ② Duo 게스트 — 회원이어도 막는다. 이 구간은 차감이 안 되므로, 버튼만
 ///      열어 두면 무료 API 호출이 된다.
-///   ④ 익명 — 잔여 시간도 구매 권한도 없다. 볼 수는 있고, 쓰지는 못한다.
+///   ③ 익명 — 잔여 시간도 구매 권한도 없다. 볼 수는 있고, 쓰지는 못한다.
 ///
 /// [isSignedInMember]는 "익명이 아닌 Firebase 사용자"다. 로그인 여부와
 /// Duo 게스트 여부는 **다른 축이다** — 넷(A·B·C·D)이 전부 성립한다.
 StudyAccess resolveStudyAccess({
-  required bool isTrial,
   required bool isDuoGuest,
   required bool isSignedInMember,
   bool hasDuoGuestStudyPreview = false,
 }) {
-  if (isTrial) return _kAllowed;
   if (isDuoGuest && hasDuoGuestStudyPreview) return _kAllowed;
   if (isDuoGuest) return _kDuoGuest;
   if (!isSignedInMember) return _kNotSignedIn;
@@ -157,7 +150,6 @@ StudyAccess resolveStudyAccess({
 StudyAccess currentStudyAccess({bool hasDuoGuestStudyPreview = false}) {
   final user = FirebaseAuth.instance.currentUser;
   return resolveStudyAccess(
-    isTrial: TrialFlowState.instance.isTrial,
     isDuoGuest: FFAppState().isGuestSession,
     isSignedInMember: user != null && !user.isAnonymous,
     hasDuoGuestStudyPreview: hasDuoGuestStudyPreview,

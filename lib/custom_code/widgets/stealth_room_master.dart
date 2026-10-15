@@ -39,7 +39,6 @@ import '/custom_code/services/openai_streaming_transcribe_session.dart';
 import '/custom_code/services/duo_board_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
-import 'trial/trial_flow_state.dart';
 import 'circle_talk_guide.dart';
 import 'scenario_talk_guide.dart';
 
@@ -148,17 +147,6 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     if ((widget.hostRoomId ?? '').isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() => _currentMode = 1);
-      });
-    }
-
-    // 트라이얼 Duo 직접 통화 진입 — 모드 메뉴와 방식 선택을 건너뛴다.
-    // 실제 10분은 이 화면 진입이 아니라 초대한 게스트가 방에 들어온 순간부터
-    // RoutineModeDuo에서 시작한다.
-    TrialFlowState.instance.restoreFromAppState();
-    if (TrialFlowState.instance.isTrialDuo) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        setState(() => _currentMode = 1);
       });
     }
   }

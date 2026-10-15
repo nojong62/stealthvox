@@ -79,9 +79,6 @@ import '/custom_code/services/openai_streaming_transcribe_session.dart';
 // 받는 대로 트는 구조라, mp3를 다 받고 재생하던 예전 경로보다 첫 소리가 빠르다.
 import '/custom_code/services/tts_adapter.dart';
 import 'duo_stage.dart';
-import 'trial/learning_prep_overlay.dart';
-import 'trial/trial_flow_state.dart';
-import 'trial/trial_study_page.dart';
 // 마이크 캡처는 Circle Talk과 **같은 구현 한 벌**을 쓴다. 복제하면 sample rate ·
 // 권한 · 종료 처리가 두 군데로 갈라진다.
 import 'routine_mode_circle_talk.dart' show PreparedAudioCapture;
@@ -694,14 +691,6 @@ Map<String, String> modePickerTextForSystemUi() =>
 
 const String kInterpreterPartnerTtsVoice = 'alloy';
 
-/// 맛보기 직접 통화 길이. 폰 한 대에 딱 한 번만 주어진다.
-///
-/// 호스트·게스트 타이머, `trialPreviewEndsAt`, 상단 남은 시간이 전부 이 값
-/// 하나를 본다. 2026-08-17에 시험용으로 60으로 내린 채 v100~151이 나갔다 —
-/// 화면은 "10분"인데 1분 만에 공부방으로 튕겼다. 시험할 때는 값을 바꾸지
-/// 말고 `--dart-define`을 쓰든가, 바꿨으면 같은 커밋에서 되돌릴 것.
-const int kDuoTrialCallSeconds = 600;
-
 /// 재생이 끝난 뒤 이만큼 안에 들어온 전사문만 에코로 의심한다.
 /// 스피커 소리가 마이크로 돌아오는 데 걸리는 시간은 길어야 한두 순간이다.
 /// 이 창을 넘어서면 근거 없이 막는 것이 되므로 그냥 통과시킨다.
@@ -1128,45 +1117,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// `_localMessages`로 저장 여부를 판단하면 히스토리가 통째로 지워진다.
   int _historyMessageCount = 0;
 
-  // ── 10분 Duo 맛보기 ────────────────────────────────────────────────────
-  Timer? _trialCallTimer;
-  int _trialCallRemaining = kDuoTrialCallSeconds;
-  bool _trialCallStarted = false;
-  bool _isTrialPreviewRoom = false;
-
-  bool get _isTrialHost => _amIHost && TrialFlowState.instance.isTrialDuo;
-  bool get _hasTrialCallLimit => _isTrialHost || _isTrialPreviewRoom;
-
-  void _startTrialCallIfNeeded() {
-    if (!_hasTrialCallLimit || _trialCallStarted || _isExiting) return;
-    _trialCallStarted = true;
-    _trialCallRemaining = kDuoTrialCallSeconds;
-
-    // 무료 초대권은 게스트가 실제 입장한 순간 소비된다. 타이머가 끝날 때까지
-    // 미루면 중간에 방을 나가거나 앱을 종료해 같은 1회권을 다시 쓸 수 있다.
-    final user = FirebaseAuth.instance.currentUser;
-    if (_isTrialHost || (user?.isAnonymous ?? false)) {
-      FFAppState().trialCompleted = true;
-      TrialFlowState.instance.saveToAppState();
-    }
-    _lgDuo('[TRIAL]', 'consumed_on_guest_join seconds=$kDuoTrialCallSeconds');
-
-    _trialCallTimer?.cancel();
-    _trialCallTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted || _isExiting) {
-        _trialCallTimer?.cancel();
-        return;
-      }
-      setState(() => _trialCallRemaining--);
-      if (_trialCallRemaining <= 0) {
-        _trialCallRemaining = 0;
-        _trialCallTimer?.cancel();
-        unawaited(_handleAutoSaveAndExit('trial_time_limit'));
-      }
-    });
-    if (mounted) setState(() {});
-  }
-
   // 🆕 [게스트 언어 오버레이] 초대 게스트(회원·비회원)가 입장 전 언어쌍 선택
   bool _showLangOverlay = false;
   String? _pendingJoinRoomId;
@@ -1277,7 +1227,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   bool _billingStarted = false;
   void _startDuoBilling() {
     // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금
-    if (!_amIHost || _isTrialHost) return;
+    if (!_amIHost) return;
     BillingTicker.instance.setSessionIdentifiers(
       sessionDocId: _myHistoryRef?.id,
       roomId: _duoSessionRef?.id ?? widget.roomId,
@@ -1337,7 +1287,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 게스트는 무료다. 초대한 호스트만 부담한다 — 유휴에서 돌아올 때도
   /// 게스트 쪽에서 과금이 켜지면 안 된다.
   @override
-  bool get isBillingEnabled => _amIHost && !_isTrialHost;
+  bool get isBillingEnabled => _amIHost;
 
   /// ⚠️ **기준은 "마이크가 열려 있는가"가 아니라 "실제로 말하고 있는가"다.**
   /// 만능 통역이 always-on이 되면서 마이크는 세션 내내 열려 있으므로, 열림을
@@ -1786,8 +1736,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   /// 마무리하면서 읽은 값. 화면 이동 쪽이 이어서 쓴다 — 마무리가 끝난 뒤에는
   /// `FFAppState`가 달라져 있을 수 있어, 그때 다시 읽으면 다른 길로 간다.
-  bool _exitWasTrialHost = false;
-  bool _exitTrialWasConsumed = false;
   bool _exitWasInviteGuest = false;
   Timer? _guestBackgroundExitTimer;
   DateTime? _guestBackgroundedAt;
@@ -1868,15 +1816,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _invitePulse.repeat(reverse: true);
     }
     _lgDuo('[DUO-SESSION]', 'started role=$_myRole');
-
-    TrialFlowState.instance.restoreFromAppState();
-    if (_isTrialHost) {
-      _duoMode = kDuoModeDirect;
-      _isTrialPreviewRoom = true;
-      _myHistoryRef = TrialFlowState.instance.myHistoryRef;
-      _trialCallRemaining = kDuoTrialCallSeconds;
-      _lgDuo('[TRIAL]', 'host_ready history=${_myHistoryRef?.path}');
-    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if ((widget.hostRoomId ?? '').isNotEmpty) {
@@ -1980,7 +1919,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     WidgetsBinding.instance.removeObserver(this);
     _guestBackgroundExitTimer?.cancel();
     _guestBackgroundExitTimer = null;
-    _trialCallTimer?.cancel();
     _partnerJoinedSubscription?.cancel();
     _hostExitSubscription?.cancel();
     _utteranceSubscription?.cancel();
@@ -2009,16 +1947,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_isTrialHost && _trialCallStarted) {
-      if (state == AppLifecycleState.paused ||
-          state == AppLifecycleState.hidden ||
-          state == AppLifecycleState.detached) {
-        unawaited(_handleAutoSaveAndExit('trial_background'));
-      } else if (state == AppLifecycleState.resumed && _isExiting && mounted) {
-        context.goNamed('Intro');
-      }
-      return;
-    }
     if (!FFAppState().isGuestSession) return;
 
     if (state == AppLifecycleState.paused ||
@@ -6451,16 +6379,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //    에서는 선택 창을 띄우지 않는다.
     final bool isNewSession = _duoSessionRef == null;
     String chosenMode = _duoMode;
-    if (isNewSession && !_isTrialHost) {
+    if (isNewSession) {
       final String? picked = await _showHostModePicker();
       if (picked == null) return; // 사용자가 취소
       chosenMode = picked;
       if (mounted) setState(() => _duoMode = picked);
-    } else if (_isTrialHost) {
-      chosenMode = kDuoModeDirect;
-      if (mounted && _duoMode != chosenMode) {
-        setState(() => _duoMode = chosenMode);
-      }
     }
     try {
       // 1) 세션이 없으면 생성 — `mode`는 **이 순간에만** 쓰인다.
@@ -6482,7 +6405,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             ),
           if (chosenMode == kDuoModeInterpreter)
             kDuoHostSameOriginDirectV1Field: duoSameOriginDirectCapability(),
-          if (_isTrialHost) 'trialPreview': true,
           // 상대 화면의 언어쌍 표시용. 첫 메시지 전에도 알아야 하므로
           // 세션 문서로 주고받는다.
           'hostLang': _myNative(),
@@ -6749,7 +6671,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         _lgDuo('[MODE]', 'guest_sync $_duoMode → $sessionMode');
       }
       _duoMode = sessionMode;
-      _isTrialPreviewRoom = data['trialPreview'] == true;
 
       // Claim the guest seat atomically. A direct invite can be opened on
       // multiple phones at nearly the same time; only the first seat wins.
@@ -6787,14 +6708,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                 duoSameOriginDirectCapability(),
           'partnerJoinedAt': FieldValue.serverTimestamp(),
           'partnerLang': _myNative(),
-          if (_isTrialPreviewRoom)
-            'trialPreviewStartedAt': FieldValue.serverTimestamp(),
-          if (_isTrialPreviewRoom)
-            'trialPreviewEndsAt': Timestamp.fromDate(
-              DateTime.now().add(
-                const Duration(seconds: kDuoTrialCallSeconds),
-              ),
-            ),
         });
       });
       // 호스트 언어는 방 문서에 이미 있다(옛 방에는 없을 수 있다 — 그때는
@@ -6872,7 +6785,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //   게스트는 `_listenForPartnerJoined`를 걸지 않는다(호스트만 건다).
       //   입장에 성공한 이 시점이 곧 "상대(호스트)가 있다"는 확정이다.
       _maybeAutoStartDirectCall('guest_joined');
-      _startTrialCallIfNeeded();
       // 🔵 [INTERP-LIVE] 만능 통역도 여기서 자동으로 붙는다. 예전에는 소켓만
       //   미리 열고 마이크는 버튼을 기다렸다.
       _maybeAutoStartInterpreter('guest_joined');
@@ -7252,7 +7164,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         });
         // 🆕 [과금정책] 게스트 입장 확정 시 과금 시작 / 퇴장 시 정지
         if (partnerJoined) {
-          _startTrialCallIfNeeded();
           _startDuoBilling();
           if (!_activeCallNetworkProbed) {
             _activeCallNetworkProbed = true;
@@ -7286,13 +7197,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     });
   }
 
-  /// 방을 떠나는 유일한 통로. 10분 타이머 만료, 뒤로가기, 게스트 퇴장이
-  /// 모두 여기로 모인다.
-  ///
-  /// 🆕 [맛보기] 세 경로 중 어느 쪽으로 끝나든 **똑같이 공부방으로 잇는다.**
-  /// 예전에는 타이머가 만료된 경우에만 공부방으로 보내서, 10분을 다 채우지
-  /// 않고 먼저 끊은 사람은 방금 나눈 대화를 두고 Intro로 튕겼다. 맛보기는
-  /// 폰 한 대에 한 번뿐이라 그 길로 나가면 다시 볼 방법이 없었다.
   /// 🚪 [DUO-EXIT] **나가면서 반드시 끝내야 하는 일.** 화면 이동은 없다.
   ///
   /// 예전에는 이 일이 [_handleAutoSaveAndExit] 안에만 있었고, 그 함수는
@@ -7320,11 +7224,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   이 한 줄이 없으면 화면이 멈춘 것처럼 보여 유저가 계속 누르고,
     //   그 탭은 위의 `if (_isExiting) return`이 전부 삼킨다.
     if (mounted) setState(() {});
-    final bool isTrialHost = _isTrialHost;
-    final bool trialWasConsumed = FFAppState().trialCompleted;
-    _exitWasTrialHost = isTrialHost;
-    _exitTrialWasConsumed = trialWasConsumed;
-    _trialCallTimer?.cancel();
     final bool isInviteGuest = FFAppState().isGuestSession;
     _exitWasInviteGuest = isInviteGuest;
     final String? guestRoomId = _duoSessionRef?.id ??
@@ -7487,7 +7386,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (_myHistoryRef != null && !preservePublishedRoom) {
       // 두 방식 다 말풍선을 만들지 않는다. 실제로 저장한 메시지 수로만
       // 판단해야 히스토리가 통째로 지워지지 않는다.
-      if (_historyMessageCount == 0 && !(isTrialHost && trialWasConsumed)) {
+      if (_historyMessageCount == 0) {
         await _myHistoryRef!.delete();
       } else {
         await _myHistoryRef!.update({
@@ -7496,7 +7395,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           if (_historyMessageCount == 0) 'last_message': "대화 기록 저장",
           'last_message_time': FieldValue.serverTimestamp(),
           'last_active': FieldValue.serverTimestamp(),
-          if (isTrialHost) 'status': 'completed',
         });
         // 목록 미리보기를 요약으로 올려둔다. 기다리지 않는다 — 사용자는 이미
         // 목록으로 나가 있고, 요약이 도착하면 스트림이 카드를 갱신한다.
@@ -7528,42 +7426,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // Restore the member's own board post after an incoming call ends.
     await DuoBoardHostPresence.instance.resumePausedPostAfterIncomingInvite();
     if (!mounted) return;
-    final bool isTrialHost = _exitWasTrialHost;
-    final bool trialWasConsumed = _exitTrialWasConsumed;
     final bool isInviteGuest = _exitWasInviteGuest;
-
-    if (isTrialHost) {
-      final historyRef = _myHistoryRef ?? TrialFlowState.instance.myHistoryRef;
-      if (!trialWasConsumed) {
-        TrialFlowState.instance.reset();
-        context.goNamed('Intro');
-        return;
-      }
-      // 남길 대화가 있어야 공부방이 의미가 있다. 게스트가 들어오기만 하고
-      // 한 마디도 오가지 않았으면 열어 봐야 빈 방이라 Intro로 보낸다.
-      if (historyRef == null || _historyMessageCount == 0) {
-        TrialFlowState.instance.advanceTo(4);
-        context.goNamed('Intro');
-        return;
-      }
-
-      TrialFlowState.instance.myHistoryRef = historyRef;
-      TrialFlowState.instance.advanceTo(2);
-      await LearningPrepOverlay.show(
-        context,
-        historyRef: historyRef,
-        onReady: (ref) {
-          if (!mounted) return;
-          TrialFlowState.instance.myHistoryRef = ref;
-          TrialFlowState.instance.advanceTo(3);
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => TrialStudyPage(historyRef: ref)),
-          );
-        },
-      );
-      return;
-    }
 
     if (mounted) {
       if (isInviteGuest) {
@@ -8482,28 +8345,25 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           // 글자 크기·원어 보기 버튼은 없다. 두 방식 다 화면에 글자를 띄우지
           // 않으므로 조절할 대상 자체가 없다.
           const SizedBox(width: 4),
-          if (_hasTrialCallLimit)
-            _buildTrialCountdownChip()
-          else
-            // ⏳ [SESSION] 10분 세션이 끝나 가는 것을 여기서도 알린다.
-            //
-            //   예전에는 이 배지가 보유시간만 보여 줬다. 세 대화 모드 중
-            //   Duo만 세션 잔여 초를 구독하지 않아, 통화하다 10분이 끝나도
-            //   미리 알 방법이 없었다. Circle Talk·Scenario Talk가 쓰는 그
-            //   위젯을 그대로 쓴다 — 같은 신호가 모드마다 다르면 안 된다.
-            //     · 30초 전 — 시간 칸이 남은 초를 센다
-            //     · 10초 전 — 점이 주황으로 깜빡인다
-            Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB),
-                    borderRadius: BorderRadius.circular(20)),
-                child: Row(children: [
-                  BillingSessionDot(onTapWhenPaused: resetBillingIdle),
-                  const SizedBox(width: 6),
-                  const BillingTimeLabel(),
-                ])),
+          // ⏳ [SESSION] 10분 세션이 끝나 가는 것을 여기서도 알린다.
+          //
+          //   예전에는 이 배지가 보유시간만 보여 줬다. 세 대화 모드 중
+          //   Duo만 세션 잔여 초를 구독하지 않아, 통화하다 10분이 끝나도
+          //   미리 알 방법이 없었다. Circle Talk·Scenario Talk가 쓰는 그
+          //   위젯을 그대로 쓴다 — 같은 신호가 모드마다 다르면 안 된다.
+          //     · 30초 전 — 시간 칸이 남은 초를 센다
+          //     · 10초 전 — 점이 주황으로 깜빡인다
+          Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                  color: const Color(0xFF2563EB),
+                  borderRadius: BorderRadius.circular(20)),
+              child: Row(children: [
+                BillingSessionDot(onTapWhenPaused: resetBillingIdle),
+                const SizedBox(width: 6),
+                const BillingTimeLabel(),
+              ])),
         ],
       ),
     );
@@ -8538,44 +8398,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildTrialCountdownChip() {
-    final int remaining = _trialCallRemaining.clamp(0, kDuoTrialCallSeconds);
-    final String value =
-        '${(remaining ~/ 60).toString().padLeft(2, '0')}:${(remaining % 60).toString().padLeft(2, '0')}';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: remaining <= 10 && _trialCallStarted
-            ? const Color(0xFFE5484D)
-            : const Color(0xFF2563EB),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            _trialCallStarted
-                ? Icons.call_rounded
-                : Icons.hourglass_top_rounded,
-            size: 15,
-            color: Colors.white,
-          ),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              _trialCallStarted ? value : _surfaceCopy['guestWaiting'],
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

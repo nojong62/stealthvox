@@ -1,7 +1,6 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
-import 'package:firebase_app_installations/firebase_app_installations.dart';
 
 /// Server-owned AI credentials.
 ///
@@ -50,18 +49,6 @@ class SecureAiGateway {
   static String _cacheScope(String? duoRoomId) {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     return '$uid|${duoRoomId?.trim() ?? ''}';
-  }
-
-  static Future<void> claimTrialAccess() async {
-    final installationId = await FirebaseInstallations.instance.getId();
-    final result = await _functions
-        .httpsCallable('claimAiTrial')
-        .call(<String, dynamic>{'installationId': installationId});
-    final data = Map<String, dynamic>.from(result.data as Map);
-    if (data['granted'] != true) {
-      throw StateError('AI trial access was not granted.');
-    }
-    clearCachedTokens();
   }
 
   static Future<String> gatewayToken({

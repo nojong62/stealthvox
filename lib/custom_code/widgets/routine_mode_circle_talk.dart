@@ -78,10 +78,6 @@ import '/custom_code/services/circle_correction_intent.dart'
 import 'deepgram_confidence_probe.dart';
 import 'first_utterance_context_judge.dart';
 import 'origin_language_recheck_dialog.dart';
-import 'trial/trial_flow_state.dart';
-import 'trial/trial_circle_talk_timer_mixin.dart';
-import 'trial/learning_prep_overlay.dart';
-import 'trial/trial_study_page.dart';
 
 /// speech_stopped 뒤 최종 전사가 이 시간 안에 안 오면 턴을 놓아준다.
 /// 없으면 `_turnInFlight`가 켜진 채 굳어 10분 롤오버까지 막힌다.
@@ -306,7 +302,6 @@ class RoutineModeCircleTalk extends StatefulWidget {
 
 class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     with
-        TrialCircleTalkTimerMixin<RoutineModeCircleTalk>,
         SingleTickerProviderStateMixin,
         BillingIdleMixin<RoutineModeCircleTalk> {
   // ====================================================================
@@ -515,10 +510,6 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
       holdBillingIdle();
       return true;
     }
-    if (trialMode && isTrialTimeUp) {
-      unawaited(_handleTrialEnd());
-      return true;
-    }
     return false;
   }
 
@@ -526,10 +517,6 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   bool get isBillingBusy {
     return _ttsAdapter.isBusy || _aiTurnActive;
   }
-
-  /// 체험 중에는 차감 대상이 아니다. 유휴에서 돌아와도 과금을 켜지 않는다.
-  @override
-  bool get isBillingEnabled => !TrialFlowState.instance.isTrial;
 
   void _markConversationActivity() => resetBillingIdle();
 
@@ -1220,12 +1207,10 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
           _closeContinuationWindow(reason: 'ai_playback_started');
         }
         _markConversationActivity();
-        if (!TrialFlowState.instance.isTrial) {
-          BillingTicker.instance.resumeFromActivity(
-              request.speakerType == TtsSpeakerType.user
-                  ? 'circle_talk_user_tts_start'
-                  : 'circle_talk_ai_tts_start');
-        }
+        BillingTicker.instance.resumeFromActivity(
+            request.speakerType == TtsSpeakerType.user
+                ? 'circle_talk_user_tts_start'
+                : 'circle_talk_ai_tts_start');
         // ⏱️ [PERF] 유저/AI 첫 PCM 시점 — 이게 실제로 소리가 시작되는 순간이다.
         _logTurnPerf(request.speakerType == TtsSpeakerType.user
             ? 'USER_FIRST_AUDIO'
@@ -1240,12 +1225,10 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
         }
       },
       onPlaybackEnd: (request, ok) {
-        if (!TrialFlowState.instance.isTrial) {
-          BillingTicker.instance.resumeFromActivity(
-              request.speakerType == TtsSpeakerType.user
-                  ? 'circle_talk_user_tts_end'
-                  : 'circle_talk_ai_tts_end');
-        }
+        BillingTicker.instance.resumeFromActivity(
+            request.speakerType == TtsSpeakerType.user
+                ? 'circle_talk_user_tts_end'
+                : 'circle_talk_ai_tts_end');
       },
       // 🔊 [TTS-HIST] 정상 완료된 음원만 온다 (guide4 11장). 히스토리 캐시에
       //   넣어 히스토리 재생 때 TTS API 재호출이 없도록 한다.
@@ -1261,15 +1244,12 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     // 첫 PCM 재생이 겹쳐 첫 문장만 무음이 될 수 있다. 방 진입 즉시 미리 연다.
     unawaited(_ttsAdapter.preparePlayback());
 
-    TrialFlowState.instance.restoreFromAppState();
     _initPermissions();
     _fetchKeys();
     BillingTicker.instance.setSessionIdentifiers();
     BillingTicker.instance.setRate(BillingRate.full);
-    if (!TrialFlowState.instance.isTrial) {
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('circle_talk');
-    }
+    BillingTicker.instance.resume();
+    BillingTicker.instance.logMode('circle_talk');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) resetBillingIdle();
     });
@@ -1288,7 +1268,6 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     }
     BillingTicker.instance.appInForeground.removeListener(_onForegroundChanged);
     _costTracker.logSnapshot(reason: 'dispose');
-    disposeTrialTimer();
     _startupRetryTimer?.cancel();
     _rolloverNoticeTimer?.cancel();
     clearBillingIdle();
@@ -2282,10 +2261,8 @@ $userFixPolicy$finalLanguageRule''';
         },
         onTranscriptUpdate: (transcript) {
           _markConversationActivity();
-          if (!TrialFlowState.instance.isTrial) {
-            BillingTicker.instance
-                .resumeFromActivity('circle_talk_stt_partial');
-          }
+          BillingTicker.instance
+              .resumeFromActivity('circle_talk_stt_partial');
           if (!isCurrentGeneration()) {
             _log('🎤 [LISTEN-STALE]', 'onTranscriptUpdate ignored');
             return;
@@ -2304,9 +2281,7 @@ $userFixPolicy$finalLanguageRule''';
         onTurnResult: _onDeepgramTurnResult,
         onTurnEnded: (transcript, {bool speechFinal = false}) {
           _markConversationActivity();
-          if (!TrialFlowState.instance.isTrial) {
-            BillingTicker.instance.resumeFromActivity('circle_talk_stt_result');
-          }
+          BillingTicker.instance.resumeFromActivity('circle_talk_stt_result');
           if (!isCurrentGeneration()) {
             _log('🎤 [LISTEN-STALE]', 'onTurnEnded ignored');
             return;
@@ -2358,9 +2333,7 @@ $userFixPolicy$finalLanguageRule''';
         _voiceManager = null;
         return false;
       }
-      if (!TrialFlowState.instance.isTrial) {
-        BillingTicker.instance.resumeFromActivity('circle_talk_mic_start');
-      }
+      BillingTicker.instance.resumeFromActivity('circle_talk_mic_start');
       _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
       _reportListeningReady();
       return true;
@@ -2474,9 +2447,7 @@ $userFixPolicy$finalLanguageRule''';
       //   복구 창이 아예 안 열린다** — 그 재생이 세운 플래그가 남기 때문이다
       //   (2026-08-14 실기기 로그에서 확인: 1턴 CONT-WINDOW 없음).
       _aiPlaybackStarted = false;
-      if (!TrialFlowState.instance.isTrial) {
-        BillingTicker.instance.resumeFromActivity('circle_talk_mic_start');
-      }
+      BillingTicker.instance.resumeFromActivity('circle_talk_mic_start');
       _log('🎤 [LISTEN-05]',
           '스트리밍 전사 listening 시작 generation=$listenGeneration');
       _reportListeningReady();
@@ -2920,9 +2891,7 @@ $userFixPolicy$finalLanguageRule''';
         _updateBubbleText(_activeHostBubbleId, merged);
         _logTurnPerf('USER_KOREAN_FINAL_MERGED');
         _markConversationActivity();
-        if (!TrialFlowState.instance.isTrial) {
-          BillingTicker.instance.resumeFromActivity('circle_talk_stt_result');
-        }
+        BillingTicker.instance.resumeFromActivity('circle_talk_stt_result');
         _startAssistantTurn(merged, reason: reason);
         return;
       case ContinuationDecision.abandon:
@@ -3091,9 +3060,7 @@ $userFixPolicy$finalLanguageRule''';
     if (_isPipelineRunning) return;
 
     _markConversationActivity();
-    if (!TrialFlowState.instance.isTrial) {
-      BillingTicker.instance.resumeFromActivity('circle_talk_stt_partial');
-    }
+    BillingTicker.instance.resumeFromActivity('circle_talk_stt_partial');
 
     if (_streamingDeltaItemId != itemId) {
       _streamingDeltaItemId = itemId;
@@ -3217,9 +3184,7 @@ $userFixPolicy$finalLanguageRule''';
       _lastTurnPcm ??= _snapshotTurnPcm();
       _logTurnPerf('USER_KOREAN_FINAL');
       _markConversationActivity();
-      if (!TrialFlowState.instance.isTrial) {
-        BillingTicker.instance.resumeFromActivity('circle_talk_stt_result');
-      }
+      BillingTicker.instance.resumeFromActivity('circle_talk_stt_result');
 
       // 🔇 [NOISE-GATE] Deepgram 경로와 완전히 같은 게이트. 여기서 걸린 발화는
       //   말풍선·AI 응답·TTS·저장·턴 수 어디에도 닿지 않는다.
@@ -3324,9 +3289,7 @@ $userFixPolicy$finalLanguageRule''';
     if (_ensureUserTurnOpen()) {
       _logTurnPerf('USER_KOREAN_FINAL');
       _markConversationActivity();
-      if (!TrialFlowState.instance.isTrial) {
-        BillingTicker.instance.resumeFromActivity('circle_talk_stt_result');
-      }
+      BillingTicker.instance.resumeFromActivity('circle_talk_stt_result');
     }
     _updateBubbleText(_activeHostBubbleId, _pendingUserTranscript);
     _updatePendingUserPreview();
@@ -5546,48 +5509,6 @@ $userFixPolicy$finalLanguageRule''';
     }
   }
 
-  /// 뒤로가기 시: 빈 방 폭파 or last_message 업데이트 후 나가기
-  Future<void> _handleTrialEnd() async {
-    if (!trialMode) return;
-    trialMode = false;
-    disposeTrialTimer();
-    BillingTicker.instance.pause();
-    // Anyone 1분 완료 = 체험 완료 확정
-    // 이후 앱 재진입 시 Welcome이 아닌 Auth 화면 표시
-    FFAppState().trialCompleted = true;
-
-    final historyRef = _myHistoryRef ?? TrialFlowState.instance.myHistoryRef;
-    if (historyRef == null) {
-      TrialFlowState.instance.reset();
-      if (mounted) context.pushReplacementNamed('Store');
-      return;
-    }
-
-    TrialFlowState.instance.myHistoryRef = historyRef;
-    TrialFlowState.instance.advanceTo(2);
-
-    try {
-      await historyRef.update({
-        'status': 'completed',
-        'last_active': FieldValue.serverTimestamp(),
-      });
-    } catch (_) {}
-
-    if (!mounted) return;
-    await LearningPrepOverlay.show(
-      context,
-      historyRef: historyRef,
-      onReady: (ref) {
-        TrialFlowState.instance.myHistoryRef = ref;
-        TrialFlowState.instance.advanceTo(3);
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => TrialStudyPage(historyRef: ref)),
-        );
-      },
-    );
-  }
-
   /// 🔍 [ORIGIN-RESTORE] 원문 복원을 걸어 둔다.
   ///
   /// 대화방은 발화 하나를 그 자리에서 전사하고 넘어가므로, 그때는 앞뒤에 무슨
@@ -5729,7 +5650,6 @@ $userFixPolicy$finalLanguageRule''';
             child: Stack(children: [
               _buildChatList(),
               _buildIdleOverlay(),
-              if (trialMode) buildTrialCountdown(),
               Positioned(
                 left: 0,
                 right: 0,

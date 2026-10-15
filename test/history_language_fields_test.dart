@@ -28,7 +28,6 @@ const List<String> _writers = <String>[
   'lib/custom_code/widgets/routine_mode_scenario_talk.dart',
   'lib/custom_code/widgets/routine_mode_duo.dart',
   'lib/custom_code/widgets/lobby_master.dart',
-  'lib/custom_code/widgets/intro_master.dart',
   'lib/custom_code/services/duo_guest_handoff.dart',
   // 히스토리 화면이 방 문서의 짝을 다시 적는 자리, 키퍼에 저장 당시 짝을
   // 채워 두는 자리.

@@ -75,16 +75,6 @@ class FFAppState extends ChangeNotifier {
       _duoGuestClaim = prefs.getString('ff_duoGuestClaim') ?? _duoGuestClaim;
     });
     _safeInit(() {
-      _trialStep = prefs.getInt('ff_trialStep') ?? _trialStep;
-    });
-    _safeInit(() {
-      _trialHistoryPath =
-          prefs.getString('ff_trialHistoryPath') ?? _trialHistoryPath;
-    });
-    _safeInit(() {
-      _trialCompleted = prefs.getBool('ff_trialCompleted') ?? _trialCompleted;
-    });
-    _safeInit(() {
       _lastAuthProvider =
           prefs.getString('ff_lastAuthProvider') ?? _lastAuthProvider;
     });
@@ -281,27 +271,6 @@ class FFAppState extends ChangeNotifier {
   set duoGuestClaim(String value) {
     _duoGuestClaim = value;
     prefs.setString('ff_duoGuestClaim', value);
-  }
-
-  int _trialStep = 0;
-  int get trialStep => _trialStep;
-  set trialStep(int value) {
-    _trialStep = value;
-    prefs.setInt('ff_trialStep', value);
-  }
-
-  String _trialHistoryPath = '';
-  String get trialHistoryPath => _trialHistoryPath;
-  set trialHistoryPath(String value) {
-    _trialHistoryPath = value;
-    prefs.setString('ff_trialHistoryPath', value);
-  }
-
-  bool _trialCompleted = false;
-  bool get trialCompleted => _trialCompleted;
-  set trialCompleted(bool value) {
-    _trialCompleted = value;
-    prefs.setBool('ff_trialCompleted', value);
   }
 
   String _lastAuthProvider = '';

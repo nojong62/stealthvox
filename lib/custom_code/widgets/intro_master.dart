@@ -13,7 +13,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
 import 'dart:math' as math;
-import 'trial/trial_flow_state.dart';
 import 'auth_progress_view.dart';
 import 'duo_board_sheet.dart';
 import '/custom_code/services/duo_board_host_presence.dart';
@@ -21,12 +20,10 @@ import '/auth/social_auth_service.dart';
 import '/auth/account_discovery_service.dart';
 // 익명으로 초대받아 대화한 뒤 기존 계정으로 돌아온 사람의 Duo 기록 복구.
 import '/custom_code/services/duo_guest_handoff.dart';
-import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/duo_board_push_service.dart';
 import '/custom_code/services/duo_board_intro_notice.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/system_ui_language.dart';
-import '/custom_code/services/secure_ai_gateway.dart';
 
 enum IntroScreen { welcome, auth, accountDiscovery }
 
@@ -80,8 +77,7 @@ class _IntroMasterState extends State<IntroMaster>
   ];
   static const String _termsEnglishUrl =
       'https://docs.google.com/document/d/1vs2n7kF0GzlejNaZOa1ZnfKbuwuOzOCr7Q5ZvYqmbVs/edit';
-  // 해외 테스터용 Google 바로가기는 종료했다. 첫 화면의 기본 진입점은
-  // 다시 Duo 10분 맛보기 안내 페이지다.
+  // 해외 테스터용 Google 바로가기는 종료했다.
   static const bool _showEnglishTesterGoogleEntry = false;
 
   static const String _privacyEnglishUrl =
@@ -132,12 +128,7 @@ class _IntroMasterState extends State<IntroMaster>
   int _welcomePage = 0;
   bool _welcomeForward = true;
   bool _showEmailForm = false;
-  bool _trialStarting = false;
-  int _trialRequestGeneration = 0;
-  bool _trialCompletionNoticeShown = false;
   bool _isValidatingDuoInvite = false;
-  String _trialNativeLang = 'English';
-  String _trialTargetLang = 'English';
 
   // =======================================================
   // [Account Discovery] Existing-account lookup state
@@ -146,15 +137,11 @@ class _IntroMasterState extends State<IntroMaster>
   String _accountDiscoveryMessage = '';
   String _accountDiscoveryBusyProvider = '';
 
-  bool get _requiresAuthOnlyIntro =>
-      FFAppState().trialCompleted || FFAppState().isGuestSession;
+  bool get _requiresAuthOnlyIntro => FFAppState().isGuestSession;
 
   @override
   void initState() {
     super.initState();
-    debugPrint(
-      '[TrialDebug] IntroMaster initState, time=${DateTime.now().toIso8601String()}',
-    );
     _termsTapRecognizer = TapGestureRecognizer()
       ..onTap = () => _openLegalDocument(isTerms: true);
     _privacyTapRecognizer = TapGestureRecognizer()
@@ -172,25 +159,7 @@ class _IntroMasterState extends State<IntroMaster>
     } else {
       _currentScreen = IntroScreen.welcome;
     }
-    if (FFAppState().trialCompleted) {
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _showTrialCompletedNotice(),
-      );
-    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _runEntryStatusCheck());
-    const trialLanguages = [
-      'Korean',
-      'English',
-      'Japanese',
-      'Chinese',
-      'Spanish',
-    ];
-    _trialNativeLang = trialLanguages.contains(FFAppState().chatLang)
-        ? FFAppState().chatLang
-        : 'English';
-    _trialTargetLang = trialLanguages.contains(FFAppState().targetLang)
-        ? FFAppState().targetLang
-        : 'English';
   }
 
   void _onDuoInviteSignal() async {
@@ -240,7 +209,6 @@ class _IntroMasterState extends State<IntroMaster>
 
   @override
   void dispose() {
-    ++_trialRequestGeneration;
     AppsFlyerManager.duoInviteSignal.removeListener(_onDuoInviteSignal);
     _scrollController.dispose();
     _emailFocusNode.dispose();
@@ -267,9 +235,6 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Future<void> _checkEntryStatus() async {
-    debugPrint(
-      '[TrialDebug] _checkEntryStatus enter, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}, time=${DateTime.now().toIso8601String()}',
-    );
     // 1순위: Play 설치 referrer의 최신 초대를 먼저 복구한다.
     // Android 자동 백업이 과거 FFAppState 초대를 되살리는 경우보다 우선해야 한다.
     await AppsFlyerManager.recoverPlayInstallInvite();
@@ -300,19 +265,11 @@ class _IntroMasterState extends State<IntroMaster>
     await _initAppsFlyer();
     if (!mounted) return;
     // 3순위: 정식 회원(non-anonymous)만 Lobby로 라우팅
-    // anonymous 체험 유저는 Intro에 머물러야 함 (Welcome 또는 Auth)
+    // 익명(Duo 비회원 게스트)은 Intro에 머문다 (Welcome 또는 Auth)
     final user = FirebaseAuth.instance.currentUser;
     if (user != null && !user.isAnonymous) {
-      debugPrint(
-        '[TrialDebug] _checkEntryStatus  routing non-anonymous user to Lobby via _routeAfterAuth, time=${DateTime.now().toIso8601String()}',
-      );
       _routeAfterAuth();
       return;
-    }
-    if (user != null && user.isAnonymous) {
-      debugPrint(
-        '[TrialDebug] _checkEntryStatus  anonymous user stays on Intro, trialCompleted=${FFAppState().trialCompleted}',
-      );
     }
     // 4순위: 비회원은 Intro에서 로그인 가능 상태로 대기
   }
@@ -338,155 +295,6 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
-  Future<void> _startTrial() async {
-    debugPrint(
-      '[TrialDebug] _startTrial enter, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}, time=${DateTime.now().toIso8601String()}',
-    );
-    if (_trialStarting) return;
-    if (FFAppState().trialCompleted) {
-      await _showTrialCompletedNotice(force: true);
-      return;
-    }
-    _trialStarting = true;
-    final requestGeneration = ++_trialRequestGeneration;
-    var authNotificationSuppressed = false;
-    try {
-      FFAppState().isGuestSession = false;
-      TrialFlowState.instance.restoreFromAppState();
-
-      final existingUser = FirebaseAuth.instance.currentUser;
-      if (existingUser != null && existingUser.isAnonymous != true) {
-        // 정식 회원은 체험 불가 -> signOut 하지 않고 Lobby로 이동
-        debugPrint(
-          '[Trial] existing member tried trial, redirecting to Lobby: ${existingUser.uid}',
-        );
-        if (mounted) context.goNamed('Lobby');
-        return;
-      }
-
-      // 언어 선택은 익명 로그인보다 먼저 띄운다. 첫 익명 로그인에서 인증 상태가
-      // 바뀌며 Intro가 재구성되더라도 첫 탭의 사용자 흐름이 끊기지 않게 한다.
-      final languageConfirmed = await _showLanguageSettingDialog();
-      if (!languageConfirmed || !_isCurrentTrialRequest(requestGeneration)) {
-        return;
-      }
-      debugPrint(
-        '[TrialDebug] language dialog confirmed, native=$_trialNativeLang, target=$_trialTargetLang',
-      );
-      setState(() => isLoading = true);
-
-      // 정책 A: 체험 확정 -> pending invite 초기화 (체험과 Duo는 분리)
-      FFAppState().pendingInviteType = '';
-      FFAppState().duoRoomId = '';
-
-      if (FirebaseAuth.instance.currentUser == null) {
-        AppStateNotifier.instance.updateNotifyOnAuthChange(false);
-        authNotificationSuppressed = true;
-        await FirebaseAuth.instance.signInAnonymously();
-      }
-      if (!_isCurrentTrialRequest(requestGeneration)) return;
-      await SecureAiGateway.claimTrialAccess();
-      if (!_isCurrentTrialRequest(requestGeneration)) return;
-      debugPrint(
-        '[TrialDebug] anonymous auth ready, uid=${FirebaseAuth.instance.currentUser?.uid}, stateMounted=$mounted',
-      );
-      FFAppState().chatLang = _trialNativeLang;
-      FFAppState().targetLang = _trialTargetLang;
-
-      await _enterTrialCircleTalk(requestGeneration);
-    } catch (e) {
-      final errorContext = mounted ? context : appNavigatorKey.currentContext;
-      if (errorContext != null && errorContext.mounted) {
-        ScaffoldMessenger.of(
-          errorContext,
-        ).showSnackBar(
-            SnackBar(content: Text('Unable to start the trial: $e')));
-      }
-    } finally {
-      if (authNotificationSuppressed) {
-        AppStateNotifier.instance.updateNotifyOnAuthChange(true);
-      }
-      _trialStarting = false;
-      if (mounted) setState(() => isLoading = false);
-    }
-  }
-
-  bool _isCurrentTrialRequest(int requestGeneration) {
-    return mounted &&
-        requestGeneration == _trialRequestGeneration &&
-        (ModalRoute.of(context)?.isCurrent ?? false);
-  }
-
-  Future<void> _enterTrialCircleTalk(int requestGeneration) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null || !_isCurrentTrialRequest(requestGeneration)) return;
-    final historyRef = FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .collection('chat_history')
-        .doc();
-    await historyRef.set({
-      'created_at': FieldValue.serverTimestamp(),
-      'last_active': FieldValue.serverTimestamp(),
-      'last_message_time': FieldValue.serverTimestamp(),
-      'room_name': 'Duo Trial Call',
-      'is_pinned': false,
-      'msg_count': 0,
-      'mode': 'duo',
-      'duo_mode': 'direct',
-      'trial_preview': true,
-      // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
-      'native_lang': FFAppState().chatLang,
-      'target_lang': FFAppState().targetLang,
-      // 📝 새 방은 검수 대기다(`history_finalize.dart`).
-      ...historyDraftSeed(),
-    });
-    TrialFlowState.instance.myHistoryRef = historyRef;
-    TrialFlowState.instance.advanceTo(1);
-    if (!mounted ||
-        requestGeneration != _trialRequestGeneration ||
-        !(ModalRoute.of(context)?.isCurrent ?? false)) {
-      return;
-    }
-    context.pushNamed(
-      'StealthRoom',
-      queryParameters: {
-        'historyRef': serializeParam(historyRef, ParamType.DocumentReference),
-      }.withoutNulls,
-    );
-  }
-
-  Future<void> _showTrialCompletedNotice({bool force = false}) async {
-    if (!mounted || (_trialCompletionNoticeShown && !force)) return;
-    _trialCompletionNoticeShown = true;
-    if (_currentScreen != IntroScreen.auth) {
-      setState(() {
-        _currentScreen = IntroScreen.auth;
-        _showEmailForm = false;
-      });
-    }
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E22),
-        title: const Text(
-          'Duo Trial Ended',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-        ),
-        content: const Text(
-          'The 10-minute call and 5-minute study trial are available once per device. Sign up to continue.',
-          style: TextStyle(color: Color(0xFFBFC1C9), height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Choose a Login Method'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _handleAuth() async {
     setState(() => isLoading = true);
     try {
@@ -504,7 +312,6 @@ class _IntroMasterState extends State<IntroMaster>
             email: email,
             password: password,
           );
-          await _cleanupTrialSandbox();
           await currentUser.linkWithCredential(credential);
         } else {
           await FirebaseAuth.instance.createUserWithEmailAndPassword(
@@ -513,7 +320,6 @@ class _IntroMasterState extends State<IntroMaster>
           );
         }
       }
-      // Duo 맛보기는 게스트가 입장하는 순간 1회 사용 완료로 기록한다.
       FFAppState().lastAuthProvider = 'email';
       if (!isLoginMode) {
         await _grantSignupBonusIfPossible();
@@ -1898,168 +1704,6 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
-  Future<bool> _showLanguageSettingDialog() async {
-    const languages = [
-      'Korean',
-      'English',
-      'Japanese',
-      'Chinese',
-      'Spanish',
-      'French',
-      'German',
-      'Hindi',
-      'Russian',
-      'Portuguese',
-      'Italian',
-      'Dutch',
-    ];
-    String? nativeLang;
-    String? targetLang;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF161616),
-              insetPadding: const EdgeInsets.symmetric(
-                horizontal: 24,
-                vertical: 24,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-                side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
-              ),
-              title: const Text(
-                'Language Settings',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _languageDropdown(
-                    label: 'Chat Language',
-                    value: nativeLang,
-                    items: languages,
-                    onChanged: (value) => setDialogState(() {
-                      nativeLang = value;
-                    }),
-                  ),
-                  const SizedBox(height: 14),
-                  _languageDropdown(
-                    label: 'Learn Language',
-                    value: targetLang,
-                    items: languages,
-                    onChanged: (value) => setDialogState(() {
-                      targetLang = value;
-                    }),
-                  ),
-                ],
-              ),
-              actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              actions: [
-                ConstrainedBox(
-                  // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
-                  //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
-                  constraints: const BoxConstraints(
-                    minHeight: 48,
-                    minWidth: double.infinity,
-                  ),
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      elevation: 0,
-                      side: const BorderSide(
-                        color: Color(0xFF7F77DD),
-                        width: 1.5,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    onPressed: nativeLang == null || targetLang == null
-                        ? null
-                        : () {
-                            if (mounted) {
-                              setState(() {
-                                _trialNativeLang = nativeLang!;
-                                _trialTargetLang = targetLang!;
-                              });
-                            }
-                            Navigator.of(dialogContext).pop(true);
-                          },
-                    child: const Text(
-                      'Confirm',
-                      style: TextStyle(
-                        color: Color(0xFFCECBF6),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-    return confirmed == true;
-  }
-
-  Widget _languageDropdown({
-    required String label,
-    required String? value,
-    required List<String> items,
-    required ValueChanged<String> onChanged,
-  }) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 92,
-          child: Text(
-            label,
-            style: const TextStyle(color: Colors.white70, fontSize: 13),
-          ),
-        ),
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.35),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-            ),
-            child: DropdownButton<String>(
-              value: value,
-              hint: const Text(
-                'Select',
-                style: TextStyle(color: Colors.white70, fontSize: 15),
-              ),
-              isExpanded: true,
-              dropdownColor: const Color(0xFF2A2A2A),
-              underline: const SizedBox(),
-              style: const TextStyle(color: Colors.white, fontSize: 15),
-              items: items
-                  .map(
-                    (item) => DropdownMenuItem(value: item, child: Text(item)),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                if (value != null) onChanged(value);
-              },
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildAuthView(BuildContext context) {
     return _buildAuthScaffold(
       context: context,
@@ -2412,7 +2056,6 @@ class _IntroMasterState extends State<IntroMaster>
     setState(() => isLoading = true);
     AppStateNotifier.instance.updateNotifyOnAuthChange(false);
     try {
-      await _cleanupTrialSandbox();
       await AccountDiscoveryService.signInWithDiscoveredAccount(account);
       FFAppState().hasLinkedAccount = true;
       FFAppState().lastAuthProvider = account.provider;
@@ -2985,9 +2628,7 @@ class _IntroMasterState extends State<IntroMaster>
     // (anonymous -> custom token -> bonus 지급 완료까지 Lobby 이동 방지)
     AppStateNotifier.instance.updateNotifyOnAuthChange(false);
     try {
-      await _cleanupTrialSandbox();
       await authFn();
-      // Duo 맛보기 완료 상태는 가입 후에도 재사용되지 않도록 유지한다.
       if (provider.isNotEmpty) {
         FFAppState().lastAuthProvider = provider;
       }
@@ -3437,49 +3078,6 @@ class _IntroMasterState extends State<IntroMaster>
 
     controller.dispose();
     return result;
-  }
-
-  /// 샌드박스 폐기: 체험 중 생성된 임시 데이터를 삭제한다.
-  /// anonymous 권한이 살아있는 상태에서 호출해야 한다 (UID 변경 전).
-  /// 가입·로그인 직전에 맛보기 **상태만** 내려놓는다. 기록은 남긴다.
-  ///
-  /// 예전에는 여기서 맛보기 History와 메시지를 지웠다. 그런데 인증 계층은
-  /// 전부 익명 uid를 지키도록 짜여 있다 — email·Google은 `linkWithCredential`,
-  /// Kakao는 CF가 `kakao_uid_map`에 익명 uid를 묶는다("preserve trial data").
-  /// uid가 그대로이니 `users/{uid}/chat_history/{trial}`도 그대로 회원 기록이
-  /// 된다. "가입 후 계속 이용해 주세요"라고 해 놓고 방금 나눈 대화를 지우는
-  /// 것은 그 설계와 어긋났다(2026-09-18).
-  ///
-  /// 기존 회원으로 로그인해 uid가 바뀌는 경우는 기록이 익명 uid 밑에 남는다.
-  /// 규칙이 `isOwner`라 클라이언트가 옮길 수 없고, 그 경우는 맛보기가 아니라
-  /// 재로그인이라 두고 간다.
-  ///
-  /// `step`·`trialHistoryPath`는 기기 값이라 내려야 한다 — 남겨 두면 정식
-  /// 회원 상태에서 StealthRoom이 Duo로 직행하는 등 오작동했다
-  /// (`TrialFlowState` 주석). `trialCompleted`는 1회 사용 기록이므로 되돌리지
-  /// 않는다.
-  Future<void> _cleanupTrialSandbox() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null || !user.isAnonymous) return;
-
-    TrialFlowState.instance.restoreFromAppState();
-    final historyRef = TrialFlowState.instance.myHistoryRef;
-    final hasTrialState = historyRef != null ||
-        TrialFlowState.instance.isTrial ||
-        FFAppState().trialCompleted ||
-        FFAppState().trialStep > 0;
-    if (!hasTrialState) return;
-
-    if (historyRef != null) {
-      debugPrint('[TrialCleanup] keeping trial history: ${historyRef.path}');
-    }
-
-    TrialFlowState.instance.myHistoryRef = null;
-    TrialFlowState.instance.step = 0;
-    FFAppState().trialStep = 0;
-    FFAppState().trialHistoryPath = '';
-
-    debugPrint('[TrialCleanup] trial state released, history kept');
   }
 
   Future<void> _grantSignupBonusIfPossible() async {

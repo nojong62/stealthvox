@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 
 /// Keeps the operator-only `real_members` collection in sync.
 ///
-/// Anonymous trial/Duo guests are deliberately excluded. The callable derives
+/// Anonymous Duo guests are deliberately excluded. The callable derives
 /// all identity fields from the verified Firebase Auth token and Admin SDK.
 class RealMemberRegistry {
   RealMemberRegistry._();

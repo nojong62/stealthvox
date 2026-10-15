@@ -1,7 +1,8 @@
 // lib/auth/social_auth_service.dart
 //
 // Social auth helpers that preserve the current anonymous Firebase uid whenever
-// possible, so trial data stored under that uid remains available after login.
+// possible, so data stored under that uid (e.g. a Duo guest call) remains
+// available after login.
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';

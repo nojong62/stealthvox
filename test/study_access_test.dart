@@ -6,19 +6,15 @@ import 'package:stealth_vox/custom_code/services/study_access.dart';
 ///   B. 익명      + Duo 게스트
 ///   C. 로그인 회원 + 일반
 ///   D. 익명      + 일반
-StudyAccess a() => resolveStudyAccess(
-    isTrial: false, isDuoGuest: true, isSignedInMember: true);
-StudyAccess b() => resolveStudyAccess(
-    isTrial: false, isDuoGuest: true, isSignedInMember: false);
-StudyAccess c() => resolveStudyAccess(
-    isTrial: false, isDuoGuest: false, isSignedInMember: true);
-StudyAccess d() => resolveStudyAccess(
-    isTrial: false, isDuoGuest: false, isSignedInMember: false);
+StudyAccess a() => resolveStudyAccess(isDuoGuest: true, isSignedInMember: true);
+StudyAccess b() =>
+    resolveStudyAccess(isDuoGuest: true, isSignedInMember: false);
+StudyAccess c() =>
+    resolveStudyAccess(isDuoGuest: false, isSignedInMember: true);
+StudyAccess d() =>
+    resolveStudyAccess(isDuoGuest: false, isSignedInMember: false);
 StudyAccess guestPreview() => resolveStudyAccess(
-    isTrial: false,
-    isDuoGuest: true,
-    isSignedInMember: false,
-    hasDuoGuestStudyPreview: true);
+    isDuoGuest: true, isSignedInMember: false, hasDuoGuestStudyPreview: true);
 
 void main() {
   group('초대 비회원 공부방 5분 제한', () {
@@ -53,7 +49,7 @@ void main() {
     test('5분 화면 안에서는 공부 기능을 열고 게스트 과금은 계속 억제한다', () {
       expect(guestPreview().canUsePaidStudy, isTrue);
       expect(guestPreview().reason, StudyBlockReason.none);
-      expect(isDuoBillingSuppressed(isTrial: false, isDuoGuest: true), isTrue);
+      expect(isDuoBillingSuppressed(isDuoGuest: true), isTrue);
     });
 
     test('5분 권한을 전달하지 않은 일반 게스트는 그대로 잠긴다', () {
@@ -87,7 +83,7 @@ void main() {
     });
 
     test('두 게스트 모두 차감 대상이 아니다', () {
-      expect(isDuoBillingSuppressed(isTrial: false, isDuoGuest: true), isTrue);
+      expect(isDuoBillingSuppressed(isDuoGuest: true), isTrue);
     });
   });
 
@@ -98,8 +94,7 @@ void main() {
     });
 
     test('일반 회원 구간은 차감이 돈다', () {
-      expect(
-          isDuoBillingSuppressed(isTrial: false, isDuoGuest: false), isFalse);
+      expect(isDuoBillingSuppressed(isDuoGuest: false), isFalse);
     });
   });
 
@@ -132,44 +127,28 @@ void main() {
       expect(b().reason, StudyBlockReason.duoGuest);
       expect(b().canUsePaidStudy, isFalse);
       expect(
-          resolveStudyAccess(
-                  isTrial: false, isDuoGuest: true, isSignedInMember: true)
+          resolveStudyAccess(isDuoGuest: true, isSignedInMember: true)
               .canUsePaidStudy,
           isFalse);
-    });
-  });
-
-  group('맛보기는 의도된 무료', () {
-    test('익명이어도 열린다 — 막으면 맛보기가 성립하지 않는다', () {
-      final trial = resolveStudyAccess(
-          isTrial: true, isDuoGuest: false, isSignedInMember: false);
-      expect(trial.canUsePaidStudy, isTrue);
-    });
-
-    test('맛보기 Duo 게스트도 열린다 — 맛보기가 먼저다', () {
-      final trial = resolveStudyAccess(
-          isTrial: true, isDuoGuest: true, isSignedInMember: false);
-      expect(trial.canUsePaidStudy, isTrue);
     });
   });
 
   group('로그인 후 복원된 History (케이스 7)', () {
     test('게스트 딱지가 떨어지면 그 방은 일반 회원 방이다 — 무료 구간이 남지 않는다', () {
       // 로그인 직후 isGuestSession을 내리는 것이 곧 이 전환이다.
-      final duringCall = resolveStudyAccess(
-          isTrial: false, isDuoGuest: true, isSignedInMember: false);
-      final afterLogin = resolveStudyAccess(
-          isTrial: false, isDuoGuest: false, isSignedInMember: true);
+      final duringCall =
+          resolveStudyAccess(isDuoGuest: true, isSignedInMember: false);
+      final afterLogin =
+          resolveStudyAccess(isDuoGuest: false, isSignedInMember: true);
       expect(duringCall.canUsePaidStudy, isFalse);
       expect(afterLogin.canUsePaidStudy, isTrue);
-      expect(isDuoBillingSuppressed(isTrial: false, isDuoGuest: true), isTrue);
-      expect(
-          isDuoBillingSuppressed(isTrial: false, isDuoGuest: false), isFalse);
+      expect(isDuoBillingSuppressed(isDuoGuest: true), isTrue);
+      expect(isDuoBillingSuppressed(isDuoGuest: false), isFalse);
     });
 
     test('딱지가 남으면 회원인데도 잠긴다 — 그래서 복구보다 먼저 내린다', () {
-      final stale = resolveStudyAccess(
-          isTrial: false, isDuoGuest: true, isSignedInMember: true);
+      final stale =
+          resolveStudyAccess(isDuoGuest: true, isSignedInMember: true);
       expect(stale.canUsePaidStudy, isFalse);
       expect(stale.reason, StudyBlockReason.duoGuest);
     });
@@ -182,7 +161,6 @@ void main() {
     test('Duo 게스트는 연습은 못 해도 배울글은 만든다', () {
       for (final isMember in <bool>[true, false]) {
         final access = resolveStudyAccess(
-          isTrial: false,
           isDuoGuest: true,
           isSignedInMember: isMember,
         );
@@ -194,7 +172,6 @@ void main() {
 
     test('그냥 익명인 사람은 여전히 막힌다 — 이 통화를 낸 사람이 없다', () {
       final access = resolveStudyAccess(
-        isTrial: false,
         isDuoGuest: false,
         isSignedInMember: false,
       );
@@ -202,34 +179,25 @@ void main() {
     });
 
     test('유료 학습이 열린 사람은 당연히 열려 있다', () {
-      for (final access in <StudyAccess>[
-        resolveStudyAccess(
-            isTrial: true, isDuoGuest: false, isSignedInMember: false),
-        resolveStudyAccess(
-            isTrial: false, isDuoGuest: false, isSignedInMember: true),
-      ]) {
-        expect(access.canBuildHistoryTarget, isTrue);
-      }
+      final access =
+          resolveStudyAccess(isDuoGuest: false, isSignedInMember: true);
+      expect(access.canBuildHistoryTarget, isTrue);
     });
   });
 
   group('🔒 불변식 — 버튼과 과금이 어긋나지 않는다', () {
-    test('맛보기가 아닌데 버튼만 열린 조합은 없다', () {
-      for (final isTrial in <bool>[true, false]) {
-        for (final isDuoGuest in <bool>[true, false]) {
-          for (final isMember in <bool>[true, false]) {
-            final access = resolveStudyAccess(
-              isTrial: isTrial,
-              isDuoGuest: isDuoGuest,
-              isSignedInMember: isMember,
-            );
-            final suppressed = isDuoBillingSuppressed(
-                isTrial: isTrial, isDuoGuest: isDuoGuest);
-            if (access.canUsePaidStudy && !isTrial) {
-              // 버튼이 열렸다면 차감도 돈다. 아니면 그 구간이 무료 API가 된다.
-              expect(suppressed, isFalse,
-                  reason: 'trial=$isTrial guest=$isDuoGuest member=$isMember');
-            }
+    test('버튼만 열리고 차감은 멈춘 조합은 없다', () {
+      for (final isDuoGuest in <bool>[true, false]) {
+        for (final isMember in <bool>[true, false]) {
+          final access = resolveStudyAccess(
+            isDuoGuest: isDuoGuest,
+            isSignedInMember: isMember,
+          );
+          final suppressed = isDuoBillingSuppressed(isDuoGuest: isDuoGuest);
+          if (access.canUsePaidStudy) {
+            // 버튼이 열렸다면 차감도 돈다. 아니면 그 구간이 무료 API가 된다.
+            expect(suppressed, isFalse,
+                reason: 'guest=$isDuoGuest member=$isMember');
           }
         }
       }
@@ -237,14 +205,12 @@ void main() {
 
     test('차감이 막힌 일반 구간은 잠기고 명시적 5분 체험만 예외다', () {
       expect(
-        resolveStudyAccess(
-                isTrial: false, isDuoGuest: true, isSignedInMember: true)
+        resolveStudyAccess(isDuoGuest: true, isSignedInMember: true)
             .canUsePaidStudy,
         isFalse,
       );
       expect(
-        resolveStudyAccess(
-                isTrial: false, isDuoGuest: true, isSignedInMember: false)
+        resolveStudyAccess(isDuoGuest: true, isSignedInMember: false)
             .canUsePaidStudy,
         isFalse,
       );
