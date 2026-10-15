@@ -474,12 +474,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     }
   }
 
-  /// 요청을 보냈다가 실패한 종류. 이 줄은 **자동으로 다시 보내지 않는다.**
-  ///
-  /// `_scheduleMissingTargetGeneration`은 빌드마다 불린다. 실패 → setState →
-  /// 빌드 → 다시 요청이 그대로 고리가 되어, 오프라인이면 프레임마다 줄 수만큼
-  /// 요청이 나갔다. 다시 시도는 배지의 버튼으로만 한다.
-  /// `no_key`·`locked`는 요청 전에 찍힌 것이라 풀리면 저절로 다시 돈다.
+  /// 요청을 보냈다가 실패한 종류. 자동 재시도 중에도 이 값은 남겨, StreamBuilder
+  /// 재빌드가 즉시 같은 요청을 다시 보내는 고리를 막는다.
+  /// `no_key`·`locked`는 요청 전에 찍힌 것이라 조건이 풀리면 저절로 다시 돈다.
   static const Set<String> _kRequestFailureKinds = <String>{
     'auth',
     'quota',
@@ -488,6 +485,23 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     'network',
     'empty',
   };
+
+  /// 일시적인 네트워크·서버·요청량 실패만 세 번까지 천천히 재시도한다.
+  /// 인증 오류와 빈 응답은 기다려도 나아질 근거가 없어 사용자의 명시적 재시도만
+  /// 받는다. 5초 → 20초 → 60초 뒤에도 안 되면 실패 배지에 남는다.
+  static const Set<String> _kRetryableTargetFailureKinds = <String>{
+    'quota',
+    'server',
+    'http',
+    'network',
+  };
+  static const List<Duration> _kTargetRetryDelays = <Duration>[
+    Duration(seconds: 5),
+    Duration(seconds: 20),
+    Duration(minutes: 1),
+  ];
+  final Map<String, int> _targetRetryAttempts = <String, int>{};
+  final Map<String, Timer> _targetRetryTimers = <String, Timer>{};
 
   /// 타겟 문장을 끝내 못 만든 줄. docId → 실패 종류(`_targetFailureLabel` 참고).
   ///
@@ -648,6 +662,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _echoingOverlayTimer?.cancel();
     _nativeEnglishRevealTimer?.cancel();
     _messageSnapshotFallbackTimer?.cancel();
+    for (final timer in _targetRetryTimers.values) {
+      timer.cancel();
+    }
+    _targetRetryTimers.clear();
     // 🎤 [P3-SPEAK] dispose에서 async setState가 나오지 않게 회차를 먼저
     //   무효화하고, 소유한 재생·타이머·임시 녹음을 직접 접는다.
     _p3Generation++;
@@ -1523,7 +1541,51 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }
 
   void _clearTargetFailure(String docId) {
+    _targetRetryTimers.remove(docId)?.cancel();
+    _targetRetryAttempts.remove(docId);
     if (_targetFailures.remove(docId) != null && mounted) setState(() {});
+  }
+
+  /// 실패 직후에는 스트림이 다시 빌드돼도 요청을 재발사하지 않는다. 대신 이
+  /// 타이머 하나만 다음 시도를 연다. 앱을 나가면 dispose에서 전부 취소된다.
+  void _scheduleTargetRetry(DocumentReference messageRef) {
+    final String docId = messageRef.id;
+    final String? kind = _targetFailures[docId];
+    if (!_kRetryableTargetFailureKinds.contains(kind)) return;
+    if (_targetRetryTimers[docId]?.isActive == true) return;
+
+    final int completedAttempts = _targetRetryAttempts[docId] ?? 0;
+    if (completedAttempts >= _kTargetRetryDelays.length) return;
+    final Duration delay = _kTargetRetryDelays[completedAttempts];
+    _targetRetryAttempts[docId] = completedAttempts + 1;
+    debugPrint('[HISTORY-TARGET] retry_scheduled msg=$docId '
+        'attempt=${completedAttempts + 1}/${_kTargetRetryDelays.length} '
+        'delay=${delay.inSeconds}s kind=$kind');
+
+    _targetRetryTimers[docId] = Timer(delay, () {
+      _targetRetryTimers.remove(docId);
+      if (!mounted || _historyIsDraft || !_historyTargetAllowed()) return;
+      unawaited(() async {
+        try {
+          final snapshot = await messageRef.get();
+          if (!mounted || !snapshot.exists) return;
+          final data = snapshot.data() as Map<String, dynamic>?;
+          if (data == null || !_historyTargetNeedsWork(docId, data)) {
+            _clearTargetFailure(docId);
+            return;
+          }
+          await _generateAndCacheHistoryTarget(
+            messageRef,
+            (data['original_text'] ?? '').toString().trim(),
+            _sourceLangForMessage(data),
+            renderToNative: _isListeningStep2AiLine(data),
+          );
+        } catch (_) {
+          _recordTargetFailure(docId, 'network');
+          _scheduleTargetRetry(messageRef);
+        }
+      }());
+    });
   }
 
   /// HTTP 응답 코드를 사용자에게 설명할 수 있는 실패 종류로 바꾼다.
@@ -1671,7 +1733,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     // 진행 중 표시("번역 중")를 띄우고 지우기 위한 rebuild. 이 맵은 원래
     // 중복 요청 방지용이었고 화면에는 전혀 드러나지 않았다.
     if (mounted) setState(() {});
-    return future.whenComplete(() {
+    return future.then((ok) {
+      if (!ok) _scheduleTargetRetry(messageRef);
+      return ok;
+    }).whenComplete(() {
       if (identical(_targetTranslationInFlight[messageRef.id], future)) {
         _targetTranslationInFlight.remove(messageRef.id);
       }
@@ -1958,6 +2023,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     for (final doc in docs) {
       final data = doc.data() as Map<String, dynamic>?;
       if (data == null) continue;
+      if (_kRequestFailureKinds.contains(_targetFailures[doc.id])) continue;
       if (_historyTargetNeedsWork(doc.id, data)) {
         tasks.add(_generateAndCacheHistoryTarget(
           doc.reference,
