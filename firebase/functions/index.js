@@ -85,7 +85,6 @@ exports.expireInactiveDuoBoardPosts = duoBoard.expireInactiveDuoBoardPosts;
 exports.mintAiGatewaySession = secureAiGateway.mintAiGatewaySession;
 exports.mintDeepgramToken = secureAiGateway.mintDeepgramToken;
 exports.mintOpenAiRealtimeToken = secureAiGateway.mintOpenAiRealtimeToken;
-exports.claimAiTrial = secureAiGateway.claimAiTrial;
 exports.openAiProxy = secureAiGateway.openAiProxy;
 exports.syncRealMemberProfile =
   memberRegistry.createSyncRealMemberProfile(admin);
@@ -633,7 +632,7 @@ exports.logUsageSession = functions.https.onCall(async (data, context) => {
 //   1. Verify the Kakao access token via kapi.kakao.com/v2/user/me.
 //   2. Resolve kakao_uid_map/{kakaoId}.
 //        - Existing map: return that uid for repeat Kakao logins.
-//        - Missing map: bind the current anonymous uid to preserve trial data.
+//        - Missing map: bind the current anonymous uid to preserve its data.
 //   3. Issue a Firebase custom token for the resolved uid.
 // ----------------------------------------------------------------------------
 exports.kakaoCustomAuth = functions

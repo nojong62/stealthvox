@@ -400,14 +400,6 @@ service cloud.firestore {
       }
     }
 
-    // AI trial grants and their one-device guard are owned by Cloud Functions.
-    // Client writes would let an attacker mint or replace their own entitlement.
-    match /trial_devices/{fid} {
-      allow read, write: if false;
-    }
-    match /ai_trial_grants/{uid} {
-      allow read, write: if false;
-    }
     // Welcome bonus device guard. Only Cloud Functions Admin SDK should access it.
     match /welcome_devices/{deviceId} {
       allow read, write: if false;

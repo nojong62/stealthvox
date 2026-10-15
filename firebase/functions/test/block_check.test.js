@@ -61,11 +61,11 @@ test("resolveAiAccess denies a blocked user even with paid time", async () => {
     "users/u": {remainingTime: 3600},
     "user_flags/u": {blocked: true},
   });
-  assert.deepEqual(await resolveAiAccess({db, uid: "u", isAnonymous: false}),
+  assert.deepEqual(await resolveAiAccess({db, uid: "u"}),
     {allowed: false, reason: "blocked"});
 
   const unblocked = fakeDb({"users/u": {remainingTime: 3600}, "user_flags/u": {blocked: false}});
-  assert.equal((await resolveAiAccess({db: unblocked, uid: "u", isAnonymous: false})).allowed, true);
+  assert.equal((await resolveAiAccess({db: unblocked, uid: "u"})).allowed, true);
 });
 
 test("interpretUtterance rejects a blocked caller before reserving anything", async () => {
