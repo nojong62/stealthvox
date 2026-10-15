@@ -4,12 +4,16 @@
 // 실장님 방식(2026-10-16): 호스트폰은 서클톡 AI 소리를 내고, 다른 폰은 관리자
 // 웹(`admin_web/author.html`)에서 유저 대신 글자를 적는다.
 //
-//   trial_author/{uid}               호스트가 쓰는 상태 — 대화 기록·언어 짝
-//   trial_author/{uid}/lines/{id}    웹이 쓰는 대사 — {text, createdAt, consumed}
+//   users/{uid}/chat_history/_trial_author            상태 — 대화 기록·언어 짝
+//   users/{uid}/chat_history/_trial_author/messages   대사 — {text, createdAt, consumed}
+//
+// 자리를 관리자 자기 계정의 chat_history 아래에 둔 것은 **지금 규칙(owner)으로
+// 이미 열려 있는 곳**이라 규칙 배포 없이 쓸 수 있어서다. 이 문서에는
+// `is_pinned`·`created_at`이 없어, 그 둘로 정렬하는 공부방 목록에는 뜨지 않는다.
 //
 // 호스트는 AI가 말을 끝내고 잠깐 조용해진 뒤에만 한 줄씩 꺼내 넣는다. AI가
 // 말하는 중에 넣으면 [ONE-TURN] 가드가 그 줄을 말없이 버린다.
-// 같은 관리자 계정(owner + admin 클레임)만 읽고 쓴다(firestore.rules).
+// 같은 계정(owner)만 읽고 쓴다.
 // ====================================================================
 
 import 'dart:async';
@@ -38,10 +42,13 @@ class StudyTrialAuthorRelay {
   static const Duration kSettle = Duration(milliseconds: 900);
   static const int kLogLimit = 40;
 
-  DocumentReference<Map<String, dynamic>> get _state =>
-      FirebaseFirestore.instance.doc('trial_author/$uid');
+  static const String kChannelDocId = '_trial_author';
+
+  DocumentReference<Map<String, dynamic>> get _state => FirebaseFirestore
+      .instance
+      .doc('users/$uid/chat_history/$kChannelDocId');
   CollectionReference<Map<String, dynamic>> get _lines =>
-      _state.collection('lines');
+      _state.collection('messages');
 
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _sub;
   Timer? _pump;

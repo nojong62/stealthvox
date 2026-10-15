@@ -1,11 +1,11 @@
 // 체험 대사 입력 — 공부방 체험 대화를 만들 때 "다른 폰"에서 쓰는 화면.
 //
-//   · 호스트폰 서클톡에서 "체험 제작"을 켜면 trial_author/{uid}에 대화가 올라온다.
-//   · 여기서 친 대사는 trial_author/{uid}/lines에 쌓이고, 호스트가 AI 말이
+//   · 호스트폰 서클톡에서 "체험 제작"을 켜면 users/{uid}/chat_history/_trial_author에
+//     대화가 올라온다.
+//   · 여기서 친 대사는 그 아래 messages에 쌓이고, 호스트가 AI 말이
 //     끝날 때마다 한 줄씩 꺼내 유저 발화로 넣는다.
 //   · 회원 관리 화면(app.js)과 달리 이 페이지는 Firestore에 직접 쓴다. 회원
-//     데이터가 아니라 관리자 자기 계정의 제작 통로뿐이고, 규칙이 owner + admin
-//     클레임으로 묶는다(firestore.rules `trial_author`).
+//     데이터가 아니라 관리자 자기 계정의 제작 통로뿐이고, 규칙은 owner다.
 //   · 서버에서 온 값은 textContent로만 그린다.
 
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
@@ -28,6 +28,8 @@ const app = initializeApp({
 const auth = getAuth(app);
 const db = getFirestore(app);
 const $ = (id) => document.getElementById(id);
+// 호스트 서클톡과 같은 자리(study_trial_author_relay.dart kChannelDocId).
+const CHANNEL = "_trial_author";
 
 let stopState = null;
 let stopLines = null;
@@ -68,7 +70,7 @@ onAuthStateChanged(auth, async (user) => {
   $("gate").hidden = true;
   $("pad").hidden = false;
 
-  stopState = onSnapshot(doc(db, "trial_author", uid), (snap) => {
+  stopState = onSnapshot(doc(db, "users", uid, "chat_history", CHANNEL), (snap) => {
     const data = snap.exists() ? snap.data() : null;
     if (!data) {
       $("state").textContent = "호스트폰 서클톡에서 '체험 제작'을 켜 주세요.";
@@ -83,7 +85,8 @@ onAuthStateChanged(auth, async (user) => {
   }, (err) => { $("state").textContent = "읽기 실패: " + err.message; });
 
   stopLines = onSnapshot(
-    query(collection(db, "trial_author", uid, "lines"), where("consumed", "==", false)),
+    query(collection(db, "users", uid, "chat_history", CHANNEL, "messages"),
+      where("consumed", "==", false)),
     (snap) => {
       queued = snap.docs
         .map((d) => d.data())
@@ -122,7 +125,7 @@ $("lineForm").addEventListener("submit", async (e) => {
   if (!text || !uid) return;
   $("line").value = "";
   try {
-    await addDoc(collection(db, "trial_author", uid, "lines"), {
+    await addDoc(collection(db, "users", uid, "chat_history", CHANNEL, "messages"), {
       text, consumed: false, createdAt: serverTimestamp(),
     });
   } catch (err) {
