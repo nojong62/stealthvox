@@ -67,6 +67,7 @@ import '/custom_code/services/pcm_audio_utils.dart';
 import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/study_trial.dart';
+import '/custom_code/services/study_trial_author_relay.dart';
 import '/custom_code/services/tts_adapter.dart';
 import '/custom_code/services/user_line_fix.dart';
 import '/custom_code/services/transcript_text_clean.dart';
@@ -396,6 +397,18 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   /// 묶지 않는다 — 원문 복원이 주변 소리로 타이핑한 글을 고쳐 쓰게 된다.
   bool _typedTurn = false;
   final TextEditingController _authorInput = TextEditingController();
+
+  /// 다른 폰(관리자 웹)에서 친 대사를 받는 통로. 제작 중에만 산다.
+  StudyTrialAuthorRelay? _authorRelay;
+
+  /// AI가 말하지 않고 처리 중인 턴도 없다 — 다음 대사를 넣어도 된다.
+  bool get _authorCanTakeLine =>
+      _isConversationActive &&
+      _openerDone &&
+      !_isAiOpenerPlaying &&
+      !_isPipelineRunning &&
+      !_aiTurnActive &&
+      !_turnInFlight;
 
   /// 복구 창이 열려 있는가 = 지금 마이크와 오디오 게이트가 살아 있는가.
   ///
@@ -1303,6 +1316,8 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     unawaited(_ttsAdapter.dispose());
     _scrollController.dispose();
     _authorInput.dispose();
+    unawaited(_authorRelay?.stop());
+    _authorRelay = null;
     super.dispose();
   }
 
@@ -5503,6 +5518,8 @@ $userFixPolicy$finalLanguageRule''';
       await _ensureHistoryRef();
       if (_myHistoryRef == null) return;
 
+      // 🎟️ [TRIAL-RELAY] 제작 중이면 다른 폰 화면에도 대화를 올린다.
+      _authorRelay?.recordLines(chatLines);
       // messages 서브컬렉션에 각 발화 저장
       for (final line in chatLines) {
         final original = (line['original_text'] ?? '').toString().trim();
@@ -5958,6 +5975,7 @@ $userFixPolicy$finalLanguageRule''';
       }
     }
     setState(() => _trialAuthoring = next);
+    unawaited(_syncAuthorRelay(next, chatLang));
     _log('🎟️ [TRIAL-AUTHOR]',
         'on=$next chat=$chatLang learn=${_targetLangName()} '
             'room=${_myHistoryRef?.id ?? '-'}');
@@ -5974,6 +5992,27 @@ $userFixPolicy$finalLanguageRule''';
     } catch (e) {
       _log('❌ [TRIAL-AUTHOR]', 'room_mark_failed $e');
     }
+  }
+
+  Future<void> _syncAuthorRelay(bool on, String chatLang) async {
+    final previous = _authorRelay;
+    _authorRelay = null;
+    await previous?.stop();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (!on || uid == null || !mounted) return;
+    final relay = StudyTrialAuthorRelay(
+      uid: uid,
+      isIdle: () => _authorCanTakeLine,
+      onLine: (text) => _onStreamingTranscriptCompleted(
+          '$_kAuthorItemPrefix${DateTime.now().microsecondsSinceEpoch}', text),
+      log: _log,
+    );
+    _authorRelay = relay;
+    await relay.start(
+      chatLang: chatLang,
+      learnLang: _targetLangName(),
+      aiAlreadySpoke: _openerDone,
+    );
   }
 
   /// 입력칸의 한 줄을 유저 발화로 넣는다. 마이크 전사와 같은 입구다.

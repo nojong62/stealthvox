@@ -1,0 +1,24 @@
+/* 체험 대사 입력 — 폰 브라우저에서 쓴다. */
+body.author main { max-width: 640px; padding: 12px 16px 96px; }
+body.author .bar a { text-decoration: none; }
+
+.log {
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px; min-height: 120px;
+}
+.log:empty::before { content: "아직 대화가 없습니다."; color: var(--muted); }
+.msg { padding: 8px 12px; border-radius: 10px; max-width: 85%; white-space: pre-wrap; word-break: break-word; }
+.msg.ai { background: var(--accent-soft); align-self: flex-start; }
+.msg.user { background: #fff4dc; align-self: flex-end; }
+.msg.queued { background: transparent; border: 1px dashed #d9a441; color: var(--muted); align-self: flex-end; }
+
+.compose {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  display: flex; gap: 8px; padding: 10px 16px;
+  background: var(--card); border-top: 1px solid var(--line);
+}
+.compose input {
+  flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 8px;
+}

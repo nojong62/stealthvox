@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+  <meta name="robots" content="noindex, nofollow">
+  <title>체험 대사 입력</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="author.css">
+</head>
+<body class="author">
+  <header class="bar">
+    <strong>체험 대사 입력</strong>
+    <span id="who" class="muted"></span>
+    <a href="index.html" class="muted">회원 관리</a>
+  </header>
+
+  <main>
+    <section id="gate" class="card center" hidden>
+      <p>호스트폰과 같은 관리자 구글 계정으로 로그인하세요.</p>
+      <button id="signIn">Google로 로그인</button>
+      <p id="gateMsg" class="error"></p>
+    </section>
+
+    <section id="pad" hidden>
+      <p id="state" class="muted"></p>
+      <div id="log" class="log"></div>
+      <p id="pending" class="muted"></p>
+      <form id="lineForm" class="compose">
+        <input id="line" type="text" autocomplete="off" spellcheck="false"
+               placeholder="유저 대사 (짧게)" enterkeyhint="send">
+        <button type="submit">보내기</button>
+      </form>
+    </section>
+  </main>
+
+  <script type="module" src="author.js"></script>
+</body>
+</html>
