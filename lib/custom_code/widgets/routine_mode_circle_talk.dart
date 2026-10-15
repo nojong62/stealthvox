@@ -66,6 +66,7 @@ import '/custom_code/services/origin_restoration_runner.dart';
 import '/custom_code/services/pcm_audio_utils.dart';
 import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/step2_native_render.dart';
+import '/custom_code/services/study_trial.dart';
 import '/custom_code/services/tts_adapter.dart';
 import '/custom_code/services/user_line_fix.dart';
 import '/custom_code/services/transcript_text_clean.dart';
@@ -383,6 +384,18 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
 
   /// 🗣️ [SHORT-REPLY] 직전 발화의 소리 난 시간(서버 VAD). 잡음 게이트가 본다.
   int? _lastTurnVoicedMs;
+
+  // 🎟️ [STUDY-TRIAL] 체험 대화 제작. 관리자(`admin` 클레임)에게만 켜진다.
+  //   켜면 유저 발화는 마이크가 아니라 **입력칸의 글자**로만 들어오고, 이
+  //   방에 숨은 `study_trial` 표시가 붙는다.
+  static const String _kAuthorItemPrefix = 'author-';
+  bool _isTrialAuthor = false;
+  bool _trialAuthoring = false;
+
+  /// 지금 처리 중인 유저 턴이 입력칸에서 왔는가. 그 턴에는 마이크 소리를
+  /// 묶지 않는다 — 원문 복원이 주변 소리로 타이핑한 글을 고쳐 쓰게 된다.
+  bool _typedTurn = false;
+  final TextEditingController _authorInput = TextEditingController();
 
   /// 복구 창이 열려 있는가 = 지금 마이크와 오디오 게이트가 살아 있는가.
   ///
@@ -1190,6 +1203,9 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     _markFirstSpeech('MIC_INPUT', at: _micInputAt);
     _preparedCaptureFuture = _startImmediateLocalCapture();
     _costTracker = CircleTalkCostTracker(_log);
+    unawaited(isStudyTrialAuthor().then((author) {
+      if (author && mounted) setState(() => _isTrialAuthor = true);
+    }));
     _costTracker.onOriginPcmSnapshot =
         () => OriginPcmStore.instance.logSnapshot(_myHistoryRef?.id ?? '');
     _ttsAdapter = TtsAdapter(
@@ -1286,6 +1302,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     //   dispose로 어댑터를 닫아 화면을 떠난 뒤 소리가 새는 것을 막는다.
     unawaited(_ttsAdapter.dispose());
     _scrollController.dispose();
+    _authorInput.dispose();
     super.dispose();
   }
 
@@ -3096,6 +3113,13 @@ $userFixPolicy$finalLanguageRule''';
         ? 'rt:$itemId'
         // item_id가 비어 오는 예외 상황에만 보조 방어선(전사문 지문)을 쓴다.
         : 'rt-hash:${_deepgramSourceTurnId(text, _listenGeneration)}';
+    final bool typed = itemId.startsWith(_kAuthorItemPrefix);
+    // 🎟️ [STUDY-TRIAL] 제작 중에는 입력칸만 듣는다. 방 소리가 유저 대사로
+    //   끼어들면 체험 대화가 망가진다.
+    if (_trialAuthoring && !typed) {
+      _log('🎟️ [TRIAL-AUTHOR]', 'mic_dropped item=$itemId len=${text.length}');
+      return;
+    }
     if (!_handledStreamingItemIds.add(dedupeKey)) {
       _log('[ANY-STT]', 'duplicate_dropped item=$itemId len=${text.length}');
       return;
@@ -3112,6 +3136,9 @@ $userFixPolicy$finalLanguageRule''';
     // 🗣️ [SHORT-REPLY] 소리 난 시간은 전사기만 안다. itemId가 살아 있는
     //   여기서 잡아 둬야 잡음 게이트가 "네."를 대답으로 살릴 수 있다.
     _lastTurnVoicedMs = _streamingStt?.utteranceVoicedMsOf(itemId);
+    // 🎟️ 타이핑한 줄은 잡음일 수 없다. "응." 같은 짧은 대답도 살린다.
+    if (typed) _lastTurnVoicedMs = kShortReplyMinVoicedMs;
+    _typedTurn = typed;
     _log(
         '[ANY-STT]',
         'final_received item=$itemId order=$order generation=$_listenGeneration '
@@ -3181,7 +3208,11 @@ $userFixPolicy$finalLanguageRule''';
       //   전사 자체는 소켓이 하므로 파일 전사 함수(`_transcribeAccurately`)를
       //   지나지 않는다. 그 함수에만 창고를 걸었다가 실기기에서 한 발화도
       //   저장되지 않았다(2026-09-08). 주 경로는 이쪽이다.
-      _lastTurnPcm ??= _snapshotTurnPcm();
+      if (_typedTurn) {
+        _lastTurnPcm = null;
+      } else {
+        _lastTurnPcm ??= _snapshotTurnPcm();
+      }
       _logTurnPerf('USER_KOREAN_FINAL');
       _markConversationActivity();
       BillingTicker.instance.resumeFromActivity('circle_talk_stt_result');
@@ -3912,7 +3943,9 @@ $userFixPolicy$finalLanguageRule''';
       final userFix = parseUserLineFix(aiOriginal);
       if (userFix != null) {
         aiOriginal = userFix.reply;
-        if (userLineFixIsPlausible(
+        // 🎟️ 타이핑한 줄은 잘못 들린 게 아니다. 고쳐 쓰지 않는다.
+        if (!_typedTurn &&
+            userLineFixIsPlausible(
             original: userOriginal, fixed: userFix.userLine)) {
           _log('🩹 [USER-FIX]',
               'turn=$currentTurnId "$userOriginal" → "${userFix.userLine}"');
@@ -5428,6 +5461,7 @@ $userFixPolicy$finalLanguageRule''';
         'target_lang': _targetLangName(),
         // 📝 새 방은 검수 대기다. 공부방 첫 화면에서 확정해야 생성이 열린다.
         ...historyDraftSeed(),
+        if (_trialAuthoring) ...studyTrialRoomFields(_nativeLangName()),
       });
       BillingTicker.instance.setSessionIdentifiers(
         sessionDocId: _sessionDocId,
@@ -5448,6 +5482,10 @@ $userFixPolicy$finalLanguageRule''';
   /// 찾으러 간다.
   int? _stashTurnPcm(Map<String, dynamic> line) {
     if (line['role'] != 'HOST') return null;
+    if (_typedTurn) {
+      _lastTurnPcm = null;
+      return null;
+    }
     final pcm = _lastTurnPcm;
     if (pcm == null || pcm.isEmpty) return null;
     final roomId = _myHistoryRef?.id ?? '';
@@ -5744,6 +5782,8 @@ $userFixPolicy$finalLanguageRule''';
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                // 🎟️ [STUDY-TRIAL] 관리자에게만 보인다.
+                if (_isTrialAuthor) _buildTrialAuthorToggle(),
                 // 📚 [STUDY-ROOM] 저장하고 바로 공부방으로.
                 IconButton(
                   icon: const Icon(Icons.menu_book_rounded,
@@ -5896,12 +5936,126 @@ $userFixPolicy$finalLanguageRule''';
     );
   }
 
+  // ── 🎟️ [STUDY-TRIAL] 체험 대화 제작 ──────────────────────────────────
+
+  void _showAuthorNotice(String message) {
+    ScaffoldMessenger.maybeOf(context)
+        ?.showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// 제작 표시를 켜고 끈다. 방이 이미 있으면 그 방 문서에도 바로 적는다.
+  Future<void> _toggleTrialAuthoring() async {
+    final bool next = !_trialAuthoring;
+    final String chatLang = _nativeLangName();
+    if (next) {
+      final problem = studyTrialPairProblem(
+        chatLang: chatLang,
+        learnLang: _targetLangName(),
+      );
+      if (problem != null) {
+        _showAuthorNotice(problem);
+        return;
+      }
+    }
+    setState(() => _trialAuthoring = next);
+    _log('🎟️ [TRIAL-AUTHOR]',
+        'on=$next chat=$chatLang learn=${_targetLangName()} '
+            'room=${_myHistoryRef?.id ?? '-'}');
+    final ref = _myHistoryRef;
+    if (ref == null) return;
+    try {
+      await ref.update(next
+          ? studyTrialRoomFields(chatLang)
+          : <String, dynamic>{
+              kStudyTrialField: FieldValue.delete(),
+              kStudyTrialChatLangField: FieldValue.delete(),
+            });
+    } catch (e) {
+      _log('❌ [TRIAL-AUTHOR]', 'room_mark_failed $e');
+    }
+  }
+
+  /// 입력칸의 한 줄을 유저 발화로 넣는다. 마이크 전사와 같은 입구다.
+  void _sendAuthorLine() {
+    final text = _authorInput.text.trim();
+    if (text.isEmpty) return;
+    if (_isPipelineRunning) {
+      // 그대로 넣으면 [ONE-TURN] 가드가 말없이 버린다.
+      _showAuthorNotice('AI 대답이 끝난 뒤에 보내 주세요');
+      return;
+    }
+    _authorInput.clear();
+    _log('🎟️ [TRIAL-AUTHOR]', 'typed len=${text.length}');
+    _onStreamingTranscriptCompleted(
+        '$_kAuthorItemPrefix${DateTime.now().microsecondsSinceEpoch}', text);
+  }
+
+  Widget _buildTrialAuthorToggle() {
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: GestureDetector(
+        onTap: _toggleTrialAuthoring,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: _trialAuthoring
+                ? const Color(0xFFF59E0B)
+                : Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Text(
+            '체험 제작',
+            style: TextStyle(
+              color: _trialAuthoring ? Colors.black : Colors.white60,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAuthorInput() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _authorInput,
+              style: const TextStyle(color: Colors.white, fontSize: 15),
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => _sendAuthorLine(),
+              decoration: InputDecoration(
+                hintText: '유저 대사 (짧게)',
+                hintStyle: const TextStyle(color: Colors.white38),
+                isDense: true,
+                filled: true,
+                fillColor: Colors.white.withValues(alpha: 0.06),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.send_rounded, color: Color(0xFFF59E0B)),
+            onPressed: _sendAuthorLine,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildControlArea(double bp) {
     return Container(
       padding: EdgeInsets.fromLTRB(24, 8, 24, bp),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (_trialAuthoring) _buildAuthorInput(),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
