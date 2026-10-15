@@ -96,11 +96,21 @@ service cloud.firestore {
         );
       allow delete: if false;
 
+      // 공부방 체험 원본(study_trial == true)은 지울 수 없다. 관리자가
+      // 실수로 지우면 인트로 체험이 그 언어에서 통째로 사라진다. 지우려면
+      // 서클톡 "체험 제작"을 꺼서 표시부터 떼야 한다.
       match /chat_history/{docId} {
-        allow read, write: if isOwner(uid);
+        allow read, create, update: if isOwner(uid);
+        allow delete: if isOwner(uid)
+          && resource.data.get('study_trial', false) != true;
 
         match /messages/{msgId} {
-          allow read, write: if isOwner(uid);
+          allow read, create, update: if isOwner(uid);
+          allow delete: if isOwner(uid) && (
+            !exists(/databases/$(database)/documents/users/$(uid)/chat_history/$(docId))
+            || get(/databases/$(database)/documents/users/$(uid)/chat_history/$(docId))
+                 .data.get('study_trial', false) != true
+          );
         }
       }
 

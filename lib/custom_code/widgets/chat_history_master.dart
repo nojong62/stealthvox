@@ -685,6 +685,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 📦 [Box 8-B: 대화방 전체 삭제]
   Future<void> _deleteHistoryRoom() async {
+    // 🎟️ 공부방 체험 원본은 지우지 않는다(규칙도 막는다).
+    if (_isTrialMasterRoom) {
+      _showRoomEntryToast('공부방 체험 원본 대화는 지울 수 없습니다');
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(

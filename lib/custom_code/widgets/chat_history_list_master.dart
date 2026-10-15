@@ -23,6 +23,7 @@ import 'package:audioplayers/audioplayers.dart' hide Source;
 import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
 import '/custom_code/services/mic_record_config.dart';
+import '/custom_code/services/study_trial.dart';
 import 'routine_mode_scenario_talk.dart' show TtsCache;
 import 'alt_style_popup.dart';
 import '/custom_code/actions/billing_ticker.dart';
@@ -2646,6 +2647,13 @@ RULES — follow exactly:
   /// ⚠️ **대사를 먼저, 방은 마지막에.** 순서가 뒤집히면 중간에 실패했을 때
   ///   부모만 사라지고 대사가 남아 정확히 고치려던 상태가 된다.
   Future<void> _deleteHistoryRoomDeep(DocumentReference roomRef) async {
+    // 🎟️ 공부방 체험 원본은 지우지 않는다 — 대사부터 지우기 **전에** 본다.
+    //   규칙(firestore.rules)도 막지만, 거기 닿으면 대사 일부만 지워진다.
+    final roomSnap = await roomRef.get();
+    final roomData = roomSnap.data() as Map<String, dynamic>?;
+    if (roomData?[kStudyTrialField] == true) {
+      throw StateError('study_trial_protected');
+    }
     const int chunk = 300;
     final CollectionReference messages = roomRef.collection('messages');
     while (true) {
@@ -2922,6 +2930,10 @@ RULES — follow exactly:
                 await _deleteHistoryRoomDeep(doc.reference);
               } catch (e) {
                 debugPrint('[DELETE-ROOM] failed (${e.runtimeType})');
+                if (e is StateError && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('공부방 체험 원본 대화는 지울 수 없습니다')));
+                }
               }
             },
             child: Text(
