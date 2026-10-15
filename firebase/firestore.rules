@@ -10,13 +10,21 @@ service cloud.firestore {
       return isAuth() && request.auth.uid == uid;
     }
 
+    // 관리자 웹(stealthvox-admin.web.app) 전용. Custom Claim admin == true만
+    // 통과한다. 읽기만 연다 — 쓰기는 앞으로도 Cloud Function을 거친다.
+    function isAdmin() {
+      return isAuth() && request.auth.token.admin == true;
+    }
+
     // Operator-only membership ledger. Cloud Functions writes it with the
     // Admin SDK; no app client may enumerate members or alter purchase totals.
     match /real_members/{uid} {
-      allow read, write: if false;
+      allow read: if isAdmin();
+      allow write: if false;
 
       match /purchases/{purchaseId} {
-        allow read, write: if false;
+        allow read: if isAdmin();
+        allow write: if false;
       }
     }
 
@@ -41,6 +49,7 @@ service cloud.firestore {
     // User profile and user-owned subcollections.
     match /users/{uid} {
       allow read: if isOwner(uid);
+      allow get: if isAdmin();
       allow create: if isOwner(uid)
         && !request.resource.data.keys().hasAny([
           'remainingTime',
@@ -79,7 +88,7 @@ service cloud.firestore {
       }
 
       match /purchases/{purchaseId} {
-        allow read: if isOwner(uid);
+        allow read: if isOwner(uid) || isAdmin();
         allow write: if false;
       }
 
@@ -96,7 +105,7 @@ service cloud.firestore {
       }
 
       match /usage_logs/{logId} {
-        allow read: if isOwner(uid);
+        allow read: if isOwner(uid) || isAdmin();
         allow write: if false;
       }
 
