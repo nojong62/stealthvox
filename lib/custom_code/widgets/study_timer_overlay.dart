@@ -7,9 +7,13 @@ class StudyTimerOverlay extends StatefulWidget {
     super.key,
     this.durationSeconds = 300,
     required this.onTimeUp,
+    this.endMessageKey = 'trialEnded',
   });
 
   final int durationSeconds;
+
+  /// 끝났을 때 띄울 문구 키(`OriginSurfaceCopy`). 기본은 Duo 게스트 5분.
+  final String endMessageKey;
   final VoidCallback onTimeUp;
 
   @override
@@ -97,7 +101,7 @@ class _StudyTimerOverlayState extends State<StudyTimerOverlay> {
               Icon(Icons.bookmark_added, size: 48, color: Color(0xFFD4AF37)),
               SizedBox(height: 16),
               Text(
-                copy['trialEnded'],
+                copy[widget.endMessageKey],
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white,

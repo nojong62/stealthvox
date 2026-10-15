@@ -1,13 +1,14 @@
 // ====================================================================
-// 🎟️ [STUDY-TRIAL] 인트로 "공부방 체험"으로 들어온 사람의 5분 공부방.
+// 🎟️ [STUDY-TRIAL] 인트로 "공부방 체험"으로 들어온 사람의 10분 공부방.
 // --------------------------------------------------------------------
 // 서버(`startStudyTrial`)가 이 사람 계정에 복사해 준 체험 대화 **하나만** 연다.
 // Duo 게스트 5분 공부방(`duo_guest_study_page.dart`)과 같은 틀이다.
 //
 //   · 다른 대화로 옮기는 길은 없다(ChatHistoryMaster.studyTrial).
 //   · 이 화면이 떠 있는 동안만 차감이 멈춘다(StudyTrialSession.active).
-//     AI 자격은 서버가 같은 5분으로 따로 묶는다.
-//   · 시간이 끝나면 Intro로 돌아간다. 같은 폰에서는 다시 체험할 수 없다.
+//     AI 자격은 서버가 같은 10분으로 따로 묶는다.
+//   · 시간(서버가 정한 10분)이 끝나면 Intro로 돌아간다. 같은 폰에서는
+//     다시 체험할 수 없다.
 // ====================================================================
 
 import 'package:flutter/material.dart';
@@ -26,7 +27,7 @@ class StudyTrialPage extends StatefulWidget {
 
   final DocumentReference historyRef;
 
-  /// 서버가 잰 남은 시간. 중간에 나갔다 오면 5분보다 짧다.
+  /// 서버가 잰 남은 시간. 중간에 나갔다 오면 10분보다 짧다.
   final int remainingSeconds;
 
   @override
@@ -68,6 +69,7 @@ class _StudyTrialPageState extends State<StudyTrialPage> {
             StudyTimerOverlay(
               durationSeconds: widget.remainingSeconds,
               onTimeUp: _backToIntro,
+              endMessageKey: 'studyTrialEnded',
             ),
           ],
         ),

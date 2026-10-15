@@ -1967,6 +1967,22 @@ class OriginSurfaceCopy {
       'Accesso non riuscito. Riprova.',
       'Inloggen mislukt. Probeer opnieuw.'
     ],
+    // 🎟️ 인트로 공부방 체험이 끝났을 때. Duo 게스트 5분(trialEnded)과
+    //   시간이 달라 시간을 말하지 않는다.
+    'studyTrialEnded': [
+      'Your Study Room trial has ended. Sign up to keep studying.',
+      '공부방 체험이 끝났어요. 계속 공부하려면 가입해 주세요.',
+      '学習ルーム体験が終了しました。続けるには登録してください。',
+      '学习室体验已结束。注册后可继续学习。',
+      'La prueba de la sala de estudio terminó. Regístrate para seguir.',
+      'L’essai de la salle d’étude est terminé. Inscrivez-vous pour continuer.',
+      'Der Lernraum-Test ist beendet. Registrieren Sie sich, um weiterzulernen.',
+      'स्टडी रूम ट्रायल समाप्त हो गया। आगे पढ़ने के लिए साइन अप करें।',
+      'Пробный доступ к учебной комнате завершён. Зарегистрируйтесь, чтобы продолжить.',
+      'O teste da sala de estudo terminou. Cadastre-se para continuar.',
+      'La prova della sala studio è terminata. Registrati per continuare.',
+      'De proef van de studieruimte is afgelopen. Meld je aan om verder te leren.'
+    ],
     'trialEnded': [
       'Your 5-minute trial has ended. Sign up to continue.',
       '5분 체험이 종료되었습니다. 계속하려면 가입해 주세요.',

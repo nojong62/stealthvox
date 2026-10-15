@@ -7,7 +7,7 @@
 //   · 체험자는 익명 계정이다. 원본을 그 계정 공부방에 **사본**으로 복사한다.
 //     공부방은 화면에서 문서에 직접 쓰는 곳이 많아, 원본을 열어 주면 체험자가
 //     원본을 고치게 된다.
-//   · 폰 하나에 한 번. 기기 ID(해시)를 서버에 남긴다. 5분 안에 같은 익명
+//   · 폰 하나에 한 번. 기기 ID(해시)를 서버에 남긴다. 10분 안에 같은 익명
 //     계정으로 다시 부르면 남은 시간만큼 이어서 쓴다.
 //   · 연습 설정은 고정: 에코잉 여성 ×2, 쉐도잉 남성 0.87x.
 //   · 체험 중 AI 자격은 study_trial_users/{uid}가 쥔다(ai_access.js).
@@ -16,7 +16,7 @@ const crypto = require("crypto");
 const {HttpsError, onCall} = require("firebase-functions/v2/https");
 
 const REGION = "asia-northeast3";
-const TRIAL_SECONDS = 5 * 60;
+const TRIAL_SECONDS = 10 * 60; // 2026-10-16 실장님: 5분 → 10분
 const DEVICE_COLLECTION = "study_trial_devices";
 const USER_COLLECTION = "study_trial_users";
 const COPY_BATCH_LIMIT = 400;
@@ -98,7 +98,7 @@ function copyRoomData(source, {sourcePath, now}) {
 /**
  * 기기 기록을 보고 이번 호출을 판정한다.
  *   new     — 처음. 복사한다.
- *   resume  — 같은 계정이 5분 안에 다시 왔다. 남은 시간으로 이어서.
+ *   resume  — 같은 계정이 10분 안에 다시 왔다. 남은 시간으로 이어서.
  *   used    — 이 폰은 이미 썼다.
  *   busy    — 같은 계정의 복사가 아직 도는 중.
  */

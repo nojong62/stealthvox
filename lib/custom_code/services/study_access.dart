@@ -120,8 +120,8 @@ const StudyAccess _kDuoGuest = StudyAccess._(false, StudyBlockReason.duoGuest);
 /// 과금 티커의 차감 조건과 이 파일의 버튼 조건이 같은 자리를 보게 하려고
 /// 따로 뽑았다. 의도된 무료는 둘이다.
 ///   · Duo 게스트 — 회원이든 아니든 초대한 호스트만 부담한다
-///   · 공부방 체험 5분 — 인트로 버튼으로 들어온 체험 화면이 살아 있는 동안
-///     ([StudyTrialSession.active]). AI 자격은 서버가 5분으로 묶는다.
+///   · 공부방 체험 10분 — 인트로 버튼으로 들어온 체험 화면이 살아 있는 동안
+///     ([StudyTrialSession.active]). AI 자격은 서버가 10분으로 묶는다.
 bool isDuoBillingSuppressed({
   required bool isDuoGuest,
   bool isStudyTrial = false,

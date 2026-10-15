@@ -31,7 +31,7 @@ function normalizedRoomId(value) {
 }
 
 // AI 자격은 셋이다: 남은 시간이 있는 본인, 초대받은 Duo 게스트, 공부방 체험
-// 5분 중인 사람. (옛 맛보기 체험 자격은 2026-10-15 폐기됐다 — 공부방 체험은
+// 10분 중인 사람. (옛 맛보기 체험 자격은 2026-10-15 폐기됐다 — 공부방 체험은
 // 그것과 다른 것이다.)
 async function resolveAiAccess({ db, uid, roomId }) {
   // 관리자 차단이 시간·Duo 게스트 자격보다 먼저다.
