@@ -2076,6 +2076,13 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           _tutorUserRecording = false;
           _tutorPlayingFullback = false;
         });
+        // 📖 첫 페이지를 열면 ESSAY 전체가 바로 보여야 한다(실장님 지시,
+        //   2026-10-15). 없으면 여기서 만든다 — 확정·결제·모드 검사는
+        //   [_ensureMySpeech]가 그대로 한다.
+        if (storedMySpeech.trim().isEmpty &&
+            _supportsSpeechPractice(_inferHistoryMode(data))) {
+          unawaited(_ensureMySpeech());
+        }
       }
     } catch (e) {
       _showRoomEntryToast("연습 진입 실패: $e");
@@ -5338,6 +5345,7 @@ RULES — follow exactly:
                         // 📖 만들어 둔 글이 있으면 누르기 전에 읽어 볼 수 있다.
                         preview: _mySpeech,
                         previewScrollable: true,
+                        blinkChevron: true,
                         emptyHint: locked
                             ? access.gateLabel
                             : _surfaceCopy['tapToCreate'],
@@ -5377,6 +5385,7 @@ RULES — follow exactly:
     VoidCallback? onTap,
     String preview = '',
     bool previewScrollable = false,
+    bool blinkChevron = false,
     String emptyHint = '',
     String? error,
     bool isLoading = false,
@@ -5439,6 +5448,8 @@ RULES — follow exactly:
                       child: CircularProgressIndicator(
                           color: color, strokeWidth: 2.2),
                     )
+                  else if (blinkChevron && body.isNotEmpty)
+                    _BlinkingChevron(color: color)
                   else
                     Icon(Icons.chevron_right_rounded,
                         color: color.withValues(alpha: 0.6), size: 20),
@@ -6621,7 +6632,8 @@ RULES — follow exactly:
       });
     }
     debugPrint('[P3-SPEAK] breaths=${analysis.segments.length} '
-        'total=${analysis.totalMs}ms voice=$_p3Voice');
+        'total=${analysis.totalMs}ms voice=$_p3Voice '
+        'mode=${_p3PracticeMode.name} chars=${text.length}');
     // 화면이 먼저 자리를 잡고 나서 소리가 난다. 두 모드가 갈리기 전에 한 번만
     // 기다린다 — 각자 넣으면 값이 갈라진다.
     await Future<void>.delayed(_kP3StartDelay);
@@ -6872,15 +6884,26 @@ RULES — follow exactly:
             if (!mounted) return;
             _p3ScrollReadingTo(pos.inMilliseconds / expectedMs);
           });
+    final Stopwatch playWatch = Stopwatch()..start();
+    var endReason = 'complete';
     try {
       await player.play(BytesSource(wav));
       await completer.future.timeout(
         Duration(milliseconds: expectedMs + 8000),
-        onTimeout: finish,
+        onTimeout: () {
+          endReason = 'timeout';
+          finish();
+        },
       );
     } catch (e) {
+      endReason = 'error';
       debugPrint('[P3-SPEAK] play $e');
     } finally {
+      // 📏 끝까지 읽었는가. playedMs가 expectedMs보다 한참 짧으면 중간에
+      //   끊긴 것이다 — stopped=true면 화면 쪽(Stop·모드 전환)이 끊었다.
+      debugPrint('[P3-PLAY] expectedMs=$expectedMs '
+          'playedMs=${playWatch.elapsedMilliseconds} end=$endReason '
+          'stopped=${!_p3Alive(generation)} bytes=${pcm.length}');
       await sub.cancel();
       await _p3ShadowPositionSub?.cancel();
       _p3ShadowPositionSub = null;
@@ -8478,6 +8501,38 @@ enum ShadowingPhase {
 
 /// 두 학습 문장. 화면 이름은 MY ENGLISH / NATIVE ENGLISH다.
 enum SentenceVariant { mySpeech, nativeEnglish }
+
+/// 다음 페이지로 간다는 것을 눈에 띄게 하는 깜박이는 >.
+class _BlinkingChevron extends StatefulWidget {
+  const _BlinkingChevron({required this.color});
+
+  final Color color;
+
+  @override
+  State<_BlinkingChevron> createState() => _BlinkingChevronState();
+}
+
+class _BlinkingChevronState extends State<_BlinkingChevron>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 700),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.2, end: 1.0).animate(_controller),
+      child: Icon(Icons.chevron_right_rounded, color: widget.color, size: 26),
+    );
+  }
+}
 
 /// 🔒 [P3-LOCK] 한 모드에 묶인 설정. 에코잉은 반복, 쉐도잉은 속도를 든다.
 class _P3ModeLock {
