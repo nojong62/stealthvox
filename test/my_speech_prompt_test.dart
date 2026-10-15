@@ -2,80 +2,58 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/ai_style.dart';
 import 'package:stealth_vox/custom_code/services/speech_reconstruction.dart';
 
-/// MY ENGLISH의 정의를 고정한다.
+/// ESSAY(저장 칸 `my_speech`)의 정의를 고정한다.
 ///
-/// My English는 **대화 기록이 아니다**(실장님 결정, 2026-08-31). 대화에서
-/// 소재 한둘을 골라 seed로 삼고, 원 대화에 없던 이유·상황·예시·생각까지
-/// 붙여 한 사람이 자연스럽게 이어 말하는 **말하기 연습문**을 새로 짓는다.
-///
-/// 넓힌 만큼 여기서 지키는 것은 남은 경계다 — 원 대화와 모순되지 않을 것,
-/// 유저의 구체적·민감한 사실을 지어내지 않을 것, 요약이나 대화문이 되지
-/// 않을 것, 그리고 다음 단계인 Native English와 하는 일이 겹치지 않을 것.
+/// 2026-10-15 실장님 지시: **대화 내용을 벗어나지 않고, 유저 개인이 1인칭으로
+/// 말하듯** 쓴다. 대화에 없던 이유·예시·생각을 붙이던 확장 규칙은 사라졌다.
+/// 길이는 대화 길이를 따른다.
 void main() {
   final prompt = buildMySpeechInstructions(targetLang: 'English');
 
-  group('기록이 아니라 학습용 확장문이다', () {
-    test('대화 기록도 요약도 아니라고 못 박는다', () {
-      expect(
-          prompt,
-          contains(
-              'This is NOT a record of the conversation and NOT a summary of it.'));
-      expect(prompt, contains('Never summarize the conversation'));
-      expect(prompt, contains('using their own conversation as the seed'));
+  group('유저 1인칭으로 대화를 다시 들려준다', () {
+    test('유저가 1인칭으로 말한다', () {
+      expect(prompt,
+          contains('**Write it as the USER, in the first person.**'));
+      expect(prompt, contains('in the first person.'));
     });
 
-    test('소재를 한둘 골라 중심 생각 하나를 세운다', () {
-      expect(prompt, contains('pick ONE or TWO topics'));
-      expect(prompt, contains('Settle on ONE central point, then develop it.'));
-    });
-
-    test('구조를 강요하지 않는다', () {
-      // 매번 같은 틀을 채우면 연습문이 전부 같은 모양이 된다.
-      expect(prompt, contains('These are not mandatory stages.'));
-      expect(
-        prompt,
-        contains('never force every speech through the same formula'),
-      );
+    test('대화 기록도 3인칭 요약도 아니다', () {
+      expect(prompt,
+          contains('This is NOT a transcript and NOT a third-person summary.'));
     });
   });
 
-  group('없던 내용을 더해도 된다', () {
-    test('학습 목적의 추가를 명시적으로 허락한다', () {
-      expect(
-        prompt,
-        contains('you may write what the conversation never said'),
-      );
-      for (final allowed in <String>[
-        'a reason or motivation that fits what the user expressed',
-        'ordinary situational detail',
-        'a common everyday example',
-        'a natural personal thought, or a small conclusion',
-      ]) {
-        expect(prompt, contains(allowed), reason: allowed);
-      }
-    });
-
-    test('옛 규칙(추가 전면 금지)은 사라졌다', () {
-      // 이 문장이 살아 있으면 확장 자체가 막힌다.
-      expect(
-        prompt,
-        isNot(contains('Never add a fact, an opinion, a reason, an emotion')),
-      );
-      expect(
-        prompt,
-        isNot(contains('Use only meaning that the USER actually expressed.')),
-      );
-    });
-  });
-
-  group('넓혔어도 경계는 셋 남는다', () {
-    test('원 대화와 모순되지 않는다', () {
-      expect(prompt, contains('Never contradict the conversation.'));
+  group('대화 밖으로 나가지 않는다', () {
+    test('대화에 있는 것만 쓴다', () {
+      expect(prompt,
+          contains('Use only what the conversation actually contains.'));
       expect(
         prompt,
         contains(
-            'Nothing you add may conflict with what the user said, decided, or felt.'),
+            'Do not add reasons, examples, details, opinions, feelings, or conclusions that the conversation did not contain.'),
       );
+    });
+
+    test('옛 확장 허락은 사라졌다', () {
+      expect(prompt,
+          isNot(contains('you may write what the conversation never said')));
+      expect(prompt, isNot(contains('pick ONE or TWO topics')));
+      expect(prompt, isNot(contains('[YOU MAY ADD]')));
+    });
+
+    test('길이는 대화를 따른다 — 늘리지도 빼지도 않는다', () {
+      expect(prompt, contains('[LENGTH FOLLOWS THE CONVERSATION]'));
+      expect(
+        prompt,
+        contains(
+            'Never pad it, and never drop a topic the user really talked about.'),
+      );
+    });
+  });
+
+  group('경계는 그대로 남는다', () {
+    test('원 대화와 모순되지 않는다', () {
+      expect(prompt, contains('Never contradict the conversation.'));
     });
 
     test('민감하거나 구체적인 사실은 지어내지 않는다', () {
@@ -98,7 +76,8 @@ void main() {
             'Never write a dialogue, a question-and-answer, or a string of exchanged turns.'),
       );
       expect(prompt, contains('It is ONE person speaking continuously.'));
-      expect(prompt, contains('never report what the other speaker said'));
+      // 상대 말은 유저가 겪은 일로만 들어온다.
+      expect(prompt, contains("only as part of the user's own experience"));
     });
 
     test('유저의 입장을 뒤집지 않는다', () {
@@ -133,7 +112,7 @@ void main() {
     test('실제로 다시 쓸 수 있는 쉬운 영어다', () {
       expect(
         prompt,
-        contains('Keep it something the user could genuinely use again'),
+        contains('Keep it something the user could genuinely say again'),
       );
       expect(
         prompt,
@@ -145,13 +124,13 @@ void main() {
   group('한 문장이 아니라 한 발화다', () {
     test('여러 문장이어도 된다고 적혀 있다', () {
       expect(prompt,
-          contains('Several sentences that connect into a single thought.'));
+          contains('Several sentences that connect into one flowing account.'));
       expect(
         prompt,
         contains('Do not force it into one grammatical sentence'),
       );
-      expect(
-          prompt, contains('One person, speaking naturally and continuously.'));
+      expect(prompt,
+          contains('One person, speaking naturally and continuously, in the first person.'));
       // 길이를 채우려고 한 문장을 늘이지도 않는다.
       expect(
         prompt,
@@ -215,7 +194,7 @@ void main() {
       );
       expect(withSituation, contains('Situation: a job interview.'));
       expect(withSituation,
-          contains('Use it as background when it fits the seed you pick.'));
+          contains('Use it only to understand the conversation; do not add details from it.'));
     });
 
     test('상황이 없으면 그 줄 자체가 없다', () {

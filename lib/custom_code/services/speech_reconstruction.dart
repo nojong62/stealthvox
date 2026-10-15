@@ -158,24 +158,18 @@ Never condense it, never drop material to make it simpler, and never trade conte
 
 ''';
 
-/// 🗣️ [MY-ENGLISH] 대화에서 고른 소재를 **말하기 연습용 확장 스피치**로 세운다.
+/// 🗣️ [MY-ENGLISH] 화면 이름은 **ESSAY**다(2026-10-15).
 ///
-/// **실제 발화의 복원이 아니다**(실장님 결정, 2026-08-31). 예전 My Speech는
-/// "유저가 실제로 표현한 것만" 모으는 자리였다. 그 결과는 충실했지만 대화가
-/// 짧으면 연습할 것도 짧았고, 에코잉·쉐도잉에 얹을 살이 없었다.
+/// **대화 안에서만 쓴다**(실장님 지시, 2026-10-15). 유저가 1인칭으로 이 대화를
+/// 제 말로 다시 들려주는 글이다. 원 대화에 없던 이유·예시·생각·결론을 붙이던
+/// 확장 규칙(2026-08-31)은 걷어냈다. 길이는 대화 길이를 따른다 — 긴 대화면
+/// 글도 길고, 일부러 늘리거나 유저가 실제로 한 이야기를 빼지 않는다.
 ///
-/// 이제 대화는 **재료(seed)**다. 소재 한둘을 골라 중심 생각 하나를 세우고,
-/// 원 대화에 없던 이유·상황·예시·생각까지 학습 목적으로 붙여, 한 사람이
-/// 자연스럽게 이어 말하는 스피치를 만든다.
+/// 남은 경계: 원 대화와 모순 금지, 유저의 구체적·민감한 사실 창작 금지,
+/// 대화문·질의응답 금지, 유저의 입장 강도 유지.
 ///
-/// 넓힌 만큼 경계는 좁게 셋만 남는다.
-///   · 원 대화와 **모순되는** 것은 만들지 않는다.
-///   · 유저의 민감하거나 구체적인 사실을 지어내지 않는다.
-///   · 대화 요약도, 질문-답변을 이어 붙인 것도 아니다.
-///
-/// 화면 이름은 **Clear & Easy**이고 화자는 [_kLkSpeakerPersona]다. 확장 규칙은
-/// 그대로 두고 그 위에 고정 화자를 얹었다 — 무엇을 말할지는 아래 seed 규칙이,
-/// 어떻게 말할지는 페르소나가 정한다.
+/// 화자 말투는 [_kLkSpeakerPersona]다 — 무엇을 말할지는 대화가, 어떻게
+/// 말할지는 페르소나가 정한다.
 ///
 /// 저장 칸은 `my_speech` 그대로다 — 이름만 바뀌었고 자리는 같다.
 ///
@@ -206,41 +200,38 @@ String buildMySpeechInstructions({
   if (partner.isNotEmpty) whoLine.write(' OTHER is $partner.');
   final situationLine = situation.trim().isEmpty
       ? ''
-      : '\nSituation: ${situation.trim()}. Use it as background when it fits the seed you pick.';
+      : '\nSituation: ${situation.trim()}. Use it only to understand the conversation; do not add details from it.';
 
-  return '''${persona}You are writing ONE speaking-practice speech for a language learner, using their own conversation as the seed.
-**You are the one who will speak it.** Build the speech, then say it in your own voice.
+  return '''${persona}You are writing ONE speaking-practice essay for a language learner, built only from their own conversation.
+**Write it as the USER, in the first person.** It is the user telling the story of this conversation in their own words — "I", "my", "me".
 
 The conversation may contain many turns between the user and another person or AI.
 $whoLine$situationLine
 
-This is NOT a record of the conversation and NOT a summary of it.
-Read the whole conversation, pick ONE or TWO topics from it that are worth practising out loud, and build a single connected speech the USER could actually say.
+This is NOT a transcript and NOT a third-person summary.
+Read the whole conversation and retell, as one person speaking, what the USER talked about: what they said, asked, decided, felt, and found out.
 
-[PICK A SEED, THEN BUILD]
-Choose material the USER engaged with — something they said, asked, decided, or reacted to.
-Settle on ONE central point, then develop it.
-A natural shape is: the point, why it is so, a concrete detail, an example or a contrast, what the user personally makes of it, and where the thought lands.
-These are not mandatory stages. Use only the ones this material actually needs, and never force every speech through the same formula.
+[STAY INSIDE THE CONVERSATION]
+Use only what the conversation actually contains.
+Do not add reasons, examples, details, opinions, feelings, or conclusions that the conversation did not contain.
+If the user's lines are broken or mistranscribed, write what they clearly meant — nothing more.
+What the other speaker said may appear only as part of the user's own experience (for example, what I was asked or what I found out), told in the user's voice and only when the user engaged with it.
+You may add plain connecting words so the thoughts flow, but a "because" or "so" must reflect a link the conversation itself made.
 
-[YOU MAY ADD]
-This is a learning text, not a transcript, so you may write what the conversation never said:
-- a reason or motivation that fits what the user expressed
-- ordinary situational detail
-- a common everyday example
-- a natural personal thought, or a small conclusion
+[LENGTH FOLLOWS THE CONVERSATION]
+Cover the topics the user actually discussed, in a natural order.
+A short conversation gives a short essay; a long conversation gives a longer one. Never pad it, and never drop a topic the user really talked about.
 
 [HARD LIMITS]
-Never contradict the conversation. Nothing you add may conflict with what the user said, decided, or felt.
+Never contradict the conversation.
 Never invent a specific or sensitive fact about the user. No names, places, employers, numbers, dates, health details, money, or relationships that the conversation did not supply.
-Never summarize the conversation, and never report what the other speaker said.
 Never write a dialogue, a question-and-answer, or a string of exchanged turns. It is ONE person speaking continuously.
 Never reverse the user's stance or make it stronger or weaker than it was.
 
 [OUTPUT STYLE]
-One person, speaking naturally and continuously.
-Several sentences that connect into a single thought. Do not force it into one grammatical sentence, and do not stretch one sentence to make it long.
-Keep it something the user could genuinely use again in their own life.
+One person, speaking naturally and continuously, in the first person.
+Several sentences that connect into one flowing account. Do not force it into one grammatical sentence, and do not stretch one sentence to make it long.
+Keep it something the user could genuinely say again in their own life.
 Plain, everyday spoken $language. No literary phrasing, no heavy idioms, no showy vocabulary.
 Write it in $language only. Render any name, role label, or situation that appears in another language into natural $language (translate role or description phrases; romanize real personal names).
 Do not explain what you changed.
@@ -288,9 +279,6 @@ class MySpeechBuilder {
             },
             body: jsonEncode(<String, dynamic>{
               'model': model,
-              // 🌡️ 확장 생성이라 0.3은 원문에 붙어 버린다. 그렇다고 자유
-              //   창작도 아니라 0.7은 대화와 무관한 디테일을 늘린다.
-              //   0.6에서 시작하고 실기기 결과를 보고 조정한다(실장님 지시).
               'reasoning_effort': kHistoryTextReasoningEffort,
               'max_completion_tokens': 1500,
               'messages': <Map<String, String>>[
