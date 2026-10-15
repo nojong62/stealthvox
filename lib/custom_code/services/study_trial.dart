@@ -71,10 +71,19 @@ const String kStudyTrialCopyField = 'study_trial_copy';
 bool isStudyTrialRoom(Map<String, dynamic>? room) =>
     room?[kStudyTrialField] == true || room?[kStudyTrialCopyField] == true;
 
+/// 체험의 연습 설정. 서버 사본(`FIXED_PRACTICE_SETTINGS`)과 같은 값이다.
+/// **원본에도 처음부터 묶는다** — 관리자가 원본에서 다른 목소리로 연습하면
+/// 그 소리는 체험자가 찾는 칸과 달라 공유되지 않는다.
+const Map<String, dynamic> kStudyTrialPracticeSettings = <String, dynamic>{
+  'echoing': <String, dynamic>{'voice': 'google-female', 'repeat': 2},
+  'shadowing': <String, dynamic>{'voice': 'google-male', 'speed': 0.87},
+};
+
 /// 방을 만들 때 함께 적는 체험 표시.
 Map<String, dynamic> studyTrialRoomFields(String chatLang) => <String, dynamic>{
       kStudyTrialField: true,
       kStudyTrialChatLangField: chatLang.trim(),
+      'practice_settings': kStudyTrialPracticeSettings,
     };
 
 /// 체험 대화를 만들 수 있는 사람인가. 관리자 웹과 같은 `admin` 클레임 하나로

@@ -5969,6 +5969,7 @@ $userFixPolicy$finalLanguageRule''';
           : <String, dynamic>{
               kStudyTrialField: FieldValue.delete(),
               kStudyTrialChatLangField: FieldValue.delete(),
+              'practice_settings': FieldValue.delete(),
             });
     } catch (e) {
       _log('❌ [TRIAL-AUTHOR]', 'room_mark_failed $e');

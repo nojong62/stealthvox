@@ -36,6 +36,11 @@ void main() {
     expect(studyTrialRoomFields('German'), <String, dynamic>{
       kStudyTrialField: true,
       kStudyTrialChatLangField: 'German',
+      'practice_settings': kStudyTrialPracticeSettings,
+    });
+    expect(kStudyTrialPracticeSettings, <String, dynamic>{
+      'echoing': <String, dynamic>{'voice': 'google-female', 'repeat': 2},
+      'shadowing': <String, dynamic>{'voice': 'google-male', 'speed': 0.87},
     });
   });
 }
