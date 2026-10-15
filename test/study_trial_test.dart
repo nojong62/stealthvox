@@ -5,11 +5,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/study_trial.dart';
 
 void main() {
-  test('12개 언어, 한국어만 영어를 배운다', () {
+  test('한국어·중국어만 영어를 배우고 나머지 10개는 한국어', () {
     expect(kStudyTrialChatLanguages, hasLength(12));
     for (final lang in kStudyTrialChatLanguages) {
       expect(studyTrialLearnLangFor(lang),
-          lang == 'Korean' ? 'English' : 'Korean');
+          lang == 'Korean' || lang == 'Chinese' ? 'English' : 'Korean');
     }
   });
 
@@ -23,6 +23,10 @@ void main() {
     expect(studyTrialPairProblem(chatLang: 'Korean', learnLang: 'English'),
         isNull);
     expect(studyTrialPairProblem(chatLang: 'French', learnLang: 'Korean'),
+        isNull);
+    expect(studyTrialPairProblem(chatLang: 'Chinese', learnLang: 'English'),
+        isNull);
+    expect(studyTrialPairProblem(chatLang: 'Japanese', learnLang: 'Korean'),
         isNull);
     expect(studyTrialPairProblem(chatLang: 'Korean', learnLang: 'Japanese'),
         isNotNull);

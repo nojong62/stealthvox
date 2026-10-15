@@ -34,8 +34,9 @@ const FIXED_PRACTICE_SETTINGS = {
 // 원본에만 있는 표시. 사본에 남으면 사본이 다음 체험의 원본 후보가 된다.
 const MASTER_ONLY_FIELDS = ["study_trial", "study_trial_chat_lang"];
 
+// 한국어·중국어 → 영어, 나머지 10개 → 한국어 (2026-10-16 실장님).
 function learnLangFor(chatLang) {
-  return chatLang === "Korean" ? "English" : "Korean";
+  return chatLang === "Korean" || chatLang === "Chinese" ? "English" : "Korean";
 }
 
 /** 폰 언어 → 체험 Chat Lang. 목록 밖이면 영어. */

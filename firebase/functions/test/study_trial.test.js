@@ -10,9 +10,12 @@ const {
   pickMasterRoom,
 } = require("../study_trial");
 
-test("language pairs: Korean learns English, the other 11 learn Korean", () => {
+test("language pairs: Korean and Chinese learn English, the other 10 learn Korean", () => {
   assert.equal(learnLangFor("Korean"), "English");
+  assert.equal(learnLangFor("Chinese"), "English");
+  assert.equal(learnLangFor("English"), "Korean");
   assert.equal(learnLangFor("Japanese"), "Korean");
+  assert.equal(learnLangFor("French"), "Korean");
   assert.equal(chatLangForSystem("Dutch"), "Dutch");
   assert.equal(chatLangForSystem("Thai"), "English");
   assert.equal(chatLangForSystem(undefined), "English");

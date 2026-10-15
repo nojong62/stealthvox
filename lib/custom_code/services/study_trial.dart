@@ -7,10 +7,10 @@
 // 유저 눈에 안 보이는 `study_trial` 속성이 붙고, 체험 버튼은 그 방들 중에서
 // Chat Lang이 폰 시스템 언어와 맞는 하나를 불러온다.
 //
-// 언어 짝은 고정이다.
-//   Chat Lang 한국어      → Learn Lang 영어
-//   Chat Lang 나머지 11개 → Learn Lang 한국어
-// 폰 언어가 12개 밖이면 영어 대화를 연다(`systemUiLanguageName`의 대체와 같다).
+// 언어 짝은 고정이다(실장님, 2026-10-16).
+//   Chat Lang 한국어·중국어   → Learn Lang 영어
+//   Chat Lang 나머지 10개     → Learn Lang 한국어
+// 폰 언어가 12개 밖이면 영어 대화(→ 한국어)를 연다(`systemUiLanguageName`의 대체와 같다).
 // ====================================================================
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -39,8 +39,10 @@ const List<String> kStudyTrialChatLanguages = <String>[
 ];
 
 /// 이 Chat Lang의 체험 대화가 써야 하는 Learn Lang.
-String studyTrialLearnLangFor(String chatLang) =>
-    chatLang.trim() == 'Korean' ? 'English' : 'Korean';
+String studyTrialLearnLangFor(String chatLang) {
+  final chat = chatLang.trim();
+  return chat == 'Korean' || chat == 'Chinese' ? 'English' : 'Korean';
+}
 
 /// 폰 언어로 체험 대화의 Chat Lang을 고른다. 목록 밖이면 영어다.
 String studyTrialChatLangForSystem(String systemLanguage) =>
