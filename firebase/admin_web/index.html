@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>StealthVox Admin</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <strong>StealthVox Admin</strong>
+    <span id="who" class="muted"></span>
+    <button id="signOut" class="ghost" hidden>로그아웃</button>
+  </header>
+
+  <main>
+    <!-- 로그인 전 -->
+    <section id="gate" class="card center" hidden>
+      <p>관리자 구글 계정으로 로그인하세요.</p>
+      <button id="signIn">Google로 로그인</button>
+      <p id="gateMsg" class="error"></p>
+    </section>
+
+    <!-- 로그인 후 -->
+    <section id="console" hidden>
+      <form id="searchForm" class="search">
+        <input id="q" type="search" autocomplete="off" spellcheck="false"
+               placeholder="이메일 앞부분 또는 UID (비우면 최근 접속 30명)">
+        <button type="submit">검색</button>
+      </form>
+      <p id="status" class="muted"></p>
+
+      <div class="split">
+        <div id="results" class="list"></div>
+        <div id="detail" class="detail"></div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
