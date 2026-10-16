@@ -75,9 +75,17 @@ android {
     buildTypes {
         release {
             signingConfig signingConfigs.release
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // ⚙️ [R8] proguard-android.txt는 `-dontoptimize`를 품고 있어서 Flutter가
+            //   넣는 optimize 설정까지 통째로 꺼 버렸다(Play 권장 조치, 2026-10-16).
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+}
+
+// ⚙️ [R8] RevenueCat이 Amazon 스토어 모듈을 딸려 오는데, 그 모듈의 소비자 규칙에
+//   `-dontoptimize`가 있어 앱 전체 최적화가 꺼진다. Amazon 스토어는 쓰지 않는다.
+configurations.configureEach {
+    exclude group: 'com.revenuecat.purchases', module: 'purchases-store-amazon'
 }
 
 flutter {
