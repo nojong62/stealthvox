@@ -1795,7 +1795,8 @@ class _IntroMasterState extends State<IntroMaster>
       builder: (context, constraints) {
         final compact = constraints.maxHeight < 720;
         final veryCompact = constraints.maxHeight < 620;
-        final headlineSize = constraints.maxWidth < 350 ? 25.0 : 28.0;
+        // 체험·초대 두 버튼과 한 덩어리로 보이게 한 단계 작게(실장님, 2026-10-16).
+        final headlineSize = constraints.maxWidth < 350 ? 21.5 : 24.0;
         final headlineScaler = _cappedScaler(context, 1.15);
         final scaledHeadline = headlineScaler.scale(headlineSize);
         final storyGradient = const LinearGradient(
