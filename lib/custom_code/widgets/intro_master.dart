@@ -638,12 +638,14 @@ class _IntroMasterState extends State<IntroMaster>
     }
   }
 
+  /// null = 이 폰에 체험 기록 없음, 0 = 10분이 이미 끝남, 그 밖 = 남은 분.
   Future<int?> _studyTrialRemainingMinutes() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final expiresAtMs = prefs.getInt(_kStudyTrialExpiryKey) ?? 0;
+      final expiresAtMs = prefs.getInt(_kStudyTrialExpiryKey);
+      if (expiresAtMs == null) return null;
       final leftMs = expiresAtMs - DateTime.now().millisecondsSinceEpoch;
-      if (leftMs <= 0) return null;
+      if (leftMs <= 0) return 0;
       return (leftMs / 60000).ceil();
     } catch (_) {
       return null;
@@ -654,6 +656,14 @@ class _IntroMasterState extends State<IntroMaster>
     if (_startingStudyTrial) return;
     final remainingMinutes = await _studyTrialRemainingMinutes();
     if (!mounted) return;
+    // 이미 끝난 체험에 설명서를 다시 보여 주면 [체험 시작]을 눌러 본 뒤에야
+    // 끝난 걸 안다. 폰에 적힌 끝 시각이 지났으면 바로 알린다.
+    if (remainingMinutes == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(IntroWelcomePageCopy.forSystemLocale()[
+              'studyTrialUsed']!)));
+      return;
+    }
     final go = await _showStudyTrialGuide(remainingMinutes);
     if (go == true && mounted) await _startStudyTrial();
   }
