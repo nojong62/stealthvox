@@ -128,9 +128,10 @@ void main() async {
 
   await initFirebase();
   await FirebaseAppCheck.instance.activate(
-    androidProvider:
-        kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
-    appleProvider: AppleProvider.appAttest,
+    providerAndroid: kDebugMode
+        ? const AndroidDebugProvider()
+        : const AndroidPlayIntegrityProvider(),
+    providerApple: const AppleAppAttestProvider(),
   );
   KakaoSdk.init(nativeAppKey: '339271f4dd4676bb030cab2f45de5091');
 

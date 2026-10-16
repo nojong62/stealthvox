@@ -15,7 +15,7 @@ import 'index.dart'; // Imports other custom widgets
 // 📦 [Box 1: Imports 및 패키지]
 import '/auth/firebase_auth/auth_util.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart' hide Type;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';

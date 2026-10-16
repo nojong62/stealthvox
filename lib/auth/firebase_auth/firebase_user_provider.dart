@@ -24,11 +24,8 @@ class StealthVoxFirebaseUser extends BaseAuthUser {
 
   @override
   Future? updateEmail(String email) async {
-    try {
-      await user?.updateEmail(email);
-    } catch (_) {
-      await user?.verifyBeforeUpdateEmail(email);
-    }
+    // firebase_auth 6에서 updateEmail이 빠졌다. 확인 메일을 거치는 길만 남았다.
+    await user?.verifyBeforeUpdateEmail(email);
   }
 
   @override
