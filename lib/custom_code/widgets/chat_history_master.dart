@@ -4309,7 +4309,10 @@ RULES — follow exactly:
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (_isTrialAuthor && _isTrialMasterRoom) _buildTrialPrepButton(),
+          if (_isTrialAuthor &&
+              _isTrialMasterRoom &&
+              !studyTrialRoomPrepared(_cachedRoomData))
+            _buildTrialPrepButton(),
           ValueListenableBuilder<int>(
             valueListenable: BillingTicker.instance.billingState,
             builder: (_, s, __) => GestureDetector(
@@ -7609,6 +7612,7 @@ RULES — follow exactly:
       final target = _sessionTargetLangName();
       final allStyles = allAltStyles(target);
       int made = 0;
+      int altMissing = 0;
       final docs = List<DocumentSnapshot>.of(_cachedDocs);
       for (int i = 0; i < docs.length; i++) {
         if (!mounted) return;
@@ -7626,6 +7630,7 @@ RULES — follow exactly:
           styles: missing,
           targetLang: target,
         );
+        if (missing.any((s) => !fetched.containsKey(s))) altMissing++;
         if (fetched.isEmpty) continue;
         await docs[i].reference.update(<String, dynamic>{
           kAltStylesField: <String, String>{...cached, ...fetched},
@@ -7651,8 +7656,20 @@ RULES — follow exactly:
         final pcm = await _getP3OriginalPcm(essay, forceTrialUpload: true);
         if (pcm != null && pcm.isNotEmpty) sounds++;
       }
+      // 빠진 것 없이 다 갖춰졌을 때만 준비 완료로 적는다. 그 뒤로 🪄은 사라진다.
+      if (altMissing == 0 && sounds == 3) {
+        await widget.historyDoc.update(<String, dynamic>{
+          kStudyTrialPreparedField: FieldValue.serverTimestamp(),
+        });
+        _cachedRoomData = <String, dynamic>{
+          ...?_cachedRoomData,
+          kStudyTrialPreparedField: Timestamp.now(),
+        };
+      }
       _setTrialPrep('완료 · 다른 표현 $made줄 · 소리 $sounds/3');
-      _showRoomEntryToast('체험 준비 완료 · 다른 표현 $made줄 · 소리 $sounds/3');
+      _showRoomEntryToast(altMissing == 0 && sounds == 3
+          ? '체험 준비 완료 · 다른 표현 $made줄 · 소리 $sounds/3'
+          : '체험 준비 덜 됨 · 다른 표현 빠짐 $altMissing줄 · 소리 $sounds/3 — 다시 눌러 주세요');
     } catch (e) {
       _setTrialPrep('실패: $e');
       _showRoomEntryToast('체험 준비 실패: $e');

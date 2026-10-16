@@ -47,4 +47,16 @@ void main() {
       'shadowing': <String, dynamic>{'voice': 'google-male', 'speed': 0.87},
     });
   });
+
+  test('준비 완료 표시가 있어야만 준비된 원본이다', () {
+    expect(studyTrialRoomPrepared(null), isFalse);
+    expect(studyTrialRoomPrepared(<String, dynamic>{kStudyTrialField: true}),
+        isFalse);
+    expect(
+        studyTrialRoomPrepared(<String, dynamic>{
+          kStudyTrialField: true,
+          kStudyTrialPreparedField: DateTime(2026, 10, 16),
+        }),
+        isTrue);
+  });
 }

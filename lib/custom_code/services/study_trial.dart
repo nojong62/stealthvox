@@ -66,6 +66,14 @@ String? studyTrialPairProblem({
   return null;
 }
 
+/// 원본 준비(🪄)가 끝까지 성공한 시각. ESSAY·다른 표현 전 줄·연습 소리 3벌이
+/// 모두 갖춰졌을 때만 적는다. 이 값이 있으면 운영자 화면에서도 🪄을 그리지 않는다.
+const String kStudyTrialPreparedField = 'study_trial_prepared_at';
+
+/// 원본 준비가 끝난 방인가.
+bool studyTrialRoomPrepared(Map<String, dynamic>? room) =>
+    room?[kStudyTrialPreparedField] != null;
+
 /// 서버가 체험자 계정에 복사한 사본에 붙이는 표시(`study_trial.js`).
 const String kStudyTrialCopyField = 'study_trial_copy';
 
