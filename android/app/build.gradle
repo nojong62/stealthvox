@@ -106,6 +106,6 @@ dependencies {
     //   플러그인을 올릴 때 이 줄도 같이 확인할 것.
     compileOnly 'io.github.webrtc-sdk:android:144.7559.09'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.1.0"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.3.0"
     implementation "com.android.installreferrer:installreferrer:2.2"
 }
