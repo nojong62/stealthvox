@@ -734,6 +734,19 @@ class _IntroMasterState extends State<IntroMaster>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // ⏱ 시간은 맨 위에 둔다. 닫아도 시계는 서버에서 계속 돌기
+                        //   때문에, 읽기 전에 먼저 알아야 한다(실장님, 2026-10-16).
+                        Container(
+                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+                          decoration: BoxDecoration(
+                            color: (resuming ? Colors.orangeAccent : teal)
+                                .withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: row(Icons.timer_outlined,
+                              resuming ? Colors.orangeAccent : teal, timeBody),
+                        ),
+                        const SizedBox(height: 14),
                         Text(copy['lead']!,
                             style: const TextStyle(
                                 color: Colors.white70,
@@ -754,10 +767,6 @@ class _IntroMasterState extends State<IntroMaster>
                         section(copy['tipTitle']!, [
                           row(Icons.volume_down_rounded, Colors.white54,
                               copy['tip']!),
-                        ]),
-                        section(copy['timeTitle']!, [
-                          row(Icons.timer_outlined,
-                              resuming ? Colors.orangeAccent : teal, timeBody),
                         ]),
                       ],
                     ),
