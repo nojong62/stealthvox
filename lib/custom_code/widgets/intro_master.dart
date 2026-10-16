@@ -25,6 +25,8 @@ import '/custom_code/services/duo_board_intro_notice.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/system_ui_language.dart';
 import 'package:android_id/android_id.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'alt_style_popup.dart' show kAltStyleAccent;
 import 'study_trial_page.dart';
 
 enum IntroScreen { welcome, auth, accountDiscovery }
@@ -587,6 +589,8 @@ class _IntroMasterState extends State<IntroMaster>
       if (roomId.isEmpty || remaining <= 0) {
         failure = copy['studyTrialFailed'];
       } else if (mounted) {
+        await _rememberStudyTrialExpiry(remaining);
+        if (!mounted) return;
         await Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => StudyTrialPage(
             historyRef: FirebaseFirestore.instance
@@ -615,6 +619,178 @@ class _IntroMasterState extends State<IntroMaster>
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(failure)));
     }
+  }
+
+  // ── 🎟️ [STUDY-TRIAL] 체험 설명서 ────────────────────────────────────
+  //   10분은 서버를 부르는 순간 시작된다(`startStudyTrial`). 그래서 설명서는
+  //   서버보다 **먼저** 띄우고, [체험 시작]을 눌러야 서버를 부른다.
+  //   다시 들어오는 사람인지는 서버를 불러야 알 수 있으니, 끝 시각을 폰에 적어
+  //   두고 그걸로 "남은 시간" 문구만 바꾼다. 판정은 늘 서버가 한다.
+  static const String _kStudyTrialExpiryKey = 'study_trial_expires_at_ms';
+
+  Future<void> _rememberStudyTrialExpiry(int remainingSeconds) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kStudyTrialExpiryKey,
+          DateTime.now().millisecondsSinceEpoch + remainingSeconds * 1000);
+    } catch (e) {
+      debugPrint('[STUDY-TRIAL] expiry save failed $e');
+    }
+  }
+
+  Future<int?> _studyTrialRemainingMinutes() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final expiresAtMs = prefs.getInt(_kStudyTrialExpiryKey) ?? 0;
+      final leftMs = expiresAtMs - DateTime.now().millisecondsSinceEpoch;
+      if (leftMs <= 0) return null;
+      return (leftMs / 60000).ceil();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _onStudyTrialTap() async {
+    if (_startingStudyTrial) return;
+    final remainingMinutes = await _studyTrialRemainingMinutes();
+    if (!mounted) return;
+    final go = await _showStudyTrialGuide(remainingMinutes);
+    if (go == true && mounted) await _startStudyTrial();
+  }
+
+  Future<bool?> _showStudyTrialGuide(int? remainingMinutes) {
+    final copy = StudyTrialGuideCopy.forSystemLocale();
+    const teal = Color(0xFF45CDBD);
+    final resuming = remainingMinutes != null;
+    final timeBody = resuming
+        ? copy['resumeTime']!.replaceAll('{m}', '$remainingMinutes')
+        : copy['time']!;
+
+    Widget section(String title, List<Widget> rows) => Padding(
+          padding: const EdgeInsets.only(top: 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14)),
+              const SizedBox(height: 8),
+              ...rows,
+            ],
+          ),
+        );
+
+    Widget row(IconData icon, Color color, String text) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Icon(icon, color: color, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(text,
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 13, height: 1.5)),
+              ),
+            ],
+          ),
+        );
+
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: const Color(0xFF1C1C1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520, maxHeight: 680),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  const Icon(Icons.auto_stories_rounded, color: teal, size: 26),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(copy['title']!,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18)),
+                  ),
+                ]),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(copy['lead']!,
+                            style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                                height: 1.5)),
+                        section(copy['bubbleTitle']!, [
+                          row(Icons.school_rounded, Colors.deepPurpleAccent,
+                              copy['tutoring']!),
+                          row(Icons.swap_horiz_rounded, kAltStyleAccent,
+                              copy['altExpr']!),
+                        ]),
+                        section(copy['speakTitle']!, [
+                          row(Icons.swap_horiz_rounded,
+                              const Color(0xFF4ADE80), copy['practice']!),
+                          row(Icons.record_voice_over_rounded,
+                              const Color(0xFF38BDF8), copy['essay']!),
+                        ]),
+                        section(copy['tipTitle']!, [
+                          row(Icons.volume_down_rounded, Colors.white54,
+                              copy['tip']!),
+                        ]),
+                        section(copy['timeTitle']!, [
+                          row(Icons.timer_outlined,
+                              resuming ? Colors.orangeAccent : teal, timeBody),
+                        ]),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(false),
+                      child: Text(copy['close']!,
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 15)),
+                    ),
+                    const SizedBox(width: 4),
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(true),
+                      child: Text(
+                          resuming ? copy['resume']! : copy['start']!,
+                          style: const TextStyle(
+                              color: teal,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   /// Duo 초대 버튼과 짝. **같은 색, 반대 구조**다(실장님, 2026-10-16).
@@ -653,7 +829,7 @@ class _IntroMasterState extends State<IntroMaster>
               color: Colors.transparent,
               borderRadius: BorderRadius.circular(99),
               child: InkWell(
-                onTap: _startingStudyTrial ? null : _startStudyTrial,
+                onTap: _startingStudyTrial ? null : _onStudyTrialTap,
                 borderRadius: BorderRadius.circular(99),
                 child: Padding(
                   padding:
