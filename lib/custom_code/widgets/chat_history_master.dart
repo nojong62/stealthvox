@@ -3339,7 +3339,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     return name.isEmpty ? 'English' : name;
   }
 
-  /// 이 세션의 CHAT(원문) 언어 이름. 비어 있으면 한국어로 본다.
+  /// 이 세션의 CHAT(원문) 언어 이름. 비어 있으면 영어로 본다.
   ///
   /// 🎓 [TUTORING] 튜터링은 **원문 언어로 준 문장을 배울 언어로 말해 보는**
   ///   연습이다. 그래서 두 이름이 다 필요하다 — 예전에는 원문=한국어,
