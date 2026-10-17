@@ -371,6 +371,10 @@ exports.deductRemainingTime = functions.https.onCall(async (data, context) => {
 //
 // Grants a one-time signup bonus during the test period. The client may call
 // this after Google/Kakao auth, but the server owns the idempotency check.
+//
+// The bonus is 0 since 2026-10-17: new members try the app through the Study
+// Room trial instead. The call still marks signup_bonus_given, because the
+// client reads that flag to tell a returning member from a new one.
 // ----------------------------------------------------------------------------
 exports.grantSignupBonus = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
@@ -388,7 +392,7 @@ exports.grantSignupBonus = functions.https.onCall(async (data, context) => {
     );
   }
   const userRef = admin.firestore().doc("users/" + uid);
-  const bonusSeconds = 5 * 60; // 5 minutes
+  const bonusSeconds = 0;
 
   const result = await admin.firestore().runTransaction(async (tx) => {
     const snap = await tx.get(userRef);
@@ -420,7 +424,7 @@ exports.grantSignupBonus = functions.https.onCall(async (data, context) => {
       after: updated,
     });
 
-    return { granted: true, remainingTime: updated };
+    return { granted: bonusSeconds > 0, remainingTime: updated };
   });
 
   return result;
