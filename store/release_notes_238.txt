@@ -1,0 +1,23 @@
+<en-US>
+Welcome to StealthVox! Practice real conversations by voice.
+
+• Circle Talk: chat with AI friends who remember you
+• Scenario Talk: rehearse real-life situations
+• Duo: talk with a real partner, with live interpretation
+• Study Room: review your talks with corrections
+• Echoing, Shadowing, and natural voices
+
+Thanks for joining. Your feedback helps us improve!
+</en-US>
+
+<ko-KR>
+StealthVox에 오신 것을 환영합니다. 실제 대화처럼 말하며 연습하는 공간이에요.
+
+• 서클톡: 내 말을 기억하는 AI 친구들과 자유롭게 대화
+• 시나리오톡: 카페부터 면접까지 실제 상황을 미리 연습
+• Duo: 실제 상대와 대화하고, 언어가 달라도 실시간 통역
+• 공부방: 대화를 다시 보며 교정과 자연스러운 표현 익히기
+• 에코잉·쉐도잉, 자연스러운 목소리로 연습
+
+함께해 주셔서 감사합니다. 의견을 남겨 주시면 더 좋아집니다!
+</ko-KR>
