@@ -101,6 +101,11 @@ exports.adminSetBlocked = adminOps.adminSetBlocked;
 const studyTrial = require("./study_trial").createStudyTrial({admin});
 exports.startStudyTrial = studyTrial.startStudyTrial;
 
+// 헬스체크(자가진단) — 매일 07:00 KST + 관리자 수동 실행. firebase/functions/health_check.js
+const healthCheck = require("./health_check");
+exports.dailyHealthCheck = healthCheck.dailyHealthCheck;
+exports.runHealthCheckNow = healthCheck.runHealthCheckNow;
+
 
 async function verifyGoogleOAuthIdToken(idToken) {
   if (!idToken || typeof idToken !== "string") {
