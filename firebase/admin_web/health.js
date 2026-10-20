@@ -73,7 +73,9 @@ async function loadRuns() {
       return el("tr", {},
         el("td", {}, fmtTime(r.ranAt)),
         el("td", {}, r.trigger === "manual" ? "수동" : "자동"),
-        el("td", {}, el("strong", {class: r.ok ? "ok" : "error"}, r.ok ? "정상" : "실패")),
+        el("td", {}, el("strong", {class: r.ok ? "ok" : "error"}, r.ok ? "정상" : "실패"),
+          r.alert ? el("div", {class: r.alert.sent ? "muted" : "error"},
+            r.alert.sent ? "메일 보냄" : `메일 실패 ${r.alert.code}`) : null),
         CHECK_COLUMNS.map((name) => checkCell(byName.get(name))));
     });
     $("runs").replaceChildren(...rows);

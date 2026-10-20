@@ -11,6 +11,8 @@
 //   · 모델·reasoning·토큰 예산은 앱과 같아야 의미가 있다. 앱의
 //     kDialogBrainModel(dialog_brain_model.dart)이나 max_completion_tokens를
 //     바꾸면 여기도 바꾼다.
+//   · 실패하면 메일 한 통(firestore-send-email 확장이 mail 컬렉션을 보고 보낸다).
+//     정상이면 아무것도 보내지 않는다.
 
 const {HttpsError, onCall} = require("firebase-functions/v2/https");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
@@ -26,6 +28,11 @@ const REASONING_EFFORT = "low";
 const MAX_COMPLETION_TOKENS = 400;
 // 정상이어도 이보다 느리면 slow로 표시한다. 앱 타임아웃(15·20초)보다 한참 앞이다.
 const SLOW_MS = 8000;
+
+const ALERT_TO = ["nisiekorea@gmail.com"];
+const ADMIN_URL = "https://stealthvox-admin.web.app/health.html";
+
+const LABELS = {scenario_recommend: "시나리오톡 추천", circle_recommend: "서클톡 추천"};
 
 const CHECKS = [
   {
@@ -121,8 +128,18 @@ async function runCheck(check, {apiKey, fetchImpl = fetch, nowMs = Date.now}) {
   }
 }
 
-/** 모든 항목을 돌리고 health_checks에 한 줄 남긴다. */
-async function runHealthCheck({db, apiKey, trigger, fetchImpl, nowMs}) {
+/** 실패 알림 본문. 무엇이 왜 깨졌는지만. */
+function failureText(checks) {
+  const lines = checks.filter((c) => !c.ok)
+    .map((c) => `· ${LABELS[c.name] || c.name}: ${c.code} (${(c.latencyMs / 1000).toFixed(1)}초)`);
+  return "[StealthVox 헬스체크] 실패\n" + lines.join("\n");
+}
+
+/**
+ * 모든 항목을 돌리고 health_checks에 한 줄 남긴다.
+ * 실패가 있으면 notify(text)를 부르고 그 결과도 같은 줄에 적는다.
+ */
+async function runHealthCheck({db, apiKey, trigger, fetchImpl, nowMs, notify}) {
   const checks = [];
   for (const check of CHECKS) {
     // 순서대로 부른다. 동시에 부르면 한쪽 지연이 다른 쪽 판정을 흐린다.
@@ -134,17 +151,39 @@ async function runHealthCheck({db, apiKey, trigger, fetchImpl, nowMs}) {
     ok: checks.every((c) => c.ok),
     failed: checks.filter((c) => !c.ok).map((c) => c.name + ":" + c.code),
     checks,
+    alert: null,
   };
+  if (!record.ok && notify) record.alert = await notify(failureText(checks));
   const ref = await db.collection(COLLECTION).add(record);
-  return {id: ref.id, ok: record.ok, failed: record.failed, checks};
+  return {id: ref.id, ok: record.ok, failed: record.failed, alert: record.alert, checks};
+}
+
+/** mail 컬렉션에 한 통 넣는다. 실제 발송 결과는 확장이 그 문서의 delivery에 적는다. */
+function mailNotifier(db) {
+  return async (text) => {
+    try {
+      const ref = await db.collection("mail").add({
+        to: ALERT_TO,
+        message: {
+          subject: "[StealthVox] 헬스체크 실패",
+          text: text + "\n\n" + ADMIN_URL,
+        },
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return {sent: true, code: "QUEUED", mailId: ref.id};
+    } catch (_) {
+      return {sent: false, code: "QUEUE_FAILED"};
+    }
+  };
 }
 
 const dailyHealthCheck = onSchedule(
   {schedule: "0 7 * * *", timeZone: "Asia/Seoul", region: REGION,
     timeoutSeconds: 120, secrets: [openAiApiKey]},
   async () => {
-    await runHealthCheck({db: admin.firestore(), apiKey: openAiApiKey.value(),
-      trigger: "schedule"});
+    const db = admin.firestore();
+    await runHealthCheck({db, apiKey: openAiApiKey.value(), trigger: "schedule",
+      notify: mailNotifier(db)});
   },
 );
 
@@ -156,14 +195,17 @@ const runHealthCheckNow = onCall(
     if (!auth || !auth.token || auth.token.admin !== true) {
       throw new HttpsError("permission-denied", "Admin only.");
     }
-    return runHealthCheck({db: admin.firestore(), apiKey: openAiApiKey.value(),
-      trigger: "manual"});
+    const db = admin.firestore();
+    return runHealthCheck({db, apiKey: openAiApiKey.value(), trigger: "manual",
+      notify: mailNotifier(db)});
   },
 );
 
 module.exports = {
   CHECKS,
   dailyHealthCheck,
+  failureText,
+  mailNotifier,
   runCheck,
   runHealthCheck,
   runHealthCheckNow,

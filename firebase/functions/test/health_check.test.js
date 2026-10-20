@@ -69,3 +69,39 @@ test("one run writes one record listing what failed", async () => {
   assert.deepEqual(summary.failed, ["scenario_recommend:MISSING_FIELDS"]);
   assert.equal(written[0].trigger, "manual");
 });
+
+test("a failing run notifies once and records the alert; a passing run stays quiet", async () => {
+  const written = [];
+  const db = {collection: () => ({add: async (doc) => { written.push(doc); return {id: "r"}; }})};
+  const texts = [];
+  const notify = async (text) => { texts.push(text); return {sent: true, code: "SENT"}; };
+  await runHealthCheck({db, apiKey: "k", trigger: "schedule", notify,
+    fetchImpl: reply("", "stop", 500)});
+  assert.equal(texts.length, 1);
+  assert.match(texts[0], /HTTP_500/);
+  assert.deepEqual(written[0].alert, {sent: true, code: "SENT"});
+
+  await runHealthCheck({db, apiKey: "k", trigger: "schedule", notify,
+    fetchImpl: reply("{\"name\":\"a\",\"situation\":\"b\",\"ai_role\":\"c\",\"user_role\":\"d\"}")});
+  assert.equal(texts.length, 1);
+  assert.equal(written[1].alert, null);
+});
+
+test("the mail notifier queues one message for the extension", async () => {
+  const {mailNotifier} = require("../health_check");
+  const added = [];
+  const db = {collection: (name) => ({add: async (doc) => { added.push([name, doc]); return {id: "m1"}; }})};
+  const result = await mailNotifier(db)("[StealthVox 헬스체크] 실패\n· 서클톡 추천: TIMEOUT (15.0초)");
+  assert.deepEqual(result, {sent: true, code: "QUEUED", mailId: "m1"});
+  assert.equal(added[0][0], "mail");
+  assert.deepEqual(added[0][1].to, ["nisiekorea@gmail.com"]);
+  assert.match(added[0][1].message.text, /TIMEOUT[\s\S]*health\.html$/);
+});
+
+test("failure text names the broken mode in Korean", () => {
+  const {failureText} = require("../health_check");
+  assert.equal(failureText([
+    {name: "scenario_recommend", ok: false, code: "HTTP_429", latencyMs: 1200},
+    {name: "circle_recommend", ok: true, code: "OK", latencyMs: 900},
+  ]), "[StealthVox 헬스체크] 실패\n· 시나리오톡 추천: HTTP_429 (1.2초)");
+});
