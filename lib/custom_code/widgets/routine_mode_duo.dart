@@ -23,7 +23,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 // 진단 로그를 개발 빌드에서만 남기기 위한 것. 이 파일의 다른 import들과
@@ -6493,13 +6492,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                     style: const TextStyle(color: Colors.white)),
                 onTap: () => Navigator.pop(sheetContext, 'share'),
               ),
-              ListTile(
-                leading: const Icon(Icons.chat_rounded,
-                    color: Color(0xFF25D366)),
-                title: Text(inviteCopy['whatsapp'],
-                    style: const TextStyle(color: Colors.white)),
-                onTap: () => Navigator.pop(sheetContext, 'whatsapp'),
-              ),
               if (chosenMode == kDuoModeInterpreter &&
                   FirebaseAuth.instance.currentUser?.isAnonymous == false)
                 ListTile(
@@ -6519,25 +6511,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       if (!mounted || destination == null) return;
       if (destination == 'copy') {
         await Clipboard.setData(ClipboardData(text: inviteLink));
-      } else if (destination == 'share' || destination == 'whatsapp') {
+      } else if (destination == 'share') {
         // 직접 대화 초대는 호스트(ORIGIN) 언어의 안내문을 그대로 쓴다.
         // 만능 통역 초대만은 초대받는 사람이 먼저 읽을 문구이므로, 호스트가
         // 고른 TARGET 언어로 코드 위의 안내문을 만든다.
         final shareIntro = chosenMode == kDuoModeInterpreter
             ? modePickerTextFor(_myTarget())['inviteShareText']
             : t['inviteShareText'];
-        final message = '$shareIntro\n$inviteLink';
-        // 💬 wa.me는 앱이 있으면 왓츠앱 대화 선택으로, 없으면 웹으로 연다.
-        //   못 열면 시스템 공유로 넘긴다 — 초대는 어떻게든 나가야 한다.
-        final bool sentByWhatsApp = destination == 'whatsapp' &&
-            await launchUrl(
-              Uri.parse('https://wa.me/')
-                  .replace(queryParameters: {'text': message}),
-              mode: LaunchMode.externalApplication,
-            ).catchError((_) => false);
-        if (!sentByWhatsApp) {
-          await Share.share(message, subject: t['inviteShareSubject']);
-        }
+        await Share.share('$shareIntro\n$inviteLink',
+            subject: t['inviteShareSubject']);
       } else if (destination == 'board') {
         await _ensureHistoryRef();
         if (_myHistoryRef == null) {
