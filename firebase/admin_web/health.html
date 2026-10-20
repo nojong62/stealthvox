@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>헬스체크</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <strong>헬스체크</strong>
+    <span id="who" class="muted"></span>
+    <a href="index.html" class="muted">회원 관리</a>
+  </header>
+
+  <main>
+    <section id="gate" class="card center" hidden>
+      <p>관리자 구글 계정으로 로그인하세요.</p>
+      <button id="signIn">Google로 로그인</button>
+      <p id="gateMsg" class="error"></p>
+    </section>
+
+    <section id="console" hidden>
+      <div class="inline">
+        <button id="runNow">지금 실행</button>
+        <span id="status" class="muted"></span>
+      </div>
+      <p id="stale" class="error" hidden></p>
+      <div class="card" style="margin-top:12px; overflow-x:auto">
+        <table>
+          <thead>
+            <tr><th>실행 시각</th><th>방식</th><th>결과</th><th>시나리오톡 추천</th><th>서클톡 추천</th></tr>
+          </thead>
+          <tbody id="runs"></tbody>
+        </table>
+      </div>
+      <p class="muted">매일 07:00(KST) 자동 실행. 서버 키·모델·응답 형식·지연만 본다 — 앱 코드 고장은 여기 안 잡힌다.</p>
+    </section>
+  </main>
+
+  <script type="module" src="health.js"></script>
+</body>
+</html>
