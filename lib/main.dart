@@ -177,6 +177,12 @@ class MyAppScrollBehavior extends MaterialScrollBehavior {
         PointerDeviceKind.touch,
         PointerDeviceKind.mouse,
       };
+
+  // 끝에 닿을 때 번지는 반 타원 빛(안드로이드 glow)을 그리지 않는다.
+  @override
+  Widget buildOverscrollIndicator(
+          BuildContext context, Widget child, ScrollableDetails details) =>
+      child;
 }
 
 class _MyAppState extends State<MyApp> {
