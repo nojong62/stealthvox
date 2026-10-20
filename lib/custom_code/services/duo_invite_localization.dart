@@ -15,7 +15,7 @@ class DuoInviteCopy {
   static const _english = <String, String>{
     'inviteMethod': 'Invite options',
     'copyLink': 'Copy link',
-    'share': 'Share · includes KakaoTalk',
+    'share': 'Share',
     'postToBoard': 'Post to Duo board',
     'postToBoardDetail': 'Your room stays private. Add only a topic.',
     'boardTitle': 'Duo Interpreter Invite Board',
@@ -78,7 +78,7 @@ class DuoInviteCopy {
     'Korean': {
       'inviteMethod': '초대 방법',
       'copyLink': '링크 복사',
-      'share': '공유하기 · 카카오톡 포함',
+      'share': '공유하기',
       'postToBoard': 'Duo 게시판에 올리기',
       'postToBoardDetail': '방 정보는 비공개입니다. 주제만 입력하세요.',
       'boardTitle': 'Duo 통역 초대 게시판',
@@ -135,7 +135,7 @@ class DuoInviteCopy {
     'Japanese': {
       'inviteMethod': '招待方法',
       'copyLink': 'リンクをコピー',
-      'share': '共有 · KakaoTalkを含む',
+      'share': '共有',
       'postToBoard': 'Duo掲示板に投稿',
       'postToBoardDetail': 'ルーム情報は非公開です。話題だけ入力してください。',
       'boardTitle': 'Duo 招待掲示板',
@@ -179,7 +179,7 @@ class DuoInviteCopy {
     'Chinese': {
       'inviteMethod': '邀请方式',
       'copyLink': '复制链接',
-      'share': '分享 · 包含 KakaoTalk',
+      'share': '分享',
       'postToBoard': '发布到 Duo 公告板',
       'postToBoardDetail': '房间信息不会公开，只需填写话题。',
       'boardTitle': 'Duo 邀请公告板',
@@ -223,7 +223,7 @@ class DuoInviteCopy {
     'Spanish': {
       'inviteMethod': 'Opciones de invitación',
       'copyLink': 'Copiar enlace',
-      'share': 'Compartir · incluye KakaoTalk',
+      'share': 'Compartir',
       'postToBoard': 'Publicar en el tablón Duo',
       'postToBoardDetail': 'Tu sala sigue siendo privada. Añade solo un tema.',
       'boardTitle': 'Tablón de invitaciones Duo',
@@ -274,7 +274,7 @@ class DuoInviteCopy {
     'French': {
       'inviteMethod': 'Options d’invitation',
       'copyLink': 'Copier le lien',
-      'share': 'Partager · inclut KakaoTalk',
+      'share': 'Partager',
       'postToBoard': 'Publier sur le tableau Duo',
       'postToBoardDetail':
           'Votre salon reste privé. Ajoutez seulement un sujet.',
@@ -326,7 +326,7 @@ class DuoInviteCopy {
     'German': {
       'inviteMethod': 'Einladungsoptionen',
       'copyLink': 'Link kopieren',
-      'share': 'Teilen · einschließlich KakaoTalk',
+      'share': 'Teilen',
       'postToBoard': 'Auf Duo-Pinnwand posten',
       'postToBoardDetail': 'Dein Raum bleibt privat. Gib nur ein Thema ein.',
       'boardTitle': 'Duo-Einladungsboard',
@@ -378,7 +378,7 @@ class DuoInviteCopy {
     'Hindi': {
       'inviteMethod': 'निमंत्रण विकल्प',
       'copyLink': 'लिंक कॉपी करें',
-      'share': 'शेयर करें · KakaoTalk सहित',
+      'share': 'शेयर करें',
       'postToBoard': 'Duo बोर्ड पर पोस्ट करें',
       'postToBoardDetail': 'आपका रूम निजी रहता है। केवल विषय जोड़ें।',
       'boardTitle': 'Duo निमंत्रण बोर्ड',
@@ -428,7 +428,7 @@ class DuoInviteCopy {
     'Russian': {
       'inviteMethod': 'Способы приглашения',
       'copyLink': 'Копировать ссылку',
-      'share': 'Поделиться · включая KakaoTalk',
+      'share': 'Поделиться',
       'postToBoard': 'Опубликовать на доске Duo',
       'postToBoardDetail':
           'Ваша комната останется приватной. Укажите только тему.',
@@ -478,7 +478,7 @@ class DuoInviteCopy {
     'Portuguese': {
       'inviteMethod': 'Opções de convite',
       'copyLink': 'Copiar link',
-      'share': 'Compartilhar · inclui KakaoTalk',
+      'share': 'Compartilhar',
       'postToBoard': 'Publicar no mural Duo',
       'postToBoardDetail':
           'Sua sala continua privada. Adicione apenas um tema.',
@@ -529,7 +529,7 @@ class DuoInviteCopy {
     'Italian': {
       'inviteMethod': 'Opzioni di invito',
       'copyLink': 'Copia link',
-      'share': 'Condividi · include KakaoTalk',
+      'share': 'Condividi',
       'postToBoard': 'Pubblica sulla bacheca Duo',
       'postToBoardDetail':
           'La tua stanza resta privata. Aggiungi solo un argomento.',
@@ -581,7 +581,7 @@ class DuoInviteCopy {
     'Dutch': {
       'inviteMethod': 'Uitnodigingsopties',
       'copyLink': 'Link kopiëren',
-      'share': 'Delen · inclusief KakaoTalk',
+      'share': 'Delen',
       'postToBoard': 'Op Duo-bord plaatsen',
       'postToBoardDetail':
           'Je kamer blijft privé. Voeg alleen een onderwerp toe.',
