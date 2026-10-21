@@ -33,6 +33,21 @@ function validatePurchaseEvent(event, products) {
   };
 }
 
+// RevenueCat이 보내는 실제 결제 금액. price는 USD로 환산한 값,
+// price_in_purchased_currency와 currency는 사용자가 실제로 낸 돈이다.
+// 173개국이 나라별 가격이라 상품 가격표로는 맞출 수 없어 이벤트 값을 그대로 남긴다.
+// 없는 이벤트도 있으므로 숫자가 아니면 null.
+function paidAmount(event) {
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const text = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  return {
+    price_usd: num(event.price),
+    price_paid: num(event.price_in_purchased_currency),
+    currency: text(event.currency),
+    country_code: text(event.country_code),
+  };
+}
+
 function sandboxUidIsAllowed(config, uid) {
   if (!config || config.enabled === false || !Array.isArray(config.allowed_uids)) {
     return false;
@@ -94,6 +109,7 @@ async function processRevenueCatPurchase({
       source: "revenuecat_webhook",
       event_type: event.type,
       environment,
+      ...paidAmount(event),
       purchased_at: serverTimestamp(),
     };
     tx.set(purchaseRef, purchaseData);
@@ -106,12 +122,19 @@ async function processRevenueCatPurchase({
       typeof memberData.totalSecondsPurchased === "number"
         ? memberData.totalSecondsPurchased
         : 0;
+    const totalSpentUsd =
+      typeof memberData.totalSpentUsd === "number" ? memberData.totalSpentUsd : 0;
+    const priceUsd = purchaseData.price_usd || 0;
     tx.set(realMemberRef, {
       uid: appUserId,
       isRealMember: true,
       hasPurchase: true,
       purchaseCount: purchaseCount + 1,
       totalSecondsPurchased: totalSecondsPurchased + product.seconds,
+      // 소수점 누적 오차를 센트 단위로 끊는다.
+      totalSpentUsd: Math.round((totalSpentUsd + priceUsd) * 100) / 100,
+      lastPricePaid: purchaseData.price_paid,
+      lastCurrency: purchaseData.currency,
       lastPurchasedAt: serverTimestamp(),
       lastProductId: productId,
       lastPurchaseEnvironment: environment,
@@ -131,6 +154,7 @@ async function processRevenueCatPurchase({
 
 module.exports = {
   SANDBOX_ALLOWLIST_PATH,
+  paidAmount,
   processRevenueCatPurchase,
   sandboxUidIsAllowed,
   validatePurchaseEvent,

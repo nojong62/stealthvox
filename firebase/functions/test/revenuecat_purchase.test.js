@@ -149,3 +149,35 @@ test("unsupported environment is rejected", async () => {
   assert.equal(result.reason, "unsupported_environment");
   assert.equal(db.docs.get("users/tester-uid").remainingTime, 0);
 });
+
+test("the amount actually paid is stored and USD spend accumulates per member", async () => {
+  const db = new FakeFirestore({"users/payer": {remainingTime: 0}});
+  await process(db, {
+    id: "e1", app_user_id: "payer", environment: "PRODUCTION",
+    price: 2.19, price_in_purchased_currency: 3000, currency: "KRW", country_code: "KR",
+  });
+  await process(db, {
+    id: "e2", app_user_id: "payer", environment: "PRODUCTION",
+    price: 0.99, price_in_purchased_currency: 0.99, currency: "USD", country_code: "US",
+  });
+  const purchase = db.docs.get("real_members/payer/purchases/e1");
+  assert.equal(purchase.price_usd, 2.19);
+  assert.equal(purchase.price_paid, 3000);
+  assert.equal(purchase.currency, "KRW");
+  assert.equal(purchase.country_code, "KR");
+  const member = db.docs.get("real_members/payer");
+  assert.equal(member.totalSpentUsd, 3.18);
+  assert.equal(member.lastCurrency, "USD");
+});
+
+test("events without price keep null amounts and add nothing to spend", async () => {
+  const db = new FakeFirestore({
+    "users/tester-uid": {remainingTime: 0},
+    [SANDBOX_ALLOWLIST_PATH]: {allowed_uids: ["tester-uid"]},
+  });
+  await process(db);
+  const purchase = db.docs.get("users/tester-uid/purchases/event-1");
+  assert.equal(purchase.price_usd, null);
+  assert.equal(purchase.currency, null);
+  assert.equal(db.docs.get("real_members/tester-uid").totalSpentUsd, 0);
+});

@@ -41,12 +41,13 @@ let allCursor = null;
 // 테스트·차단 표시는 수가 적으니 한 번에 읽어 두고 목록 태그에 쓴다.
 let flagsByUid = new Map();
 async function loadFlags() {
-  const [tests, blocked] = await Promise.all([
+  const [tests, blocked, robots] = await Promise.all([
     getDocs(query(collection(db, "user_flags"), where("isTest", "==", true))),
     getDocs(query(collection(db, "user_flags"), where("blocked", "==", true))),
+    getDocs(query(collection(db, "user_flags"), where("isRobot", "==", true))),
   ]);
   flagsByUid = new Map();
-  for (const d of [...tests.docs, ...blocked.docs]) flagsByUid.set(d.id, d.data());
+  for (const d of [...tests.docs, ...blocked.docs, ...robots.docs]) flagsByUid.set(d.id, d.data());
 }
 
 function flagTags(uid) {
@@ -54,6 +55,8 @@ function flagTags(uid) {
   return [
     f.isTest ? [" ", el("span", {class: "tag test"}, f.testLabel ? `TEST · ${f.testLabel}` : "TEST")] : null,
     f.blocked ? [" ", el("span", {class: "tag blocked"}, "차단")] : null,
+    // 출시 전 테스트 로봇(2026-10-21 일괄 표시). 테스트 계정과 달리 SANDBOX 결제 허용이 없다.
+    f.isRobot ? [" ", el("span", {class: "tag"}, "로봇")] : null,
   ];
 }
 const $ = (id) => document.getElementById(id);
@@ -87,6 +90,13 @@ function fmtSeconds(s) {
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
   return `${sign}${h}시간 ${m}분 ${sec}초`;
+}
+
+// 실제 낸 돈(현지 통화)과 USD 환산. 2026-10-21 이전 기록은 금액이 없다.
+function fmtPaid(p) {
+  if (typeof p.price_paid !== "number") return "—";
+  const local = `${p.price_paid.toLocaleString("ko-KR")} ${p.currency || ""}`.trim();
+  return typeof p.price_usd === "number" && p.currency !== "USD" ? `${local} ($${p.price_usd})` : local;
 }
 
 function kv(pairs) {
@@ -220,9 +230,9 @@ async function runSearch(q) {
       rows = snap.docs.map((d) => ({id: d.id, data: d.data()}))
         .filter(({id}) => {
           const f = flagsByUid.get(id) || {};
-          return !f.isTest && !f.blocked;
+          return !f.isTest && !f.blocked && !f.isRobot;
         });
-      label = "정식회원 (테스트·차단 제외)";
+      label = "정식회원 (테스트·차단·로봇 제외)";
     } else if (filter === "buyers") {
       const snap = await getDocs(query(collection(db, "real_members"),
         where("hasPurchase", "==", true), limit(200)));
@@ -312,7 +322,7 @@ function renderList(rows, append = false) {
     el("div", {class: "sub"},
       `${(m.providers || []).join(", ") || "익명"} · 가입 ${fmtTime(m.joinedAt)} · 최근 ${fmtTime(m.lastSeenAt)}`),
     m.hasPurchase ? el("div", {class: "sub"},
-      `구매 ${m.purchaseCount || 0}건 · 충전 ${fmtSeconds(m.totalSecondsPurchased)} · 마지막 구매 ${fmtTime(m.lastPurchasedAt)}`,
+      `구매 ${m.purchaseCount || 0}건 · ${m.totalSpentUsd ? `$${m.totalSpentUsd} · ` : ""}충전 ${fmtSeconds(m.totalSecondsPurchased)} · 마지막 구매 ${fmtTime(m.lastPurchasedAt)}`,
       m.lastPurchaseEnvironment === "SANDBOX" ? [" ", el("span", {class: "tag sandbox"}, "SANDBOX")] : null) : null);
     return row;
   });
@@ -548,13 +558,14 @@ function purchaseTable(docs) {
   return el("div", {class: "card"},
     el("h3", {}, `구매 이력 (${docs.length})`),
     docs.length === 0 ? el("p", {class: "muted"}, "없음") : el("table", {},
-      el("tr", {}, el("th", {}, "시각"), el("th", {}, "상품"), el("th", {}, "추가 시간"), el("th", {}, "환경")),
+      el("tr", {}, el("th", {}, "시각"), el("th", {}, "상품"), el("th", {}, "추가 시간"), el("th", {}, "결제 금액"), el("th", {}, "환경")),
       docs.map((d) => {
         const p = d.data();
         return el("tr", {},
           el("td", {}, fmtTime(p.purchased_at)),
           el("td", {}, p.product_title || p.product_id || "—"),
           el("td", {class: "num"}, fmtSeconds(p.seconds_added)),
+          el("td", {class: "num"}, fmtPaid(p)),
           el("td", {}, el("span", {class: p.environment === "SANDBOX" ? "tag sandbox" : "tag"},
             p.environment || "—")));
       })));
