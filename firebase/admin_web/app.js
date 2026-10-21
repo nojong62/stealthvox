@@ -213,6 +213,16 @@ async function runSearch(q) {
         .map(([uid]) => uid);
       rows = await membersForUids(uids);
       label = filter === "test" ? "테스트 계정" : "차단 계정";
+    } else if (filter === "members") {
+      // 정식회원 = real_members(익명 제외) 중 테스트·차단 표시가 없는 사람.
+      const snap = await getDocs(query(collection(db, "real_members"),
+        orderBy("joinedAt", "desc"), limit(1000)));
+      rows = snap.docs.map((d) => ({id: d.id, data: d.data()}))
+        .filter(({id}) => {
+          const f = flagsByUid.get(id) || {};
+          return !f.isTest && !f.blocked;
+        });
+      label = "정식회원 (테스트·차단 제외)";
     } else if (filter === "buyers") {
       const snap = await getDocs(query(collection(db, "real_members"),
         where("hasPurchase", "==", true), limit(200)));
@@ -244,7 +254,7 @@ async function runSearch(q) {
       rows = rows.filter(({id, data}) =>
         [data.email, data.displayName, id].some((v) => String(v || "").toLowerCase().includes(needle)));
     }
-    if (filter !== "all") {
+    if (filter !== "all" && filter !== "members") {
       rows.sort((a, b) => timeValue(b.data.lastSeenAt) - timeValue(a.data.lastSeenAt));
     }
     setStatus(`${label} ${rows.length}명`);
@@ -300,7 +310,10 @@ function renderList(rows, append = false) {
       m.hasPurchase ? [" ", el("span", {class: "tag"}, `구매 ${m.purchaseCount || 0}`)] : null,
       flagTags(id)),
     el("div", {class: "sub"},
-      `${(m.providers || []).join(", ") || "익명"} · 가입 ${fmtTime(m.joinedAt)} · 최근 ${fmtTime(m.lastSeenAt)}`));
+      `${(m.providers || []).join(", ") || "익명"} · 가입 ${fmtTime(m.joinedAt)} · 최근 ${fmtTime(m.lastSeenAt)}`),
+    m.hasPurchase ? el("div", {class: "sub"},
+      `구매 ${m.purchaseCount || 0}건 · 충전 ${fmtSeconds(m.totalSecondsPurchased)} · 마지막 구매 ${fmtTime(m.lastPurchasedAt)}`,
+      m.lastPurchaseEnvironment === "SANDBOX" ? [" ", el("span", {class: "tag sandbox"}, "SANDBOX")] : null) : null);
     return row;
   });
   if (append) $("results").append(...nodes);
