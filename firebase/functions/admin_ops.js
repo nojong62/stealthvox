@@ -222,6 +222,38 @@ async function setBlocked({db, adminUid, uid, blocked, reason, requestId, now}) 
   });
 }
 
+// 보류 표시·해제. 정식회원 목록에서만 빠진다 — 이용 시간·AI 사용·데이터는 그대로다.
+// (차단과 달리 서버가 막는 곳이 없다. 관리자 웹 필터만 이 값을 읽는다.)
+async function setHold({db, adminUid, uid, hold, reason, requestId, now}) {
+  if (typeof hold !== "boolean") {
+    throw new HttpsError("invalid-argument", "hold must be boolean.");
+  }
+  const why = typeof reason === "string" ? reason.trim() : "";
+  if (hold && (!why || why.length > REASON_MAX_LENGTH)) {
+    throw new HttpsError("invalid-argument", "reason is required (max 200 characters).");
+  }
+  const flagRef = db.doc(`user_flags/${uid}`);
+  const logRef = auditRef(db, "set_hold", requestId);
+
+  return db.runTransaction(async (tx) => {
+    const [logSnap, flagSnap] = await Promise.all([tx.get(logRef), tx.get(flagRef)]);
+    if (logSnap.exists) return {duplicate: true};
+    const flags = flagSnap.exists ? flagSnap.data() || {} : {};
+    const before = {isHold: flags.isHold === true, holdReason: flags.holdReason || ""};
+    const after = hold
+      ? {isHold: true, holdReason: why, heldAt: now, heldBy: adminUid}
+      : {isHold: false, holdReason: "", releasedAt: now, releasedBy: adminUid};
+
+    tx.set(flagRef, {...after, updatedAt: now}, {merge: true});
+    tx.set(logRef, auditEntry({
+      action: "set_hold", targetUid: uid, before,
+      after: {isHold: hold, holdReason: hold ? why : ""},
+      reason: why, adminUid, now,
+    }));
+    return {duplicate: false, isHold: hold};
+  });
+}
+
 function createAdminOps(admin) {
   const db = () => admin.firestore();
   const now = () => admin.firestore.FieldValue.serverTimestamp();
@@ -269,6 +301,17 @@ function createAdminOps(admin) {
         requestId: requireRequestId(data.requestId),
       });
     }),
+    adminSetHold: onCall(options, async (request) => {
+      const adminUid = requireAdmin(request);
+      const data = request.data || {};
+      return setHold({
+        db: db(), adminUid, now: now(),
+        uid: requireUid(data.uid),
+        hold: data.hold,
+        reason: data.reason,
+        requestId: requireRequestId(data.requestId),
+      });
+    }),
     adminAdjustTime: onCall(options, async (request) => {
       const adminUid = requireAdmin(request);
       const data = request.data || {};
@@ -292,5 +335,6 @@ module.exports = {
   requireRequestId,
   requireUid,
   setBlocked,
+  setHold,
   setTestAccount,
 };

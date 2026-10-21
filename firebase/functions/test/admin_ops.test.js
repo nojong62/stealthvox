@@ -8,6 +8,7 @@ const {
   requireRequestId,
   requireUid,
   setBlocked,
+  setHold,
   setTestAccount,
 } = require("../admin_ops");
 
@@ -232,4 +233,32 @@ test("setBlocked requires a reason to block and refuses self-block", async () =>
   await assert.rejects(setBlocked({...base, db, uid: "admin-1", blocked: true, reason: "x", requestId: "req-00022"}),
     {code: "failed-precondition"});
   assert.equal(db.docs.size, 0);
+});
+
+test("hold needs a reason, writes only the flag and an audit line, and is idempotent", async () => {
+  const db = new FakeDb({"user_flags/u1": {isRobot: true}});
+  await assert.rejects(() => setHold({...base, db, uid: "u1", hold: true, reason: " ", requestId: "req-00000001"}),
+    {code: "invalid-argument"});
+  await assert.rejects(() => setHold({...base, db, uid: "u1", hold: "yes", reason: "x", requestId: "req-00000001"}),
+    {code: "invalid-argument"});
+
+  const first = await setHold({...base, db, uid: "u1", hold: true, reason: "확인 중", requestId: "req-00000001"});
+  assert.equal(first.isHold, true);
+  const flags = db.get("user_flags/u1");
+  assert.equal(flags.isHold, true);
+  assert.equal(flags.holdReason, "확인 중");
+  assert.equal(flags.isRobot, true);
+  assert.equal(db.get("admin_audit/set_hold_req-00000001").action, "set_hold");
+  assert.deepEqual(db.paths("users/"), []);
+
+  const again = await setHold({...base, db, uid: "u1", hold: true, reason: "확인 중", requestId: "req-00000001"});
+  assert.equal(again.duplicate, true);
+});
+
+test("releasing a hold needs no reason and clears it", async () => {
+  const db = new FakeDb({"user_flags/u1": {isHold: true, holdReason: "확인 중"}});
+  const result = await setHold({...base, db, uid: "u1", hold: false, requestId: "req-00000002"});
+  assert.equal(result.isHold, false);
+  assert.equal(db.get("user_flags/u1").isHold, false);
+  assert.equal(db.get("user_flags/u1").holdReason, "");
 });

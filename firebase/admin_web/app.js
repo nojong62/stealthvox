@@ -41,13 +41,14 @@ let allCursor = null;
 // 테스트·차단 표시는 수가 적으니 한 번에 읽어 두고 목록 태그에 쓴다.
 let flagsByUid = new Map();
 async function loadFlags() {
-  const [tests, blocked, robots] = await Promise.all([
+  const [tests, blocked, robots, held] = await Promise.all([
     getDocs(query(collection(db, "user_flags"), where("isTest", "==", true))),
     getDocs(query(collection(db, "user_flags"), where("blocked", "==", true))),
     getDocs(query(collection(db, "user_flags"), where("isRobot", "==", true))),
+    getDocs(query(collection(db, "user_flags"), where("isHold", "==", true))),
   ]);
   flagsByUid = new Map();
-  for (const d of [...tests.docs, ...blocked.docs, ...robots.docs]) flagsByUid.set(d.id, d.data());
+  for (const d of [...tests.docs, ...blocked.docs, ...robots.docs, ...held.docs]) flagsByUid.set(d.id, d.data());
 }
 
 function flagTags(uid) {
@@ -57,6 +58,7 @@ function flagTags(uid) {
     f.blocked ? [" ", el("span", {class: "tag blocked"}, "차단")] : null,
     // 출시 전 테스트 로봇(2026-10-21 일괄 표시). 테스트 계정과 달리 SANDBOX 결제 허용이 없다.
     f.isRobot ? [" ", el("span", {class: "tag"}, "로봇")] : null,
+    f.isHold ? [" ", el("span", {class: "tag sandbox"}, "보류")] : null,
   ];
 }
 const $ = (id) => document.getElementById(id);
@@ -231,6 +233,10 @@ async function runSearch(q) {
         .map(([uid]) => uid);
       rows = await membersForUids(uids);
       label = filter === "test" ? "테스트 계정" : "차단 계정";
+    } else if (filter === "hold") {
+      const uids = [...flagsByUid.entries()].filter(([, f]) => f.isHold).map(([uid]) => uid);
+      rows = await membersForUids(uids);
+      label = "보류 회원";
     } else if (filter === "members") {
       // 정식회원 = real_members(익명 제외) 중 테스트·차단 표시가 없는 사람.
       const snap = await getDocs(query(collection(db, "real_members"),
@@ -238,9 +244,9 @@ async function runSearch(q) {
       rows = snap.docs.map((d) => ({id: d.id, data: d.data()}))
         .filter(({id}) => {
           const f = flagsByUid.get(id) || {};
-          return !f.isTest && !f.blocked && !f.isRobot;
+          return !f.isTest && !f.blocked && !f.isRobot && !f.isHold;
         });
-      label = "정식회원 (테스트·차단·로봇 제외)";
+      label = "정식회원 (테스트·차단·로봇·보류 제외)";
     } else if (filter === "buyers") {
       const snap = await getDocs(query(collection(db, "real_members"),
         where("hasPurchase", "==", true), limit(200)));
@@ -385,6 +391,7 @@ async function showMember(uid) {
       userSnap.exists() ? timeCard(uid, u.remainingTime) : null,
       adjustmentTable(adjustments.docs),
       testAccountCard(uid, flagSnap.exists() ? flagSnap.data() : {}),
+      holdCard(uid, flagSnap.exists() ? flagSnap.data() : {}),
       blockCard(uid, flagSnap.exists() ? flagSnap.data() : {}),
       notesCard(uid, notes.docs.filter((d) => d.data().deleted !== true)),
       purchaseTable(purchases.docs),
@@ -518,6 +525,46 @@ function blockCard(uid, flags) {
     el("p", {class: "muted"}, "AI 대화·통역·Duo 게시판·체험 지급을 서버에서 거절합니다. 15초 안에 반영됩니다."),
     el("div", {class: "inline"}, reason, button),
     flags.unblockedAt ? el("p", {class: "muted"}, `마지막 해제 ${fmtTime(flags.unblockedAt)}`) : null);
+}
+
+// 보류: 정식회원 목록에서만 뺀다. 이용·데이터에는 영향이 없다(차단과 다르다).
+function holdCard(uid, flags) {
+  if (flags.isHold === true) {
+    const button = el("button", {
+      class: "ghost",
+      onclick: () => {
+        if (!confirm("보류를 해제할까요? 정식회원 목록에 다시 나타납니다.")) return;
+        runAction(button, uid, () => call("adminSetHold", {uid, hold: false}));
+      },
+    }, "보류 해제");
+    return el("div", {class: "card"},
+      el("h3", {}, el("span", {class: "tag sandbox"}, "보류"), " 중인 회원"),
+      kv([
+        ["사유", flags.holdReason || "—"],
+        ["보류 시각", fmtTime(flags.heldAt)],
+      ]),
+      el("div", {class: "inline"}, button));
+  }
+  const reason = el("input", {type: "text", maxlength: "200", placeholder: "보류 사유 (필수)"});
+  const button = el("button", {
+    class: "ghost",
+    onclick: () => {
+      if (!reason.value.trim()) {
+        alertLine(button, "보류 사유를 입력하세요.");
+        reason.focus();
+        return;
+      }
+      if (!confirm(`이 회원을 보류할까요?
+사유: ${reason.value.trim()}
+
+정식회원 목록에서만 빠집니다. 이용·데이터는 그대로입니다.`)) return;
+      runAction(button, uid, () => call("adminSetHold", {uid, hold: true, reason: reason.value}));
+    },
+  }, "보류");
+  return el("div", {class: "card"},
+    el("h3", {}, "보류"),
+    el("p", {class: "muted"}, "정식회원 목록에서만 뺍니다. 이용 시간·AI 사용·데이터는 그대로이고, 언제든 해제할 수 있습니다."),
+    el("div", {class: "inline"}, reason, button));
 }
 
 function testAccountCard(uid, flags) {

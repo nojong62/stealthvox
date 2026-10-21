@@ -96,6 +96,7 @@ exports.adminDeleteNote = adminOps.adminDeleteNote;
 exports.adminSetTestAccount = adminOps.adminSetTestAccount;
 exports.adminAdjustTime = adminOps.adminAdjustTime;
 exports.adminSetBlocked = adminOps.adminSetBlocked;
+exports.adminSetHold = adminOps.adminSetHold;
 
 // 공부방 체험 (인트로 버튼). firebase/functions/study_trial.js
 const studyTrial = require("./study_trial").createStudyTrial({admin});
