@@ -69,7 +69,7 @@ function el(tag, props = {}, ...children) {
     else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
     else node.setAttribute(k, v);
   }
-  for (const c of children.flat()) {
+  for (const c of children.flat(Infinity)) {
     if (c == null || c === false) continue;
     node.append(c instanceof Node ? c : String(c));
   }
@@ -90,6 +90,14 @@ function fmtSeconds(s) {
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
   return `${sign}${h}시간 ${m}분 ${sec}초`;
+}
+
+// 회원 화면의 잔액·충전량은 시간 단위까지만 보인다(분·초 생략, 2026-10-21).
+// 정확한 값이 필요한 시간 조정 확인창·조정 내역·사용 기록은 fmtSeconds를 쓴다.
+function fmtHours(s) {
+  if (typeof s !== "number") return "—";
+  if (s > 0 && s < 3600) return "1시간 미만";
+  return `${s < 0 ? "-" : ""}${Math.floor(Math.abs(s) / 3600)}시간`;
 }
 
 // 실제 낸 돈(현지 통화)과 USD 환산. 2026-10-21 이전 기록은 금액이 없다.
@@ -322,7 +330,7 @@ function renderList(rows, append = false) {
     el("div", {class: "sub"},
       `${(m.providers || []).join(", ") || "익명"} · 가입 ${fmtTime(m.joinedAt)} · 최근 ${fmtTime(m.lastSeenAt)}`),
     m.hasPurchase ? el("div", {class: "sub"},
-      `구매 ${m.purchaseCount || 0}건 · ${m.totalSpentUsd ? `$${m.totalSpentUsd} · ` : ""}충전 ${fmtSeconds(m.totalSecondsPurchased)} · 마지막 구매 ${fmtTime(m.lastPurchasedAt)}`,
+      `구매 ${m.purchaseCount || 0}건 · ${m.totalSpentUsd ? `$${m.totalSpentUsd} · ` : ""}충전 ${fmtHours(m.totalSecondsPurchased)} · 마지막 구매 ${fmtTime(m.lastPurchasedAt)}`,
       m.lastPurchaseEnvironment === "SANDBOX" ? [" ", el("span", {class: "tag sandbox"}, "SANDBOX")] : null) : null);
     return row;
   });
@@ -352,7 +360,8 @@ async function showMember(uid) {
     const m = memberSnap.exists() ? memberSnap.data() : {};
     const u = userSnap.exists() ? userSnap.data() : {};
 
-    box.replaceChildren(
+    // 조정 이력이 없으면 null이 들어온다. replaceChildren은 null을 "null" 글자로 그리므로 거른다.
+    box.replaceChildren(...[
       el("div", {class: "card"},
         el("h2", {}, m.email || (memberSnap.exists() ? "(이메일 없음)" : "체험(익명) 사용자")),
         el("div", {class: "muted"}, m.displayName || ""),
@@ -366,9 +375,9 @@ async function showMember(uid) {
         ]),
         el("h3", {}, "이용 시간·결제"),
         kv([
-          ["남은 시간", fmtSeconds(u.remainingTime)],
+          ["남은 시간", fmtHours(u.remainingTime)],
           ["구매 횟수", m.purchaseCount ?? 0],
-          ["총 구매 시간", fmtSeconds(m.totalSecondsPurchased ?? 0)],
+          ["총 구매 시간", fmtHours(m.totalSecondsPurchased ?? 0)],
           ["마지막 구매", m.lastPurchasedAt
             ? `${fmtTime(m.lastPurchasedAt)} · ${m.lastProductId || ""} · ${m.lastPurchaseEnvironment || ""}`
             : "—"],
@@ -384,7 +393,7 @@ async function showMember(uid) {
         el("details", {},
           el("summary", {}, "users 문서 원본"),
           el("pre", {}, JSON.stringify(plain(u), null, 2)))),
-    );
+    ].filter(Boolean));
   } catch (err) {
     box.replaceChildren(el("p", {class: "error"}, explain(err)));
   }
@@ -445,7 +454,7 @@ function timeCard(uid, remaining) {
 
   return el("div", {class: "card"},
     el("h3", {}, "이용 시간 조정"),
-    el("p", {}, "현재 남은 시간 ", el("strong", {}, fmtSeconds(current))),
+    el("p", {}, "현재 남은 시간 ", el("strong", {}, fmtHours(current))),
     el("div", {class: "inline"}, reason),
     el("div", {class: "inline"},
       preset("+30분", 1800), preset("+1시간", 3600), preset("+10시간", 36000)),
@@ -564,7 +573,7 @@ function purchaseTable(docs) {
         return el("tr", {},
           el("td", {}, fmtTime(p.purchased_at)),
           el("td", {}, p.product_title || p.product_id || "—"),
-          el("td", {class: "num"}, fmtSeconds(p.seconds_added)),
+          el("td", {class: "num"}, fmtHours(p.seconds_added)),
           el("td", {class: "num"}, fmtPaid(p)),
           el("td", {}, el("span", {class: p.environment === "SANDBOX" ? "tag sandbox" : "tag"},
             p.environment || "—")));
