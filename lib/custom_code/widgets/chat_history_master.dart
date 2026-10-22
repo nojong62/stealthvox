@@ -3516,7 +3516,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
             const SizedBox(height: 6),
             Text(
               _surfaceCopy['speakSentenceIn'].replaceAll('{language}',
-                  koreanLanguageDisplayName(_sessionTargetLangName())),
+                  _surfaceCopy.languageName(_sessionTargetLangName())),
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white38, fontSize: 11),
             ),
@@ -3574,8 +3574,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                     const SizedBox(height: 6),
                     Text(
                       _appIsRecording
-                          ? "Recording... tap to stop"
-                          : "Tap to start recording",
+                          ? _surfaceCopy['tutorRecordingTapToStop']
+                          : _surfaceCopy['tutorTapToRecord'],
                       style: TextStyle(
                           color: _appIsRecording
                               ? Colors.redAccent
@@ -3681,7 +3681,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                   size: 18,
                 ),
                 label: Text(
-                  _isPlayingAppAudio ? "Playing..." : "Shadow This!",
+                  _isPlayingAppAudio
+                      ? _surfaceCopy['tutorPlaying']
+                      : _surfaceCopy['tutorShadowThis'],
                   style: TextStyle(
                       color: _isPlayingAppAudio
                           ? Colors.greenAccent
@@ -7481,18 +7483,25 @@ RULES — follow exactly:
                   ),
                 ),
                 const SizedBox(width: 7),
-                Text(
-                  _p3PracticeMode == P3PracticeMode.echoing
-                      ? 'SNAP ECHOING'
-                      : 'SHADOWING',
-                  style: TextStyle(
-                    color: inBreathEcho ? _p3BreathAccentColor : Colors.white38,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.3,
+                // 남는 폭만 쓴다. 일본어 READING 배지(リーディング)가 붙으면
+                // 줄이 27px 넘쳤다(2026-10-22, S25 큰 글꼴).
+                Expanded(
+                  child: Text(
+                    _p3PracticeMode == P3PracticeMode.echoing
+                        ? 'SNAP ECHOING'
+                        : 'SHADOWING',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color:
+                          inBreathEcho ? _p3BreathAccentColor : Colors.white38,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.3,
+                    ),
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 8),
                 // 카운터와 READING을 한 자리에서 교대시키면 정작 말하는 동안
                 // 몇 번째 호흡인지가 사라진다. 둘을 나란히 두고 카운터는 늘
                 // 남긴다.
@@ -7624,8 +7633,7 @@ RULES — follow exactly:
         final base = (data?['translated_text'] ?? '').toString().trim();
         if (base.isEmpty) continue;
         final cached = cachedAltStyles(data, base);
-        final missing =
-            allStyles.where((s) => !cached.containsKey(s)).toList();
+        final missing = allStyles.where((s) => !cached.containsKey(s)).toList();
         if (missing.isEmpty) continue;
         _setTrialPrep('다른 표현 ${i + 1}/${docs.length}');
         final fetched = await fetchAltStyleSentences(
