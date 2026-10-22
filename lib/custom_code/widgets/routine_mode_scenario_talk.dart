@@ -89,6 +89,7 @@ import '/custom_code/services/tts_model_policy.dart';
 import '/custom_code/services/user_line_fix.dart';
 import '/custom_code/services/transcript_text_clean.dart';
 import '/custom_code/services/short_reply_gate.dart';
+import '/custom_code/services/debug_stt_inject.dart';
 import 'first_utterance_context_judge.dart'; // 3모드 공통 응답 길이 규칙
 import 'origin_language_recheck_dialog.dart'; // 🌐 [ORIGIN-RECHECK] 언어 확인 창
 
@@ -241,6 +242,8 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   bool _aiPlaybackStarted = false;
   Timer? _continuationWindowTimer;
   Timer? _continuationTranscriptTimeout;
+  // 🧪 [STT-INJECT] 디버그 빌드에서만 산다. 릴리스면 null.
+  Timer? _debugSttInject;
 
   bool get _continuationCandidateAlive => _continuationCandidate != 0;
 
@@ -978,6 +981,11 @@ $finalLanguageRule''';
   @override
   void initState() {
     super.initState();
+    _debugSttInject = startDebugSttInject((text) {
+      debugPrint('🧪 [STT-INJECT] text="$text"');
+      _onStreamingTranscriptCompleted(
+          'inject-${DateTime.now().microsecondsSinceEpoch}', text);
+    });
     // 🌐 [ORIGIN-RESOLVE] 이 방의 ORIGIN 판정을 처음 상태로 되돌린다.
     //   전환은 **세션 한정**이다 — prefs에는 쓰지 않으므로 방을 나가면
     //   로비값 그대로다. 여기서 비워야 다음 입장이 새로 판정한다.
@@ -1070,6 +1078,7 @@ $finalLanguageRule''';
 
   @override
   void dispose() {
+    _debugSttInject?.cancel();
     _isDisposing = true;
     // 💾 24시간·200MB·40MB는 근거 있는 값이 아니라 보호용 출발점이다.
     //   이 줄이 쌓여야 실제 값으로 바꿀 수 있다.

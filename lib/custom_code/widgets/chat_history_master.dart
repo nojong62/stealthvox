@@ -1,3 +1,4 @@
+import '/custom_code/services/debug_stt_inject.dart';
 import '/custom_code/services/secure_ai_gateway.dart';
 // Automatic FlutterFlow imports
 import '/backend/backend.dart';
@@ -3909,7 +3910,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           await request.send().timeout(const Duration(seconds: 15));
       final body = await streamed.stream.bytesToString();
       if (!mounted) return;
-      final transcript = (jsonDecode(body)['text'] as String? ?? '').trim();
+      // 🧪 [STT-INJECT] 디버그 빌드에서만 주입한 줄이 실제 전사를 대신한다.
+      final injected = await takeDebugSttInjectLine();
+      final transcript =
+          injected ?? (jsonDecode(body)['text'] as String? ?? '').trim();
       BillingTicker.instance.resumeFromActivity('history_tutoring_stt_result');
 
       if (mounted) {

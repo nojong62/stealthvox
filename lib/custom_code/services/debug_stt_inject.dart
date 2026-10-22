@@ -40,3 +40,19 @@ Timer? startDebugSttInject(void Function(String text) onText) {
     }
   });
 }
+
+/// 한 번만 읽는 주입 줄. 녹음 버튼이 있는 화면(튜터링)이 실제 전사 대신
+/// 쓴다. 릴리스거나 파일이 없으면 null.
+Future<String?> takeDebugSttInjectLine() async {
+  if (!kDebugSttInjectAvailable) return null;
+  try {
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/stt_inject.txt');
+    if (!await file.exists()) return null;
+    final text = (await file.readAsString()).trim();
+    await file.delete();
+    return text.isEmpty ? null : text;
+  } catch (_) {
+    return null;
+  }
+}
