@@ -271,8 +271,8 @@ void main() {
       final String label =
           _region(duo, 'String _interpStatusLabel()', 'Widget _buildInterpreterMicIndicator');
       expect(label, contains('_interpRetryTimer != null'));
-      expect(label, contains('다시 연결하는 중'));
-      expect(label, contains('마이크를 열지 못했습니다'));
+      expect(label, contains("_surfaceCopy['interpRetrying']"));
+      expect(label, contains("_surfaceCopy['interpMicFailed']"));
     });
   });
 }

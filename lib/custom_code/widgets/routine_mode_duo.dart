@@ -5919,24 +5919,26 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// **[_interpReady]와 어긋나면 안 된다.** "대화를 시작하세요"는 오직
   /// 게이트가 실제로 열려 있을 때만 나온다.
   String _interpStatusLabel() {
-    if (_isExiting) return '대화를 마치는 중';
+    if (_isExiting) return _surfaceCopy['interpEnding'];
     if (!_hasConversationPartner) {
       return _interpMicPhase == InterpMicPhase.ended
-          ? '상대방 연결 종료'
-          : '상대방을 기다리는 중';
+          ? _surfaceCopy['interpPartnerLeft']
+          : _surfaceCopy['interpWaitingPartner'];
     }
     // 🔁 소켓이 끊겨 다시 붙는 중이면 그 사실을 먼저 말한다. 마이크는 열려
     //   있고 재연결도 돌고 있으므로 "준비 중"이라고 적으면 유저가 멈춘 줄 안다.
-    if (_interpSttReconnecting) return '연결이 끊겨 다시 잇는 중';
+    if (_interpSttReconnecting) return _surfaceCopy['interpReconnecting'];
     if (_interpStartFailed) {
       // 재시도가 예약돼 있으면 "실패"가 아니라 "다시 붙는 중"이다.
-      return _interpRetryTimer != null ? '다시 연결하는 중' : '마이크를 열지 못했습니다';
+      return _interpRetryTimer != null
+          ? _surfaceCopy['interpRetrying']
+          : _surfaceCopy['interpMicFailed'];
     }
     if (_interpPartnerPhase == InterpPartnerPhase.playing) {
-      return '상대방 말 전달 중';
+      return _surfaceCopy['interpRelaying'];
     }
-    if (_interpReady) return '대화를 시작하세요';
-    return '통역 준비 중';
+    if (_interpReady) return _surfaceCopy['interpReady'];
+    return _surfaceCopy['interpPreparing'];
   }
 
   /// 지금 통화의 방 id. 호스트·게스트 어느 경로로 들어왔든 하나로 모은다.
@@ -6688,7 +6690,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         }
         final reservedPartner = currentData['partnerUid']?.toString() ?? '';
         final boardReserved = currentData['boardReservedAt'] != null;
-        if (boardReserved && reservedPartner.isNotEmpty &&
+        if (boardReserved &&
+            reservedPartner.isNotEmpty &&
             reservedPartner != guestUid) {
           throw StateError('Duo room is reserved for another guest');
         }
@@ -6704,8 +6707,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
               remoteCandidate: _interpTransportRaw,
             ),
           if (sessionMode == kDuoModeInterpreter)
-            kDuoPartnerSameOriginDirectV1Field:
-                duoSameOriginDirectCapability(),
+            kDuoPartnerSameOriginDirectV1Field: duoSameOriginDirectCapability(),
           'partnerJoinedAt': FieldValue.serverTimestamp(),
           'partnerLang': _myNative(),
         });
@@ -7246,7 +7248,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         _lgDuo(
           '[DUO-NETWORK]',
           'operation=post_preservation_check status=unknown '
-              'error=' + error.runtimeType.toString(),
+                  'error=' +
+              error.runtimeType.toString(),
         );
         unawaited(_probeDuoNetwork('post_preservation_check_failed'));
       }
@@ -8354,8 +8357,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           //     · 30초 전 — 시간 칸이 남은 초를 센다
           //     · 10초 전 — 점이 주황으로 깜빡인다
           Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
                   color: const Color(0xFF2563EB),
                   borderRadius: BorderRadius.circular(20)),
