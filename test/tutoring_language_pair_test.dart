@@ -124,7 +124,7 @@ void main() {
       expect(
           _flat(hist),
           contains("_surfaceCopy['speakSentenceIn'].replaceAll('{language}', "
-              'koreanLanguageDisplayName(_sessionTargetLangName())),'));
+              '_surfaceCopy.languageName(_sessionTargetLangName())),'));
     });
   });
 

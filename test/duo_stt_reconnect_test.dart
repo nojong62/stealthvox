@@ -334,7 +334,10 @@ void main() {
   // ── 화면 ────────────────────────────────────────────────────────────
   group('끊긴 동안 화면이 잠긴 것처럼 보이지 않는다', () {
     test('기존 상태 체계 안에서 한 줄만 얹었다', () {
-      expect(duo, contains("if (_interpSttReconnecting) return '연결이 끊겨 다시 잇는 중';"));
+      expect(
+          duo,
+          contains(
+              "if (_interpSttReconnecting) return _surfaceCopy['interpReconnecting'];"));
     });
 
     test('"실패"보다 먼저 읽힌다', () {
