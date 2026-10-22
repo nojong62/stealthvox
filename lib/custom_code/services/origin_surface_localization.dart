@@ -27,6 +27,188 @@ class OriginSurfaceCopy {
   static OriginSurfaceCopy forSystemLocale() =>
       forLanguage(systemUiLanguageName());
 
+  /// 언어 저장값(영문 이름) → 이 화면 언어로 적은 언어 이름. 문구 틀에
+  /// 끼워 넣는 용도라 격변화가 없는 주격이다(러시아어 틀이 "на языке: X").
+  /// 12개 밖의 값은 그대로 돌려준다.
+  String languageName(String language) {
+    final column = _languages.indexOf(language.trim());
+    if (column < 0) return language.trim();
+    final row = _languages.indexOf(_language);
+    return _languageNames[row < 0 ? 0 : row][column];
+  }
+
+  /// 행 = 화면 언어, 열 = 이름을 적을 언어. 둘 다 [_languages] 순서다.
+  static const List<List<String>> _languageNames = [
+    [
+      'English',
+      'Korean',
+      'Japanese',
+      'Chinese',
+      'Spanish',
+      'French',
+      'German',
+      'Hindi',
+      'Russian',
+      'Portuguese',
+      'Italian',
+      'Dutch'
+    ],
+    [
+      '영어',
+      '한국어',
+      '일본어',
+      '중국어',
+      '스페인어',
+      '프랑스어',
+      '독일어',
+      '힌디어',
+      '러시아어',
+      '포르투갈어',
+      '이탈리아어',
+      '네덜란드어'
+    ],
+    [
+      '英語',
+      '韓国語',
+      '日本語',
+      '中国語',
+      'スペイン語',
+      'フランス語',
+      'ドイツ語',
+      'ヒンディー語',
+      'ロシア語',
+      'ポルトガル語',
+      'イタリア語',
+      'オランダ語'
+    ],
+    [
+      '英语',
+      '韩语',
+      '日语',
+      '中文',
+      '西班牙语',
+      '法语',
+      '德语',
+      '印地语',
+      '俄语',
+      '葡萄牙语',
+      '意大利语',
+      '荷兰语'
+    ],
+    [
+      'inglés',
+      'coreano',
+      'japonés',
+      'chino',
+      'español',
+      'francés',
+      'alemán',
+      'hindi',
+      'ruso',
+      'portugués',
+      'italiano',
+      'neerlandés'
+    ],
+    [
+      'anglais',
+      'coréen',
+      'japonais',
+      'chinois',
+      'espagnol',
+      'français',
+      'allemand',
+      'hindi',
+      'russe',
+      'portugais',
+      'italien',
+      'néerlandais'
+    ],
+    [
+      'Englisch',
+      'Koreanisch',
+      'Japanisch',
+      'Chinesisch',
+      'Spanisch',
+      'Französisch',
+      'Deutsch',
+      'Hindi',
+      'Russisch',
+      'Portugiesisch',
+      'Italienisch',
+      'Niederländisch'
+    ],
+    [
+      'अंग्रेज़ी',
+      'कोरियाई',
+      'जापानी',
+      'चीनी',
+      'स्पेनिश',
+      'फ़्रेंच',
+      'जर्मन',
+      'हिंदी',
+      'रूसी',
+      'पुर्तगाली',
+      'इतालवी',
+      'डच'
+    ],
+    [
+      'английский',
+      'корейский',
+      'японский',
+      'китайский',
+      'испанский',
+      'французский',
+      'немецкий',
+      'хинди',
+      'русский',
+      'португальский',
+      'итальянский',
+      'нидерландский'
+    ],
+    [
+      'inglês',
+      'coreano',
+      'japonês',
+      'chinês',
+      'espanhol',
+      'francês',
+      'alemão',
+      'hindi',
+      'russo',
+      'português',
+      'italiano',
+      'neerlandês'
+    ],
+    [
+      'inglese',
+      'coreano',
+      'giapponese',
+      'cinese',
+      'spagnolo',
+      'francese',
+      'tedesco',
+      'hindi',
+      'russo',
+      'portoghese',
+      'italiano',
+      'olandese'
+    ],
+    [
+      'Engels',
+      'Koreaans',
+      'Japans',
+      'Chinees',
+      'Spaans',
+      'Frans',
+      'Duits',
+      'Hindi',
+      'Russisch',
+      'Portugees',
+      'Italiaans',
+      'Nederlands'
+    ],
+  ];
+
   String operator [](String key) {
     final values = _values[key];
     if (values == null) return key;
@@ -3034,6 +3216,62 @@ class OriginSurfaceCopy {
       '(Sem conteúdo de conversa)',
       '(Nessun contenuto della conversazione)',
       '(Geen gespreksinhoud)'
+    ],
+    'tutorTapToRecord': [
+      'Tap to start recording',
+      '탭해서 녹음 시작',
+      'タップして録音開始',
+      '点击开始录音',
+      'Toca para empezar a grabar',
+      "Touchez pour lancer l'enregistrement",
+      'Tippen, um die Aufnahme zu starten',
+      'रिकॉर्डिंग शुरू करने के लिए टैप करें',
+      'Нажмите, чтобы начать запись',
+      'Toque para começar a gravar',
+      'Tocca per iniziare a registrare',
+      'Tik om de opname te starten'
+    ],
+    'tutorRecordingTapToStop': [
+      'Recording... tap to stop',
+      '녹음 중… 탭해서 멈추기',
+      '録音中… タップで停止',
+      '录音中… 点击停止',
+      'Grabando… toca para detener',
+      'Enregistrement… touchez pour arrêter',
+      'Aufnahme läuft… zum Stoppen tippen',
+      'रिकॉर्डिंग हो रही है… रोकने के लिए टैप करें',
+      'Идёт запись… нажмите, чтобы остановить',
+      'Gravando… toque para parar',
+      'Registrazione… tocca per fermare',
+      'Opnemen… tik om te stoppen'
+    ],
+    'tutorShadowThis': [
+      'Shadow This!',
+      '따라 말하기',
+      'シャドーイング',
+      '跟读这句',
+      '¡Repítelo!',
+      'Répétez-la !',
+      'Nachsprechen!',
+      'इसे दोहराएँ!',
+      'Повторите!',
+      'Repita!',
+      'Ripetila!',
+      'Zeg het na!'
+    ],
+    'tutorPlaying': [
+      'Playing...',
+      '재생 중…',
+      '再生中…',
+      '播放中…',
+      'Reproduciendo…',
+      'Lecture…',
+      'Wird abgespielt…',
+      'चल रहा है…',
+      'Воспроизведение…',
+      'Reproduzindo…',
+      'Riproduzione…',
+      'Afspelen…'
     ],
   };
 }
