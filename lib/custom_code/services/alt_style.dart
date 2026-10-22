@@ -32,6 +32,33 @@ List<String> allAltStyles(String targetLang) =>
         ? kAiStyles
         : const <String>['Standard', 'Native'];
 
+/// 스타일 지시문. 영어 타겟이면 [aiStyleInstruction] 그대로다.
+///
+/// 그 지시문은 영어 전용이다("US native speaker", "international English").
+/// 타겟이 한국어인 방에 그대로 붙이자 Native가 영어로 나왔다(2026-10-22
+/// 실기기, 일본어→한국어 방). 비영어 타겟은 Standard·Native 둘뿐이라 그
+/// 둘만 타겟 언어로 다시 적는다.
+String altStyleInstruction(String style, String targetLang) {
+  final lang = targetLang.trim().isEmpty ? 'English' : targetLang.trim();
+  if (lang == 'English') return aiStyleInstruction(style);
+  if (normalizeAiStyle(style) == 'Native') {
+    return '''STYLE — Native
+Do not hand back a more polished or more difficult version of the sentence. Work out the thought first, then say it the way a native $lang speaker naturally would.
+- Start from what the speaker actually means, intends, feels, and is dealing with right now.
+- Build the $lang fresh from that. Do not follow the source's word order or sentence structure.
+- Keep the core meaning, the speaker's intent, the situation, the feeling, and the facts that matter.
+- Never invent a fact or a feeling the speaker did not express.
+- Native does not mean hard words, slang, or piled-up idioms. It means the easy spoken $lang that comes out of a native speaker's mouth.
+Write it in $lang. Never switch to another language.''';
+  }
+  return '''STYLE — Standard
+Write clear, natural, standard $lang.
+- Grammatically accurate and easy for a learner of $lang to follow.
+- Keep slang and strong regional expressions out.
+- Preserve the speaker's meaning and intent faithfully.
+Write it in $lang. Never switch to another language.''';
+}
+
 /// 💾 [ALT-CACHE] 줄 문서에 남긴 다른 표현. 이 줄의 배울글이 그때와 같을
 /// 때만 쓴다 — 고친 줄에 옛 문장을 띄우지 않는다.
 const String kAltStylesField = 'alt_styles';
@@ -69,8 +96,9 @@ Future<Map<String, String>> fetchAltStyleSentences({
       targetLang.trim().isEmpty ? 'English' : targetLang.trim();
   // 팝업은 여러 스타일을 한 번에 요청하므로, 스타일마다 지시문 전체를
   // 붙인다. 한 줄 요약만 주면 American과 Native가 같은 문장으로 돌아온다.
-  final guide =
-      styles.map((s) => '### "$s"\n${aiStyleInstruction(s)}').join('\n\n');
+  final guide = styles
+      .map((s) => '### "$s"\n${altStyleInstruction(s, targetLanguage)}')
+      .join('\n\n');
   try {
     final response = await http
         .post(
