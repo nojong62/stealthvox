@@ -1967,10 +1967,12 @@ class _IntroMasterState extends State<IntroMaster>
                   Center(child: _buildPageIndicator(0, tealActive: true)),
                   const Spacer(flex: 2),
                   _buildWelcomePageFooter(copy['swipeContinue']!),
-                  SizedBox(height: compact ? 8 : 12),
-                  _buildLanguageFlagCluster(),
-                  SizedBox(height: compact ? 6 : 10),
+                  // FAQ는 국기 바로 위에 붙인다. 알약에 위아래 6씩 눌리는
+                  // 자리가 있어 국기와의 틈은 따로 거의 두지 않는다.
+                  SizedBox(height: compact ? 4 : 8),
                   Center(child: _buildFaqButton()),
+                  SizedBox(height: compact ? 2 : 4),
+                  _buildLanguageFlagCluster(),
                   SizedBox(height: compact ? 2 : 6),
                 ],
               ),
