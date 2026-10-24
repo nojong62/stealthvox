@@ -51,15 +51,20 @@ void main() {
   group('배선', () {
     final hist = _read('lib/custom_code/widgets/chat_history_master.dart');
 
-    test('체크는 서클톡·시나리오톡 시작 화면에 있다', () {
+    test('서클톡·시나리오톡은 들어갈 때마다 묻고, 고른 값을 인자로 넘긴다', () {
       final room = _read('lib/custom_code/widgets/stealth_room_master.dart');
-      expect('_buildFreeTalkToggle(accent),'.allMatches(room).length, 2);
+      expect('await _askFreeTalk('.allMatches(room).length, 2);
+      expect('freeTalk: _freeTalkRoom,'.allMatches(room).length, 2);
+      // 창을 닫으면 들어가지 않는다.
+      expect('if (freeTalk == null || !mounted) return;'.allMatches(room).length,
+          2);
     });
 
-    test('로비와 Duo는 Free Talk을 모른다', () {
+    test('로비·Duo·저장 설정은 Free Talk을 모른다', () {
       for (final path in [
         'lib/custom_code/widgets/lobby_master.dart',
         'lib/custom_code/widgets/routine_mode_duo.dart',
+        'lib/app_state.dart',
       ]) {
         final src = _read(path);
         expect(src, isNot(contains('freeTalk')), reason: path);
@@ -70,7 +75,7 @@ void main() {
     test('두 모드는 방이 열릴 때 한 번 읽어 고정하고 방 문서에 남긴다', () {
       for (final path in _modes) {
         final src = _read(path);
-        expect(src, contains('late final bool _freeTalk = FFAppState().freeTalk;'),
+        expect(src, contains('late final bool _freeTalk = widget.freeTalk;'),
             reason: path);
         expect(src, contains('...freeTalkRoomFields(_freeTalk),'),
             reason: path);

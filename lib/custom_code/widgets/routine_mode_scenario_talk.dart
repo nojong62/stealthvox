@@ -107,9 +107,17 @@ class ScenarioStore {
 /// 2: 클래스 선언부]
 /// ====================================================================
 class RoutineModeScenarioTalk extends StatefulWidget {
-  const RoutineModeScenarioTalk({super.key, this.width, this.height});
+  const RoutineModeScenarioTalk({
+    super.key,
+    this.width,
+    this.height,
+    this.freeTalk = false,
+  });
   final double? width;
   final double? height;
+
+  /// 🗣️ 들어가기 직전에 고른 Free Talk 여부(`free_talk.dart`).
+  final bool freeTalk;
 
   @override
   State<RoutineModeScenarioTalk> createState() =>
@@ -140,9 +148,9 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   //   세션 한정 — 방을 나가면 Step 1로 돌아간다.
   ListeningStep _listeningStep = ListeningStep.step1;
 
-  /// 🗣️ 이 방이 Free Talk인가. 시작 화면의 선택을 **처음 한 번** 읽고 방이
-  ///   끝날 때까지 쓴다(`free_talk.dart`).
-  late final bool _freeTalk = FFAppState().freeTalk;
+  /// 🗣️ 이 방이 Free Talk인가. 들어가기 직전에 고른 값을 **처음 한 번**
+  ///   읽고 방이 끝날 때까지 쓴다(`free_talk.dart`).
+  late final bool _freeTalk = widget.freeTalk;
 
   /// 이 방에서 말하는 로비 언어. Free Talk이면 로비 Target이다.
   String _lobbySpokenLang() => freeTalkSpokenLobbyLang(

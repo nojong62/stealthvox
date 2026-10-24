@@ -1,5 +1,5 @@
 // ====================================================================
-// ❓ [INTRO-FAQ] 인트로 첫 화면 아래 FAQ 팝업의 글.
+// ❓ [INTRO-FAQ] 인트로 첫 화면 아래로 펼쳐 둔 FAQ의 글(스크롤로 읽는다).
 // --------------------------------------------------------------------
 // 처음 온 사람이 "이게 나한테 맞나"를 판단하는 데 필요한 것만 고른다.
 // 출처는 앱 안 사용 설명(`guide_ui_localization.dart`)과 지금 코드다 —
@@ -29,7 +29,7 @@ class IntroFaqCopy {
     'en': IntroFaqCopy._('FAQ', [
       [
         'What is StealthVox?',
-        'A practice room where you learn a language from your own words. It works whether you can’t say a word yet or already talk freely. You can even call a friend who speaks another language — each of you speaks your own, and you pick up theirs.',
+        'A practice room where you learn a language from your own words. If you can’t say a word yet, you talk in your native language and learn from it; if you already talk freely, Free Talk lets you speak the language you are learning from the start. You can even call a friend who speaks another language — each of you speaks your own, and you pick up theirs.',
       ],
       [
         'I can’t speak the language at all. Is that OK?',
@@ -37,7 +37,7 @@ class IntroFaqCopy {
       ],
       [
         'I can already hold a conversation.',
-        'On the screen where you start Circle Talk or Scenario Talk, check Free Talk. You talk in your lobby Target language from the start, and the Study Room shows what you said on top with its meaning in your Origin language below. All Study Room practice is in that language too.',
+        'Every time you enter Circle Talk or Scenario Talk, you choose whether to use Free Talk. With Free Talk you talk in your lobby Target language from the start; without it, you talk with your lobby settings as they are. The Study Room shows what you said on top with its meaning in your Origin language below in smaller text, and all practice is in that language.',
       ],
       [
         'I have no one to talk to.',
@@ -59,7 +59,7 @@ class IntroFaqCopy {
     'ko': IntroFaqCopy._('자주 묻는 질문', [
       [
         'StealthVox는 어떤 앱인가요?',
-        '내 말로 연습하는 외국어 연습장입니다. 외국어를 한마디도 못 해도, 이미 자유롭게 대화할 수 있어도 쓸 수 있습니다. 서로 다른 언어를 쓰는 친구와도 각자 모국어로 통화하며 상대의 언어를 배울 수 있습니다.',
+        '내 말로 연습하는 외국어 연습장입니다. 외국어를 한마디도 못 해도 모국어로 대화하며 배울 수 있고, 이미 대화가 되는 분은 Free Talk으로 배우는 언어로 바로 대화할 수 있습니다. 서로 다른 언어를 쓰는 친구와도 각자 모국어로 통화하며 상대의 언어를 배울 수 있습니다.',
       ],
       [
         '외국어를 전혀 못 해도 되나요?',
@@ -67,7 +67,7 @@ class IntroFaqCopy {
       ],
       [
         '이미 외국어로 대화할 수 있어요.',
-        '서클톡이나 시나리오톡을 시작하는 화면에서 Free Talk을 체크하세요. 로비에서 고른 Target 언어로 처음부터 대화하고, 공부방에는 내가 한 말이 위에, Origin(모국어) 뜻이 아래에 나옵니다. 공부방 연습도 모두 그 언어로 합니다.',
+        '서클톡이나 시나리오톡에 들어갈 때마다 Free Talk으로 할지 고릅니다. Free Talk을 고르면 로비의 Target 언어로 처음부터 대화하고, 고르지 않으면 로비 설정 그대로 대화합니다. 공부방에는 내가 한 말이 위에, Origin(모국어) 뜻이 아래에 작게 나오고, 연습도 모두 그 언어로 합니다.',
       ],
       [
         '말할 상대가 없어요.',
@@ -89,7 +89,7 @@ class IntroFaqCopy {
     'ja': IntroFaqCopy._('よくある質問', [
       [
         'StealthVox はどんなアプリですか?',
-        '自分の言葉で練習する外国語の練習場です。外国語がまったく話せなくても、すでに自由に会話できても使えます。違う言語を話す友だちとも、それぞれ母語で通話しながら相手の言語を学べます。',
+        '自分の言葉で練習する外国語の練習場です。外国語がまったく話せなくても母語で会話しながら学べ、すでに会話できる人は Free Talk で学ぶ言語のまますぐに話せます。違う言語を話す友だちとも、それぞれ母語で通話しながら相手の言語を学べます。',
       ],
       [
         '外国語がまったく話せなくても大丈夫?',
@@ -97,7 +97,7 @@ class IntroFaqCopy {
       ],
       [
         'すでに外国語で会話できます。',
-        'サークルトークやシナリオトークを始める画面で Free Talk にチェックを入れてください。ロビーで選んだ Target 言語で最初から会話し、学習ルームでは自分の言葉が上に、Origin(母語)の意味が下に表示されます。学習ルームの練習もすべてその言語で行います。',
+        'サークルトークやシナリオトークに入るたびに、Free Talk にするかを選びます。Free Talk を選ぶとロビーの Target 言語で最初から会話し、選ばなければロビーの設定のまま会話します。学習ルームでは自分の言葉が上に、Origin(母語)の意味が下に小さく表示され、練習もすべてその言語で行います。',
       ],
       [
         '話し相手がいません。',
@@ -119,7 +119,7 @@ class IntroFaqCopy {
     'zh': IntroFaqCopy._('常见问题', [
       [
         'StealthVox 是什么应用?',
-        '用自己的话练习外语的练习场。无论一句外语都不会说,还是已经能自由对话,都可以使用。还能和说另一种语言的朋友各自用母语通话,学习对方的语言。',
+        '用自己的话练习外语的练习场。一句外语都不会说,也能用母语对话来学习;已经能对话的人,可以用 Free Talk 直接用所学语言交谈。还能和说另一种语言的朋友各自用母语通话,学习对方的语言。',
       ],
       [
         '完全不会说外语也可以吗?',
@@ -127,7 +127,7 @@ class IntroFaqCopy {
       ],
       [
         '我已经能用外语对话了。',
-        '在开始社群对话或情景对话的画面勾选 Free Talk。从一开始就用大厅里选的 Target 语言对话,学习室里上方显示你说的话,下方显示 Origin(母语)的意思。学习室的练习也都用这种语言进行。',
+        '每次进入社群对话或情景对话时,都可以选择是否使用 Free Talk。选择 Free Talk 就从一开始用大厅的 Target 语言对话;不选择则按大厅设置对话。学习室里上方显示你说的话,下方以小字显示 Origin(母语)的意思,练习也都用这种语言进行。',
       ],
       [
         '我没有说话的对象。',
@@ -149,7 +149,7 @@ class IntroFaqCopy {
     'es': IntroFaqCopy._('Preguntas frecuentes', [
       [
         '¿Qué es StealthVox?',
-        'Una sala de práctica donde aprendes un idioma a partir de tus propias palabras. Sirve tanto si aún no sabes decir nada como si ya conversas con soltura. Incluso puedes llamar a un amigo que habla otro idioma: cada uno habla el suyo y aprendes el del otro.',
+        'Una sala de práctica donde aprendes un idioma a partir de tus propias palabras. Si aún no sabes decir nada, conversas en tu idioma nativo y aprendes de ello; si ya conversas con soltura, Free Talk te deja hablar desde el principio en el idioma que aprendes. Incluso puedes llamar a un amigo que habla otro idioma: cada uno habla el suyo y aprendes el del otro.',
       ],
       [
         'No hablo nada del idioma. ¿Puedo usarla?',
@@ -157,7 +157,7 @@ class IntroFaqCopy {
       ],
       [
         'Ya puedo mantener una conversación.',
-        'En la pantalla donde empiezas Conversación de círculo o Conversación de escenario, marca Free Talk. Hablas desde el principio en tu idioma Target del lobby, y la sala de estudio muestra arriba lo que dijiste y abajo su significado en tu idioma Origin. Toda la práctica de la sala de estudio también es en ese idioma.',
+        'Cada vez que entras en Conversación de círculo o Conversación de escenario, eliges si usar Free Talk. Con Free Talk hablas desde el principio en tu idioma Target del lobby; sin él, hablas con la configuración del lobby tal cual. La sala de estudio muestra arriba lo que dijiste y abajo, en letra más pequeña, su significado en tu idioma Origin, y toda la práctica es en ese idioma.',
       ],
       [
         'No tengo con quién hablar.',
@@ -179,7 +179,7 @@ class IntroFaqCopy {
     'fr': IntroFaqCopy._('Questions fréquentes', [
       [
         'Qu’est-ce que StealthVox ?',
-        'Une salle d’entraînement où vous apprenez une langue à partir de vos propres mots. Elle convient que vous ne sachiez encore rien dire ou que vous parliez déjà librement. Vous pouvez même appeler un ami qui parle une autre langue : chacun parle la sienne et vous apprenez celle de l’autre.',
+        'Une salle d’entraînement où vous apprenez une langue à partir de vos propres mots. Si vous ne savez encore rien dire, vous parlez dans votre langue maternelle et apprenez à partir de là ; si vous parlez déjà librement, Free Talk vous fait parler dès le début dans la langue apprise. Vous pouvez même appeler un ami qui parle une autre langue : chacun parle la sienne et vous apprenez celle de l’autre.',
       ],
       [
         'Je ne parle pas du tout la langue. Est-ce possible ?',
@@ -187,7 +187,7 @@ class IntroFaqCopy {
       ],
       [
         'Je sais déjà tenir une conversation.',
-        'Sur l’écran où vous lancez Dialogue de groupe ou Dialogue de scénario, cochez Free Talk. Vous parlez dès le début dans votre langue Target de l’accueil, et la salle d’étude affiche en haut ce que vous avez dit, en dessous son sens dans votre langue Origin. Tous les exercices de la salle d’étude se font aussi dans cette langue.',
+        'À chaque entrée dans Dialogue de groupe ou Dialogue de scénario, vous choisissez d’utiliser ou non Free Talk. Avec Free Talk, vous parlez dès le début dans votre langue Target de l’accueil ; sans, vous parlez avec les réglages de l’accueil tels quels. La salle d’étude affiche en haut ce que vous avez dit et en dessous, en plus petit, son sens dans votre langue Origin ; tous les exercices se font dans cette langue.',
       ],
       [
         'Je n’ai personne avec qui parler.',
@@ -209,7 +209,7 @@ class IntroFaqCopy {
     'de': IntroFaqCopy._('Häufige Fragen', [
       [
         'Was ist StealthVox?',
-        'Ein Übungsraum, in dem du eine Sprache aus deinen eigenen Worten lernst. Er passt, egal ob du noch kein Wort sagen kannst oder schon frei sprichst. Du kannst sogar mit einem Freund telefonieren, der eine andere Sprache spricht – jeder spricht seine eigene, und du lernst die des anderen.',
+        'Ein Übungsraum, in dem du eine Sprache aus deinen eigenen Worten lernst. Kannst du noch kein Wort sagen, sprichst du in deiner Muttersprache und lernst daraus; sprichst du schon frei, lässt dich Free Talk von Anfang an in der Lernsprache reden. Du kannst sogar mit einem Freund telefonieren, der eine andere Sprache spricht – jeder spricht seine eigene, und du lernst die des anderen.',
       ],
       [
         'Ich spreche die Sprache gar nicht. Geht das?',
@@ -217,7 +217,7 @@ class IntroFaqCopy {
       ],
       [
         'Ich kann mich schon unterhalten.',
-        'Setze auf dem Startbildschirm von Gruppengespräch oder Szenario-Gespräch ein Häkchen bei Free Talk. Du sprichst von Anfang an in deiner Target-Sprache aus der Lobby, und der Lernraum zeigt oben, was du gesagt hast, darunter die Bedeutung in deiner Origin-Sprache. Auch alle Übungen im Lernraum laufen in dieser Sprache.',
+        'Jedes Mal, wenn du Gruppengespräch oder Szenario-Gespräch betrittst, wählst du, ob du Free Talk nutzt. Mit Free Talk sprichst du von Anfang an in deiner Target-Sprache aus der Lobby; ohne sprichst du mit den Lobby-Einstellungen, wie sie sind. Der Lernraum zeigt oben, was du gesagt hast, darunter kleiner die Bedeutung in deiner Origin-Sprache, und alle Übungen laufen in dieser Sprache.',
       ],
       [
         'Ich habe niemanden zum Reden.',
@@ -239,7 +239,7 @@ class IntroFaqCopy {
     'hi': IntroFaqCopy._('अक्सर पूछे जाने वाले सवाल', [
       [
         'StealthVox क्या है?',
-        'अपनी ही बातों से विदेशी भाषा का अभ्यास करने की जगह। चाहे आप अभी एक शब्द भी न बोल पाते हों या पहले से खुलकर बात करते हों, दोनों के लिए है। दूसरी भाषा बोलने वाले दोस्त से भी हर कोई अपनी भाषा में बात कर सकता है और आप उसकी भाषा सीखते हैं।',
+        'अपनी ही बातों से विदेशी भाषा का अभ्यास करने की जगह। अगर अभी एक शब्द भी नहीं बोल पाते, तो मातृभाषा में बात करके सीखते हैं; अगर पहले से खुलकर बात करते हैं, तो Free Talk से शुरू से ही सीखी जा रही भाषा में बोल सकते हैं। दूसरी भाषा बोलने वाले दोस्त से भी हर कोई अपनी भाषा में बात कर सकता है और आप उसकी भाषा सीखते हैं।',
       ],
       [
         'मुझे वह भाषा बिल्कुल नहीं आती। क्या चलेगा?',
@@ -247,7 +247,7 @@ class IntroFaqCopy {
       ],
       [
         'मैं पहले से उस भाषा में बात कर सकता/सकती हूँ।',
-        'समूह वार्ता या परिदृश्य वार्ता शुरू करने वाली स्क्रीन पर Free Talk पर निशान लगाएँ। आप शुरू से लॉबी में चुनी Target भाषा में बात करते हैं, और अध्ययन कक्ष में ऊपर आपकी कही बात और नीचे Origin (मातृभाषा) में उसका अर्थ दिखता है। अध्ययन कक्ष का सारा अभ्यास भी उसी भाषा में होता है।',
+        'हर बार समूह वार्ता या परिदृश्य वार्ता में जाते समय आप चुनते हैं कि Free Talk इस्तेमाल करना है या नहीं। Free Talk चुनने पर आप शुरू से लॉबी की Target भाषा में बात करते हैं; न चुनने पर लॉबी की सेटिंग जैसी है वैसी रहती है। अध्ययन कक्ष में ऊपर आपकी कही बात और नीचे छोटे अक्षरों में Origin (मातृभाषा) में उसका अर्थ दिखता है, और सारा अभ्यास उसी भाषा में होता है।',
       ],
       [
         'मेरे पास बात करने के लिए कोई नहीं है।',
@@ -269,7 +269,7 @@ class IntroFaqCopy {
     'ru': IntroFaqCopy._('Частые вопросы', [
       [
         'Что такое StealthVox?',
-        'Площадка, где вы учите язык на своих собственных словах. Подходит и тем, кто пока не может сказать ни слова, и тем, кто уже свободно разговаривает. Можно даже созвониться с другом, говорящим на другом языке: каждый говорит на своём, а вы учите его язык.',
+        'Площадка, где вы учите язык на своих собственных словах. Если пока не можете сказать ни слова, вы говорите на родном языке и учитесь на этом; если уже говорите свободно, Free Talk позволяет с самого начала говорить на изучаемом языке. Можно даже созвониться с другом, говорящим на другом языке: каждый говорит на своём, а вы учите его язык.',
       ],
       [
         'Я совсем не говорю на этом языке. Можно?',
@@ -277,7 +277,7 @@ class IntroFaqCopy {
       ],
       [
         'Я уже могу поддержать разговор.',
-        'На экране запуска Группового или Сценарного разговора отметьте Free Talk. Вы с самого начала говорите на языке Target из лобби, а в учебной комнате сверху видно сказанное вами, снизу — его смысл на языке Origin. Все упражнения учебной комнаты тоже идут на этом языке.',
+        'Каждый раз, входя в Групповой или Сценарный разговор, вы выбираете, использовать ли Free Talk. С Free Talk вы с самого начала говорите на языке Target из лобби; без него — с настройками лобби как есть. В учебной комнате сверху видно сказанное вами, снизу мелким шрифтом — смысл на языке Origin, и все упражнения идут на этом языке.',
       ],
       [
         'Мне не с кем поговорить.',
@@ -299,7 +299,7 @@ class IntroFaqCopy {
     'pt': IntroFaqCopy._('Perguntas frequentes', [
       [
         'O que é o StealthVox?',
-        'Uma sala de prática onde você aprende um idioma a partir das suas próprias palavras. Serve tanto para quem ainda não sabe dizer nada quanto para quem já conversa com facilidade. Você pode até ligar para um amigo que fala outro idioma: cada um fala o seu e você aprende o dele.',
+        'Uma sala de prática onde você aprende um idioma a partir das suas próprias palavras. Se ainda não sabe dizer nada, você conversa no seu idioma nativo e aprende com isso; se já conversa com facilidade, o Free Talk deixa você falar desde o início no idioma que aprende. Você pode até ligar para um amigo que fala outro idioma: cada um fala o seu e você aprende o dele.',
       ],
       [
         'Não falo nada do idioma. Tudo bem?',
@@ -307,7 +307,7 @@ class IntroFaqCopy {
       ],
       [
         'Já consigo manter uma conversa.',
-        'Na tela em que você inicia a Conversa em grupo ou a Conversa de cenário, marque Free Talk. Você conversa desde o início no seu idioma Target do lobby, e a sala de estudo mostra em cima o que você disse e embaixo o significado no seu idioma Origin. Toda a prática da sala de estudo também é nesse idioma.',
+        'Toda vez que entra na Conversa em grupo ou na Conversa de cenário, você escolhe se vai usar o Free Talk. Com o Free Talk, você conversa desde o início no seu idioma Target do lobby; sem ele, conversa com as configurações do lobby como estão. A sala de estudo mostra em cima o que você disse e embaixo, em letra menor, o significado no seu idioma Origin, e toda a prática é nesse idioma.',
       ],
       [
         'Não tenho com quem conversar.',
@@ -329,7 +329,7 @@ class IntroFaqCopy {
     'it': IntroFaqCopy._('Domande frequenti', [
       [
         'Che cos’è StealthVox?',
-        'Una palestra in cui impari una lingua partendo dalle tue parole. Va bene sia se non sai ancora dire nulla sia se parli già liberamente. Puoi perfino chiamare un amico che parla un’altra lingua: ognuno parla la propria e tu impari la sua.',
+        'Una palestra in cui impari una lingua partendo dalle tue parole. Se non sai ancora dire nulla, parli nella tua lingua madre e impari da lì; se parli già liberamente, Free Talk ti fa parlare fin dall’inizio nella lingua che stai imparando. Puoi perfino chiamare un amico che parla un’altra lingua: ognuno parla la propria e tu impari la sua.',
       ],
       [
         'Non parlo affatto la lingua. Va bene lo stesso?',
@@ -337,7 +337,7 @@ class IntroFaqCopy {
       ],
       [
         'So già sostenere una conversazione.',
-        'Nella schermata da cui avvii Dialogo di gruppo o Dialogo di scenario, spunta Free Talk. Parli fin dall’inizio nella lingua Target scelta nella lobby, e la sala studio mostra sopra ciò che hai detto e sotto il significato nella tua lingua Origin. Anche tutta la pratica della sala studio è in quella lingua.',
+        'Ogni volta che entri in Dialogo di gruppo o Dialogo di scenario, scegli se usare Free Talk. Con Free Talk parli fin dall’inizio nella lingua Target della lobby; senza, parli con le impostazioni della lobby così come sono. La sala studio mostra sopra ciò che hai detto e sotto, in piccolo, il significato nella tua lingua Origin, e tutta la pratica è in quella lingua.',
       ],
       [
         'Non ho nessuno con cui parlare.',
@@ -359,7 +359,7 @@ class IntroFaqCopy {
     'nl': IntroFaqCopy._('Veelgestelde vragen', [
       [
         'Wat is StealthVox?',
-        'Een oefenruimte waar je een taal leert vanuit je eigen woorden. Het werkt of je nu nog geen woord kunt zeggen of al vrij praat. Je kunt zelfs bellen met een vriend die een andere taal spreekt: ieder spreekt de eigen taal en jij leert die van de ander.',
+        'Een oefenruimte waar je een taal leert vanuit je eigen woorden. Kun je nog geen woord zeggen, dan praat je in je moedertaal en leer je daarvan; praat je al vrij, dan laat Free Talk je vanaf het begin in de leertaal praten. Je kunt zelfs bellen met een vriend die een andere taal spreekt: ieder spreekt de eigen taal en jij leert die van de ander.',
       ],
       [
         'Ik spreek de taal helemaal niet. Kan dat?',
@@ -367,7 +367,7 @@ class IntroFaqCopy {
       ],
       [
         'Ik kan al een gesprek voeren.',
-        'Vink Free Talk aan op het scherm waar je Groepsgesprek of Scenariogesprek start. Je praat vanaf het begin in je Target-taal uit de lobby, en de leerruimte toont bovenaan wat je zei en daaronder de betekenis in je Origin-taal. Ook alle oefeningen in de leerruimte zijn in die taal.',
+        'Elke keer dat je Groepsgesprek of Scenariogesprek binnengaat, kies je of je Free Talk gebruikt. Met Free Talk praat je vanaf het begin in je Target-taal uit de lobby; zonder praat je met de lobby-instellingen zoals ze zijn. De leerruimte toont bovenaan wat je zei en daaronder, kleiner, de betekenis in je Origin-taal, en alle oefeningen zijn in die taal.',
       ],
       [
         'Ik heb niemand om mee te praten.',

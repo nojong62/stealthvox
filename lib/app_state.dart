@@ -37,9 +37,6 @@ class FFAppState extends ChangeNotifier {
       _aiRole = prefs.getString('ff_aiRole') ?? _aiRole;
     });
     _safeInit(() {
-      _freeTalk = prefs.getBool('ff_freeTalk') ?? _freeTalk;
-    });
-    _safeInit(() {
       final saved = prefs.getString('ff_chatLang')?.trim() ?? '';
       if (saved.isNotEmpty || prefs.containsKey('ff_chatLang')) {
         _chatLang = saved;
@@ -213,15 +210,6 @@ class FFAppState extends ChangeNotifier {
   set chatLang(String value) {
     _chatLang = value;
     prefs.setString('ff_chatLang', value);
-  }
-
-  /// 서클톡·시나리오톡 시작 화면의 Free Talk 체크(마지막 선택). 로비
-  /// [chatLang]·[targetLang]의 뜻은 바꾸지 않는다(`free_talk.dart`).
-  bool _freeTalk = false;
-  bool get freeTalk => _freeTalk;
-  set freeTalk(bool value) {
-    _freeTalk = value;
-    prefs.setBool('ff_freeTalk', value);
   }
 
   String _aiLevel = 'Ⅰ';

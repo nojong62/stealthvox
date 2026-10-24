@@ -290,6 +290,7 @@ class RoutineModeCircleTalk extends StatefulWidget {
     this.audioPreparation,
     this.micInputAt,
     this.circleDescription = '편안한 일상 대화 커뮤니티',
+    this.freeTalk = false,
   });
   final double? width;
   final double? height;
@@ -298,6 +299,9 @@ class RoutineModeCircleTalk extends StatefulWidget {
   final Future<void>? audioPreparation;
   final DateTime? micInputAt;
   final String circleDescription;
+
+  /// 🗣️ 들어가기 직전에 고른 Free Talk 여부(`free_talk.dart`).
+  final bool freeTalk;
 
   @override
   State<RoutineModeCircleTalk> createState() => _RoutineModeCircleTalkState();
@@ -477,9 +481,9 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   //   세션 한정 — 방을 나가면 Step 1로 돌아간다.
   ListeningStep _listeningStep = ListeningStep.step1;
 
-  /// 🗣️ 이 방이 Free Talk인가. 시작 화면의 선택을 **처음 한 번** 읽고 방이
-  ///   끝날 때까지 쓴다(`free_talk.dart`).
-  late final bool _freeTalk = FFAppState().freeTalk;
+  /// 🗣️ 이 방이 Free Talk인가. 들어가기 직전에 고른 값을 **처음 한 번**
+  ///   읽고 방이 끝날 때까지 쓴다(`free_talk.dart`).
+  late final bool _freeTalk = widget.freeTalk;
 
   /// 이 방에서 말하는 로비 언어. Free Talk이면 로비 Target이다.
   String _lobbySpokenLang() => freeTalkSpokenLobbyLang(

@@ -358,7 +358,11 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     });
   }
 
-  void _enterCircleTalk(String description) {
+  /// 🗣️ 지금 들어가는 방이 Free Talk인가. 들어갈 때마다 [_askFreeTalk]로
+  ///   새로 정하고, 모드 위젯 인자로 넘긴다(`free_talk.dart`).
+  bool _freeTalkRoom = false;
+
+  Future<void> _enterCircleTalk(String description) async {
     // 설정 화면을 열어 둔 사이에 시간이 바닥날 수 있다(다른 기기에서 소진 등).
     // 실제로 과금이 시작되는 이 문에서 한 번 더 본다.
     if (!guardBillingEntry(context)) return;
@@ -369,6 +373,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       ).showSnackBar(SnackBar(content: Text(_setupCopy['circleRequired'])));
       return;
     }
+    final freeTalk = await _askFreeTalk(const Color(0xFF9333EA));
+    if (freeTalk == null || !mounted) return;
+    _freeTalkRoom = freeTalk;
     _circleMicInputAt = DateTime.now();
     debugPrint(
       '[FIRST-SPEECH] event=MIC_INPUT at=${_circleMicInputAt!.toIso8601String()} deltaMs=0',
@@ -498,7 +505,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     }
   }
 
-  void _enterScenarioTalk() {
+  Future<void> _enterScenarioTalk() async {
     if (!guardBillingEntry(context)) return;
     final situation = _situationController.text.trim();
     final aiRole = _aiRoleController.text.trim();
@@ -509,6 +516,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       ).showSnackBar(SnackBar(content: Text(_setupCopy['scenarioRequired'])));
       return;
     }
+    final freeTalk = await _askFreeTalk(const Color(0xFF16A34A));
+    if (freeTalk == null || !mounted) return;
+    _freeTalkRoom = freeTalk;
     // 방은 이 홀더를 읽어 시나리오를 세팅한다(재진입 보존과 같은 경로).
     ScenarioStore.situation = situation;
     ScenarioStore.aiRole = aiRole;
@@ -981,6 +991,7 @@ Return ONLY valid JSON: {"name":"..."}.
         audioPreparation: _circleAudioReady,
         micInputAt: _circleMicInputAt,
         circleDescription: _selectedCircleDescription ?? '편안한 일상 대화 커뮤니티',
+        freeTalk: _freeTalkRoom,
       );
     }
     if (_currentMode == 1) {
@@ -997,6 +1008,7 @@ Return ONLY valid JSON: {"name":"..."}.
         key: const ValueKey('RoutineModeScenarioTalk'),
         width: widget.width,
         height: widget.height,
+        freeTalk: _freeTalkRoom,
       );
     }
 
@@ -1501,8 +1513,6 @@ Return ONLY valid JSON: {"name":"..."}.
         const SizedBox(height: 18),
         _setupField(_userRoleController, accent, copy['userRole'],
             copy['userRoleHint']),
-        const SizedBox(height: 14),
-        _buildFreeTalkToggle(accent),
       ],
       startLabel: copy['scenarioStart'],
       onStart: _enterScenarioTalk,
@@ -1525,89 +1535,140 @@ Return ONLY valid JSON: {"name":"..."}.
       fields: [
         _setupField(
             _circleController, accent, copy['circle'], copy['circleHint']),
-        const SizedBox(height: 14),
-        _buildFreeTalkToggle(accent),
       ],
       startLabel: copy['circleStart'],
       onStart: () => _enterCircleTalk(_circleController.text),
     );
   }
 
-  /// 🗣️ Free Talk 체크. 켜고 시작하면 이 방은 로비 Target으로 처음부터
-  /// 대화하고, 뜻은 로비 Origin으로 본다(`free_talk.dart`).
+  /// 🗣️ 들어가기 직전에 **매번** 묻는다 — Free Talk이면 로비 Target으로
+  /// 처음부터 대화하고, 기본이면 로비 설정 그대로다(`free_talk.dart`).
   ///
-  /// 줄 전체가 버튼이다 — 네모 칸만 눌리면 글자를 누른 사람이 헛손질한다.
-  /// 마지막 선택을 기억하고, 방에 들어간 뒤에는 그 방에 고정된다.
-  Widget _buildFreeTalkToggle(Color accent) {
-    final bool on = FFAppState().freeTalk;
-    const radius = BorderRadius.all(Radius.circular(14));
+  /// 창을 닫으면(null) 들어가지 않고 시작 화면에 남는다. 로비 두 언어가
+  /// 같으면 Free Talk이 기본과 똑같아 묻지 않는다.
+  Future<bool?> _askFreeTalk(Color accent) async {
+    final String origin = FFAppState().chatLang.trim();
+    final String target = FFAppState().targetLang.trim();
+    if (origin.isEmpty || target.isEmpty || origin == target) return false;
+    final copy = FreeTalkChoiceCopy.forSystemLocale();
+    String lang(String name) =>
+        _surfaceCopy.languageName(name);
+    return showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: const Color(0xFF17171A),
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                copy.title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _buildFreeTalkChoice(
+                accent: accent,
+                highlighted: true,
+                title: 'Free Talk',
+                desc: copy.freeTalkDesc.replaceAll('{lang}', lang(target)),
+                onTap: () => Navigator.pop(sheetContext, true),
+              ),
+              const SizedBox(height: 10),
+              _buildFreeTalkChoice(
+                accent: accent,
+                highlighted: false,
+                title: copy.standard,
+                desc: copy.standardDesc.replaceAll('{lang}', lang(origin)),
+                onTap: () => Navigator.pop(sheetContext, false),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 고르는 칸 하나. 칸 전체가 버튼이다.
+  Widget _buildFreeTalkChoice({
+    required Color accent,
+    required bool highlighted,
+    required String title,
+    required String desc,
+    required VoidCallback onTap,
+  }) {
+    const radius = BorderRadius.all(Radius.circular(16));
     return Material(
-      // 테두리는 두지 않는다 — 위 입력칸만 상자로 보이게 한다.
-      color: on ? accent.withValues(alpha: 0.08) : Colors.transparent,
-      shape: const RoundedRectangleBorder(borderRadius: radius),
+      color: highlighted
+          ? accent.withValues(alpha: 0.14)
+          : const Color(0xFF222226),
+      shape: RoundedRectangleBorder(
+        borderRadius: radius,
+        side: BorderSide(
+          color: highlighted ? accent : const Color(0x1FFFFFFF),
+          width: highlighted ? 1.4 : 1,
+        ),
+      ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: () => setState(() => FFAppState().freeTalk = !on),
-        splashColor: accent.withValues(alpha: 0.14),
+        onTap: onTap,
+        splashColor: accent.withValues(alpha: 0.18),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 48),
+          constraints: const BoxConstraints(minHeight: 64),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
             child: Row(
               children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    color: on ? accent : Colors.transparent,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: on ? accent : Colors.white38,
-                      width: 1.6,
-                    ),
-                  ),
-                  child: on
-                      ? const Icon(
-                          Icons.check_rounded,
-                          size: 15,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
                           color: Colors.white,
-                        )
-                      : null,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'Free Talk',
-                  maxLines: 1,
-                  style: TextStyle(
-                    color: on ? Colors.white : Colors.white70,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w300,
-                    letterSpacing: .3,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // 켜지 않아도 되는 칸이라는 표시. 설명은 인트로 FAQ에 있다.
-                Flexible(
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0x1FFFFFFF)),
-                    ),
-                    child: Text(
-                      freeTalkOptionLabelForSystemLocale(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white38,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: .2,
+                          fontSize: 16,
+                          fontWeight:
+                              highlighted ? FontWeight.bold : FontWeight.w600,
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 3),
+                      Text(
+                        desc,
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 13,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
                   ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 16,
+                  color: highlighted ? accent : Colors.white38,
                 ),
               ],
             ),
