@@ -29,23 +29,24 @@ Map<String, dynamic> freeTalkRoomFields(bool freeTalk) =>
 bool isFreeTalkRoom(Map<String, dynamic>? data) =>
     data?[kHistoryFreeTalkField] == true;
 
-/// 로비 체크 칸 밑의 한 줄. 로그인 전 화면과 같이 폰 언어를 따른다.
-String freeTalkCaptionForSystemLocale() {
+/// 로비 체크 칸 이름 옆의 작은 표시. 설명은 인트로 FAQ가 한다.
+/// 로그인 전 화면과 같이 폰 언어를 따른다.
+String freeTalkOptionLabelForSystemLocale() {
   final code = PlatformDispatcher.instance.locale.languageCode.toLowerCase();
-  return _kFreeTalkCaptions[code] ?? _kFreeTalkCaptions['en']!;
+  return _kFreeTalkOptionLabels[code] ?? _kFreeTalkOptionLabels['en']!;
 }
 
-const Map<String, String> _kFreeTalkCaptions = {
-  'en': 'Talk in the language you are learning. Base Lang shows the meaning.',
-  'ko': '배우는 언어로 바로 대화합니다. 뜻은 Base Lang으로 확인합니다.',
-  'ja': '学んでいる言語でそのまま話します。意味は Base Lang で確認します。',
-  'zh': '直接用正在学的语言对话，用 Base Lang 确认意思。',
-  'es': 'Habla en el idioma que aprendes. Base Lang muestra el significado.',
-  'fr': 'Parlez dans la langue que vous apprenez. Base Lang en donne le sens.',
-  'de': 'Sprich in der Sprache, die du lernst. Base Lang zeigt die Bedeutung.',
-  'hi': 'जो भाषा सीख रहे हैं, उसी में बात करें। अर्थ Base Lang में दिखेगा।',
-  'ru': 'Говорите на изучаемом языке. Смысл показывается на Base Lang.',
-  'pt': 'Fale no idioma que você está aprendendo. Base Lang mostra o sentido.',
-  'it': 'Parla nella lingua che stai imparando. Base Lang ne mostra il senso.',
-  'nl': 'Praat in de taal die je leert. Base Lang toont de betekenis.',
+const Map<String, String> _kFreeTalkOptionLabels = {
+  'en': 'Optional',
+  'ko': '옵션',
+  'ja': 'オプション',
+  'zh': '可选',
+  'es': 'Opcional',
+  'fr': 'Option',
+  'de': 'Optional',
+  'hi': 'वैकल्पिक',
+  'ru': 'Опция',
+  'pt': 'Opcional',
+  'it': 'Opzionale',
+  'nl': 'Optioneel',
 };

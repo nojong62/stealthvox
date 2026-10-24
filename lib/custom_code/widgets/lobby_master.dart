@@ -566,33 +566,37 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                       : null,
                 ),
                 const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Free Talk',
-                        maxLines: 1,
-                        style: TextStyle(
-                          color: on ? _kLobbyTextHi : _kLobbyTextMid,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: .3,
-                        ),
+                Text(
+                  'Free Talk',
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: on ? _kLobbyTextHi : _kLobbyTextMid,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: .3,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // 켜지 않아도 되는 칸이라는 표시. 설명은 인트로 FAQ에 있다.
+                Flexible(
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: _kLobbyBorder),
+                    ),
+                    child: Text(
+                      freeTalkOptionLabelForSystemLocale(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _kLobbyTextLow,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: .2,
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        freeTalkCaptionForSystemLocale(),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _kLobbyTextLow,
-                          fontSize: 11.5,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ],
