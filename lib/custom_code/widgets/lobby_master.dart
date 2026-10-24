@@ -530,11 +530,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     final bool on = appState.freeTalk;
     const radius = BorderRadius.all(Radius.circular(14));
     return Material(
+      // 테두리는 두지 않는다 — 아래 두 언어 칸만 상자로 보이게 한다.
       color: on ? const Color(0x1422D3EE) : Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: radius,
-        side: BorderSide(color: on ? const Color(0x6622D3EE) : _kLobbyBorder),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: radius),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () => setState(() => appState.freeTalk = !on),
@@ -572,7 +570,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                   style: TextStyle(
                     color: on ? _kLobbyTextHi : _kLobbyTextMid,
                     fontSize: 14,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w300,
                     letterSpacing: .3,
                   ),
                 ),
