@@ -22,6 +22,7 @@ import '/auth/account_discovery_service.dart';
 import '/custom_code/services/duo_guest_handoff.dart';
 import '/custom_code/services/duo_board_push_service.dart';
 import '/custom_code/services/duo_board_intro_notice.dart';
+import '/custom_code/services/intro_faq_copy.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/system_ui_language.dart';
 import 'package:android_id/android_id.dart';
@@ -1510,6 +1511,89 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
+  /// ❓ 국기 줄 밑의 FAQ 알약. 처음 온 사람이 묻는 것만 모은 팝업을 연다.
+  ///
+  /// 국기 칸과 같은 바탕·테두리를 써서 한 덩어리로 보이게 하고, 물음표만
+  /// 브랜드 그라디언트로 칠한다. 눈에 띄되 체험·로그인 버튼과 다투지 않는다.
+  Widget _buildFaqButton() {
+    final copy = IntroFaqCopy.forSystemLocale();
+    const radius = BorderRadius.all(Radius.circular(999));
+    // 👆 보이는 알약은 36으로 낮게 두고, 위아래 6씩 눌리는 자리를 덧대
+    //   48을 맞춘다(로비 톱니와 같은 기준).
+    return Semantics(
+      button: true,
+      label: copy.title,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _openFaqSheet,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: _buildFaqPill(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFaqPill() {
+    const radius = BorderRadius.all(Radius.circular(999));
+    return Material(
+      color: const Color(0xFF1B1E27),
+      shape: RoundedRectangleBorder(
+        borderRadius: radius,
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.11)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _openFaqSheet,
+        splashColor: const Color(0x2445CDBD),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 36, minWidth: 48),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 7, 16, 7),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ShaderMask(
+                  shaderCallback: (rect) => const LinearGradient(
+                    colors: [Color(0xFF45CDBD), Color(0xFF765EEB)],
+                  ).createShader(rect),
+                  blendMode: BlendMode.srcIn,
+                  child: const Icon(
+                    Icons.help_outline_rounded,
+                    size: 18,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  'FAQ',
+                  textScaler: _cappedScaler(context, 1.15),
+                  style: const TextStyle(
+                    color: Color(0xFFBFC1C9),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openFaqSheet() async {
+    _hideTaglineBubble();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      builder: (_) => const _IntroFaqSheet(),
+    );
+  }
+
   /// 첨부 레퍼런스의 여러 겹 선형 음파를 작은 브랜드 마크로 재해석했다.
   /// 선의 위상과 진폭이 천천히 이동해 말소리가 흐르는 인상을 준다.
   Widget _buildWelcomeWaveMark() {
@@ -1885,6 +1969,8 @@ class _IntroMasterState extends State<IntroMaster>
                   _buildWelcomePageFooter(copy['swipeContinue']!),
                   SizedBox(height: compact ? 8 : 12),
                   _buildLanguageFlagCluster(),
+                  SizedBox(height: compact ? 6 : 10),
+                  Center(child: _buildFaqButton()),
                   SizedBox(height: compact ? 2 : 6),
                 ],
               ),
@@ -3524,6 +3610,187 @@ class _IntroMasterState extends State<IntroMaster>
           borderSide: const BorderSide(color: Color(0xFF756BE8), width: 1.3),
         ),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(13)),
+      ),
+    );
+  }
+}
+
+/// ❓ 인트로 FAQ 팝업. 아래에서 올라오는 시트이고, 끌어서 더 펼치거나 닫는다.
+///
+/// 한 번에 한 답만 펼친다 — 일곱 개가 다 열리면 처음 온 사람에게 다시 긴
+/// 설명서가 된다. 첫 질문(무슨 앱인가)만 펼친 채로 연다.
+class _IntroFaqSheet extends StatefulWidget {
+  const _IntroFaqSheet();
+
+  @override
+  State<_IntroFaqSheet> createState() => _IntroFaqSheetState();
+}
+
+class _IntroFaqSheetState extends State<_IntroFaqSheet> {
+  int? _openIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final copy = IntroFaqCopy.forSystemLocale();
+    return DraggableScrollableSheet(
+      initialChildSize: 0.72,
+      minChildSize: 0.4,
+      maxChildSize: 0.92,
+      expand: false,
+      builder: (context, scrollController) => Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF17191F),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border(
+            top: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+        ),
+        child: ListView(
+          controller: scrollController,
+          padding: EdgeInsets.fromLTRB(
+            20,
+            10,
+            20,
+            24 + MediaQuery.of(context).padding.bottom,
+          ),
+          children: [
+            Center(
+              child: Container(
+                width: 38,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                ShaderMask(
+                  shaderCallback: (rect) => const LinearGradient(
+                    colors: [Color(0xFF45CDBD), Color(0xFF765EEB)],
+                  ).createShader(rect),
+                  blendMode: BlendMode.srcIn,
+                  child: const Icon(
+                    Icons.help_outline_rounded,
+                    size: 22,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    copy.title,
+                    style: const TextStyle(
+                      color: Color(0xFFF7F8FA),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.4,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+                  style: IconButton.styleFrom(
+                    foregroundColor: const Color(0xFFBFC1C9),
+                    backgroundColor: Colors.white.withValues(alpha: 0.045),
+                    minimumSize: const Size(48, 48),
+                  ),
+                  icon: const Icon(Icons.close_rounded, size: 20),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            for (int i = 0; i < copy.items.length; i++) ...[
+              _buildItem(i, copy.items[i][0], copy.items[i][1]),
+              const SizedBox(height: 8),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildItem(int index, String question, String answer) {
+    final bool open = _openIndex == index;
+    const radius = BorderRadius.all(Radius.circular(16));
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      decoration: BoxDecoration(
+        color: open ? const Color(0xFF1E212A) : const Color(0xFF1A1C23),
+        borderRadius: radius,
+        border: Border.all(
+          color: open
+              ? const Color(0xFF45CDBD).withValues(alpha: 0.35)
+              : Colors.white.withValues(alpha: 0.06),
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: radius,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => setState(() => _openIndex = open ? null : index),
+          splashColor: const Color(0x1845CDBD),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        question,
+                        style: TextStyle(
+                          color: open
+                              ? const Color(0xFFF7F8FA)
+                              : const Color(0xFFE6E7EA),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    AnimatedRotation(
+                      turns: open ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        size: 22,
+                        color: open
+                            ? const Color(0xFF45CDBD)
+                            : const Color(0xFF777780),
+                      ),
+                    ),
+                  ],
+                ),
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOutCubic,
+                  alignment: Alignment.topCenter,
+                  child: open
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 10, right: 4),
+                          child: Text(
+                            answer,
+                            style: const TextStyle(
+                              color: Color(0xFFCFD2DA),
+                              fontSize: 14,
+                              height: 1.6,
+                            ),
+                          ),
+                        )
+                      : const SizedBox(width: double.infinity),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
