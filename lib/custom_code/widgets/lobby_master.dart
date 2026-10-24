@@ -33,6 +33,7 @@ import '/custom_code/services/admin_gate.dart'; // 관리자 판별(UID)
 import '/custom_code/services/real_member_registry.dart';
 import '/custom_code/services/guide_ui_localization.dart';
 import '/custom_code/services/history_finalize.dart';
+import '/custom_code/services/free_talk.dart';
 import '/custom_code/services/origin_pcm_store.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/system_ui_language.dart';
@@ -517,6 +518,86 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           fontSize: 11,
           letterSpacing: 1.6,
           fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+
+  /// 🗣️ LANGUAGE 바로 밑의 Free Talk 체크.
+  ///
+  /// 줄 전체가 버튼이다 — 네모 칸만 눌리면 글자를 누른 사람이 헛손질한다.
+  Widget _buildFreeTalkToggle(FFAppState appState) {
+    final bool on = appState.freeTalk;
+    const radius = BorderRadius.all(Radius.circular(14));
+    return Material(
+      color: on ? const Color(0x1422D3EE) : Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: radius,
+        side: BorderSide(color: on ? const Color(0x6622D3EE) : _kLobbyBorder),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => setState(() => appState.freeTalk = !on),
+        splashColor: const Color(0x2422D3EE),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Row(
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: on ? _kLobbyCyan : Colors.transparent,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: on ? _kLobbyCyan : _kLobbyTextLow,
+                      width: 1.6,
+                    ),
+                  ),
+                  child: on
+                      ? const Icon(
+                          Icons.check_rounded,
+                          size: 15,
+                          color: _kLobbyBgTop,
+                        )
+                      : null,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Free Talk',
+                        maxLines: 1,
+                        style: TextStyle(
+                          color: on ? _kLobbyTextHi : _kLobbyTextMid,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: .3,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        freeTalkCaptionForSystemLocale(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _kLobbyTextLow,
+                          fontSize: 11.5,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -1407,13 +1488,18 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      _buildFreeTalkToggle(appState),
+                      const SizedBox(height: 8),
                       // 📐 위아래로 쌓는다. 좌우로 나란히 뒀더니 폭이 절반이라
                       //   "(Chat L…"·"Ko…"처럼 라벨도 언어 이름도 잘렸다
                       //   (실기기 확인, 2026-08-27). 방향은 가운데 화살표가
                       //   말한다 — 아래를 가리키면 원어 → 배울 말이다.
+                      // 🗣️ Free Talk이면 이름만 바뀐다. 저장 칸은 그대로다
+                      //   (`free_talk.dart`).
                       _buildLangField(
-                        'Origin (Chat Lang)',
+                        appState.freeTalk
+                            ? 'Free Talk Lang'
+                            : 'Origin (Chat Lang)',
                         'Select',
                         appState.chatLang,
                         (val) {
@@ -1431,7 +1517,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                         ),
                       ),
                       _buildLangField(
-                        'Target (Learn Lang)',
+                        appState.freeTalk ? 'Base Lang' : 'Target (Learn Lang)',
                         'Select',
                         appState.targetLang,
                         // ⚠️ AI STYLE은 여기서 건드리지 않는다. 비영어로 가면
@@ -1517,6 +1603,7 @@ class LobbyBrain {
       // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
       'native_lang': FFAppState().chatLang,
       'target_lang': FFAppState().targetLang,
+      ...freeTalkRoomFields(FFAppState().freeTalk),
       // 📝 새 방은 검수 대기다(`history_finalize.dart`).
       ...historyDraftSeed(),
     });

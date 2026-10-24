@@ -36,6 +36,7 @@ import '/custom_code/services/duo_call_resolution.dart';
 import '/custom_code/services/duo_interpreter_protocol.dart';
 import '/custom_code/services/duo_interpreter_callable.dart';
 import '/custom_code/services/history_finalize.dart';
+import '/custom_code/services/free_talk.dart';
 import '/custom_code/services/duo_transcript_gate.dart';
 import '/custom_code/services/duo_stt_ab_probe.dart';
 import '/custom_code/services/duo_final_transcription_runner.dart';
@@ -1198,6 +1199,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final bool neverChoseNative = !app.prefs.containsKey('ff_chatLang');
     if (neverChoseNative || !_kGuestLangs.contains(app.chatLang)) {
       app.chatLang = _guestNativeFromDevice();
+      // 🗣️ ORIGIN을 폰 언어로 새로 잡았으면 Free Talk 표시는 옛 값이다.
+      //   저장값을 그대로 쓰는 회원 게스트는 건드리지 않는다.
+      app.freeTalk = false;
     }
     // TARGET은 ORIGIN과 같으면 안 된다. 배울 언어가 모국어가 되면 두 줄이
     // 같은 글이 된다.
@@ -5974,6 +5978,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         //   `_syncHistoryRoomLanguages`가 이 두 줄을 다시 맞춘다.
         'native_lang': _myNative(),
         'target_lang': _myTarget(),
+        ...freeTalkRoomFields(FFAppState().freeTalk),
         // 🔗 이 방이 어느 통화였는지. **이 값이 있어야 나중에 공유 결과를
         //   찾아 옮길 수 있다.** 게스트는 입장 순서 때문에 이 시점에 아직
         //   없을 수 있어, 종료 때 한 번 더 채운다.

@@ -66,6 +66,7 @@ import '/custom_code/services/dialog_brain_model.dart';
 import '/custom_code/services/recent_recommendation_history.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/history_finalize.dart';
+import '/custom_code/services/free_talk.dart';
 import '/custom_code/services/history_preview_summary.dart';
 import '/custom_code/services/talk_ui_localization.dart';
 // 🔁 [LATE-CONTINUATION] 판정·합치기·말풍선 규칙은 Circle Talk과 **같은
@@ -4261,6 +4262,7 @@ $finalLanguageRule''';
         //   native_lang = ChatLang(로비 Origin), target_lang = LearnLang(로비 Target).
         'native_lang': _nativeLangName(),
         'target_lang': _targetLangName(),
+        ...freeTalkRoomFields(FFAppState().freeTalk),
         // 📝 새 방은 검수 대기다. 공부방 첫 화면에서 확정해야 생성이 열린다.
         ...historyDraftSeed(),
       });
@@ -4886,6 +4888,10 @@ $finalLanguageRule''';
               ),
               // 🎧 [LISTENING] Step 1 | Step 2. 배울 언어가 대화 언어와 같으면
               //   잠근다.
+              // 🗣️ Free Talk이면 아예 그리지 않는다. 그때 배울 언어 자리는
+              //   뜻을 확인할 Base Lang이라, Step 2는 AI가 모국어로 답하는
+              //   쪽이 된다(실장님, 2026-10-24).
+              if (!FFAppState().freeTalk)
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: ListeningStepSwitch(

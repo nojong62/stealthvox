@@ -40,6 +40,7 @@ import '/custom_code/services/origin_restoration_runner.dart';
 import '/custom_code/services/origin_language_session.dart'
     show detectOriginScript, koreanLanguageDisplayName, textContradictsLanguage;
 import '/custom_code/services/history_finalize.dart';
+import '/custom_code/services/free_talk.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
 import '/custom_code/services/tts_model_policy.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart'
@@ -192,6 +193,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   /// 전역 FFAppState 값을 쓰지 않으므로, 이후 언어 설정을 바꿔도 과거 기록은 안전하다.
   String? _sessionNativeLang;
   String? _sessionTargetLang;
+
+  /// 🗣️ Free Talk 방인가(`free_talk.dart`). 그렇다면 원문이 배울 언어이고
+  /// 배울글 자리가 뜻을 확인할 Base Lang이라, 말풍선의 위아래를 바꾼다.
+  bool _sessionFreeTalk = false;
 
   /// 언어 식별값 정규화: 대소문자·앞뒤 공백 차이를 흡수한다.
   String _normLangCode(String v) => v.trim().toLowerCase();
@@ -1180,6 +1185,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     roomName = data['room_name'] ?? 'History Master';
     _sessionNativeLang = data['native_lang'] as String?;
     _sessionTargetLang = data['target_lang'] as String?;
+    _sessionFreeTalk = isFreeTalkRoom(data);
   }
 
   /// 종료 직후 canonical GPT가 아직 도는 짧은 구간을 기다린다. 실패 상태나
@@ -4645,6 +4651,20 @@ RULES — follow exactly:
         //   그러니 타겟이 없으면 원문이 본문 자리를 갖는다.
         final bool originIsBody = _langDisplayMode == 2 || showTargetBadge;
 
+        // 🗣️ Free Talk 방은 위아래가 반대다 — 위에 내가 한 말(Free Talk
+        //   Lang)을 본문으로, 아래에 뜻(Base Lang)을 보조로 둔다. Base Lang만
+        //   보는 mode 1이거나 원문이 없으면 Base Lang이 본문 자리를 갖는다.
+        final bool baseIsBody = _langDisplayMode == 1 || original.isEmpty;
+        final TextStyle lineBodyStyle = TextStyle(
+            color: isHost ? Colors.white : const Color(0xFF93C5FD),
+            fontSize: 16 * _fontScale,
+            fontWeight: FontWeight.bold,
+            height: 1.4);
+        final TextStyle lineSubStyle = TextStyle(
+            color: Colors.grey,
+            fontSize: 12 * _fontScale,
+            fontWeight: FontWeight.normal);
+
         // 🎛️ 줄마다 아이콘은 **셋 그대로다.** 소리 듣기가 있던 자리를 수정이
         //   가져갔다 — 이 화면의 일이 듣기가 아니라 최종 원고 검수가 됐기
         //   때문이다. 소리는 Practice에서 듣는다.
@@ -4752,7 +4772,34 @@ RULES — follow exactly:
                                                   fontWeight: FontWeight.bold,
                                                   height: 1.4)),
                                         ]
-                                      : [
+                                      : _sessionFreeTalk
+                                          ? [
+                                              if ((_langDisplayMode != 1 ||
+                                                      showTargetBadge) &&
+                                                  original.isNotEmpty) ...[
+                                                _buildSubjectHint(
+                                                    docs[index], isHost),
+                                                Text(original,
+                                                    textAlign: isHost
+                                                        ? TextAlign.right
+                                                        : TextAlign.left,
+                                                    style: lineBodyStyle),
+                                              ],
+                                              if (_langDisplayMode != 2 &&
+                                                  !showTargetBadge &&
+                                                  translated.isNotEmpty) ...[
+                                                if (!baseIsBody)
+                                                  const SizedBox(height: 8),
+                                                Text(translated,
+                                                    textAlign: isHost
+                                                        ? TextAlign.right
+                                                        : TextAlign.left,
+                                                    style: baseIsBody
+                                                        ? lineBodyStyle
+                                                        : lineSubStyle),
+                                              ],
+                                            ]
+                                          : [
                                           // 영어(타겟) 표시: mode 0,1 에서 보임
                                           // 배지가 붙는 줄은 타겟이 아예 없다 — 빈 줄만
                                           // 남기지 말고 자리를 배지에 넘긴다.
