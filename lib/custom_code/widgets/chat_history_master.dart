@@ -2126,7 +2126,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       //    대화는 `translated_text`를 빈 문자열로 저장하므로 폴백이 돌지 않고,
       //    그 줄은 아래 `where`에서 조용히 빠진다. 모국어를 따라 읽히지 않는
       //    결과 자체는 옳으니 동작은 그대로 두고, **몇 줄이 빠졌는지 알린다.**
-      final int untranslatedCount = _usesDeferredHistoryTargets
+      // 🗣️ Free Talk 방의 연습 재료는 원문이라 뜻 줄이 비어도 빠지지 않는다.
+      final int untranslatedCount =
+          _usesDeferredHistoryTargets && !_sessionFreeTalk
           ? messageDocs.where((doc) {
               final d = doc.data() as Map<String, dynamic>;
               return (d['translated_text'] ?? '').toString().trim().isEmpty &&
@@ -2139,8 +2141,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
             final d = doc.data() as Map<String, dynamic>;
             return <String, dynamic>{
               'role': d['role'] ?? 'HOST',
-              'text':
-                  (d['translated_text'] ?? d['original_text'] ?? '').toString(),
+              'text': (_sessionFreeTalk
+                      ? (d['original_text'] ?? d['translated_text'] ?? '')
+                      : (d['translated_text'] ?? d['original_text'] ?? ''))
+                  .toString(),
             };
           })
           .where((m) => (m['text'] as String).isNotEmpty)
@@ -3340,10 +3344,25 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       buildAltStyleButton(onPressed: () => _showAltStylePopup(doc, baseText));
 
   /// 이 세션의 TARGET 언어 이름. 비어 있으면 영어로 본다(기존 동작).
+  ///
+  /// 🗣️ 공부방이 **연습하는 언어**다. Free Talk 방은 대화한 언어(`native_lang`)
+  ///   가 곧 배우는 언어라서 아래 [_sessionNativeLangName]과 맞바꾼다 —
+  ///   튜터링·다른 표현·Practice·ESSAY·Keepers가 모두 이 두 함수를 본다.
+  ///   뜻 줄(배울글)을 만드는 쪽은 이 함수가 아니라 방 문서 값을 그대로 쓴다.
   String _sessionTargetLangName() {
-    final name = (_sessionTargetLang ?? '').trim();
+    final name =
+        ((_sessionFreeTalk ? _sessionNativeLang : _sessionTargetLang) ?? '')
+            .trim();
     return name.isEmpty ? 'English' : name;
   }
+
+  /// 🗣️ 공부방 연습 재료가 되는 줄. 평소에는 배울글(`translated_text`)이고,
+  /// Free Talk 방은 내가 실제로 한 말(`original_text`)이다 — 그 말이 곧
+  /// 배우는 언어다. 뜻 줄은 그 반대편이다.
+  String _studyLine({required String translated, required String original}) =>
+      _sessionFreeTalk ? original : translated;
+  String _glossLine({required String translated, required String original}) =>
+      _sessionFreeTalk ? translated : original;
 
   /// 이 세션의 CHAT(원문) 언어 이름. 비어 있으면 영어로 본다.
   ///
@@ -3352,7 +3371,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   ///   배울=영어로 프롬프트에 박혀 있어서, 일본어로 배우는 사람에게도
   ///   한국어 문장을 주고 영어로 답하라고 했다.
   String _sessionNativeLangName() {
-    final name = (_sessionNativeLang ?? '').trim();
+    final name =
+        ((_sessionFreeTalk ? _sessionTargetLang : _sessionNativeLang) ?? '')
+            .trim();
     return name.isEmpty ? 'English' : name;
   }
 
@@ -4651,6 +4672,12 @@ RULES — follow exactly:
         //   그러니 타겟이 없으면 원문이 본문 자리를 갖는다.
         final bool originIsBody = _langDisplayMode == 2 || showTargetBadge;
 
+        // 🗣️ 튜터링·다른 표현·Keepers가 받는 줄. Free Talk 방은 원문이다.
+        final String studyText =
+            _studyLine(translated: translated, original: original);
+        final String glossText =
+            _glossLine(translated: translated, original: original);
+
         // 🗣️ Free Talk 방은 위아래가 반대다 — 위에 내가 한 말(Free Talk
         //   Lang)을 본문으로, 아래에 뜻(Base Lang)을 보조로 둔다. Base Lang만
         //   보는 mode 1이거나 원문이 없으면 Base Lang이 본문 자리를 갖는다.
@@ -4682,9 +4709,9 @@ RULES — follow exactly:
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _buildAppBtn(docs[index].id, translated),
+                  _buildAppBtn(docs[index].id, studyText),
                   const SizedBox(height: 4),
-                  _buildAltStyleBtn(docs[index], translated),
+                  _buildAltStyleBtn(docs[index], studyText),
                 ],
               ),
             ),
@@ -4724,8 +4751,8 @@ RULES — follow exactly:
                           ? null
                           : () => _saveToKeepers(
                                 messageDocId: docId,
-                                translatedText: translated,
-                                originalText: original,
+                                translatedText: studyText,
+                                originalText: glossText,
                                 speakerRole: isHost ? 'HOST' : 'USER',
                               ),
                       child: Container(
@@ -7673,7 +7700,10 @@ RULES — follow exactly:
       for (int i = 0; i < docs.length; i++) {
         if (!mounted) return;
         final data = docs[i].data() as Map<String, dynamic>?;
-        final base = (data?['translated_text'] ?? '').toString().trim();
+        final base = _studyLine(
+          translated: (data?['translated_text'] ?? '').toString(),
+          original: (data?['original_text'] ?? '').toString(),
+        ).trim();
         if (base.isEmpty) continue;
         final cached = cachedAltStyles(data, base);
         final missing = allStyles.where((s) => !cached.containsKey(s)).toList();
@@ -8418,7 +8448,9 @@ RULES — follow exactly:
         _kNativeEnglishSchemaVersion) {
       return false;
     }
-    final roomTarget = _historyString(data, 'target_lang');
+    // 🗣️ Free Talk 방의 target_lang은 뜻을 보는 Base Lang이다. 연습 언어로 본다.
+    final roomTarget =
+        _sessionFreeTalk ? '' : _historyString(data, 'target_lang');
     final target = roomTarget.isEmpty ? _sessionTargetLangName() : roomTarget;
     if (target == 'English' && _hangul.hasMatch(text)) return false;
     if (text == mySpeech.trim()) return false;
