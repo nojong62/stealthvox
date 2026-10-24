@@ -31,6 +31,7 @@ import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/dialog_brain_model.dart';
 import '/custom_code/services/recent_recommendation_history.dart';
 import '/custom_code/services/talk_ui_localization.dart';
+import '/custom_code/services/free_talk.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/guide_ui_localization.dart';
 import '/custom_code/services/openai_connection_pool.dart';
@@ -1500,6 +1501,8 @@ Return ONLY valid JSON: {"name":"..."}.
         const SizedBox(height: 18),
         _setupField(_userRoleController, accent, copy['userRole'],
             copy['userRoleHint']),
+        const SizedBox(height: 14),
+        _buildFreeTalkToggle(accent),
       ],
       startLabel: copy['scenarioStart'],
       onStart: _enterScenarioTalk,
@@ -1522,9 +1525,95 @@ Return ONLY valid JSON: {"name":"..."}.
       fields: [
         _setupField(
             _circleController, accent, copy['circle'], copy['circleHint']),
+        const SizedBox(height: 14),
+        _buildFreeTalkToggle(accent),
       ],
       startLabel: copy['circleStart'],
       onStart: () => _enterCircleTalk(_circleController.text),
+    );
+  }
+
+  /// 🗣️ Free Talk 체크. 켜고 시작하면 이 방은 로비 Target으로 처음부터
+  /// 대화하고, 뜻은 로비 Origin으로 본다(`free_talk.dart`).
+  ///
+  /// 줄 전체가 버튼이다 — 네모 칸만 눌리면 글자를 누른 사람이 헛손질한다.
+  /// 마지막 선택을 기억하고, 방에 들어간 뒤에는 그 방에 고정된다.
+  Widget _buildFreeTalkToggle(Color accent) {
+    final bool on = FFAppState().freeTalk;
+    const radius = BorderRadius.all(Radius.circular(14));
+    return Material(
+      // 테두리는 두지 않는다 — 위 입력칸만 상자로 보이게 한다.
+      color: on ? accent.withValues(alpha: 0.08) : Colors.transparent,
+      shape: const RoundedRectangleBorder(borderRadius: radius),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => setState(() => FFAppState().freeTalk = !on),
+        splashColor: accent.withValues(alpha: 0.14),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Row(
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: on ? accent : Colors.transparent,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: on ? accent : Colors.white38,
+                      width: 1.6,
+                    ),
+                  ),
+                  child: on
+                      ? const Icon(
+                          Icons.check_rounded,
+                          size: 15,
+                          color: Colors.white,
+                        )
+                      : null,
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Free Talk',
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: on ? Colors.white : Colors.white70,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w300,
+                    letterSpacing: .3,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // 켜지 않아도 되는 칸이라는 표시. 설명은 인트로 FAQ에 있다.
+                Flexible(
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0x1FFFFFFF)),
+                    ),
+                    child: Text(
+                      freeTalkOptionLabelForSystemLocale(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: .2,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 

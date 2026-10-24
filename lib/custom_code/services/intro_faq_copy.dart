@@ -37,7 +37,7 @@ class IntroFaqCopy {
       ],
       [
         'I can already hold a conversation.',
-        'Check Free Talk under LANGUAGE in the lobby. Set Free Talk Lang to the language you want to practice and Base Lang to the one you understand best (usually your native language). You talk in the target language from the start, and the Study Room shows what you said on top with its meaning below.',
+        'On the screen where you start Circle Talk or Scenario Talk, check Free Talk. You talk in your lobby Target language from the start, and the Study Room shows what you said on top with its meaning in your Origin language below. All Study Room practice is in that language too.',
       ],
       [
         'I have no one to talk to.',
@@ -67,7 +67,7 @@ class IntroFaqCopy {
       ],
       [
         '이미 외국어로 대화할 수 있어요.',
-        '로비의 LANGUAGE에서 Free Talk을 체크하세요. Free Talk Lang에는 연습할 언어를, Base Lang에는 뜻을 확인할 언어(보통 모국어)를 고릅니다. 대화는 처음부터 배우는 언어로 하고, 공부방에는 내가 한 말이 위에, 그 뜻이 아래에 나옵니다.',
+        '서클톡이나 시나리오톡을 시작하는 화면에서 Free Talk을 체크하세요. 로비에서 고른 Target 언어로 처음부터 대화하고, 공부방에는 내가 한 말이 위에, Origin(모국어) 뜻이 아래에 나옵니다. 공부방 연습도 모두 그 언어로 합니다.',
       ],
       [
         '말할 상대가 없어요.',
@@ -97,7 +97,7 @@ class IntroFaqCopy {
       ],
       [
         'すでに外国語で会話できます。',
-        'ロビーの LANGUAGE で Free Talk にチェックを入れてください。Free Talk Lang に練習したい言語、Base Lang に意味を確認する言語(ふつうは母語)を選びます。最初から学ぶ言語で会話し、学習ルームでは自分の言葉が上に、その意味が下に表示されます。',
+        'サークルトークやシナリオトークを始める画面で Free Talk にチェックを入れてください。ロビーで選んだ Target 言語で最初から会話し、学習ルームでは自分の言葉が上に、Origin(母語)の意味が下に表示されます。学習ルームの練習もすべてその言語で行います。',
       ],
       [
         '話し相手がいません。',
@@ -127,7 +127,7 @@ class IntroFaqCopy {
       ],
       [
         '我已经能用外语对话了。',
-        '在大厅的 LANGUAGE 里勾选 Free Talk。Free Talk Lang 选择要练习的语言,Base Lang 选择用来确认意思的语言(通常是母语)。从一开始就用所学语言对话,学习室里上方显示你说的话,下方显示它的意思。',
+        '在开始社群对话或情景对话的画面勾选 Free Talk。从一开始就用大厅里选的 Target 语言对话,学习室里上方显示你说的话,下方显示 Origin(母语)的意思。学习室的练习也都用这种语言进行。',
       ],
       [
         '我没有说话的对象。',
@@ -157,7 +157,7 @@ class IntroFaqCopy {
       ],
       [
         'Ya puedo mantener una conversación.',
-        'Marca Free Talk en LANGUAGE, en el lobby. Elige en Free Talk Lang el idioma que quieres practicar y en Base Lang el que mejor entiendes (normalmente tu idioma nativo). Hablas en el idioma que aprendes desde el principio, y la sala de estudio muestra arriba lo que dijiste y abajo su significado.',
+        'En la pantalla donde empiezas Conversación de círculo o Conversación de escenario, marca Free Talk. Hablas desde el principio en tu idioma Target del lobby, y la sala de estudio muestra arriba lo que dijiste y abajo su significado en tu idioma Origin. Toda la práctica de la sala de estudio también es en ese idioma.',
       ],
       [
         'No tengo con quién hablar.',
@@ -187,7 +187,7 @@ class IntroFaqCopy {
       ],
       [
         'Je sais déjà tenir une conversation.',
-        'Cochez Free Talk dans LANGUAGE, sur l’accueil. Choisissez dans Free Talk Lang la langue à pratiquer et dans Base Lang celle que vous comprenez le mieux (en général votre langue maternelle). Vous parlez dans la langue apprise dès le début, et la salle d’étude affiche en haut ce que vous avez dit, en dessous son sens.',
+        'Sur l’écran où vous lancez Dialogue de groupe ou Dialogue de scénario, cochez Free Talk. Vous parlez dès le début dans votre langue Target de l’accueil, et la salle d’étude affiche en haut ce que vous avez dit, en dessous son sens dans votre langue Origin. Tous les exercices de la salle d’étude se font aussi dans cette langue.',
       ],
       [
         'Je n’ai personne avec qui parler.',
@@ -217,7 +217,7 @@ class IntroFaqCopy {
       ],
       [
         'Ich kann mich schon unterhalten.',
-        'Setze in der Lobby unter LANGUAGE ein Häkchen bei Free Talk. Wähle bei Free Talk Lang die Sprache, die du üben willst, und bei Base Lang die, die du am besten verstehst (meist deine Muttersprache). Du sprichst von Anfang an in der Lernsprache, und der Lernraum zeigt oben, was du gesagt hast, darunter die Bedeutung.',
+        'Setze auf dem Startbildschirm von Gruppengespräch oder Szenario-Gespräch ein Häkchen bei Free Talk. Du sprichst von Anfang an in deiner Target-Sprache aus der Lobby, und der Lernraum zeigt oben, was du gesagt hast, darunter die Bedeutung in deiner Origin-Sprache. Auch alle Übungen im Lernraum laufen in dieser Sprache.',
       ],
       [
         'Ich habe niemanden zum Reden.',
@@ -247,7 +247,7 @@ class IntroFaqCopy {
       ],
       [
         'मैं पहले से उस भाषा में बात कर सकता/सकती हूँ।',
-        'लॉबी में LANGUAGE के नीचे Free Talk पर निशान लगाएँ। Free Talk Lang में अभ्यास वाली भाषा और Base Lang में वह भाषा चुनें जिसे आप सबसे अच्छी तरह समझते हैं (आमतौर पर मातृभाषा)। आप शुरू से सीखी जा रही भाषा में बात करते हैं, और अध्ययन कक्ष में ऊपर आपकी कही बात और नीचे उसका अर्थ दिखता है।',
+        'समूह वार्ता या परिदृश्य वार्ता शुरू करने वाली स्क्रीन पर Free Talk पर निशान लगाएँ। आप शुरू से लॉबी में चुनी Target भाषा में बात करते हैं, और अध्ययन कक्ष में ऊपर आपकी कही बात और नीचे Origin (मातृभाषा) में उसका अर्थ दिखता है। अध्ययन कक्ष का सारा अभ्यास भी उसी भाषा में होता है।',
       ],
       [
         'मेरे पास बात करने के लिए कोई नहीं है।',
@@ -277,7 +277,7 @@ class IntroFaqCopy {
       ],
       [
         'Я уже могу поддержать разговор.',
-        'Отметьте Free Talk в разделе LANGUAGE в лобби. В Free Talk Lang выберите язык для практики, в Base Lang — тот, который понимаете лучше всего (обычно родной). Вы с самого начала говорите на изучаемом языке, а в учебной комнате сверху видно сказанное вами, снизу — его смысл.',
+        'На экране запуска Группового или Сценарного разговора отметьте Free Talk. Вы с самого начала говорите на языке Target из лобби, а в учебной комнате сверху видно сказанное вами, снизу — его смысл на языке Origin. Все упражнения учебной комнаты тоже идут на этом языке.',
       ],
       [
         'Мне не с кем поговорить.',
@@ -307,7 +307,7 @@ class IntroFaqCopy {
       ],
       [
         'Já consigo manter uma conversa.',
-        'Marque Free Talk em LANGUAGE, no lobby. Escolha em Free Talk Lang o idioma que quer praticar e em Base Lang o que você entende melhor (geralmente o nativo). Você conversa no idioma que aprende desde o início, e a sala de estudo mostra em cima o que você disse e embaixo o significado.',
+        'Na tela em que você inicia a Conversa em grupo ou a Conversa de cenário, marque Free Talk. Você conversa desde o início no seu idioma Target do lobby, e a sala de estudo mostra em cima o que você disse e embaixo o significado no seu idioma Origin. Toda a prática da sala de estudo também é nesse idioma.',
       ],
       [
         'Não tenho com quem conversar.',
@@ -337,7 +337,7 @@ class IntroFaqCopy {
       ],
       [
         'So già sostenere una conversazione.',
-        'Spunta Free Talk in LANGUAGE, nella lobby. Scegli in Free Talk Lang la lingua da esercitare e in Base Lang quella che capisci meglio (di solito la lingua madre). Parli nella lingua che stai imparando fin dall’inizio, e la sala studio mostra sopra ciò che hai detto e sotto il suo significato.',
+        'Nella schermata da cui avvii Dialogo di gruppo o Dialogo di scenario, spunta Free Talk. Parli fin dall’inizio nella lingua Target scelta nella lobby, e la sala studio mostra sopra ciò che hai detto e sotto il significato nella tua lingua Origin. Anche tutta la pratica della sala studio è in quella lingua.',
       ],
       [
         'Non ho nessuno con cui parlare.',
@@ -367,7 +367,7 @@ class IntroFaqCopy {
       ],
       [
         'Ik kan al een gesprek voeren.',
-        'Vink in de lobby onder LANGUAGE Free Talk aan. Kies bij Free Talk Lang de taal die je wilt oefenen en bij Base Lang de taal die je het best begrijpt (meestal je moedertaal). Je praat vanaf het begin in de leertaal, en de leerruimte toont bovenaan wat je zei en daaronder de betekenis.',
+        'Vink Free Talk aan op het scherm waar je Groepsgesprek of Scenariogesprek start. Je praat vanaf het begin in je Target-taal uit de lobby, en de leerruimte toont bovenaan wat je zei en daaronder de betekenis in je Origin-taal. Ook alle oefeningen in de leerruimte zijn in die taal.',
       ],
       [
         'Ik heb niemand om mee te praten.',

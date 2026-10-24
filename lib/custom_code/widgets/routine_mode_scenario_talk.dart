@@ -139,6 +139,16 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   // 🎧 [LISTENING] Step 1(기본) = AI도 대화 언어. Step 2 = AI만 배울 언어.
   //   세션 한정 — 방을 나가면 Step 1로 돌아간다.
   ListeningStep _listeningStep = ListeningStep.step1;
+
+  /// 🗣️ 이 방이 Free Talk인가. 시작 화면의 선택을 **처음 한 번** 읽고 방이
+  ///   끝날 때까지 쓴다(`free_talk.dart`).
+  late final bool _freeTalk = FFAppState().freeTalk;
+
+  /// 이 방에서 말하는 로비 언어. Free Talk이면 로비 Target이다.
+  String _lobbySpokenLang() => freeTalkSpokenLobbyLang(
+      freeTalk: _freeTalk,
+      chatLang: FFAppState().chatLang,
+      targetLang: FFAppState().targetLang);
   int _turnCounter = 0;
 
   // 👂 [HEARD-CONFIRM] 전사가 깨졌을 때 "글로 적기 전에" 말로 되묻는다.
@@ -306,8 +316,9 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   /// 🌐 [ORIGIN-RESOLVE] 로비값이 아니라 **이 세션에서 확정된 ORIGIN**을 준다.
   ///   유저가 첫 마디를 로비 설정과 다른 언어로 했으면 그 언어가 여기서
   ///   나온다. 세션 한정이라 방을 나가면 로비값으로 돌아간다.
+  ///   🗣️ Free Talk 방은 로비 Target에서 출발한다([_lobbySpokenLang]).
   String _nativeLangName() => resolveNativeLanguageName(
-      OriginLanguageSession.instance.resolve(FFAppState().chatLang));
+      OriginLanguageSession.instance.resolve(_lobbySpokenLang()));
 
   String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
   TalkUiCopy get _uiCopy => TalkUiCopy.forSystemLocale();
@@ -319,8 +330,15 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   /// `target_lang`에 저장될 수 있었다. 그 필드가 비면 히스토리가 동일 언어
   /// 판정을 못 하고(`chat_history_master._recordSameLang`) 글자 비교로
   /// 떨어진다.
-  String _targetLangName() =>
-      FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
+  ///
+  /// 🗣️ Free Talk 방에서는 둘째 줄, 즉 뜻을 볼 로비 Origin이다.
+  String _targetLangName() {
+    final lang = freeTalkSecondLobbyLang(
+        freeTalk: _freeTalk,
+        chatLang: FFAppState().chatLang,
+        targetLang: FFAppState().targetLang);
+    return lang.isNotEmpty ? lang : 'English';
+  }
 
   /// 🔊 TTS로 읽을 AI 말의 언어. Step 1은 ORIGIN, Step 2는 배울 언어다.
   String _spokenLangName([ListeningStep? step]) =>
@@ -348,7 +366,7 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   Future<void> _settleOriginLanguage(String transcript) async {
     final session = OriginLanguageSession.instance;
     if (session.settled) return;
-    final lobbyOrigin = resolveNativeLanguageName(FFAppState().chatLang);
+    final lobbyOrigin = resolveNativeLanguageName(_lobbySpokenLang());
     final detected = await resolveOriginFromFirstUtterance(
       apiKey: _openAiKey,
       transcript: transcript,
@@ -362,6 +380,13 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
     unawaited(_streamingStt?.switchLanguage(_nativeLangCode()) ??
         Future<bool>.value(false));
     if (detected == null) return;
+    // 🗣️ 확인 창은 로비 Origin/Target을 고치는 창이다. Free Talk 방은 말하는
+    //   언어가 로비 Target이라 그 창의 뜻과 맞지 않는다 — 적어 두기만 한다.
+    if (_freeTalk) {
+      _log('🌐 [ORIGIN-RESOLVE]',
+          'mismatch freeTalk spoken=$lobbyOrigin detected=$detected → no prompt');
+      return;
+    }
     _log('🌐 [ORIGIN-RESOLVE]',
         'mismatch lobby=$lobbyOrigin detected=$detected → ask (origin unchanged)');
     unawaited(_promptOriginRecheck(detected));
@@ -4262,7 +4287,7 @@ $finalLanguageRule''';
         //   native_lang = ChatLang(로비 Origin), target_lang = LearnLang(로비 Target).
         'native_lang': _nativeLangName(),
         'target_lang': _targetLangName(),
-        ...freeTalkRoomFields(FFAppState().freeTalk),
+        ...freeTalkRoomFields(_freeTalk),
         // 📝 새 방은 검수 대기다. 공부방 첫 화면에서 확정해야 생성이 열린다.
         ...historyDraftSeed(),
       });
@@ -4793,7 +4818,7 @@ $finalLanguageRule''';
             if (_showOriginal &&
                 // ORIGIN과 TARGET이 같으면 원문 줄이 배울글과 똑같아진다.
                 // 세션에서 확정된 ORIGIN으로 봐야 한다 — 로비값과 다를 수 있다.
-                _nativeLangName() != FFAppState().targetLang &&
+                _nativeLangName() != _targetLangName() &&
                 !isThinking &&
                 msg['original'] != null &&
                 msg['original'].toString().isNotEmpty) ...[
@@ -4888,10 +4913,10 @@ $finalLanguageRule''';
               ),
               // 🎧 [LISTENING] Step 1 | Step 2. 배울 언어가 대화 언어와 같으면
               //   잠근다.
-              // 🗣️ Free Talk이면 아예 그리지 않는다. 그때 배울 언어 자리는
-              //   뜻을 확인할 Base Lang이라, Step 2는 AI가 모국어로 답하는
-              //   쪽이 된다(실장님, 2026-10-24).
-              if (!FFAppState().freeTalk)
+              // 🗣️ Free Talk 방이면 아예 그리지 않는다. 이미 배우는 언어로
+              //   대화하고 있고, Step 2 자리는 뜻을 볼 모국어라 AI가 모국어로
+              //   답하는 쪽이 된다(실장님, 2026-10-24).
+              if (!_freeTalk)
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: ListeningStepSwitch(

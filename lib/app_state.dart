@@ -215,8 +215,8 @@ class FFAppState extends ChangeNotifier {
     prefs.setString('ff_chatLang', value);
   }
 
-  /// 로비 LANGUAGE의 Free Talk 체크. 켜면 [chatLang]이 Free Talk Lang,
-  /// [targetLang]이 Base Lang이 된다(`free_talk.dart`).
+  /// 서클톡·시나리오톡 시작 화면의 Free Talk 체크(마지막 선택). 로비
+  /// [chatLang]·[targetLang]의 뜻은 바꾸지 않는다(`free_talk.dart`).
   bool _freeTalk = false;
   bool get freeTalk => _freeTalk;
   set freeTalk(bool value) {

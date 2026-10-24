@@ -128,14 +128,21 @@ void main() {
     const String fallback =
         "FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English'";
 
+    // 🗣️ 서클톡·시나리오톡은 Free Talk 방에서 둘째 줄이 로비 Origin이라
+    //   값을 먼저 고른 뒤 같은 보정을 한다(`free_talk.dart`).
+    const String modeFallback = "return lang.isNotEmpty ? lang : 'English';";
+
     test('서클톡 _targetLangName', () {
-      expect(_read('lib/custom_code/widgets/routine_mode_circle_talk.dart'),
-          contains(fallback));
+      final src = _read('lib/custom_code/widgets/routine_mode_circle_talk.dart');
+      expect(src, contains('String _targetLangName() {'));
+      expect(src, contains(modeFallback));
     });
 
     test('시나리오톡 _targetLangName', () {
-      expect(_read('lib/custom_code/widgets/routine_mode_scenario_talk.dart'),
-          contains(fallback));
+      final src =
+          _read('lib/custom_code/widgets/routine_mode_scenario_talk.dart');
+      expect(src, contains('String _targetLangName() {'));
+      expect(src, contains(modeFallback));
     });
 
     test('만능통역 _myTarget', () {

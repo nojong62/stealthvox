@@ -5,6 +5,11 @@ import 'package:stealth_vox/custom_code/services/free_talk.dart';
 
 String _read(String path) => File(path).readAsStringSync();
 
+const _modes = [
+  'lib/custom_code/widgets/routine_mode_circle_talk.dart',
+  'lib/custom_code/widgets/routine_mode_scenario_talk.dart',
+];
+
 void main() {
   group('방 문서 표시', () {
     test('Free Talk 방에만 free_talk가 붙는다', () {
@@ -19,29 +24,64 @@ void main() {
     });
   });
 
+  group('언어 짝', () {
+    test('평소 방은 로비 Origin으로 말하고 Target이 둘째 줄이다', () {
+      expect(
+          freeTalkSpokenLobbyLang(
+              freeTalk: false, chatLang: 'Korean', targetLang: 'English'),
+          'Korean');
+      expect(
+          freeTalkSecondLobbyLang(
+              freeTalk: false, chatLang: 'Korean', targetLang: 'English'),
+          'English');
+    });
+
+    test('Free Talk 방은 로비 Target으로 말하고 Origin이 뜻 줄이다', () {
+      expect(
+          freeTalkSpokenLobbyLang(
+              freeTalk: true, chatLang: 'Korean', targetLang: 'English'),
+          'English');
+      expect(
+          freeTalkSecondLobbyLang(
+              freeTalk: true, chatLang: 'Korean', targetLang: 'English'),
+          'Korean');
+    });
+  });
+
   group('배선', () {
     final hist = _read('lib/custom_code/widgets/chat_history_master.dart');
 
-    test('새 방 네 곳이 모두 표시를 남긴다', () {
+    test('체크는 서클톡·시나리오톡 시작 화면에 있다', () {
+      final room = _read('lib/custom_code/widgets/stealth_room_master.dart');
+      expect('_buildFreeTalkToggle(accent),'.allMatches(room).length, 2);
+    });
+
+    test('로비와 Duo는 Free Talk을 모른다', () {
       for (final path in [
         'lib/custom_code/widgets/lobby_master.dart',
-        'lib/custom_code/widgets/routine_mode_circle_talk.dart',
-        'lib/custom_code/widgets/routine_mode_scenario_talk.dart',
         'lib/custom_code/widgets/routine_mode_duo.dart',
       ]) {
-        expect(_read(path),
-            contains('...freeTalkRoomFields(FFAppState().freeTalk),'),
+        final src = _read(path);
+        expect(src, isNot(contains('freeTalk')), reason: path);
+        expect(src, isNot(contains('free_talk')), reason: path);
+      }
+    });
+
+    test('두 모드는 방이 열릴 때 한 번 읽어 고정하고 방 문서에 남긴다', () {
+      for (final path in _modes) {
+        final src = _read(path);
+        expect(src, contains('late final bool _freeTalk = FFAppState().freeTalk;'),
+            reason: path);
+        expect(src, contains('...freeTalkRoomFields(_freeTalk),'),
+            reason: path);
+        expect(src, contains('OriginLanguageSession.instance.resolve(_lobbySpokenLang())'),
             reason: path);
       }
     });
 
-    test('서클톡·시나리오톡은 Free Talk에서 Step 단추를 그리지 않는다', () {
-      for (final path in [
-        'lib/custom_code/widgets/routine_mode_circle_talk.dart',
-        'lib/custom_code/widgets/routine_mode_scenario_talk.dart',
-      ]) {
-        expect(_read(path), contains('if (!FFAppState().freeTalk)'),
-            reason: path);
+    test('Free Talk 방에서는 Step 단추를 그리지 않는다', () {
+      for (final path in _modes) {
+        expect(_read(path), contains('if (!_freeTalk)'), reason: path);
       }
     });
 

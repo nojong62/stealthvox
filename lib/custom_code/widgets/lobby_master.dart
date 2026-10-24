@@ -33,7 +33,6 @@ import '/custom_code/services/admin_gate.dart'; // 관리자 판별(UID)
 import '/custom_code/services/real_member_registry.dart';
 import '/custom_code/services/guide_ui_localization.dart';
 import '/custom_code/services/history_finalize.dart';
-import '/custom_code/services/free_talk.dart';
 import '/custom_code/services/origin_pcm_store.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/system_ui_language.dart';
@@ -518,88 +517,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           fontSize: 11,
           letterSpacing: 1.6,
           fontWeight: FontWeight.w800,
-        ),
-      ),
-    );
-  }
-
-  /// 🗣️ LANGUAGE 바로 밑의 Free Talk 체크.
-  ///
-  /// 줄 전체가 버튼이다 — 네모 칸만 눌리면 글자를 누른 사람이 헛손질한다.
-  Widget _buildFreeTalkToggle(FFAppState appState) {
-    final bool on = appState.freeTalk;
-    const radius = BorderRadius.all(Radius.circular(14));
-    return Material(
-      // 테두리는 두지 않는다 — 아래 두 언어 칸만 상자로 보이게 한다.
-      color: on ? const Color(0x1422D3EE) : Colors.transparent,
-      shape: const RoundedRectangleBorder(borderRadius: radius),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => setState(() => appState.freeTalk = !on),
-        splashColor: const Color(0x2422D3EE),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 48),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            child: Row(
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    color: on ? _kLobbyCyan : Colors.transparent,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: on ? _kLobbyCyan : _kLobbyTextLow,
-                      width: 1.6,
-                    ),
-                  ),
-                  child: on
-                      ? const Icon(
-                          Icons.check_rounded,
-                          size: 15,
-                          color: _kLobbyBgTop,
-                        )
-                      : null,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'Free Talk',
-                  maxLines: 1,
-                  style: TextStyle(
-                    color: on ? _kLobbyTextHi : _kLobbyTextMid,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w300,
-                    letterSpacing: .3,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // 켜지 않아도 되는 칸이라는 표시. 설명은 인트로 FAQ에 있다.
-                Flexible(
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: _kLobbyBorder),
-                    ),
-                    child: Text(
-                      freeTalkOptionLabelForSystemLocale(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _kLobbyTextLow,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: .2,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
         ),
       ),
     );
@@ -1490,18 +1407,13 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                           ),
                         ],
                       ),
-                      _buildFreeTalkToggle(appState),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 4),
                       // 📐 위아래로 쌓는다. 좌우로 나란히 뒀더니 폭이 절반이라
                       //   "(Chat L…"·"Ko…"처럼 라벨도 언어 이름도 잘렸다
                       //   (실기기 확인, 2026-08-27). 방향은 가운데 화살표가
                       //   말한다 — 아래를 가리키면 원어 → 배울 말이다.
-                      // 🗣️ Free Talk이면 이름만 바뀐다. 저장 칸은 그대로다
-                      //   (`free_talk.dart`).
                       _buildLangField(
-                        appState.freeTalk
-                            ? 'Free Talk Lang'
-                            : 'Origin (Chat Lang)',
+                        'Origin (Chat Lang)',
                         'Select',
                         appState.chatLang,
                         (val) {
@@ -1519,7 +1431,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                         ),
                       ),
                       _buildLangField(
-                        appState.freeTalk ? 'Base Lang' : 'Target (Learn Lang)',
+                        'Target (Learn Lang)',
                         'Select',
                         appState.targetLang,
                         // ⚠️ AI STYLE은 여기서 건드리지 않는다. 비영어로 가면
@@ -1605,7 +1517,6 @@ class LobbyBrain {
       // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
       'native_lang': FFAppState().chatLang,
       'target_lang': FFAppState().targetLang,
-      ...freeTalkRoomFields(FFAppState().freeTalk),
       // 📝 새 방은 검수 대기다(`history_finalize.dart`).
       ...historyDraftSeed(),
     });
