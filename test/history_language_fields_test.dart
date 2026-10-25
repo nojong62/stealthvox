@@ -33,6 +33,8 @@ const List<String> _writers = <String>[
   // 채워 두는 자리.
   'lib/custom_code/widgets/chat_history_master.dart',
   'lib/custom_code/widgets/chat_history_list_master.dart',
+  // Free Talk 방이 끝난 뒤 짝을 로비 Origin/Target으로 되돌리는 자리.
+  'lib/custom_code/services/free_talk_history_flip.dart',
 ];
 
 String _read(String path) =>

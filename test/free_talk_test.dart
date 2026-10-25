@@ -148,7 +148,7 @@ void main() {
       final flip =
           _read('lib/custom_code/services/free_talk_history_flip.dart');
       expect(flip, contains('writeHistoryPreviewSummary('));
-      expect(flip, contains('nativeLang: baseLang,'));
+      expect(flip, contains('nativeLang: chatLang,'));
       for (final path in _modes) {
         expect(_read(path),
             contains('if (!_freeTalk) unawaited(writeHistoryPreviewSummary('),
