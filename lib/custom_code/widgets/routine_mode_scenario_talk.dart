@@ -1183,9 +1183,12 @@ $finalLanguageRule''';
     if (_openAiKey.isEmpty || _isGeneratingScenario) return;
     setState(() => _isGeneratingScenario = true);
     try {
+      // 상황·역할 글은 설정 페이지처럼 로비 Origin으로 쓴다. Free Talk 방도
+      //   말하는 언어(로비 Target)가 아니라 뜻을 볼 언어로 보여 준다.
       final result = await ScenarioBrain.generateDramaticScenario(
         _openAiKey,
-        languageName: _nativeLangName(),
+        languageName: resolveNativeLanguageName(
+            OriginLanguageSession.instance.resolve(FFAppState().chatLang)),
       );
       if (mounted && result != null) {
         setState(() {
