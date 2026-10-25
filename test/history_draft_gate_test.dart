@@ -180,9 +180,8 @@ void main() {
     });
 
     test('나머지 두 아이콘은 그대로다', () {
-      // 🗣️ 받는 줄은 연습 줄이다 — 평소 배울글, Free Talk 방은 원문.
-      expect(master, contains('_buildAppBtn(docs[index].id, studyText),'));
-      expect(master, contains('_buildAltStyleBtn(docs[index], studyText),'));
+      expect(master, contains('_buildAppBtn(docs[index].id, translated),'));
+      expect(master, contains('_buildAltStyleBtn(docs[index], translated),'));
       expect(master, contains('Icons.school_rounded'));
     });
 

@@ -49,10 +49,8 @@ void main() {
   group('① 언어는 방 문서에서 온다', () {
     test('원문 언어 이름을 주는 자리가 있다', () {
       expect(hist, contains('String _sessionNativeLangName()'));
-      // 🗣️ Free Talk 방은 두 언어가 맞바뀐다(대화한 언어가 곧 배우는 언어).
-      expect(
-          _flat(hist),
-          contains("((_sessionFreeTalk ? _sessionTargetLang : _sessionNativeLang) ?? '')"));
+      expect(_flat(hist),
+          contains("final name = (_sessionNativeLang ?? '').trim();"));
     });
 
     test('문제 만들기가 두 언어를 다 집어 온다', () {

@@ -4479,7 +4479,7 @@ $userFixPolicy$finalLanguageRule''';
               speakerType: isAi ? TtsSpeakerType.ai : TtsSpeakerType.user,
               turnId: '${isAi ? 'ai' : 'user'}-history-$turnId',
               generationId: generationId,
-              language: _freeTalk ? _nativeLangName() : _targetLangName(),
+              language: _targetLangName(),
               saveToHistory: true,
               historyVoiceKey: historyVoiceKey,
               playbackCategory: 'history_only',
@@ -5299,19 +5299,22 @@ $userFixPolicy$finalLanguageRule''';
       _saveHistoryMessages([hostLine, systemLine]); // 🔧 [히스토리] 병행 저장
       _saveRecentHistory(
           hostOriginal, aiOriginalText); // 🧠 [한국어 대화 문맥] 백그라운드 메모리 업데이트
-      // 🗣️ 공부방이 연습하는 줄을 미리 읽어 둔다. Free Talk 방은 원문이다.
-      _cacheTargetSpeechForHistory(
-        targetText: _freeTalk ? hostOriginal : userTargetText,
-        turnId: currentTurnId,
-        generationId: pipelineGeneration,
-        isAi: false,
-      );
-      _cacheTargetSpeechForHistory(
-        targetText: _freeTalk ? aiOriginalText : aiTargetText,
-        turnId: currentTurnId,
-        generationId: pipelineGeneration,
-        isAi: true,
-      );
+      // 🔁 Free Talk 방은 배울글을 방이 끝난 뒤 공부방이 다시 만든다
+      //   (`free_talk_history_flip.dart`). 지금 읽어 둘 문장이 아직 없다.
+      if (!_freeTalk) {
+        _cacheTargetSpeechForHistory(
+          targetText: userTargetText,
+          turnId: currentTurnId,
+          generationId: pipelineGeneration,
+          isAi: false,
+        );
+        _cacheTargetSpeechForHistory(
+          targetText: aiTargetText,
+          turnId: currentTurnId,
+          generationId: pipelineGeneration,
+          isAi: true,
+        );
+      }
       _log('🧠 [PIPE-10]', 'Firestore 저장 호출 완료');
     } catch (e) {
       aiTtsPrefetch?.cancel();
