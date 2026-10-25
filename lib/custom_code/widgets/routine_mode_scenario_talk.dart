@@ -73,6 +73,7 @@ import '/custom_code/services/talk_ui_localization.dart';
 //   함수**를 쓴다. 여기에 규칙을 다시 구현하면 한쪽만 고쳐지고 다른 쪽은 남는다.
 import '/custom_code/services/late_continuation.dart';
 import '/custom_code/services/listening_practice.dart';
+import '/custom_code/services/debug_stt_inject.dart';
 import '/custom_code/services/circle_correction_intent.dart'
     as correction_intent;
 import '/custom_code/services/conversation_cancel_command.dart';
@@ -260,6 +261,8 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   bool _aiPlaybackStarted = false;
   Timer? _continuationWindowTimer;
   Timer? _continuationTranscriptTimeout;
+  // 🧪 [STT-INJECT] 디버그 빌드에서만 산다. 릴리스면 null.
+  Timer? _debugSttInject;
 
   bool get _continuationCandidateAlive => _continuationCandidate != 0;
 
@@ -1019,6 +1022,12 @@ $finalLanguageRule''';
     // 잔여시간 소진 시 StealthRoom이 이 경로로 방을 닫는다(저장·정리 포함).
     StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
     BillingTicker.instance.appInForeground.addListener(_onForegroundChanged);
+    // 🧪 [STT-INJECT] 주입된 한 줄은 소켓의 completed와 같은 입구로 들어간다.
+    _debugSttInject = startDebugSttInject((text) {
+      _log('🧪 [STT-INJECT]', 'text="$text"');
+      _onStreamingTranscriptCompleted(
+          'inject-${DateTime.now().microsecondsSinceEpoch}', text);
+    });
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
       if (_swTTS.isRunning) {
         _swTTS.stop();
@@ -1105,6 +1114,7 @@ $finalLanguageRule''';
   @override
   void dispose() {
     _isDisposing = true;
+    _debugSttInject?.cancel();
     // 💾 24시간·200MB·40MB는 근거 있는 값이 아니라 보호용 출발점이다.
     //   이 줄이 쌓여야 실제 값으로 바꿀 수 있다.
     OriginPcmStore.instance.logSnapshot(_myHistoryRef?.id ?? '');
