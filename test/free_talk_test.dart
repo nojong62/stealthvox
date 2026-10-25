@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/free_talk.dart';
 import 'package:stealth_vox/custom_code/services/free_talk_history_flip.dart';
+import 'package:stealth_vox/custom_code/services/history_finalize.dart';
 
 String _read(String path) => File(path).readAsStringSync();
 
@@ -53,7 +54,19 @@ void main() {
     test('바꾸지 않은 Free Talk 방만 대상이다', () {
       expect(freeTalkRoomNeedsFlip(null), isFalse);
       expect(freeTalkRoomNeedsFlip(<String, dynamic>{}), isFalse);
-      expect(freeTalkRoomNeedsFlip({kHistoryFreeTalkField: true}), isTrue);
+      expect(
+          freeTalkRoomNeedsFlip({
+            kHistoryFreeTalkField: true,
+            kHistoryStateField: kHistoryStateDraft,
+          }),
+          isTrue);
+      // 확정한 원문은 다시 쓰지 않는다.
+      expect(
+          freeTalkRoomNeedsFlip({
+            kHistoryFreeTalkField: true,
+            kHistoryStateField: kHistoryStateFinalized,
+          }),
+          isFalse);
       expect(
           freeTalkRoomNeedsFlip({
             kHistoryFreeTalkField: true,
