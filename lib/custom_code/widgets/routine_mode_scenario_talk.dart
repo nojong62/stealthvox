@@ -4488,10 +4488,11 @@ $finalLanguageRule''';
           ));
           // 🗂️ [HISTORY-PREVIEW] 목록의 날짜 밑 한 줄을 마지막 대사 대신
           //   **대화 언어로 쓴 주제 요약**으로 덮어쓴다. 기다리지 않는다.
+          //   🔁 Free Talk 방은 공부방에서 로비 Origin 방이 되므로 그 언어로.
           unawaited(writeHistoryPreviewSummary(
             ref: _myHistoryRef!,
             apiKey: _openAiKey,
-            nativeLang: _nativeLangName(),
+            nativeLang: _freeTalk ? _targetLangName() : _nativeLangName(),
             lines: _localMessages
                 .where((m) => m['role'] == 'HOST' || m['role'] == 'SYSTEM')
                 .map((m) => (m['target'] ?? '').toString().trim())
