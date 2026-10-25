@@ -28,6 +28,7 @@ import 'package:http/http.dart' as http;
 import 'completion_budget.dart';
 import 'free_talk.dart';
 import 'history_finalize.dart';
+import 'history_preview_summary.dart';
 import 'history_text_model.dart';
 import 'origin_pcm_store.dart';
 import 'origin_restoration.dart';
@@ -193,7 +194,12 @@ class FreeTalkHistoryFlip {
           'translated_text': FieldValue.delete(),
         });
       }
+      final orderedMeanings = docs
+          .map((d) => meanings[d.id] ?? '')
+          .where((t) => t.isNotEmpty)
+          .toList(growable: false);
       batch.update(roomRef, <String, dynamic>{
+        if (orderedMeanings.isNotEmpty) 'last_message': orderedMeanings.last,
         'native_lang': baseLang,
         'target_lang': spokenLang,
         kFreeTalkFlippedAtField: FieldValue.serverTimestamp(),
@@ -203,6 +209,14 @@ class FreeTalkHistoryFlip {
       });
       await batch.commit();
       unawaited(OriginPcmStore.instance.discard(roomId).catchError((_) {}));
+      // 🗂️ 목록 요약도 여기서 쓴다. 대화방에서 Target 줄로 요약하면 모델이
+      //   "Origin으로 쓰라"를 무시하고 Target으로 썼다(2026-10-25 실기기).
+      unawaited(writeHistoryPreviewSummary(
+        ref: roomRef,
+        apiKey: apiKey,
+        lines: orderedMeanings,
+        nativeLang: baseLang,
+      ));
       debugPrint('[FREE-TALK-FLIP] done room=$roomId lines=${docs.length} '
           'native=$baseLang target=$spokenLang '
           'elapsedMs=${DateTime.now().difference(started).inMilliseconds}');
