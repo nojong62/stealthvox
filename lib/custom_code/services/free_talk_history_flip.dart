@@ -27,6 +27,7 @@ import 'package:http/http.dart' as http;
 
 import 'completion_budget.dart';
 import 'free_talk.dart';
+import 'history_finalize.dart';
 import 'history_text_model.dart';
 import 'origin_pcm_store.dart';
 import 'origin_restoration.dart';
@@ -37,9 +38,12 @@ const String kFreeTalkFlippedAtField = 'free_talk_flipped_at';
 /// 실제로 한 Target 말. 원문 칸이 Origin 뜻으로 바뀐 뒤의 근거다.
 const String kMessageSpokenTextField = 'spoken_text';
 
-/// 아직 바꾸지 않은 Free Talk 방인가.
+/// 아직 바꾸지 않은 Free Talk 방인가. **검수 중인 방만** — 확정한 원문은
+/// 어떤 자동 처리도 다시 쓰지 않는다. 바꾸기가 실패한 채 확정된 방은 그대로 둔다.
 bool freeTalkRoomNeedsFlip(Map<String, dynamic>? room) =>
-    isFreeTalkRoom(room) && room?[kFreeTalkFlippedAtField] == null;
+    isFreeTalkRoom(room) &&
+    room?[kFreeTalkFlippedAtField] == null &&
+    historyEditAllowed(room);
 
 String buildFreeTalkFlipInstructions({
   required String spokenLang,
