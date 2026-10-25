@@ -261,20 +261,19 @@ function splitForGoogleTts(text, maxBytes = MAX_GOOGLE_TTS_INPUT_BYTES) {
   return pieces;
 }
 
-// At the start of a Korean reply, a vocative or lead-in ending in a comma can
-// run into the next word ("회원님,PT 시간..."). Add a short Chirp pause after
-// the first opening comma without changing the text shown in the UI or kept in
-// history. This is intentionally limited to the opening 80 characters so a
-// later comma in a longer reply retains the model's natural pacing.
-function koreanChirpInputWithOpeningCommaPause(text) {
+// Chirp runs Korean clauses together across a comma ("회원님,PT 시간...",
+// "좋고,산책하기..."). Add a short Chirp pause after every comma without
+// changing the text shown in the UI or kept in history. Digit grouping
+// ("1,000") is not a clause break, and text that already holds brackets is
+// left alone so it is not misread as a pause tag.
+function koreanChirpInputWithCommaPauses(text) {
   const input = String(text || "").trim();
-  const match = /^([^,，\n]{1,80}[,，])(?=\s*\S)/u.exec(input);
-  if (!match) return { text: input };
-
-  const markup = input.slice(0, match[0].length) +
-    " [pause short]" + input.slice(match[0].length);
+  if (input.includes("[") || input.includes("]")) return { text: input };
+  const markup = input.replace(/(?<!\d)([,，])\s*(?=\S)|(?<=\d)([,，])(?!\d)\s*(?=\S)/gu,
+    (_, a, b) => (a || b) + " [pause short] ");
+  if (markup === input) return { text: input };
   // Do not make a request that would exceed the provider's input cap solely
-  // because the audio-only pause marker was added.
+  // because the audio-only pause markers were added.
   return utf8Bytes(markup) <= MAX_GOOGLE_TTS_INPUT_BYTES ? { markup } : { text: input };
 }
 // GA returns `{ value, expires_at }` at the top level; the retired beta shape
@@ -358,8 +357,8 @@ async function synthesizeChirp(body, locale) {
   const pieces = splitForGoogleTts(input);
   const audio = [];
   for (let i = 0; i < pieces.length; i++) {
-    const speechInput = i === 0 && locale === "ko-KR"
-      ? koreanChirpInputWithOpeningCommaPause(pieces[i])
+    const speechInput = locale === "ko-KR"
+      ? koreanChirpInputWithCommaPauses(pieces[i])
       : { text: pieces[i] };
     // Raw PCM and MP3 frames both play back correctly when concatenated.
     audio.push(await synthesizeChirpPiece(
@@ -606,7 +605,7 @@ module.exports = {
   splitForGoogleTts,
   chirpAudioConfig,
   chirpMarkupForRequest,
-  koreanChirpInputWithOpeningCommaPause,
+  koreanChirpInputWithCommaPauses,
   mintAiGatewaySession,
   mintDeepgramToken,
   mintOpenAiRealtimeToken,

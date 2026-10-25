@@ -16,7 +16,7 @@ const {
   splitForGoogleTts,
   chirpAudioConfig,
   chirpMarkupForRequest,
-  koreanChirpInputWithOpeningCommaPause,
+  koreanChirpInputWithCommaPauses,
   realtimeClientSecret,
 } = require("../secure_ai_gateway");
 
@@ -151,22 +151,37 @@ test("Google TTS input is split by UTF-8 bytes, not characters", () => {
   for (const piece of cut) assert.ok(Buffer.byteLength(piece, "utf8") <= 5000);
 });
 
-test("Korean TTS pauses after the first opening comma", () => {
+test("Korean TTS pauses after every comma", () => {
   assert.deepEqual(
-    koreanChirpInputWithOpeningCommaPause("네, 기본 포장은 무료예요."),
+    koreanChirpInputWithCommaPauses("네, 기본 포장은 무료예요."),
     { markup: "네, [pause short] 기본 포장은 무료예요." },
   );
   assert.deepEqual(
-    koreanChirpInputWithOpeningCommaPause("회원님, PT 시간 변경을 도와드릴게요."),
+    koreanChirpInputWithCommaPauses("회원님,PT 시간 변경을 도와드릴게요."),
     { markup: "회원님, [pause short] PT 시간 변경을 도와드릴게요." },
   );
   assert.deepEqual(
-    koreanChirpInputWithOpeningCommaPause("기본 포장은 무료예요."),
+    koreanChirpInputWithCommaPauses("기본 포장은 무료예요."),
     { text: "기본 포장은 무료예요." },
   );
   assert.deepEqual(
-    koreanChirpInputWithOpeningCommaPause("오늘은 날씨가 좋고, 산책하기 좋아요."),
-    { markup: "오늘은 날씨가 좋고, [pause short] 산책하기 좋아요." },
+    koreanChirpInputWithCommaPauses("날씨가 좋고, 바람도 시원하고, 산책하기 좋아요."),
+    { markup: "날씨가 좋고, [pause short] 바람도 시원하고, [pause short] 산책하기 좋아요." },
+  );
+});
+
+test("Korean comma pause skips digit grouping and bracketed text", () => {
+  assert.deepEqual(
+    koreanChirpInputWithCommaPauses("가격은 1,000원이에요."),
+    { text: "가격은 1,000원이에요." },
+  );
+  assert.deepEqual(
+    koreanChirpInputWithCommaPauses("3, 4번 중에 고르세요."),
+    { markup: "3, [pause short] 4번 중에 고르세요." },
+  );
+  assert.deepEqual(
+    koreanChirpInputWithCommaPauses("[참고] 네, 좋아요."),
+    { text: "[참고] 네, 좋아요." },
   );
 });
 
