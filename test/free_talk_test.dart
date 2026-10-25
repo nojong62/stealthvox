@@ -144,6 +144,18 @@ void main() {
           contains('FreeTalkHistoryFlip.instance.ensure(widget.historyDoc, _apiKey)'));
     });
 
+    test('목록 요약은 바꾼 뒤 Origin 원문으로 쓴다', () {
+      final flip =
+          _read('lib/custom_code/services/free_talk_history_flip.dart');
+      expect(flip, contains('writeHistoryPreviewSummary('));
+      expect(flip, contains('nativeLang: baseLang,'));
+      for (final path in _modes) {
+        expect(_read(path),
+            contains('if (!_freeTalk) unawaited(writeHistoryPreviewSummary('),
+            reason: path);
+      }
+    });
+
     test('복원이 끝난 뒤에 바꾼다', () {
       final runner =
           _read('lib/custom_code/services/origin_restoration_runner.dart');
