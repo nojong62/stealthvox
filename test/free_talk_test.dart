@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/free_talk.dart';
+import 'package:stealth_vox/custom_code/services/free_talk_history_flip.dart';
 
 String _read(String path) => File(path).readAsStringSync();
 
@@ -48,6 +49,39 @@ void main() {
     });
   });
 
+  group('공부방으로 넘길 때 평소 방으로 바꾼다', () {
+    test('바꾸지 않은 Free Talk 방만 대상이다', () {
+      expect(freeTalkRoomNeedsFlip(null), isFalse);
+      expect(freeTalkRoomNeedsFlip(<String, dynamic>{}), isFalse);
+      expect(freeTalkRoomNeedsFlip({kHistoryFreeTalkField: true}), isTrue);
+      expect(
+          freeTalkRoomNeedsFlip({
+            kHistoryFreeTalkField: true,
+            kFreeTalkFlippedAtField: 'x',
+          }),
+          isFalse);
+    });
+
+    test('줄이 모두 오면 읽고, 하나라도 빠지면 바꾸지 않는다', () {
+      const content =
+          '{"lines":[{"id":"a","text":"공항에 가야 해요"},{"id":"b","text":"네"}]}';
+      expect(parseFreeTalkFlipLines(content, {'a', 'b'}),
+          {'a': '공항에 가야 해요', 'b': '네'});
+      expect(parseFreeTalkFlipLines(content, {'a', 'b', 'c'}), isNull);
+      expect(parseFreeTalkFlipLines('not json', {'a'}), isNull);
+      expect(
+          parseFreeTalkFlipLines('{"lines":[{"id":"a","text":" "}]}', {'a'}),
+          isNull);
+    });
+
+    test('지시문은 말한 언어에서 뜻 언어로 옮긴다', () {
+      final s = buildFreeTalkFlipInstructions(
+          spokenLang: 'Portuguese', baseLang: 'Korean');
+      expect(s, contains('conversation in Portuguese'));
+      expect(s, contains('Rewrite every line in Korean'));
+    });
+  });
+
   group('배선', () {
     final hist = _read('lib/custom_code/widgets/chat_history_master.dart');
 
@@ -90,14 +124,18 @@ void main() {
       }
     });
 
-    test('History는 방 문서에서 Free Talk 여부를 읽는다', () {
-      expect(hist, contains('_sessionFreeTalk = isFreeTalkRoom(data);'));
+    test('공부방은 Free Talk 방을 따로 다루지 않는다 — 평소 방으로 바꿔 받는다', () {
+      expect(hist, isNot(contains('_sessionFreeTalk')));
+      expect(hist, contains('freeTalkRoomNeedsFlip(data)'));
+      expect(hist,
+          contains('FreeTalkHistoryFlip.instance.ensure(widget.historyDoc, _apiKey)'));
     });
 
-    test('공부방 연습 재료는 Free Talk 방에서 원문이다', () {
-      expect(hist, contains('_sessionFreeTalk ? original : translated;'));
-      expect(hist,
-          contains("? (d['original_text'] ?? d['translated_text'] ?? '')"));
+    test('복원이 끝난 뒤에 바꾼다', () {
+      final runner =
+          _read('lib/custom_code/services/origin_restoration_runner.dart');
+      expect(runner,
+          contains('.then((_) => FreeTalkHistoryFlip.instance.ensure(roomRef, apiKey))'));
     });
   });
 }

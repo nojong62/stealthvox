@@ -25,6 +25,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'duo_study_state.dart';
+import 'free_talk_history_flip.dart';
 import 'history_finalize.dart';
 import 'completion_budget.dart';
 import 'history_text_model.dart';
@@ -101,6 +102,8 @@ class OriginRestorationRunner {
       return;
     }
     final int runId = ++_runSeq;
+    // 🔁 Free Talk 방은 복원이 Target 말을 고친 **뒤에** 평소 방으로 바꾼다
+    //   (`free_talk_history_flip.dart`). 공부방은 이 판 전체를 기다린다.
     final Future<void> raw = _run(
       roomRef: roomRef,
       apiKey: apiKey,
@@ -109,7 +112,7 @@ class OriginRestorationRunner {
       targetSubjectOnly: targetSubjectOnly,
       useCircleDecisionGate: useCircleDecisionGate,
       runId: runId,
-    );
+    ).then((_) => FreeTalkHistoryFlip.instance.ensure(roomRef, apiKey));
     late final Future<void> task;
 
     // ⚠️ **이 정리는 값을 돌려주면 안 된다. 한 줄로 줄이지 말 것.**
