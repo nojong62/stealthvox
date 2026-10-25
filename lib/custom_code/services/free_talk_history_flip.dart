@@ -115,10 +115,11 @@ class FreeTalkHistoryFlip {
         debugPrint('[FREE-TALK-FLIP] skip room=$roomId reason=no_api_key');
         return false;
       }
-      // 대화방이 저장한 짝: native = 말한 언어(로비 Target), target = 뜻(로비 Origin).
-      final spokenLang = (data!['native_lang'] ?? '').toString().trim();
-      final baseLang = (data['target_lang'] ?? '').toString().trim();
-      if (spokenLang.isEmpty || baseLang.isEmpty) {
+      // 대화방이 저장한 짝: native = 말한 언어(로비 Target), target = 뜻(로비
+      // Origin = ChatLang). 바꾼 뒤에는 평소 방처럼 native = ChatLang이다.
+      final lobbyTargetLang = (data!['native_lang'] ?? '').toString().trim();
+      final chatLang = (data['target_lang'] ?? '').toString().trim();
+      if (lobbyTargetLang.isEmpty || chatLang.isEmpty) {
         debugPrint('[FREE-TALK-FLIP] skip room=$roomId reason=no_lang');
         return false;
       }
@@ -154,7 +155,7 @@ class FreeTalkHistoryFlip {
                   <String, String>{
                     'role': 'system',
                     'content': buildFreeTalkFlipInstructions(
-                        spokenLang: spokenLang, baseLang: baseLang),
+                        spokenLang: lobbyTargetLang, baseLang: chatLang),
                   },
                   <String, String>{
                     'role': 'user',
@@ -200,8 +201,8 @@ class FreeTalkHistoryFlip {
           .toList(growable: false);
       batch.update(roomRef, <String, dynamic>{
         if (orderedMeanings.isNotEmpty) 'last_message': orderedMeanings.last,
-        'native_lang': baseLang,
-        'target_lang': spokenLang,
+        'native_lang': chatLang,
+        'target_lang': lobbyTargetLang,
         kFreeTalkFlippedAtField: FieldValue.serverTimestamp(),
         // 원문이 이제 다른 언어다. 소리로 다시 듣는 복원이 돌면 Target 말로
         // 덮어쓴다.
@@ -215,10 +216,10 @@ class FreeTalkHistoryFlip {
         ref: roomRef,
         apiKey: apiKey,
         lines: orderedMeanings,
-        nativeLang: baseLang,
+        nativeLang: chatLang,
       ));
       debugPrint('[FREE-TALK-FLIP] done room=$roomId lines=${docs.length} '
-          'native=$baseLang target=$spokenLang '
+          'native=$chatLang target=$lobbyTargetLang '
           'elapsedMs=${DateTime.now().difference(started).inMilliseconds}');
       return true;
     } catch (error) {
