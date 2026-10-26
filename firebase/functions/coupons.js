@@ -105,6 +105,11 @@ async function redeem({db, uid, code, devKey, nowMs, now}) {
       after_seconds: after, at: now};
     tx.set(userRedeemRef, row);
     tx.set(deviceRef, {uid, at: now});
+    // 회원 쪽 장부(관리자 웹 회원 상세). 메모는 쓴 시점 그대로 남긴다.
+    tx.set(db.doc(`users/${uid}/coupon_redemptions/${code}`), {
+      code, memo: coupon.memo || "", seconds: coupon.seconds,
+      before_seconds: before, after_seconds: after, at: now,
+    });
     return {ok: true, secondsAdded: coupon.seconds, remainingTime: after};
   });
 }

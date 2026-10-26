@@ -163,6 +163,12 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // 쿠폰 사용 장부(메모 포함). coupons.js만 쓴다.
+      match /coupon_redemptions/{code} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow write: if false;
+      }
+
       match /fcm_tokens/{installationId} {
         allow read: if false;
         allow create, update, delete: if isOwner(uid);

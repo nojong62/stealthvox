@@ -373,7 +373,7 @@ async function showMember(uid) {
   box.replaceChildren(el("p", {class: "muted"}, "불러오는 중…"));
   try {
     const userRef = doc(db, "users", uid);
-    const [memberSnap, userSnap, purchases, usage, flagSnap, notes, adjustments] = await Promise.all([
+    const [memberSnap, userSnap, purchases, usage, flagSnap, notes, adjustments, coupons] = await Promise.all([
       getDoc(doc(db, "real_members", uid)),
       getDoc(userRef),
       getDocs(query(collection(userRef, "purchases"), orderBy("purchased_at", "desc"), limit(50))),
@@ -381,6 +381,7 @@ async function showMember(uid) {
       getDoc(doc(db, "user_flags", uid)),
       getDocs(query(collection(db, "admin_notes", uid, "notes"), orderBy("createdAt", "desc"), limit(100))),
       getDocs(query(collection(userRef, "admin_adjustments"), orderBy("created_at", "desc"), limit(LIST_LIMIT))),
+      getDocs(query(collection(userRef, "coupon_redemptions"), orderBy("at", "desc"), limit(LIST_LIMIT))),
     ]);
     if (!memberSnap.exists() && !userSnap.exists()) {
       box.replaceChildren(el("p", {class: "error"}, `UID ${uid}: 회원 문서가 없습니다.`));
@@ -413,6 +414,7 @@ async function showMember(uid) {
         ])),
       userSnap.exists() ? timeCard(uid, u.remainingTime) : null,
       adjustmentTable(adjustments.docs),
+      couponTable(coupons.docs),
       testAccountCard(uid, flagSnap.exists() ? flagSnap.data() : {}),
       holdCard(uid, flagSnap.exists() ? flagSnap.data() : {}),
       blockCard(uid, flagSnap.exists() ? flagSnap.data() : {}),
@@ -506,6 +508,25 @@ function adjustmentTable(docs) {
           el("td", {class: a.applied_seconds < 0 ? "num error" : "num ok"}, sign + fmtSeconds(a.applied_seconds)),
           el("td", {class: "num"}, `${fmtSeconds(a.before_seconds)} → ${fmtSeconds(a.after_seconds)}`),
           el("td", {}, a.reason || ""));
+      })));
+}
+
+// 쿠폰 사용 이력. 메모는 쓴 시점 그대로다(쿠폰 쪽 메모를 고쳐도 안 바뀐다).
+function couponTable(docs) {
+  if (docs.length === 0) return null;
+  return el("div", {class: "card"},
+    el("h3", {}, `쿠폰 사용 (${docs.length})`),
+    el("table", {},
+      el("tr", {}, el("th", {}, "시각"), el("th", {}, "코드"), el("th", {}, "지급"),
+        el("th", {}, "잔여 (전 → 후)"), el("th", {}, "메모")),
+      docs.map((d) => {
+        const c = d.data();
+        return el("tr", {},
+          el("td", {}, fmtTime(c.at)),
+          el("td", {class: "mono"}, c.code || d.id),
+          el("td", {class: "num ok"}, "+" + fmtSeconds(c.seconds)),
+          el("td", {class: "num"}, `${fmtSeconds(c.before_seconds)} → ${fmtSeconds(c.after_seconds)}`),
+          el("td", {}, c.memo || ""));
       })));
 }
 
