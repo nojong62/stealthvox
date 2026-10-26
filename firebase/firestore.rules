@@ -92,6 +92,8 @@ service cloud.firestore {
         && !request.resource.data.keys().hasAny([
           'remainingTime',
           'remaining_seconds',
+          'couponSeconds',
+          'couponCount',
           'parentConsentGrantedAt',
           'parentConsentMethod',
           'parentConsentEmail'
@@ -101,12 +103,14 @@ service cloud.firestore {
           || request.resource.data.parentConsentPending == true
         );
 
-      // remainingTime, remaining_seconds, and consent approval fields are server-owned.
+      // remainingTime, remaining_seconds, coupon totals, and consent approval fields are server-owned.
       allow update: if isOwner(uid)
         && !request.resource.data.diff(resource.data).affectedKeys()
           .hasAny([
             'remainingTime',
             'remaining_seconds',
+            'couponSeconds',
+            'couponCount',
             'parentConsentGrantedAt',
             'parentConsentMethod',
             'parentConsentEmail'

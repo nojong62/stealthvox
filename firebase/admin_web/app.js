@@ -342,8 +342,35 @@ function timeValue(v) {
   return v instanceof Timestamp ? v.toMillis() : 0;
 }
 
+// 잔여 시간·쿠폰 누계는 users/{uid}에 있다. 목록을 먼저 그리고 행마다 채운다.
+// 정식회원 필터는 수백 명이라 한 번에 20개씩만 읽는다.
+const BALANCE_CONCURRENCY = 20;
+
+async function fillBalances(targets) {
+  let next = 0;
+  const worker = async () => {
+    while (next < targets.length) {
+      const {id, node} = targets[next++];
+      try {
+        const snap = await getDoc(doc(db, "users", id));
+        const u = snap.exists() ? snap.data() : {};
+        const coupon = u.couponCount > 0
+          ? ` · 쿠폰 ${fmtHours(u.couponSeconds || 0)} (${u.couponCount}회)` : "";
+        node.textContent = `잔여 ${fmtHours(u.remainingTime ?? 0)}${coupon}`;
+        if (coupon) node.className = "sub ok";
+      } catch (err) {
+        node.textContent = "잔여 —";
+      }
+    }
+  };
+  await Promise.all(Array.from({length: Math.min(BALANCE_CONCURRENCY, targets.length)}, worker));
+}
+
 function renderList(rows, append = false) {
+  const balances = [];
   const nodes = rows.map(({id, data: m}) => {
+    const balance = el("div", {class: "sub"}, "잔여 …");
+    balances.push({id, node: balance});
     const row = el("div", {
       class: "row",
       onclick: () => {
@@ -360,11 +387,13 @@ function renderList(rows, append = false) {
       `${(m.providers || []).join(", ") || "익명"} · 가입 ${fmtHour(m.joinedAt)} · 최근 ${fmtHour(m.lastSeenAt)}`),
     m.hasPurchase ? el("div", {class: "sub"},
       `구매 ${m.purchaseCount || 0}건 · ${m.totalSpentUsd ? `$${m.totalSpentUsd} · ` : ""}충전 ${fmtHours(m.totalSecondsPurchased)} · 마지막 구매 ${fmtHour(m.lastPurchasedAt)}`,
-      m.lastPurchaseEnvironment === "SANDBOX" ? [" ", el("span", {class: "tag sandbox"}, "SANDBOX")] : null) : null);
+      m.lastPurchaseEnvironment === "SANDBOX" ? [" ", el("span", {class: "tag sandbox"}, "SANDBOX")] : null) : null,
+    balance);
     return row;
   });
   if (append) $("results").append(...nodes);
   else $("results").replaceChildren(...nodes);
+  fillBalances(balances);
 }
 
 // ── 회원 상세 ─────────────────────────────────────────────────────────────
@@ -406,6 +435,7 @@ async function showMember(uid) {
         el("h3", {}, "이용 시간·결제"),
         kv([
           ["남은 시간", fmtHours(u.remainingTime)],
+          ["쿠폰으로 받은 시간", u.couponCount > 0 ? `${fmtHours(u.couponSeconds || 0)} (${u.couponCount}회)` : "—"],
           ["구매 횟수", m.purchaseCount ?? 0],
           ["총 구매 시간", fmtHours(m.totalSecondsPurchased ?? 0)],
           ["마지막 구매", m.lastPurchasedAt

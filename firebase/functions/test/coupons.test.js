@@ -95,6 +95,9 @@ test("first come first served: seats run out, then the code is full", async () =
     code: "LUNA2H", memo: "유튜버 A", seconds: 7200, before_seconds: 60, after_seconds: 7260, at: "t",
   });
   assert.equal(db.get("users/u3/coupon_redemptions/LUNA2H"), undefined);
+  assert.equal(db.get("users/u1").couponSeconds, 7200);
+  assert.equal(db.get("users/u1").couponCount, 1);
+  assert.equal(db.get("users/u3").couponCount, undefined);
 });
 
 test("same account or same phone cannot use a code twice", async () => {

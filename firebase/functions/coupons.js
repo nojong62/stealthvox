@@ -96,10 +96,17 @@ async function redeem({db, uid, code, devKey, nowMs, now}) {
     }
     if (reason !== "ok") return {ok: false, reason};
 
-    const current = userSnap.data().remainingTime;
+    const userData = userSnap.data() || {};
+    const current = userData.remainingTime;
     const before = typeof current === "number" && Number.isFinite(current) ? current : 0;
     const after = before + coupon.seconds;
-    tx.update(userRef, {remainingTime: after});
+    // 쿠폰 누계는 관리자 웹 회원 목록이 잔여 시간과 같이 읽는다.
+    const countOf = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    tx.update(userRef, {
+      remainingTime: after,
+      couponSeconds: countOf(userData.couponSeconds) + coupon.seconds,
+      couponCount: countOf(userData.couponCount) + 1,
+    });
     tx.update(couponRef, {usedCount: (coupon.usedCount || 0) + 1, lastUsedAt: now});
     const row = {uid, deviceKey: devKey, seconds: coupon.seconds, before_seconds: before,
       after_seconds: after, at: now};
