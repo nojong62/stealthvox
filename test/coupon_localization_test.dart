@@ -24,7 +24,8 @@ void main() {
 
   test('모르는 사유와 모르는 언어는 영어 실패 문구로 떨어진다', () {
     final ko = CouponCopy.forLanguage('Korean');
-    expect(ko['full'], '선착순 인원이 마감된 코드입니다.');
+    // 개별 코드(1명)에도 맞도록 "선착순"이라 하지 않는다.
+    expect(ko['full'], '사용 인원이 다 찬 코드입니다.');
     expect(ko['no_user'], 'Could not apply the code. Please try again.');
     expect(CouponCopy.forLanguage('Klingon')['link'], 'Have a coupon code?');
   });
