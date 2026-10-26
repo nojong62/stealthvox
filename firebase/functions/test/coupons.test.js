@@ -61,6 +61,9 @@ test("only accounts with a sign-in provider count as real accounts", () => {
   assert.equal(isLinkedAccount({providerData: [{providerId: "google.com"}]}), true);
   assert.equal(isLinkedAccount({providerData: []}), false);
   assert.equal(isLinkedAccount(null), false);
+  // 카카오는 커스텀 토큰이라 providerData가 비어 있다.
+  assert.equal(isLinkedAccount({providerData: []}, {firebase: {sign_in_provider: "custom"}}), true);
+  assert.equal(isLinkedAccount({providerData: []}, {firebase: {sign_in_provider: "anonymous"}}), false);
 });
 
 test("judgeRedeem covers every refusal before the seat count", () => {

@@ -62,10 +62,17 @@ function judgeAttempts(attempts, nowMs) {
   return {locked: fails >= FAIL_LIMIT, windowStartMs: start, fails};
 }
 
-/** 익명이 아닌 계정인지. 익명 계정에 Google을 붙인 경우도 providerData가 생긴다. */
-function isLinkedAccount(userRecord) {
-  return Boolean(userRecord && Array.isArray(userRecord.providerData) &&
-    userRecord.providerData.length > 0);
+/**
+ * 익명이 아닌 계정인지. 익명 계정에 Google을 붙인 경우도 providerData가 생긴다.
+ * 카카오는 커스텀 토큰 로그인이라 providerData가 비어 있다 — 토큰의
+ * sign_in_provider "custom"으로 받는다(익명은 "anonymous").
+ */
+function isLinkedAccount(userRecord, token) {
+  if (userRecord && Array.isArray(userRecord.providerData) && userRecord.providerData.length > 0) {
+    return true;
+  }
+  const provider = token && token.firebase && token.firebase.sign_in_provider;
+  return provider === "custom";
 }
 
 async function redeem({db, uid, code, devKey, nowMs, now}) {
@@ -259,7 +266,7 @@ function createCouponFunctions({admin}) {
       if (!uid) throw new HttpsError("unauthenticated", "Authentication is required.");
       const data = request.data || {};
       const userRecord = await admin.auth().getUser(uid);
-      if (!isLinkedAccount(userRecord)) return {ok: false, reason: "needs_account"};
+      if (!isLinkedAccount(userRecord, request.auth.token)) return {ok: false, reason: "needs_account"};
       if (await readBlocked(db(), uid)) return {ok: false, reason: "blocked"};
       const code = normalizeCode(data.code);
       const devKey = deviceKey(data.deviceId);
