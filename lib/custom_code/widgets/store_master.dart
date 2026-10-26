@@ -134,6 +134,68 @@ class StoreMaster extends StatefulWidget {
   _StoreMasterState createState() => _StoreMasterState();
 }
 
+/// 쿠폰 코드 입력창. 입력 컨트롤러는 이 창이 가진다.
+/// 창이 닫히는 애니메이션 동안에도 입력칸이 그려지므로, 부르는 쪽에서
+/// showDialog 직후에 dispose하면 "used after being disposed"로 빨간 화면이
+/// 떴다(2026-10-26 카카오 계정 실기기, flutter attach로 확인).
+class _CouponCodeDialog extends StatefulWidget {
+  const _CouponCodeDialog({required this.copy});
+
+  final CouponCopy copy;
+
+  @override
+  State<_CouponCodeDialog> createState() => _CouponCodeDialogState();
+}
+
+class _CouponCodeDialogState extends State<_CouponCodeDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final copy = widget.copy;
+    return AlertDialog(
+      backgroundColor: const Color(0xFF222222),
+      title: Text(
+        copy['title'],
+        style: const TextStyle(color: Colors.white, fontSize: 17),
+      ),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        textCapitalization: TextCapitalization.characters,
+        autocorrect: false,
+        enableSuggestions: false,
+        maxLength: 24,
+        style: const TextStyle(color: Colors.white, letterSpacing: 2),
+        decoration: InputDecoration(
+          hintText: copy['hint'],
+          hintStyle: const TextStyle(color: Colors.white38),
+          counterText: '',
+        ),
+        onSubmitted: (value) => Navigator.pop(context, value),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(copy['cancel'],
+              style: const TextStyle(color: Colors.white54)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: Text(copy['apply'],
+              style: const TextStyle(color: Colors.amber)),
+        ),
+      ],
+    );
+  }
+}
+
 class _StoreMasterState extends State<StoreMaster> {
   static const String _termsUrl =
       'https://docs.google.com/document/d/1KE4xrb63SDw1ZkiNQ_wxQjH7iyY6msTuVtazCTnR7KY/edit';
@@ -509,45 +571,10 @@ class _StoreMasterState extends State<StoreMaster> {
       if (!mounted) return;
     }
 
-    final controller = TextEditingController();
     final code = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFF222222),
-        title: Text(
-          copy['title'],
-          style: const TextStyle(color: Colors.white, fontSize: 17),
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.characters,
-          autocorrect: false,
-          enableSuggestions: false,
-          maxLength: 24,
-          style: const TextStyle(color: Colors.white, letterSpacing: 2),
-          decoration: InputDecoration(
-            hintText: copy['hint'],
-            hintStyle: const TextStyle(color: Colors.white38),
-            counterText: '',
-          ),
-          onSubmitted: (value) => Navigator.pop(dialogContext, value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text(copy['cancel'],
-                style: const TextStyle(color: Colors.white54)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, controller.text),
-            child: Text(copy['apply'],
-                style: const TextStyle(color: Colors.amber)),
-          ),
-        ],
-      ),
+      builder: (_) => _CouponCodeDialog(copy: copy),
     );
-    controller.dispose();
     final typed = (code ?? '').trim();
     if (typed.isEmpty || !mounted) return;
 
