@@ -42,7 +42,7 @@ button.small { padding: 2px 8px; font-size: 12px; }
   border: 1px solid var(--line); border-radius: 6px; background: var(--card);
 }
 
-.split { display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: start; }
+.split { display: grid; grid-template-columns: 440px 1fr; gap: 16px; align-items: start; }
 @media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
 
 .list { background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
@@ -52,6 +52,19 @@ button.small { padding: 2px 8px; font-size: 12px; }
 .row:hover { background: var(--bg); }
 .row.active { background: var(--accent-soft); }
 .row .sub { font-size: 12px; color: var(--muted); }
+/* 목록 행: 왼쪽 회원 정보, 오른쪽 잔여·구매·쿠폰 칸 */
+.row { display: flex; gap: 10px; align-items: flex-start; }
+.row .main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.row .stats { flex: 0 0 112px; display: flex; flex-direction: column; gap: 4px; }
+.stat { display: flex; justify-content: space-between; gap: 6px; padding: 3px 8px; font-size: 12px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.stat[hidden] { display: none; }
+.stat span { color: var(--muted); }
+.stat strong { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stat.buy { border-color: #e7c66b; background: #fff8e1; }
+.stat.buy.sandbox { border-style: dashed; }
+.stat.coupon { border-color: #9fd8b5; background: #ecf8f0; }
+.stat.coupon strong { color: var(--ok); }
 
 .detail:empty { display: none; }
 .detail h2 { margin: 0 0 4px; font-size: 18px; }

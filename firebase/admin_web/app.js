@@ -350,16 +350,17 @@ async function fillBalances(targets) {
   let next = 0;
   const worker = async () => {
     while (next < targets.length) {
-      const {id, node} = targets[next++];
+      const {id, balance, coupon} = targets[next++];
       try {
         const snap = await getDoc(doc(db, "users", id));
         const u = snap.exists() ? snap.data() : {};
-        const coupon = u.couponCount > 0
-          ? ` · 쿠폰 ${fmtHours(u.couponSeconds || 0)} (${u.couponCount}회)` : "";
-        node.textContent = `잔여 ${fmtHours(u.remainingTime ?? 0)}${coupon}`;
-        if (coupon) node.className = "sub ok";
+        balance.lastChild.textContent = fmtHours(u.remainingTime ?? 0);
+        if (u.couponCount > 0) {
+          coupon.lastChild.textContent = `${fmtHours(u.couponSeconds || 0)} · ${u.couponCount}회`;
+          coupon.hidden = false;
+        }
       } catch (err) {
-        node.textContent = "잔여 —";
+        balance.lastChild.textContent = "—";
       }
     }
   };
@@ -368,9 +369,18 @@ async function fillBalances(targets) {
 
 function renderList(rows, append = false) {
   const balances = [];
+  // 칸 하나 = 이름표 + 값. 오른쪽에 세로로 쌓는다.
+  const stat = (cls, label, value) =>
+    el("div", {class: `stat ${cls}`}, el("span", {}, label), el("strong", {}, value));
   const nodes = rows.map(({id, data: m}) => {
-    const balance = el("div", {class: "sub"}, "잔여 …");
-    balances.push({id, node: balance});
+    const balance = stat("balance", "잔여", "…");
+    const coupon = stat("coupon", "쿠폰", "");
+    coupon.hidden = true;
+    balances.push({id, balance, coupon});
+    const purchase = m.hasPurchase
+      ? stat(m.lastPurchaseEnvironment === "SANDBOX" ? "buy sandbox" : "buy", "구매",
+        `${m.purchaseCount || 0}건${m.totalSpentUsd ? ` · $${m.totalSpentUsd}` : ""}`)
+      : null;
     const row = el("div", {
       class: "row",
       onclick: () => {
@@ -379,16 +389,14 @@ function renderList(rows, append = false) {
         showMember(id);
       },
     },
-    el("div", {},
-      m.email || m.displayName || el("span", {class: "muted mono"}, id),
-      m.hasPurchase ? [" ", el("span", {class: "tag"}, `구매 ${m.purchaseCount || 0}`)] : null,
-      flagTags(id)),
-    el("div", {class: "sub"},
-      `${(m.providers || []).join(", ") || "익명"} · 가입 ${fmtHour(m.joinedAt)} · 최근 ${fmtHour(m.lastSeenAt)}`),
-    m.hasPurchase ? el("div", {class: "sub"},
-      `구매 ${m.purchaseCount || 0}건 · ${m.totalSpentUsd ? `$${m.totalSpentUsd} · ` : ""}충전 ${fmtHours(m.totalSecondsPurchased)} · 마지막 구매 ${fmtHour(m.lastPurchasedAt)}`,
-      m.lastPurchaseEnvironment === "SANDBOX" ? [" ", el("span", {class: "tag sandbox"}, "SANDBOX")] : null) : null,
-    balance);
+    el("div", {class: "main"},
+      el("div", {}, m.email || m.displayName || el("span", {class: "muted mono"}, id), flagTags(id)),
+      el("div", {class: "sub"},
+        `${(m.providers || []).join(", ") || "익명"} · 가입 ${fmtHour(m.joinedAt)} · 최근 ${fmtHour(m.lastSeenAt)}`),
+      m.hasPurchase ? el("div", {class: "sub"},
+        `충전 ${fmtHours(m.totalSecondsPurchased)} · 마지막 구매 ${fmtHour(m.lastPurchasedAt)}`,
+        m.lastPurchaseEnvironment === "SANDBOX" ? [" ", el("span", {class: "tag sandbox"}, "SANDBOX")] : null) : null),
+    el("div", {class: "stats"}, balance, purchase, coupon));
     return row;
   });
   if (append) $("results").append(...nodes);
