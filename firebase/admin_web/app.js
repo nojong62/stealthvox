@@ -85,6 +85,18 @@ function fmtTime(v) {
 }
 
 // 목록용: 분·초는 떼고 날짜와 시(時)까지만.
+// 로그인 방식 id → 읽기 쉬운 이름. 모르는 값은 그대로 보인다.
+// "custom"은 10-26 이전에 적힌 커스텀 토큰 로그인(대개 카카오)이다 — 다음 앱 실행 때
+// syncRealMemberProfile이 kakaocorp.com 등으로 다시 적는다.
+const PROVIDER_NAMES = {
+  // 카카오 토큰 표시는 로그인 경로에 따라 kakaocorp.com 또는 kakao다(10-26 실계정은 kakao).
+  "google.com": "Google", "kakaocorp.com": "카카오", "kakao": "카카오", "password": "이메일",
+  "apple.com": "Apple", "phone": "전화", "custom": "custom",
+};
+function fmtProviders(list) {
+  return (list || []).map((p) => PROVIDER_NAMES[p] || p).join(", ") || "익명";
+}
+
 function fmtHour(v) {
   if (v instanceof Timestamp) v = v.toDate();
   if (!(v instanceof Date)) return "—";
@@ -392,7 +404,7 @@ function renderList(rows, append = false) {
       },
     },
     el("div", {class: "cell who"}, m.email || m.displayName || el("span", {class: "muted mono"}, id), flagTags(id)),
-    el("div", {class: "cell muted"}, (m.providers || []).join(", ") || "익명"),
+    el("div", {class: "cell muted"}, fmtProviders(m.providers)),
     el("div", {class: "cell muted"}, fmtHour(m.joinedAt)),
     el("div", {class: "cell muted"}, fmtHour(m.lastSeenAt)),
     balance, purchase, coupon);
@@ -452,7 +464,7 @@ async function showMember(uid) {
         el("div", {class: "mono"}, uid, " ", copyButton(uid), flagTags(uid)),
         el("h3", {}, "계정"),
         kv([
-          ["로그인 방식", (m.providers || []).join(", ") || "익명"],
+          ["로그인 방식", fmtProviders(m.providers)],
           ["가입", fmtTime(m.joinedAt)],
           ["마지막 로그인", fmtTime(m.lastSignInAt)],
           ["마지막 접속", fmtTime(m.lastSeenAt)],
