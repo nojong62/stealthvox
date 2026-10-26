@@ -52,19 +52,25 @@ button.small { padding: 2px 8px; font-size: 12px; }
 .row:hover { background: var(--bg); }
 .row.active { background: var(--accent-soft); }
 .row .sub { font-size: 12px; color: var(--muted); }
-/* 목록 행: 왼쪽 회원 정보, 오른쪽 잔여·구매·쿠폰 칸 */
-.row { display: flex; gap: 10px; align-items: flex-start; }
-.row .main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.row .stats { flex: 0 0 112px; display: flex; flex-direction: column; gap: 4px; }
-.stat { display: flex; justify-content: space-between; gap: 6px; padding: 3px 8px; font-size: 12px;
-  border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
-.stat[hidden] { display: none; }
-.stat span { color: var(--muted); }
-.stat strong { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.stat.buy { border-color: #e7c66b; background: #fff8e1; }
-.stat.buy.sandbox { border-style: dashed; }
-.stat.coupon { border-color: #9fd8b5; background: #ecf8f0; }
-.stat.coupon strong { color: var(--ok); }
+/* 목록: 회원당 한 줄. 좁은 화면에서는 목록만 옆으로 스크롤한다. */
+.list { overflow-x: auto; }
+.row { display: grid; align-items: center; gap: 12px; padding: 8px 14px; font-size: 13px;
+  grid-template-columns: minmax(240px, 2.4fr) 100px 120px 120px 90px 120px 120px; min-width: 980px; }
+.row.head { cursor: default; position: sticky; top: 0; background: var(--card);
+  color: var(--muted); font-size: 12px; font-weight: 500; }
+.row.head:hover { background: var(--card); }
+.row .cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .cell.num { text-align: right; font-variant-numeric: tabular-nums; }
+.row .cell.buy { color: #8a5a00; font-weight: 600; }
+.row .cell.buy.sandbox { text-decoration: underline dashed; }
+.row .cell.coupon { color: var(--ok); font-weight: 600; }
+
+/* 회원 상세: 오른쪽 서랍 */
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(720px, 100%); z-index: 10;
+  overflow-y: auto; padding: 16px 20px; background: var(--bg); border-left: 1px solid var(--line);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, .12); }
+.drawer[hidden] { display: none; }
+.drawer #closeDetail { float: right; }
 
 .detail:empty { display: none; }
 .detail h2 { margin: 0 0 4px; font-size: 18px; }

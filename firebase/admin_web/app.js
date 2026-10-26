@@ -169,7 +169,7 @@ $("signOut").addEventListener("click", () => signOut(auth));
 
 onAuthStateChanged(auth, async (user) => {
   $("results").replaceChildren();
-  $("detail").replaceChildren();
+  closeDetail();
   if (!user) {
     $("who").textContent = "";
     $("signOut").hidden = true;
@@ -222,7 +222,7 @@ async function membersForUids(uids) {
 
 async function runSearch(q) {
   $("results").replaceChildren();
-  $("detail").replaceChildren();
+  closeDetail();
   setStatus("검색 중…");
   const filter = $("filter").value;
   try {
@@ -325,7 +325,7 @@ async function showAllMembers(more = false) {
   allCursor = snap.docs.length ? snap.docs[snap.docs.length - 1] : allCursor;
   const rows = snap.docs.map((d) => ({id: d.id, data: d.data()}));
   renderList(rows, more);
-  const shown = $("results").querySelectorAll(".row").length;
+  const shown = $("results").querySelectorAll(".row:not(.head)").length;
   setStatus(`전체 회원 ${showAllMembers.total}명 · 가입 순 · ${shown}명 표시`);
   if (snap.docs.length === ALL_PAGE && shown < showAllMembers.total) {
     $("results").append(el("button", {
@@ -354,58 +354,75 @@ async function fillBalances(targets) {
       try {
         const snap = await getDoc(doc(db, "users", id));
         const u = snap.exists() ? snap.data() : {};
-        balance.lastChild.textContent = fmtHours(u.remainingTime ?? 0);
+        balance.textContent = fmtHours(u.remainingTime ?? 0);
         if (u.couponCount > 0) {
-          coupon.lastChild.textContent = `${fmtHours(u.couponSeconds || 0)} · ${u.couponCount}회`;
-          coupon.hidden = false;
+          coupon.textContent = `${fmtHours(u.couponSeconds || 0)} · ${u.couponCount}회`;
+          coupon.classList.add("coupon");
         }
       } catch (err) {
-        balance.lastChild.textContent = "—";
+        balance.textContent = "—";
       }
     }
   };
   await Promise.all(Array.from({length: Math.min(BALANCE_CONCURRENCY, targets.length)}, worker));
 }
 
+// 회원당 한 줄(2026-10-26 실장님). 칸 순서는 머리줄과 같다.
+const LIST_COLUMNS = ["회원", "로그인", "가입", "최근 접속", "잔여", "구매", "쿠폰"];
+
 function renderList(rows, append = false) {
   const balances = [];
-  // 칸 하나 = 이름표 + 값. 오른쪽에 세로로 쌓는다.
-  const stat = (cls, label, value) =>
-    el("div", {class: `stat ${cls}`}, el("span", {}, label), el("strong", {}, value));
   const nodes = rows.map(({id, data: m}) => {
-    const balance = stat("balance", "잔여", "…");
-    const coupon = stat("coupon", "쿠폰", "");
-    coupon.hidden = true;
+    const balance = el("div", {class: "cell num"}, "…");
+    const coupon = el("div", {class: "cell num"}, "");
     balances.push({id, balance, coupon});
+    const sandbox = m.lastPurchaseEnvironment === "SANDBOX";
     const purchase = m.hasPurchase
-      ? stat(m.lastPurchaseEnvironment === "SANDBOX" ? "buy sandbox" : "buy", "구매",
-        `${m.purchaseCount || 0}건${m.totalSpentUsd ? ` · $${m.totalSpentUsd}` : ""}`)
-      : null;
+      ? el("div", {
+        class: `cell num buy${sandbox ? " sandbox" : ""}`,
+        title: `충전 ${fmtHours(m.totalSecondsPurchased)} · 마지막 구매 ${fmtHour(m.lastPurchasedAt)}${sandbox ? " · SANDBOX" : ""}`,
+      }, `${m.purchaseCount || 0}건${m.totalSpentUsd ? ` · $${m.totalSpentUsd}` : ""}`)
+      : el("div", {class: "cell num muted"}, "—");
     const row = el("div", {
       class: "row",
       onclick: () => {
-        for (const r of $("results").children) r.classList.remove("active");
+        for (const r of $("results").querySelectorAll(".row")) r.classList.remove("active");
         row.classList.add("active");
         showMember(id);
       },
     },
-    el("div", {class: "main"},
-      el("div", {}, m.email || m.displayName || el("span", {class: "muted mono"}, id), flagTags(id)),
-      el("div", {class: "sub"},
-        `${(m.providers || []).join(", ") || "익명"} · 가입 ${fmtHour(m.joinedAt)} · 최근 ${fmtHour(m.lastSeenAt)}`),
-      m.hasPurchase ? el("div", {class: "sub"},
-        `충전 ${fmtHours(m.totalSecondsPurchased)} · 마지막 구매 ${fmtHour(m.lastPurchasedAt)}`,
-        m.lastPurchaseEnvironment === "SANDBOX" ? [" ", el("span", {class: "tag sandbox"}, "SANDBOX")] : null) : null),
-    el("div", {class: "stats"}, balance, purchase, coupon));
+    el("div", {class: "cell who"}, m.email || m.displayName || el("span", {class: "muted mono"}, id), flagTags(id)),
+    el("div", {class: "cell muted"}, (m.providers || []).join(", ") || "익명"),
+    el("div", {class: "cell muted"}, fmtHour(m.joinedAt)),
+    el("div", {class: "cell muted"}, fmtHour(m.lastSeenAt)),
+    balance, purchase, coupon);
     return row;
   });
-  if (append) $("results").append(...nodes);
-  else $("results").replaceChildren(...nodes);
+  if (append) {
+    $("results").append(...nodes);
+  } else {
+    // 숫자 칸(잔여·구매·쿠폰) 머리는 값과 같이 오른쪽 정렬.
+    const head = el("div", {class: "row head"},
+      LIST_COLUMNS.map((c, i) => el("div", {class: i >= 4 ? "cell num" : "cell"}, c)));
+    $("results").replaceChildren(head, ...nodes);
+  }
   fillBalances(balances);
 }
 
 // ── 회원 상세 ─────────────────────────────────────────────────────────────
+// 목록이 화면 폭을 다 쓰므로 상세는 오른쪽 서랍으로 연다. 닫기·Esc로 닫는다.
+function closeDetail() {
+  $("drawer").hidden = true;
+  $("detail").replaceChildren();
+  for (const r of $("results").querySelectorAll(".row")) r.classList.remove("active");
+}
+$("closeDetail").addEventListener("click", closeDetail);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("drawer").hidden) closeDetail();
+});
+
 async function showMember(uid) {
+  $("drawer").hidden = false;
   const box = $("detail");
   box.replaceChildren(el("p", {class: "muted"}, "불러오는 중…"));
   try {
