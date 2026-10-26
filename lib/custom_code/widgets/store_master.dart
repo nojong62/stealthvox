@@ -24,7 +24,10 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:android_id/android_id.dart';
 import '/components/social_login_modal.dart';
+import '/custom_code/services/coupon_localization.dart';
 import '/custom_code/services/talk_ui_localization.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/system_ui_language.dart';
@@ -147,6 +150,7 @@ class _StoreMasterState extends State<StoreMaster> {
   bool get _useEnglishLegalDocs => systemUiLanguageName() != 'Korean';
   TalkUiCopy get _copy => TalkUiCopy.forSystemLocale();
   OriginSurfaceCopy get _surfaceCopy => OriginSurfaceCopy.forSystemLocale();
+  CouponCopy get _couponCopy => CouponCopy.forSystemLocale();
   String _versionText = '';
 
   // [v4.0] 서버 증액 감지용 Firestore 리스너
@@ -481,6 +485,108 @@ class _StoreMasterState extends State<StoreMaster> {
     _log('SYNC', 'waiting for server webhook to credit remainingTime...');
 
     _listenForServerCredit(planTitle);
+  }
+
+  // ── 🎟️ [COUPON] 쿠폰 코드 ─────────────────────────────────────────
+  //   서버(`redeemCoupon`)가 코드·계정·폰을 확인하고 remainingTime을 올린다.
+  //   로그인 전(익명)이면 구매와 같은 로그인 창을 먼저 띄운다 — 서버는 익명을 거절한다.
+
+  Future<void> _openCouponDialog() async {
+    if (isProcessing) return;
+    final copy = _couponCopy;
+    final currentUser = FirebaseAuth.instance.currentUser;
+    final needsAccount = currentUser == null ||
+        (currentUser.isAnonymous && !FFAppState().hasLinkedAccount);
+    if (needsAccount) {
+      final result = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const SocialLoginModal(),
+      );
+      if (result != true || !mounted) return;
+      FFAppState().hasLinkedAccount = true;
+      await _initRevenueCatUser();
+      if (!mounted) return;
+    }
+
+    final controller = TextEditingController();
+    final code = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF222222),
+        title: Text(
+          copy['title'],
+          style: const TextStyle(color: Colors.white, fontSize: 17),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          autocorrect: false,
+          enableSuggestions: false,
+          maxLength: 24,
+          style: const TextStyle(color: Colors.white, letterSpacing: 2),
+          decoration: InputDecoration(
+            hintText: copy['hint'],
+            hintStyle: const TextStyle(color: Colors.white38),
+            counterText: '',
+          ),
+          onSubmitted: (value) => Navigator.pop(dialogContext, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(copy['cancel'],
+                style: const TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: Text(copy['apply'],
+                style: const TextStyle(color: Colors.amber)),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final typed = (code ?? '').trim();
+    if (typed.isEmpty || !mounted) return;
+
+    setState(() => isProcessing = true);
+    String? failure;
+    try {
+      final deviceId = await const AndroidId().getId();
+      if (deviceId == null || deviceId.isEmpty) {
+        throw StateError('no_device_id');
+      }
+      final result = await FirebaseFunctions.instanceFor(
+        region: 'asia-northeast3',
+      ).httpsCallable('redeemCoupon').call(<String, dynamic>{
+        'code': typed,
+        'deviceId': deviceId,
+      });
+      final data = Map<String, dynamic>.from(result.data as Map);
+      _log('COUPON', 'redeem ok=${data['ok']} reason=${data['reason']}');
+      if (data['ok'] == true) {
+        final added = (data['secondsAdded'] as num?)?.toInt() ?? 0;
+        final updated = (data['remainingTime'] as num?)?.toInt();
+        if (updated != null && mounted) {
+          setState(() => FFAppState().remainingTime = updated);
+          BillingTicker.instance.remainingSecondsNotifier.value = updated;
+        }
+        _showFeedback(
+          '✅ ${copy['added'].replaceAll('{time}', copy.duration(added))}',
+          const Color(0xFF34D399),
+        );
+      } else {
+        failure = copy[(data['reason'] ?? 'failed').toString()];
+      }
+    } catch (e) {
+      _log('COUPON', 'redeem failed $e');
+      failure = copy['failed'];
+    } finally {
+      if (mounted) setState(() => isProcessing = false);
+    }
+    if (failure != null) _showFeedback(failure, const Color(0xFFEF4444));
   }
 
   void _showFeedback(String message, Color bgColor) {
@@ -1277,6 +1383,27 @@ class _StoreMasterState extends State<StoreMaster> {
                                 ),
                               );
                             },
+                          ),
+
+                          // 3. 쿠폰 코드
+                          const SizedBox(height: 18),
+                          Center(
+                            child: TextButton.icon(
+                              onPressed: _openCouponDialog,
+                              icon: const Icon(
+                                Icons.confirmation_number_outlined,
+                                color: Colors.amber,
+                                size: 18,
+                              ),
+                              label: Text(
+                                _couponCopy['link'],
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 13,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ),
                           ),
                         ],
                       ),
