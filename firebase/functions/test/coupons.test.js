@@ -154,6 +154,21 @@ test("a chosen code is created once and refused when it already exists", async (
   {code: "invalid-argument"});
 });
 
+test("createCoupons keeps the codes the admin page suggested", async () => {
+  const db = new FakeDb({"coupons/TAKEN234": coupon()});
+  const base = {db, adminUid: "a", seconds: 7200, maxUses: 1, expiresAtMs: null, memo: "m", now: "t"};
+  const made = await createCoupons({...base, codes: ["abcd2345", "WXYZ6789"], requestId: "req-00020"});
+  assert.deepEqual(made.codes, ["ABCD2345", "WXYZ6789"]);
+  assert.equal(db.get("coupons/WXYZ6789").maxUses, 1);
+
+  // 하나라도 이미 있으면 전부 안 만든다.
+  await assert.rejects(createCoupons({...base, codes: ["NEWC2345", "TAKEN234"], requestId: "req-00021"}),
+    {code: "already-exists"});
+  assert.equal(db.get("coupons/NEWC2345"), undefined);
+  await assert.rejects(createCoupons({...base, codes: ["SAME2345", "same-2345"], requestId: "req-00022"}),
+    {code: "invalid-argument"});
+});
+
 test("updateCoupon toggles, resizes, and never drops below seats already taken", async () => {
   const db = new FakeDb({"coupons/LUNA2H": coupon({usedCount: 3, maxUses: 10})});
   const off = await updateCoupon({db, adminUid: "a", code: "LUNA2H", active: false,

@@ -68,18 +68,37 @@ function fmtHours(seconds) {
 // 서버 coupons.js와 같은 글자판(0 O 1 I L 제외). 겹치면 서버가 already-exists로 거절한다.
 const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 
-function suggestCode() {
+function randomCode() {
   const bytes = crypto.getRandomValues(new Uint8Array(8));
-  $("code").value = Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
+  return Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
+}
+
+function suggestCode() {
+  $("code").value = randomCode();
 }
 $("suggest").addEventListener("click", suggestCode);
 
-// 개별: 인원 수만큼 코드를 서버가 만든다(코드당 1명). 공용: 추천 코드 하나를 선착순 N명.
+// 개별 모드 미리보기: 인원 수만큼 서로 다른 코드. 인원을 바꾸면 늘리거나 줄인다.
+function suggestList(fresh) {
+  const n = Math.max(1, Math.min(100, Math.floor(Number($("count").value)) || 1));
+  const codes = fresh ? [] : previewCodes().slice(0, n);
+  while (codes.length < n) {
+    const c = randomCode();
+    if (!codes.includes(c)) codes.push(c);
+  }
+  $("preview").value = codes.join("\n");
+}
+const previewCodes = () => $("preview").value.split("\n").map((s) => s.trim()).filter(Boolean);
+$("suggestAll").addEventListener("click", () => suggestList(true));
+$("count").addEventListener("input", () => suggestList(false));
+
+// 개별: 미리 보여 준 코드를 그대로 만든다(코드당 1명). 공용: 추천 코드 하나를 선착순 N명.
 function syncMode() {
   const manual = $("mode").value === "manual";
-  for (const id of ["countLabel", "countRow"]) $(id).hidden = manual;
+  for (const id of ["countLabel", "countRow", "previewLabel", "previewRow"]) $(id).hidden = manual;
   for (const id of ["codeLabel", "codeRow", "maxUsesLabel", "maxUsesRow"]) $(id).hidden = !manual;
   if (manual && !$("code").value) suggestCode();
+  if (!manual && previewCodes().length === 0) suggestList(true);
 }
 $("mode").addEventListener("change", syncMode);
 
@@ -95,11 +114,11 @@ $("createForm").addEventListener("submit", async (event) => {
     memo: $("memo").value,
   };
   if (manual) data.code = $("code").value;
-  else data.count = Number($("count").value);
+  else data.codes = previewCodes();
 
   const summary = manual
     ? `코드 ${data.code.toUpperCase()} 1개, ${fmtHours(data.seconds)}, 선착순 ${data.maxUses}명`
-    : `개별 코드 ${data.count}개(${data.count}명), 각 ${fmtHours(data.seconds)}`;
+    : `개별 코드 ${data.codes.length}개(${data.codes.length}명), 각 ${fmtHours(data.seconds)}`;
   if (!confirm(`${summary}\n만료: ${fmtExpiry(data.expiresAtMs)}\n발급할까요?`)) return;
 
   $("createBtn").disabled = true;
@@ -110,8 +129,9 @@ $("createForm").addEventListener("submit", async (event) => {
     $("issued").hidden = false;
     $("issued").value = result.codes.join("\n");
     $("createMsg").textContent = `${result.codes.length}개 발급. 아래 목록을 복사해 보내세요.`;
-    if (manual) $("code").value = "";
-    syncMode();
+    // 다음 발급용으로 새 추천 코드를 깔아 둔다.
+    if (manual) suggestCode();
+    else suggestList(true);
     await loadList();
   } catch (err) {
     $("createMsg").className = "error";

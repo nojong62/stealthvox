@@ -139,13 +139,24 @@ function requireMemo(value) {
   return memo;
 }
 
-// 코드를 비우면 count개를 자동으로 만든다(개별 코드 묶음). 코드를 주면 그 하나만.
-async function createCoupons({db, adminUid, code, count, seconds, maxUses, expiresAtMs,
-  memo, requestId, now, random = Math.random}) {
+/** 관리자 화면이 미리 보여 준 코드 목록. 비었으면 null(서버가 뽑는다). */
+function wantedCodes(code, codes) {
+  const raw = Array.isArray(codes) ? codes : (code === undefined || code === null || code === "" ? [] : [code]);
+  if (raw.length === 0) return null;
+  const list = raw.map(normalizeCode);
+  if (list.some((c) => c === "")) {
+    throw new HttpsError("invalid-argument", "codes must be 4-20 letters or digits.");
+  }
+  if (new Set(list).size !== list.length) throw new HttpsError("invalid-argument", "codes repeat.");
+  return list;
+}
+
+// 코드 목록(화면의 추천 코드)을 주면 그대로 만든다. 비우면 count개를 서버가 뽑는다.
+async function createCoupons({db, adminUid, code, codes: given, count, seconds, maxUses,
+  expiresAtMs, memo, requestId, now, random = Math.random}) {
   const logRef = db.doc(`admin_audit/create_coupons_${requestId}`);
-  const wanted = code === undefined || code === null || code === "" ? null : normalizeCode(code);
-  if (wanted === "") throw new HttpsError("invalid-argument", "code must be 4-20 letters or digits.");
-  const n = wanted ? 1 : count;
+  const wanted = wantedCodes(code, given);
+  const n = wanted ? wanted.length : count;
   if (!Number.isInteger(n) || n < 1 || n > MAX_BATCH) {
     throw new HttpsError("invalid-argument", `count must be 1..${MAX_BATCH}.`);
   }
@@ -157,8 +168,8 @@ async function createCoupons({db, adminUid, code, count, seconds, maxUses, expir
     const codes = [];
     const refs = [];
     for (let i = 0; i < n; i++) {
-      // 자동 코드가 겹치면 몇 번 다시 뽑는다. 직접 준 코드가 있으면 거절.
-      let picked = wanted;
+      // 서버가 뽑은 코드가 겹치면 몇 번 다시 뽑는다. 화면이 준 코드가 겹치면 거절.
+      let picked = wanted ? wanted[i] : null;
       let ref = null;
       for (let tries = 0; tries < 5; tries++) {
         const candidate = picked || generateCode(random);
@@ -170,7 +181,7 @@ async function createCoupons({db, adminUid, code, count, seconds, maxUses, expir
           ref = candidateRef;
           break;
         }
-        if (wanted) throw new HttpsError("already-exists", `Coupon ${wanted} already exists.`);
+        if (wanted) throw new HttpsError("already-exists", `Coupon ${candidate} already exists.`);
       }
       if (!ref) throw new HttpsError("aborted", "Could not pick a free code. Try again.");
       codes.push(picked);
@@ -251,6 +262,7 @@ function createCouponFunctions({admin}) {
       return createCoupons({
         db: db(), adminUid, now: now(),
         code: data.code,
+        codes: data.codes,
         count: data.count === undefined ? 1 : data.count,
         seconds: requireSeconds(data.seconds),
         maxUses: requireMaxUses(data.maxUses),

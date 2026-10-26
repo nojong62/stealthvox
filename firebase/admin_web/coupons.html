@@ -33,8 +33,12 @@
             </select>
           </dd>
           <dt id="countLabel">인원(코드 수)</dt>
-          <dd id="countRow"><input id="count" type="number" min="1" max="100" value="10">
-            <span class="muted">코드는 자동으로 만들어집니다.</span></dd>
+          <dd id="countRow"><input id="count" type="number" min="1" max="100" value="10"></dd>
+          <dt id="previewLabel">추천 코드</dt>
+          <dd id="previewRow">
+            <textarea id="preview" rows="6" readonly class="mono"></textarea>
+            <button type="button" id="suggestAll" class="small ghost">다시 추천</button>
+            <span class="muted">이 코드들이 그대로 발급됩니다.</span></dd>
           <dt id="codeLabel" hidden>코드</dt>
           <dd id="codeRow" hidden><input id="code" type="text" maxlength="20" autocomplete="off"
             spellcheck="false" class="mono">
