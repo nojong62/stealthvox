@@ -102,6 +102,12 @@ exports.adminSetHold = adminOps.adminSetHold;
 const studyTrial = require("./study_trial").createStudyTrial({admin});
 exports.startStudyTrial = studyTrial.startStudyTrial;
 
+// 쿠폰 코드 (스토어 입력칸 + 관리자 웹 발급). firebase/functions/coupons.js
+const coupons = require("./coupons").createCouponFunctions({admin});
+exports.redeemCoupon = coupons.redeemCoupon;
+exports.adminCreateCoupons = coupons.adminCreateCoupons;
+exports.adminUpdateCoupon = coupons.adminUpdateCoupon;
+
 // 헬스체크(자가진단) — 매일 07:00 KST + 관리자 수동 실행. firebase/functions/health_check.js
 const healthCheck = require("./health_check");
 exports.dailyHealthCheck = healthCheck.dailyHealthCheck;
