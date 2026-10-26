@@ -613,7 +613,8 @@ class _StoreMasterState extends State<StoreMaster> {
     } finally {
       if (mounted) setState(() => isProcessing = false);
     }
-    if (failure != null) _showFeedback(failure, const Color(0xFFEF4444));
+    // 거절은 오류가 아니라 안내라서 빨강 대신 차분한 회색으로 띄운다(10-26 실장님).
+    if (failure != null) _showFeedback(failure, const Color(0xFF52525B));
   }
 
   void _showFeedback(String message, Color bgColor) {
