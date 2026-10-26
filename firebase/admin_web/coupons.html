@@ -28,20 +28,23 @@
           <dt>방식</dt>
           <dd>
             <select id="mode">
-              <option value="auto">자동 코드 여러 개 (개별)</option>
-              <option value="manual">직접 정한 코드 하나 (공용)</option>
+              <option value="auto">개별 코드 — 1명당 코드 1개</option>
+              <option value="manual">공용 코드 — 코드 1개를 선착순 여러 명</option>
             </select>
           </dd>
-          <dt id="countLabel">개수</dt>
-          <dd id="countRow"><input id="count" type="number" min="1" max="100" value="10"></dd>
+          <dt id="countLabel">인원(코드 수)</dt>
+          <dd id="countRow"><input id="count" type="number" min="1" max="100" value="10">
+            <span class="muted">코드는 자동으로 만들어집니다.</span></dd>
           <dt id="codeLabel" hidden>코드</dt>
           <dd id="codeRow" hidden><input id="code" type="text" maxlength="20" autocomplete="off"
-            spellcheck="false" placeholder="영문·숫자 4~20자 (예: LUNA2H)"></dd>
+            spellcheck="false" class="mono">
+            <button type="button" id="suggest" class="small ghost">다시 추천</button>
+            <span class="muted">추천 코드 그대로 써도 되고, 고쳐도 됩니다.</span></dd>
+          <dt id="maxUsesLabel" hidden>선착순 인원</dt>
+          <dd id="maxUsesRow" hidden><input id="maxUses" type="number" min="1" max="10000" value="10">
+            <span class="muted">폰 하나·계정 하나에 한 번.</span></dd>
           <dt>지급 시간</dt>
           <dd><input id="hours" type="number" min="0.5" max="10" step="0.5" value="2"> 시간</dd>
-          <dt>코드당 인원</dt>
-          <dd><input id="maxUses" type="number" min="1" max="10000" value="1">
-            <span class="muted">1 = 개별, 2 이상 = 선착순. 폰 하나·계정 하나에 한 번.</span></dd>
           <dt>만료일</dt>
           <dd><input id="expires" type="date"> <span class="muted">그날 23:59(KST)까지. 비우면 무기한.</span></dd>
           <dt>메모</dt>

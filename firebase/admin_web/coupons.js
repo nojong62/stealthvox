@@ -65,14 +65,21 @@ function fmtHours(seconds) {
   return `${Number.isInteger(h) ? h : h.toFixed(1)}시간`;
 }
 
+// 서버 coupons.js와 같은 글자판(0 O 1 I L 제외). 겹치면 서버가 already-exists로 거절한다.
+const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+
+function suggestCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  $("code").value = Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
+}
+$("suggest").addEventListener("click", suggestCode);
+
+// 개별: 인원 수만큼 코드를 서버가 만든다(코드당 1명). 공용: 추천 코드 하나를 선착순 N명.
 function syncMode() {
   const manual = $("mode").value === "manual";
-  $("countLabel").hidden = manual;
-  $("countRow").hidden = manual;
-  $("codeLabel").hidden = !manual;
-  $("codeRow").hidden = !manual;
-  // 공용 코드면 인원 기본값을 10으로 바꿔 둔다. 개별이면 1.
-  $("maxUses").value = manual ? "10" : "1";
+  for (const id of ["countLabel", "countRow"]) $(id).hidden = manual;
+  for (const id of ["codeLabel", "codeRow", "maxUsesLabel", "maxUsesRow"]) $(id).hidden = !manual;
+  if (manual && !$("code").value) suggestCode();
 }
 $("mode").addEventListener("change", syncMode);
 
@@ -83,7 +90,7 @@ $("createForm").addEventListener("submit", async (event) => {
   const date = $("expires").value;
   const data = {
     seconds: Math.round(hours * 3600),
-    maxUses: Number($("maxUses").value),
+    maxUses: manual ? Number($("maxUses").value) : 1,
     expiresAtMs: date ? new Date(`${date}T23:59:59+09:00`).getTime() : null,
     memo: $("memo").value,
   };
@@ -92,7 +99,7 @@ $("createForm").addEventListener("submit", async (event) => {
 
   const summary = manual
     ? `코드 ${data.code.toUpperCase()} 1개, ${fmtHours(data.seconds)}, 선착순 ${data.maxUses}명`
-    : `자동 코드 ${data.count}개, 각 ${fmtHours(data.seconds)}, 코드당 ${data.maxUses}명`;
+    : `개별 코드 ${data.count}개(${data.count}명), 각 ${fmtHours(data.seconds)}`;
   if (!confirm(`${summary}\n만료: ${fmtExpiry(data.expiresAtMs)}\n발급할까요?`)) return;
 
   $("createBtn").disabled = true;
@@ -103,6 +110,8 @@ $("createForm").addEventListener("submit", async (event) => {
     $("issued").hidden = false;
     $("issued").value = result.codes.join("\n");
     $("createMsg").textContent = `${result.codes.length}개 발급. 아래 목록을 복사해 보내세요.`;
+    if (manual) $("code").value = "";
+    syncMode();
     await loadList();
   } catch (err) {
     $("createMsg").className = "error";
