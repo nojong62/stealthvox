@@ -84,6 +84,14 @@ function fmtTime(v) {
   return v.toLocaleString("ko-KR", {hour12: false});
 }
 
+// 목록용: 분·초는 떼고 날짜와 시(時)까지만.
+function fmtHour(v) {
+  if (v instanceof Timestamp) v = v.toDate();
+  if (!(v instanceof Date)) return "—";
+  const d = v.toLocaleDateString("ko-KR");
+  return `${d} ${v.getHours()}시`;
+}
+
 function fmtSeconds(s) {
   if (typeof s !== "number") return "—";
   const sign = s < 0 ? "-" : "";
@@ -246,6 +254,21 @@ async function runSearch(q) {
           const f = flagsByUid.get(id) || {};
           return !f.isTest && !f.blocked && !f.isRobot && !f.isHold;
         });
+      // 같은 이메일은 한 명으로 센다: 구매가 많은 쪽, 같으면 최근 접속한 쪽을 남긴다.
+      const byEmail = new Map();
+      const noEmail = [];
+      for (const r of rows) {
+        const email = String(r.data.email || "").toLowerCase();
+        if (!email) { noEmail.push(r); continue; }
+        const cur = byEmail.get(email);
+        const better = !cur ||
+          (r.data.purchaseCount || 0) > (cur.data.purchaseCount || 0) ||
+          ((r.data.purchaseCount || 0) === (cur.data.purchaseCount || 0) &&
+            timeValue(r.data.lastSeenAt) > timeValue(cur.data.lastSeenAt));
+        if (better) byEmail.set(email, r);
+      }
+      rows = [...byEmail.values(), ...noEmail]
+        .sort((a, b) => timeValue(b.data.joinedAt) - timeValue(a.data.joinedAt));
       label = "정식회원 (테스트·차단·로봇·보류 제외)";
     } else if (filter === "buyers") {
       const snap = await getDocs(query(collection(db, "real_members"),
@@ -334,9 +357,9 @@ function renderList(rows, append = false) {
       m.hasPurchase ? [" ", el("span", {class: "tag"}, `구매 ${m.purchaseCount || 0}`)] : null,
       flagTags(id)),
     el("div", {class: "sub"},
-      `${(m.providers || []).join(", ") || "익명"} · 가입 ${fmtTime(m.joinedAt)} · 최근 ${fmtTime(m.lastSeenAt)}`),
+      `${(m.providers || []).join(", ") || "익명"} · 가입 ${fmtHour(m.joinedAt)} · 최근 ${fmtHour(m.lastSeenAt)}`),
     m.hasPurchase ? el("div", {class: "sub"},
-      `구매 ${m.purchaseCount || 0}건 · ${m.totalSpentUsd ? `$${m.totalSpentUsd} · ` : ""}충전 ${fmtHours(m.totalSecondsPurchased)} · 마지막 구매 ${fmtTime(m.lastPurchasedAt)}`,
+      `구매 ${m.purchaseCount || 0}건 · ${m.totalSpentUsd ? `$${m.totalSpentUsd} · ` : ""}충전 ${fmtHours(m.totalSecondsPurchased)} · 마지막 구매 ${fmtHour(m.lastPurchasedAt)}`,
       m.lastPurchaseEnvironment === "SANDBOX" ? [" ", el("span", {class: "tag sandbox"}, "SANDBOX")] : null) : null);
     return row;
   });
