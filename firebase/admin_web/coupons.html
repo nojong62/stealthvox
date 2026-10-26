@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>쿠폰</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <strong>쿠폰</strong>
+    <span id="who" class="muted"></span>
+    <a href="index.html" class="muted">회원 관리</a>
+  </header>
+
+  <main>
+    <section id="gate" class="card center" hidden>
+      <p>관리자 구글 계정으로 로그인하세요.</p>
+      <button id="signIn">Google로 로그인</button>
+      <p id="gateMsg" class="error"></p>
+    </section>
+
+    <section id="console" hidden>
+      <form id="createForm" class="card">
+        <h3 style="margin-top:0">코드 발급</h3>
+        <dl class="kv">
+          <dt>방식</dt>
+          <dd>
+            <select id="mode">
+              <option value="auto">자동 코드 여러 개 (개별)</option>
+              <option value="manual">직접 정한 코드 하나 (공용)</option>
+            </select>
+          </dd>
+          <dt id="countLabel">개수</dt>
+          <dd id="countRow"><input id="count" type="number" min="1" max="100" value="10"></dd>
+          <dt id="codeLabel" hidden>코드</dt>
+          <dd id="codeRow" hidden><input id="code" type="text" maxlength="20" autocomplete="off"
+            spellcheck="false" placeholder="영문·숫자 4~20자 (예: LUNA2H)"></dd>
+          <dt>지급 시간</dt>
+          <dd><input id="hours" type="number" min="0.5" max="10" step="0.5" value="2"> 시간</dd>
+          <dt>코드당 인원</dt>
+          <dd><input id="maxUses" type="number" min="1" max="10000" value="1">
+            <span class="muted">1 = 개별, 2 이상 = 선착순. 폰 하나·계정 하나에 한 번.</span></dd>
+          <dt>만료일</dt>
+          <dd><input id="expires" type="date"> <span class="muted">그날 23:59(KST)까지. 비우면 무기한.</span></dd>
+          <dt>메모</dt>
+          <dd><input id="memo" type="text" maxlength="200" placeholder="예: 유튜버 OO 구독자 10명" style="width:100%"></dd>
+        </dl>
+        <div class="inline">
+          <button type="submit" id="createBtn">발급</button>
+          <span id="createMsg" class="muted"></span>
+        </div>
+        <textarea id="issued" rows="6" readonly hidden></textarea>
+      </form>
+
+      <div class="inline" style="margin-top:16px">
+        <span id="status" class="muted"></span>
+      </div>
+      <div class="card" style="margin-top:8px; overflow-x:auto">
+        <table>
+          <thead>
+            <tr><th>코드</th><th>메모</th><th>시간</th><th>사용</th><th>만료</th><th>상태</th><th></th></tr>
+          </thead>
+          <tbody id="list"></tbody>
+        </table>
+      </div>
+      <div id="usedBy" class="card" style="margin-top:12px" hidden></div>
+    </section>
+  </main>
+
+  <script type="module" src="coupons.js"></script>
+</body>
+</html>
