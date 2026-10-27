@@ -66,6 +66,7 @@ const duoBoard = require("./duo_board");
 const secureAiGateway = require("./secure_ai_gateway");
 const memberRegistry = require("./member_registry");
 const accountDeletion = require("./account_deletion");
+const accountDiscovery = require("./account_discovery");
 
 // Callable Interpreter v2 is deployed dark while the client rollout flag is
 // false. Existing direct/realtime functions keep their original regions and
@@ -1058,20 +1059,12 @@ async function getAccountDiscoverySummary(uid) {
   };
 }
 
-async function resolveMappedDiscoveryUid(provider, providerUid) {
-  const firestore = admin.firestore();
-  if (provider === "google") {
-    const mapDoc = await firestore
-      .collection("provider_uid_map")
-      .doc("google:" + providerUid)
-      .get();
-    return mapDoc.exists && mapDoc.data().uid ? mapDoc.data().uid : null;
-  }
-  if (provider === "kakao") {
-    const mapDoc = await firestore.collection("kakao_uid_map").doc(providerUid).get();
-    return mapDoc.exists && mapDoc.data().uid ? mapDoc.data().uid : null;
-  }
-  return null;
+function resolveMappedDiscoveryUid(provider, providerUid) {
+  return accountDiscovery.resolveDiscoveryUid(
+    {db: admin.firestore(), auth: admin.auth()},
+    provider,
+    providerUid
+  );
 }
 
 async function verifyAccountDiscoveryProvider(data) {
