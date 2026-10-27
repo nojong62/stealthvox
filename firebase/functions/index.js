@@ -65,6 +65,7 @@ const { interpretUtterance } = require("./duo_interpreter");
 const duoBoard = require("./duo_board");
 const secureAiGateway = require("./secure_ai_gateway");
 const memberRegistry = require("./member_registry");
+const accountDeletion = require("./account_deletion");
 
 // Callable Interpreter v2 is deployed dark while the client rollout flag is
 // false. Existing direct/realtime functions keep their original regions and
@@ -293,7 +294,8 @@ exports.createTurnCredential = functions
 // ----------------------------------------------------------------------------
 // onUserDeleted
 // Trigger: Firebase Auth user.delete
-// Cleans up the user's Firestore document when their account is deleted.
+// Cleans up the user's Firestore document when their account is deleted,
+// then the member row and login maps (account_deletion.js).
 // ----------------------------------------------------------------------------
 exports.onUserDeleted = functions.auth.user().onDelete(async (user) => {
   const firestore = admin.firestore();
@@ -305,6 +307,14 @@ exports.onUserDeleted = functions.auth.user().onDelete(async (user) => {
     console.log(`[onUserDeleted] Deleted all data for uid=${user.uid}`);
   } catch (err) {
     console.error(`[onUserDeleted] Error deleting data for uid=${user.uid}:`, err);
+  }
+
+  try {
+    const removed = await accountDeletion.cleanUpDeletedAccount(firestore, user.uid);
+    console.log(`[onUserDeleted] Cleared member row and login maps for uid=${user.uid}`,
+      removed.length);
+  } catch (err) {
+    console.error(`[onUserDeleted] Error clearing member row for uid=${user.uid}:`, err);
   }
 });
 
