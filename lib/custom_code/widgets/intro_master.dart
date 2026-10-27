@@ -145,6 +145,11 @@ class _IntroMasterState extends State<IntroMaster>
   String _accountDiscoveryMessage = '';
   String _accountDiscoveryBusyProvider = '';
 
+  /// 계정 찾기에서 "새 계정 만들기"를 확인했다. 이 화면이 살아 있는 동안만
+  /// 이전 방식 버튼 하나 대신 세 버튼을 다 보인다. lastAuthProvider는 그대로라
+  /// 가입하지 않고 앱을 다시 열면 원래대로 버튼 하나다.
+  bool _newAccountConfirmed = false;
+
   bool get _requiresAuthOnlyIntro => FFAppState().isGuestSession;
 
   @override
@@ -2566,6 +2571,7 @@ class _IntroMasterState extends State<IntroMaster>
         _accountDiscoveryMessage = '';
         _showEmailForm = false;
         isLoginMode = false;
+        _newAccountConfirmed = true;
       });
     }
   }
@@ -2846,9 +2852,13 @@ class _IntroMasterState extends State<IntroMaster>
     };
   }
 
+  /// 버튼 하나만 보일 이전 로그인 방식. 새 계정을 확인했으면 없다.
+  String? _singleProvider() =>
+      _newAccountConfirmed ? null : _validLastAuthProvider();
+
   List<Widget> _buildAuthHeader() {
     final copy = _authIntroCopy();
-    final lastProvider = _validLastAuthProvider();
+    final lastProvider = _singleProvider();
     if (lastProvider == null) {
       return [
         _authSectionTitle(
@@ -2867,7 +2877,7 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   List<Widget> _buildProviderButtons() {
-    final lastProvider = _validLastAuthProvider();
+    final lastProvider = _singleProvider();
     if (lastProvider != null) {
       return [_providerButton(lastProvider)];
     }
