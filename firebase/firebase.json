@@ -19,21 +19,42 @@
   "storage": {
     "rules": "storage.rules"
   },
-  "hosting": {
-    "site": "stealthvox-admin",
-    "public": "admin_web",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "headers": [
-      {
-        "source": "**",
-        "headers": [
-          {"key": "Cache-Control", "value": "no-cache"},
-          {"key": "X-Frame-Options", "value": "DENY"},
-          {"key": "X-Content-Type-Options", "value": "nosniff"},
-          {"key": "X-Robots-Tag", "value": "noindex, nofollow"},
-          {"key": "Referrer-Policy", "value": "no-referrer"}
-        ]
-      }
-    ]
-  }
+  "hosting": [
+    {
+      "site": "stealthvox-admin",
+      "public": "admin_web",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "headers": [
+        {
+          "source": "**",
+          "headers": [
+            {"key": "Cache-Control", "value": "no-cache"},
+            {"key": "X-Frame-Options", "value": "DENY"},
+            {"key": "X-Content-Type-Options", "value": "nosniff"},
+            {"key": "X-Robots-Tag", "value": "noindex, nofollow"},
+            {"key": "Referrer-Policy", "value": "no-referrer"}
+          ]
+        }
+      ]
+    },
+    {
+      "site": "stealthvox-app",
+      "public": "landing_web",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "cleanUrls": true,
+      "headers": [
+        {
+          "source": "**",
+          "headers": [
+            {"key": "Cache-Control", "value": "public, max-age=3600"},
+            {"key": "X-Content-Type-Options", "value": "nosniff"}
+          ]
+        },
+        {
+          "source": "/llms.txt",
+          "headers": [{"key": "Content-Type", "value": "text/plain; charset=utf-8"}]
+        }
+      ]
+    }
+  ]
 }

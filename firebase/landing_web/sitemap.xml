@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://stealthvox-app.web.app/</loc>
+    <lastmod>2026-10-22</lastmod>
+    <xhtml:link rel="alternate" hreflang="ko" href="https://stealthvox-app.web.app/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://stealthvox-app.web.app/en/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://stealthvox-app.web.app/ja/"/>
+  </url>
+  <url>
+    <loc>https://stealthvox-app.web.app/en/</loc>
+    <lastmod>2026-10-22</lastmod>
+    <xhtml:link rel="alternate" hreflang="ko" href="https://stealthvox-app.web.app/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://stealthvox-app.web.app/en/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://stealthvox-app.web.app/ja/"/>
+  </url>
+  <url>
+    <loc>https://stealthvox-app.web.app/ja/</loc>
+    <lastmod>2026-10-22</lastmod>
+    <xhtml:link rel="alternate" hreflang="ko" href="https://stealthvox-app.web.app/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://stealthvox-app.web.app/en/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://stealthvox-app.web.app/ja/"/>
+  </url>
+  <url>
+    <loc>https://stealthvox-app.web.app/vs/speak/</loc>
+    <lastmod>2026-10-22</lastmod>
+  </url>
+  <url>
+    <loc>https://stealthvox-app.web.app/en/vs/hellotalk/</loc>
+    <lastmod>2026-10-22</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://stealthvox-app.web.app/en/vs/hellotalk/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://stealthvox-app.web.app/ja/vs/hellotalk/"/>
+  </url>
+  <url>
+    <loc>https://stealthvox-app.web.app/ja/vs/hellotalk/</loc>
+    <lastmod>2026-10-22</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://stealthvox-app.web.app/en/vs/hellotalk/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://stealthvox-app.web.app/ja/vs/hellotalk/"/>
+  </url>
+</urlset>

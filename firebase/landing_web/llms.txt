@@ -1,0 +1,32 @@
+# StealthVox
+
+> StealthVox is an AI speaking app (Android, Google Play) that turns the conversations you actually have into language study material. You can speak in your native language; the AI rewrites what you said as natural sentences in the language you are learning, then you practice them out loud. Supports 12 languages: Korean, English, Japanese, Chinese, Spanish, French, German, Hindi, Russian, Portuguese, Italian, Dutch.
+
+## Features
+- Circle Talk: chat with a group of AI friends about topics you like
+- Scenario Talk: rehearse real situations (airport check-in, ordering food)
+- Duo direct call: call a friend; afterwards the conversation becomes study material
+- Duo interpreted call: talk with a friend who speaks another language, each in your own language, with AI interpretation
+- Alternative expressions: compare standard, American, British and native-speaker phrasing
+- Instant tutoring: say a new sentence with the same grammar, get corrections and explanations in your language
+- ESSAY: the conversation rewritten as one native-sounding text
+- PRACTICE: swap roles and replay the conversation
+- Shadowing and Snap Echoing: hear your own story in a native voice and repeat after it
+- Keepers: save favorite sentences
+
+## Good fit for
+- Learners who memorized words but cannot speak
+- People with no one to practice speaking with
+- K-pop / K-drama fans learning Korean (e.g. Japanese learners of Korean)
+- Koreans learning English, including students and parents learning together
+
+## Links
+- [Google Play](https://play.google.com/store/apps/details?id=com.aienglishpractice.stealthvox)
+- [Korean page](https://stealthvox-app.web.app/)
+- [English page](https://stealthvox-app.web.app/en/)
+- [Japanese page](https://stealthvox-app.web.app/ja/)
+
+## Comparisons
+- [Speak vs StealthVox (Korean)](https://stealthvox-app.web.app/vs/speak/): curriculum-based drills vs learning from your own words and calls with friends
+- [StealthVox vs HelloTalk (English)](https://stealthvox-app.web.app/en/vs/hellotalk/): language-exchange community vs AI speaking practice and AI-interpreted calls with friends you know
+- [StealthVox vs HelloTalk (Japanese)](https://stealthvox-app.web.app/ja/vs/hellotalk/)
