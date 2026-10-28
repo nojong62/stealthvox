@@ -31,6 +31,22 @@ function isRealMemberProvider(signInProvider) {
   return Boolean(signInProvider && signInProvider !== "anonymous");
 }
 
+function isKakaoProvider(providerId) {
+  return providerId === "kakaocorp.com" || providerId === "kakao";
+}
+
+// 카카오 회원은 이메일·이름이 비어 관리자 웹에 UID만 보인다. kakao_uid_map에서
+// 회원번호(겹치지 않음)와 닉네임(겹칠 수 있음)을 찾아 명부에 같이 적는다.
+async function kakaoMemberFields(db, uid) {
+  const snap = await db.collection("kakao_uid_map").where("uid", "==", uid).limit(1).get();
+  if (snap.empty) return {};
+  const doc = snap.docs[0];
+  const data = doc.data() || {};
+  const fields = {kakaoId: String(data.kakao_id || doc.id)};
+  if (data.kakao_nickname) fields.kakaoNickname = String(data.kakao_nickname);
+  return fields;
+}
+
 function createSyncRealMemberProfile(admin) {
   return onCall({region: REGION, enforceAppCheck: true}, async (request) => {
     const uid = request.auth && request.auth.uid;
@@ -43,6 +59,10 @@ function createSyncRealMemberProfile(admin) {
     }
 
     const userRecord = await admin.auth().getUser(uid);
+    const providers = normalizedProviderIds(userRecord, signInProvider);
+    const kakao = providers.some(isKakaoProvider)
+      ? await kakaoMemberFields(admin.firestore(), uid)
+      : {};
     const joinedDate = new Date(userRecord.metadata.creationTime);
     const lastSignInDate = new Date(userRecord.metadata.lastSignInTime);
     const Timestamp = admin.firestore.Timestamp;
@@ -52,8 +72,9 @@ function createSyncRealMemberProfile(admin) {
       uid,
       email: userRecord.email || null,
       displayName: userRecord.displayName || null,
-      providers: normalizedProviderIds(userRecord, signInProvider),
+      providers,
       primaryProvider: signInProvider,
+      ...kakao,
       joinedAt: Number.isNaN(joinedDate.getTime())
         ? FieldValue.serverTimestamp()
         : Timestamp.fromDate(joinedDate),
@@ -72,5 +93,6 @@ module.exports = {
   createSyncRealMemberProfile,
   effectiveSignInProvider,
   isRealMemberProvider,
+  kakaoMemberFields,
   normalizedProviderIds,
 };

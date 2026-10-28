@@ -154,6 +154,17 @@ async function verifyGoogleOAuthIdToken(idToken) {
   }
 }
 
+// 카카오 닉네임. 동의항목에 따라 kakao_account.profile 또는 옛 properties에 온다.
+function kakaoNicknameOf(profile) {
+  const raw =
+    (profile && profile.kakao_account && profile.kakao_account.profile &&
+      profile.kakao_account.profile.nickname) ||
+    (profile && profile.properties && profile.properties.nickname) ||
+    "";
+  const nickname = String(raw).trim().slice(0, 60);
+  return nickname || null;
+}
+
 async function verifyKakaoAccessToken(accessToken) {
   if (!accessToken || typeof accessToken !== "string") {
     throw new functions.https.HttpsError(
@@ -687,6 +698,7 @@ exports.kakaoCustomAuth = functions
 
     let kakaoId = null;
     let kakaoEmail = null;
+    let kakaoNickname = null;
     try {
       const resp = await fetch("https://kapi.kakao.com/v2/user/me", {
         method: "GET",
@@ -704,6 +716,7 @@ exports.kakaoCustomAuth = functions
         profile && profile.kakao_account && profile.kakao_account.email
           ? profile.kakao_account.email
           : null;
+      kakaoNickname = kakaoNicknameOf(profile);
     } catch (e) {
       if (e instanceof functions.https.HttpsError) throw e;
       throw new functions.https.HttpsError(
@@ -733,6 +746,17 @@ exports.kakaoCustomAuth = functions
       preCheckDoc.data().authEmailSet === true
     ) {
       const resolvedUid = preCheckDoc.data().uid;
+      // 관리자 웹이 카카오 회원을 알아보도록 닉네임을 표에 적어 둔다(바뀔 때만).
+      if (kakaoNickname && preCheckDoc.data().kakao_nickname !== kakaoNickname) {
+        try {
+          await mapRef.set({ kakao_nickname: kakaoNickname }, { merge: true });
+        } catch (nickErr) {
+          functions.logger.warn("kakaoCustomAuth: nickname write failed", {
+            uid: resolvedUid,
+            error: String(nickErr),
+          });
+        }
+      }
       const token = await admin
         .auth()
         .createCustomToken(resolvedUid, { provider: "kakaocorp.com" });
@@ -810,7 +834,12 @@ exports.kakaoCustomAuth = functions
 
     // 이메일 확인 절차 완료 표시 -> 다음 로그인부터 fast path 진입
     try {
-      await mapRef.set({ authEmailSet: true }, { merge: true });
+      await mapRef.set(
+        kakaoNickname
+          ? { authEmailSet: true, kakao_nickname: kakaoNickname }
+          : { authEmailSet: true },
+        { merge: true }
+      );
     } catch (flagErr) {
       functions.logger.warn("kakaoCustomAuth: authEmailSet flag write failed", {
         uid: resolvedUid,

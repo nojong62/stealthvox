@@ -219,6 +219,12 @@ $("filter").addEventListener("change", () => runSearch($("q").value.trim()));
 // Firebase UID: 영숫자 20~36자, '@' 없음.
 const looksLikeUid = (q) => /^[A-Za-z0-9]{20,36}$/.test(q);
 
+// 카카오 회원은 이메일·이름이 없을 수 있다. 닉네임은 겹칠 수 있으니 회원번호를 같이 붙인다.
+function kakaoLabel(m) {
+  if (!m.kakaoId) return "";
+  return m.kakaoNickname ? `${m.kakaoNickname} · 카카오 #${m.kakaoId}` : `카카오 #${m.kakaoId}`;
+}
+
 function prefixQuery(field, q) {
   return query(collection(db, "real_members"),
     where(field, ">=", q),
@@ -288,15 +294,22 @@ async function runSearch(q) {
       rows = snap.docs.map((d) => ({id: d.id, data: d.data()}));
       label = "구매자";
     } else if (q) {
-      // 이메일 앞부분과 이름 앞부분을 같이 찾는다(카카오 회원은 이메일이 없을 수 있다).
-      const [byEmail, byName] = await Promise.all([
+      // 이메일·이름·카카오 닉네임 앞부분과 카카오 회원번호(숫자 전체)를 같이 찾는다.
+      const kakaoNo = q.replace(/^#/, "");
+      const [byEmail, byName, byNick, byKakaoId] = await Promise.all([
         getDocs(prefixQuery("email", q.toLowerCase())),
         getDocs(prefixQuery("displayName", q)),
+        getDocs(prefixQuery("kakaoNickname", q)),
+        /^\d+$/.test(kakaoNo)
+          ? getDocs(query(collection(db, "real_members"), where("kakaoId", "==", kakaoNo), limit(LIST_LIMIT)))
+          : Promise.resolve({docs: []}),
       ]);
       const seen = new Map();
-      for (const d of [...byEmail.docs, ...byName.docs]) seen.set(d.id, {id: d.id, data: d.data()});
+      for (const d of [...byEmail.docs, ...byName.docs, ...byNick.docs, ...byKakaoId.docs]) {
+        seen.set(d.id, {id: d.id, data: d.data()});
+      }
       rows = [...seen.values()];
-      label = `"${q}"로 시작하는 이메일·이름`;
+      label = `"${q}"로 시작하는 이메일·이름·카카오 닉네임·회원번호`;
     } else if (filter === "recent") {
       const snap = await getDocs(query(collection(db, "real_members"),
         orderBy("lastSeenAt", "desc"), limit(LIST_LIMIT)));
@@ -311,7 +324,7 @@ async function runSearch(q) {
     if (q && filter !== "all") {
       const needle = q.toLowerCase();
       rows = rows.filter(({id, data}) =>
-        [data.email, data.displayName, id].some((v) => String(v || "").toLowerCase().includes(needle)));
+        [data.email, data.displayName, data.kakaoNickname, data.kakaoId, id].some((v) => String(v || "").toLowerCase().includes(needle)));
     }
     if (filter !== "all" && filter !== "members") {
       rows.sort((a, b) => timeValue(b.data.lastSeenAt) - timeValue(a.data.lastSeenAt));
@@ -403,7 +416,8 @@ function renderList(rows, append = false) {
         showMember(id);
       },
     },
-    el("div", {class: "cell who"}, m.email || m.displayName || el("span", {class: "muted mono"}, id), flagTags(id)),
+    el("div", {class: "cell who"},
+      m.email || m.displayName || kakaoLabel(m) || el("span", {class: "muted mono"}, id), flagTags(id)),
     el("div", {class: "cell muted"}, fmtProviders(m.providers)),
     el("div", {class: "cell muted"}, fmtHour(m.joinedAt)),
     el("div", {class: "cell muted"}, fmtHour(m.lastSeenAt)),
@@ -460,7 +474,7 @@ async function showMember(uid) {
     box.replaceChildren(...[
       el("div", {class: "card"},
         el("h2", {}, m.email || (memberSnap.exists() ? "(이메일 없음)" : "체험(익명) 사용자")),
-        el("div", {class: "muted"}, m.displayName || ""),
+        el("div", {class: "muted"}, [m.displayName, kakaoLabel(m)].filter(Boolean).join(" · ")),
         el("div", {class: "mono"}, uid, " ", copyButton(uid), flagTags(uid)),
         el("h3", {}, "계정"),
         kv([
