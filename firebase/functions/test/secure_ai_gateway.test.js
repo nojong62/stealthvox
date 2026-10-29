@@ -99,6 +99,10 @@ test("Chirp locale: Hangul first, then the app's language, then single-language 
   assert.equal(chirpLocaleForRequest({ input: "Hola", language: "es" }), "es-ES");
   assert.equal(chirpLocaleForRequest({ input: "Hallo", language: "nl-NL" }), "nl-NL");
   assert.equal(chirpLocaleForRequest({ input: "Hello", language: "English" }), "en-US");
+  assert.equal(chirpLocaleForRequest({ input: "Hello", language: "en-GB" }), "en-GB");
+  assert.equal(chirpLocaleForRequest({ input: "Hello", language: "en_gb" }), "en-GB");
+  assert.equal(chirpLocaleForRequest({ input: "Hello", language: "en-US" }), "en-US");
+  assert.equal(chirpVoiceForRequest({ voice: "google-female" }, "en-GB"), "en-GB-Chirp3-HD-Leda");
   assert.equal(chirpLocaleForRequest({ input: "你好", language: "zh" }), "cmn-CN");
   assert.equal(chirpLocaleForRequest({ input: "こんにちは" }), "ja-JP");
   assert.equal(chirpLocaleForRequest({ input: "नमस्ते" }), "hi-IN");

@@ -1,5 +1,8 @@
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 
+import '/app_state.dart';
+import 'ai_style.dart';
+
 /// TTS 용도별 모델 계약.
 ///
 /// 대화 음성은 짧은 지연과 숫자형 speed가 중요하고, 학습 음성은
@@ -36,7 +39,7 @@ class TtsModelProfile {
     String? language,
   }) {
     final trimmedInstructions = instructions?.trim() ?? '';
-    final trimmedLanguage = language?.trim() ?? '';
+    final trimmedLanguage = ttsLanguageFor(language?.trim() ?? '');
     return <String, dynamic>{
       'model': model,
       'input': input,
@@ -51,6 +54,17 @@ class TtsModelProfile {
         'instructions': trimmedInstructions,
     };
   }
+}
+
+/// AI STYLE이 British면 영어 소리를 영국식 Chirp(en-GB)으로 읽힌다.
+///
+/// Gateway는 'English'를 en-US로 읽는다. British는 말투만 바꾸고 소리는
+/// 미국식이었다(2026-10-29 실장님 지시로 변경). 영어가 아닌 언어는 그대로다.
+String ttsLanguageFor(String language, {String? style}) {
+  if (!isAiStyleTargetLanguage(language)) return language;
+  return normalizeAiStyle(style ?? FFAppState().aiStyle) == 'British'
+      ? 'en-GB'
+      : language;
 }
 
 /// 앱 전체 OpenAI TTS 모델 선택의 단일 진입점.
@@ -124,8 +138,11 @@ class TtsModelPolicy {
     final profile = forWorkload(workload);
     // The audio provider can change without the caller's cache key changing.
     // v3: every conversation language moved to Chirp 3 HD, so prior OpenAI
-    // bytes must not be replayed.
-    return '${profile.model}_${profile.cacheVersion}_tts-route-v3_$namespace';
+    // bytes must not be replayed. British style reads English in en-GB, so its
+    // bytes get their own slot rather than replaying the en-US ones.
+    final accent = ttsLanguageFor('English') == 'en-GB' ? '_en-GB' : '';
+    return '${profile.model}_${profile.cacheVersion}_tts-route-v3$accent'
+        '_$namespace';
   }
 
   static TtsModelProfile _resolve(TtsWorkload workload) {

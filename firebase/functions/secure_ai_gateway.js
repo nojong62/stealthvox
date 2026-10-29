@@ -178,8 +178,10 @@ function utf8Bytes(text) {
 function chirpLocaleForRequest(body) {
   const input = String(body && body.input || "");
   if (containsKorean(input)) return "ko-KR";
-  const requested = String(body && body.language || "").trim().toLowerCase()
-    .split(/[-_]/)[0];
+  const language = String(body && body.language || "").trim().toLowerCase();
+  // The app sends en-GB when its English style is British.
+  if (/^en[-_]gb$/.test(language)) return "en-GB";
+  const requested = language.split(/[-_]/)[0];
   if (CHIRP_LOCALES.has(requested)) return CHIRP_LOCALES.get(requested);
   if (/[぀-ヿ]/u.test(input)) return "ja-JP";
   if (/[ऀ-ॿ]/u.test(input)) return "hi-IN";
