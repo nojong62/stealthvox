@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:in_app_update/in_app_update.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '/custom_code/services/app_update_policy.dart';
@@ -26,9 +27,45 @@ class AppUpdateGate extends StatefulWidget {
 
 class _AppUpdateGateState extends State<AppUpdateGate> {
   bool _recommendedDismissedForSession = false;
+  // Play가 "새 버전 있음"이라고 답한 경우. Remote Config 값을 올리지 않아도
+  // 상위 버전이 나오면 권장 Update로 안내한다.
+  bool _playUpdateAvailable = false;
 
   OriginSurfaceCopy get _copy =>
       OriginSurfaceCopy.forSystemLocale();
+
+  @override
+  void initState() {
+    super.initState();
+    _checkPlayUpdate();
+  }
+
+  Future<void> _checkPlayUpdate() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      final info = await InAppUpdate.checkForUpdate();
+      if (!mounted) return;
+      if (info.updateAvailability == UpdateAvailability.updateAvailable &&
+          info.immediateUpdateAllowed) {
+        setState(() => _playUpdateAvailable = true);
+      }
+    } catch (_) {
+      // Play 설치본이 아니거나 Play 서비스를 못 쓰면 조용히 넘어간다.
+    }
+  }
+
+  Future<void> _update() async {
+    if (_playUpdateAvailable) {
+      try {
+        final result = await InAppUpdate.performImmediateUpdate();
+        if (result == AppUpdateResult.success) return;
+        if (result == AppUpdateResult.userDeniedUpdate) return;
+      } catch (_) {
+        // 아래 스토어 열기로 넘어간다.
+      }
+    }
+    await _openStore();
+  }
 
   Future<void> _openStore() async {
     var opened = false;
@@ -63,7 +100,10 @@ class _AppUpdateGateState extends State<AppUpdateGate> {
 
   @override
   Widget build(BuildContext context) {
-    final requirement = widget.decision.requirement;
+    var requirement = widget.decision.requirement;
+    if (requirement == AppUpdateRequirement.none && _playUpdateAvailable) {
+      requirement = AppUpdateRequirement.recommended;
+    }
     final visible = requirement == AppUpdateRequirement.required ||
         (requirement == AppUpdateRequirement.recommended &&
             !_recommendedDismissedForSession);
@@ -111,7 +151,7 @@ class _AppUpdateGateState extends State<AppUpdateGate> {
                           ),
                         ),
                       TextButton(
-                        onPressed: _openStore,
+                        onPressed: _update,
                         child: Text(
                           _copy['update'],
                           style: const TextStyle(
