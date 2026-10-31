@@ -174,9 +174,15 @@ class OpenAiStreamingTranscribeSession {
     this.vadThreshold = kStreamingSttVadThreshold,
     this.vadPrefixPaddingMs = kStreamingSttVadPrefixPaddingMs,
     this.vadSilenceDurationMs = kStreamingSttVadSilenceDurationMs,
+    this.duoRoomId,
   }) : _languageCode = languageCode;
 
   final String apiKey;
+
+  /// Duo 통화의 방 번호. 잔여 시간이 없는 사람(비회원 게스트·홍보 기간 비회원
+  /// 초대자)은 이 방으로 전사 토큰 자격을 받는다. 없으면 회원 자격만 본다.
+  /// 이 값을 안 넘겨서 10-30 실기기에서 비회원 통역 전사가 열리지 않았다.
+  final String? duoRoomId;
 
   // ── Server VAD. 기본값은 공용이고, 부르는 쪽이 갈아 끼울 수 있다.
   //   모드별로 다르게 잡을 근거가 생기면 그때 한 벌을 넘긴다.
@@ -414,7 +420,8 @@ class OpenAiStreamingTranscribeSession {
     }
     final sw = Stopwatch()..start();
     try {
-      final realtimeToken = await SecureAiGateway.openAiRealtimeToken();
+      final realtimeToken =
+          await SecureAiGateway.openAiRealtimeToken(duoRoomId: duoRoomId);
       final socket = await WebSocket.connect(
         kStreamingSttEndpoint,
         headers: {'Authorization': 'Bearer $realtimeToken'},

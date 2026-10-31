@@ -1280,7 +1280,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       context,
       showInactivePosts: true,
     );
-    if (!mounted || claim == null) return;
+    // 비회원 초대 버튼은 익명에게만 보이므로 로비(회원)에는 올 일이 없다.
+    if (!mounted || claim == null || claim.startGuestHost) return;
     await DuoBoardHostPresence.instance.prepareForIncomingInvite(claim.roomId);
     if (!mounted) return;
     FFAppState().isGuestSession = true;

@@ -204,6 +204,15 @@ async function loadList() {
         if (next === null) return;
         update(d.id, {maxUses: Number(next)}, e.currentTarget);
       }}, "인원");
+      const reexpire = el("button", {class: "small ghost", onclick: (e) => {
+        const cur = typeof c.expiresAtMs === "number"
+          ? new Date(c.expiresAtMs).toLocaleDateString("sv-SE", {timeZone: "Asia/Seoul"}) : "";
+        const next = prompt(`${d.id} 만료일 YYYY-MM-DD, 그날 23:59(KST)까지. 비우면 무기한 (지금 ${fmtExpiry(c.expiresAtMs)})`, cur);
+        if (next === null) return;
+        const date = next.trim();
+        if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) { alert("YYYY-MM-DD 형식으로 적어 주세요."); return; }
+        update(d.id, {expiresAtMs: date ? new Date(`${date}T23:59:59+09:00`).getTime() : null}, e.currentTarget);
+      }}, "만료");
       const users = el("button", {class: "small ghost", onclick: () => showUsedBy(d.id)}, "사용자");
       return el("tr", {},
         el("td", {class: "mono"}, d.id),
@@ -212,7 +221,7 @@ async function loadList() {
         el("td", {class: "num"}, `${c.usedCount || 0}/${c.maxUses}`),
         el("td", {}, fmtExpiry(c.expiresAtMs)),
         el("td", {}, state),
-        el("td", {}, toggle, " ", resize, " ", users));
+        el("td", {}, toggle, " ", resize, " ", reexpire, " ", users));
     });
     $("list").replaceChildren(...rows);
     $("status").textContent = `최근 ${rows.length}개`;

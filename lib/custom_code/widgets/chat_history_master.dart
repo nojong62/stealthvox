@@ -4286,8 +4286,11 @@ RULES — follow exactly:
 
   // 📦 [Box 20: UI - 상단 네비게이션 바]
   Widget _buildTopBar() {
+    // 👆 뒤로 버튼은 화면 왼쪽 끝·위까지 눌리게 한다. 예전에는 바깥 여백
+    //   16px가 버튼 밖이라 가장자리를 누르면 반응이 없었다(10-30 실장님).
+    //   아이콘 자리(왼쪽 24px)와 머리 높이(88px)는 그대로다.
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(4, 12, 16, 12),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -4298,10 +4301,10 @@ RULES — follow exactly:
                   onTap: () => context.pop(),
                   behavior: HitTestBehavior.opaque,
                   child: Container(
-                    width: 64,
-                    height: 56,
+                    width: 84,
+                    height: 64,
                     alignment: Alignment.centerLeft,
-                    padding: const EdgeInsets.only(left: 8),
+                    padding: const EdgeInsets.only(left: 20),
                     child: const Icon(Icons.keyboard_arrow_left,
                         color: Colors.amber, size: 28),
                   )),

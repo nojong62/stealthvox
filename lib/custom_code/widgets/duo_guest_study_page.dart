@@ -22,19 +22,28 @@ import 'chat_history_master.dart';
 import 'study_timer_overlay.dart';
 
 class DuoGuestStudyPage extends StatelessWidget {
-  const DuoGuestStudyPage({super.key, required this.historyRef});
+  const DuoGuestStudyPage({
+    super.key,
+    required this.historyRef,
+    this.forceLimitedStudy = false,
+  });
 
   final DocumentReference historyRef;
+
+  /// 홍보 기간 비회원 초대자(호스트)는 초대 세션 표시가 없다. 그래도
+  /// 게스트와 똑같이 5분으로 막는다 — 안 막으면 무료 공부방이 된다.
+  final bool forceLimitedStudy;
 
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    final limitedGuestStudy = shouldLimitDuoGuestStudy(
-      // 초대 세션인데 인증 복원 타이밍상 user가 잠시 null이어도 비회원
-      // 체험으로 제한한다. null을 회원으로 간주하면 5분 제한이 풀릴 수 있다.
-      isAnonymous: user == null || user.isAnonymous,
-      isGuestSession: FFAppState().isGuestSession,
-    );
+    final limitedGuestStudy = forceLimitedStudy ||
+        shouldLimitDuoGuestStudy(
+          // 초대 세션인데 인증 복원 타이밍상 user가 잠시 null이어도 비회원
+          // 체험으로 제한한다. null을 회원으로 간주하면 5분 제한이 풀릴 수 있다.
+          isAnonymous: user == null || user.isAnonymous,
+          isGuestSession: FFAppState().isGuestSession,
+        );
 
     // 뒤로 가면 통화방이 아니라 Intro다. 통화는 이미 끝났고, 그 화면으로
     // 돌아가면 끝난 방에 다시 앉아 있게 된다.

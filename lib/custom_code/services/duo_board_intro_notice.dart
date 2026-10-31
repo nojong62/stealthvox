@@ -7,12 +7,18 @@ class DuoBoardIntroNoticeCopy {
     required this.body,
     required this.cancel,
     required this.openBoard,
+    required this.promoTitle,
+    required this.promoBody,
   });
 
   final String title;
   final String body;
   final String cancel;
   final String openBoard;
+
+  /// 홍보 기간(비회원끼리 통화 오픈)에만 본문 위에 따로 보이는 안내.
+  final String promoTitle;
+  final String promoBody;
 
   static DuoBoardIntroNoticeCopy forSystemLocale() => forLanguageCode(
         PlatformDispatcher.instance.locale.languageCode,
@@ -30,6 +36,8 @@ class DuoBoardIntroNoticeCopy {
           '공개 Duo 초대는 언어 연습을 위한 대화입니다. 게시된 주제와 동떨어진 이야기나 비속어 등으로 상대방을 불쾌하게 하지 않도록 배려해 주세요.',
       cancel: '취소',
       openBoard: '게시판 보기',
+      promoTitle: '📣 홍보 기간 특별 오픈',
+      promoBody: '지금은 가입하지 않은 비회원끼리도 통화할 수 있습니다. 게시판 아래 \'비회원 초대글 쓰기\'로 누구나 초대글을 올리고, 전 세계 누구나 눌러서 참여할 수 있습니다.\n• 비회원이 올린 초대 대화는 3분까지입니다. 끝나기 30초 전에 알려 드립니다.\n• 초대글은 폰 하나에 하나만 올릴 수 있고, 통화가 끝나면 사라집니다. 다시 올리면 됩니다.\n• 인사와 짧은 자기소개로 시작하고, 상대가 말할 때는 끝까지 기다려 주세요. 통역은 한 사람씩 전합니다.\n• 욕설, 성적인 말, 연락처·SNS 같은 개인정보 요구는 금지입니다. 불쾌한 상대는 통화 중 깃발 버튼으로 신고하세요. 바로 끝나고 다시 연결되지 않습니다.\n• 대화를 공부방에 저장해 연습하려면 통화가 끝난 뒤 회원으로 가입하세요.',
     ),
     'en': DuoBoardIntroNoticeCopy(
       title: 'About the Duo Interpreter Board',
@@ -40,6 +48,8 @@ class DuoBoardIntroNoticeCopy {
           'Public Duo invitations are for language-practice conversations. Please stay on the posted topic and avoid profanity or other language that could make the other person uncomfortable.',
       cancel: 'Cancel',
       openBoard: 'View board',
+      promoTitle: '📣 Open to guests during our promotion',
+      promoBody: 'Right now even people without an account can talk to each other. Anyone can post an invitation with \'Write a guest invitation\' at the bottom of the board, and anyone in the world can tap it to join.\n• Calls on guest invitations last up to 3 minutes. We\'ll let you know 30 seconds before the end.\n• One phone can post one invitation. It disappears after the call, and you can post again.\n• Start with a greeting and a short introduction, and let the other person finish speaking. The interpreter passes on one person at a time.\n• No swearing, sexual talk, or asking for contact details or social media. If someone makes you uncomfortable, tap the flag during the call to report them. The call ends and you won\'t be matched again.\n• To save the conversation to your Study Room and practice with it, sign up after the call.',
     ),
     'ja': DuoBoardIntroNoticeCopy(
       title: 'Duo通訳掲示板のご案内',
@@ -49,6 +59,8 @@ class DuoBoardIntroNoticeCopy {
           '公開Duo招待は語学練習のための会話です。投稿されたテーマから大きく外れた話や暴言・不適切な言葉で相手を不快にさせないよう、ご配慮ください。',
       cancel: 'キャンセル',
       openBoard: '掲示板を見る',
+      promoTitle: '📣 プロモーション期間限定オープン',
+      promoBody: '今は登録していないゲスト同士でも通話できます。掲示板下の「ゲスト招待を書く」で誰でも招待を投稿でき、世界中の誰でもタップして参加できます。\n• ゲストが投稿した招待の会話は3分までです。終了30秒前にお知らせします。\n• 招待は1台のスマホにつき1件まで。通話が終わると消えるので、また投稿できます。\n• あいさつと短い自己紹介から始め、相手が話している間は最後まで待ってください。通訳は1人ずつ伝えます。\n• 暴言、性的な発言、連絡先やSNSなど個人情報を求めることは禁止です。不快な相手は通話中の旗ボタンで通報してください。すぐに終了し、再びつながりません。\n• 会話を学習ルームに保存して練習するには、通話後に会員登録してください。',
     ),
     'zh': DuoBoardIntroNoticeCopy(
       title: 'Duo 口译公告板说明',
@@ -58,6 +70,8 @@ class DuoBoardIntroNoticeCopy {
           '公开的 Duo 邀请用于语言练习对话。请围绕发布的主题交流，并避免使用脏话或其他可能让对方感到不适的言语。',
       cancel: '取消',
       openBoard: '查看公告板',
+      promoTitle: '📣 推广期间特别开放',
+      promoBody: '现在未注册的访客之间也可以通话。任何人都可以通过公告板下方的“写访客邀请”发布邀请，全世界任何人都可以点击参加。\n• 访客发布的邀请通话最长3分钟。结束前30秒会提醒您。\n• 每部手机只能发布一条邀请，通话结束后会消失，可以再次发布。\n• 先打招呼并简短自我介绍，对方说话时请耐心听完。口译一次只转达一个人的话。\n• 禁止脏话、性相关言论以及索要联系方式、社交账号等个人信息。遇到让您不适的人，请在通话中点击旗帜按钮举报，通话会立即结束且不会再匹配。\n• 想把对话保存到学习室练习，请在通话结束后注册会员。',
     ),
     'es': DuoBoardIntroNoticeCopy(
       title: 'Acerca del tablón de intérprete Duo',
@@ -68,6 +82,8 @@ class DuoBoardIntroNoticeCopy {
           'Las invitaciones públicas de Duo son para practicar idiomas. Mantén la conversación en el tema publicado y evita insultos u otras expresiones que puedan incomodar a la otra persona.',
       cancel: 'Cancelar',
       openBoard: 'Ver tablón',
+      promoTitle: '📣 Abierto a invitados durante la promoción',
+      promoBody: 'Ahora incluso las personas sin cuenta pueden hablar entre sí. Cualquiera puede publicar una invitación con «Escribir invitación de invitado» al final del tablón, y cualquier persona del mundo puede tocarla para unirse.\n• Las llamadas de invitaciones de invitados duran hasta 3 minutos. Te avisamos 30 segundos antes del final.\n• Cada teléfono puede publicar una invitación. Desaparece después de la llamada y puedes volver a publicar.\n• Empieza con un saludo y una breve presentación, y deja que la otra persona termine de hablar. El intérprete transmite a una persona cada vez.\n• Prohibidos los insultos, el contenido sexual y pedir contactos o redes sociales. Si alguien te incomoda, toca la bandera durante la llamada para denunciarlo. La llamada termina y no volveréis a coincidir.\n• Para guardar la conversación en tu Sala de estudio y practicar, regístrate después de la llamada.',
     ),
     'fr': DuoBoardIntroNoticeCopy(
       title: 'À propos du tableau d’interprétation Duo',
@@ -78,6 +94,8 @@ class DuoBoardIntroNoticeCopy {
           'Les invitations Duo publiques sont destinées à la pratique des langues. Restez dans le sujet publié et évitez les grossièretés ou tout propos susceptible de mettre l’autre personne mal à l’aise.',
       cancel: 'Annuler',
       openBoard: 'Voir le tableau',
+      promoTitle: '📣 Ouvert aux invités pendant la promotion',
+      promoBody: 'En ce moment, même les personnes sans compte peuvent se parler. Tout le monde peut publier une invitation avec « Écrire une invitation invité » en bas du tableau, et n\'importe qui dans le monde peut la toucher pour participer.\n• Les appels sur les invitations d\'invités durent 3 minutes maximum. Nous vous prévenons 30 secondes avant la fin.\n• Un téléphone peut publier une invitation. Elle disparaît après l\'appel et vous pouvez en publier une autre.\n• Commencez par saluer et vous présenter brièvement, et laissez l\'autre personne finir de parler. L\'interprète transmet une personne à la fois.\n• Interdits : insultes, propos sexuels, demandes de coordonnées ou de réseaux sociaux. Si quelqu\'un vous met mal à l\'aise, touchez le drapeau pendant l\'appel pour le signaler. L\'appel se termine et vous ne serez plus mis en relation.\n• Pour enregistrer la conversation dans votre Salle d\'étude et vous entraîner, inscrivez-vous après l\'appel.',
     ),
     'de': DuoBoardIntroNoticeCopy(
       title: 'Über das Duo-Dolmetscherboard',
@@ -88,6 +106,8 @@ class DuoBoardIntroNoticeCopy {
           'Öffentliche Duo-Einladungen sind für Gespräche zum Sprachenüben gedacht. Bleibe beim veröffentlichten Thema und vermeide Schimpfwörter oder andere Äußerungen, die dein Gegenüber unangenehm berühren könnten.',
       cancel: 'Abbrechen',
       openBoard: 'Board ansehen',
+      promoTitle: '📣 Während der Aktion auch für Gäste offen',
+      promoBody: 'Gerade können auch Menschen ohne Konto miteinander sprechen. Jeder kann unten im Board mit „Gast-Einladung schreiben“ eine Einladung posten, und jeder auf der Welt kann sie antippen und mitmachen.\n• Gespräche über Gast-Einladungen dauern höchstens 3 Minuten. 30 Sekunden vor Ende geben wir Bescheid.\n• Pro Telefon eine Einladung. Sie verschwindet nach dem Gespräch, danach kannst du neu posten.\n• Beginne mit einem Gruß und einer kurzen Vorstellung und lass die andere Person ausreden. Der Dolmetscher überträgt jeweils eine Person.\n• Keine Beleidigungen, keine sexuellen Inhalte, keine Fragen nach Kontaktdaten oder Social Media. Wenn dir jemand unangenehm ist, tippe im Gespräch auf die Flagge und melde ihn. Das Gespräch endet und ihr werdet nicht wieder verbunden.\n• Um das Gespräch in deinem Lernraum zu speichern und damit zu üben, registriere dich nach dem Gespräch.',
     ),
     'hi': DuoBoardIntroNoticeCopy(
       title: 'Duo दुभाषिया बोर्ड के बारे में',
@@ -98,6 +118,8 @@ class DuoBoardIntroNoticeCopy {
           'सार्वजनिक Duo निमंत्रण भाषा-अभ्यास की बातचीत के लिए हैं। पोस्ट किए गए विषय पर रहें और गाली-गलौज या ऐसी भाषा से बचें जिससे दूसरे व्यक्ति को असहज महसूस हो।',
       cancel: 'रद्द करें',
       openBoard: 'बोर्ड देखें',
+      promoTitle: '📣 प्रचार अवधि में अतिथियों के लिए खुला',
+      promoBody: 'अभी बिना खाते वाले लोग भी आपस में बात कर सकते हैं। बोर्ड के नीचे \'अतिथि निमंत्रण लिखें\' से कोई भी निमंत्रण पोस्ट कर सकता है, और दुनिया में कोई भी उसे टैप करके जुड़ सकता है।\n• अतिथि निमंत्रण की कॉल अधिकतम 3 मिनट की होती है। खत्म होने से 30 सेकंड पहले हम बताएँगे।\n• एक फ़ोन से एक निमंत्रण। कॉल के बाद यह हट जाता है और आप फिर से पोस्ट कर सकते हैं।\n• अभिवादन और छोटे परिचय से शुरू करें, और सामने वाले को बात पूरी करने दें। अनुवादक एक समय में एक व्यक्ति की बात पहुँचाता है।\n• गाली, यौन बातें, या संपर्क/सोशल मीडिया जानकारी माँगना मना है। कोई असहज करे तो कॉल के दौरान झंडा बटन से रिपोर्ट करें। कॉल तुरंत खत्म होगी और आप दोबारा नहीं जुड़ेंगे।\n• बातचीत को स्टडी रूम में सहेजकर अभ्यास करने के लिए कॉल के बाद सदस्य बनें।',
     ),
     'ru': DuoBoardIntroNoticeCopy(
       title: 'О доске переводчика Duo',
@@ -108,6 +130,8 @@ class DuoBoardIntroNoticeCopy {
           'Публичные приглашения Duo предназначены для языковой практики. Придерживайтесь заявленной темы и избегайте ругательств и других выражений, которые могут вызвать у собеседника дискомфорт.',
       cancel: 'Отмена',
       openBoard: 'Открыть доску',
+      promoTitle: '📣 Во время акции открыто для гостей',
+      promoBody: 'Сейчас даже люди без аккаунта могут разговаривать друг с другом. Любой может опубликовать приглашение кнопкой «Написать гостевое приглашение» внизу доски, а любой человек в мире может нажать на него и присоединиться.\n• Разговоры по гостевым приглашениям длятся до 3 минут. За 30 секунд до конца мы предупредим.\n• С одного телефона — одно приглашение. После звонка оно исчезает, и можно опубликовать снова.\n• Начните с приветствия и короткого рассказа о себе и дайте собеседнику договорить. Переводчик передаёт речь по одному человеку.\n• Запрещены ругательства, сексуальные темы и просьбы о контактах или соцсетях. Если собеседник неприятен, нажмите флажок во время звонка, чтобы пожаловаться. Звонок завершится, и вас больше не соединят.\n• Чтобы сохранить разговор в Учебной комнате и практиковаться, зарегистрируйтесь после звонка.',
     ),
     'pt': DuoBoardIntroNoticeCopy(
       title: 'Sobre o mural de intérprete Duo',
@@ -118,6 +142,8 @@ class DuoBoardIntroNoticeCopy {
           'Os convites públicos do Duo são destinados à prática de idiomas. Mantenha a conversa no tema publicado e evite palavrões ou outras falas que possam deixar a outra pessoa desconfortável.',
       cancel: 'Cancelar',
       openBoard: 'Ver mural',
+      promoTitle: '📣 Aberto a convidados durante a promoção',
+      promoBody: 'Agora até pessoas sem conta podem conversar entre si. Qualquer um pode publicar um convite com «Escrever convite de convidado» no fim do quadro, e qualquer pessoa no mundo pode tocar para participar.\n• Chamadas de convites de convidados duram até 3 minutos. Avisamos 30 segundos antes do fim.\n• Cada telefone pode publicar um convite. Ele some depois da chamada e você pode publicar de novo.\n• Comece com um cumprimento e uma breve apresentação, e deixe a outra pessoa terminar de falar. O intérprete transmite uma pessoa por vez.\n• Proibidos palavrões, conteúdo sexual e pedir contatos ou redes sociais. Se alguém te incomodar, toque na bandeira durante a chamada para denunciar. A chamada termina e vocês não serão conectados de novo.\n• Para salvar a conversa na sua Sala de Estudo e praticar, cadastre-se depois da chamada.',
     ),
     'it': DuoBoardIntroNoticeCopy(
       title: 'Informazioni sulla bacheca interprete Duo',
@@ -128,6 +154,8 @@ class DuoBoardIntroNoticeCopy {
           'Gli inviti Duo pubblici sono destinati alla pratica linguistica. Rimani sul tema pubblicato ed evita parolacce o altre espressioni che potrebbero mettere a disagio l’altra persona.',
       cancel: 'Annulla',
       openBoard: 'Vedi bacheca',
+      promoTitle: '📣 Aperto agli ospiti durante la promozione',
+      promoBody: 'In questo periodo anche chi non ha un account può parlare con gli altri. Chiunque può pubblicare un invito con «Scrivi un invito da ospite» in fondo alla bacheca, e chiunque nel mondo può toccarlo per partecipare.\n• Le chiamate sugli inviti degli ospiti durano al massimo 3 minuti. Ti avvisiamo 30 secondi prima della fine.\n• Ogni telefono può pubblicare un invito. Sparisce dopo la chiamata e puoi pubblicarne un altro.\n• Inizia con un saluto e una breve presentazione, e lascia finire di parlare l\'altra persona. L\'interprete trasmette una persona alla volta.\n• Vietati insulti, contenuti sessuali e richieste di contatti o social. Se qualcuno ti mette a disagio, tocca la bandiera durante la chiamata per segnalarlo. La chiamata termina e non sarete più abbinati.\n• Per salvare la conversazione nella tua Aula studio ed esercitarti, registrati dopo la chiamata.',
     ),
     'nl': DuoBoardIntroNoticeCopy(
       title: 'Over het Duo-tolkenbord',
@@ -138,6 +166,8 @@ class DuoBoardIntroNoticeCopy {
           'Openbare Duo-uitnodigingen zijn bedoeld voor taalgesprekken. Blijf bij het geplaatste onderwerp en vermijd scheldwoorden of andere taal die de ander een ongemakkelijk gevoel kan geven.',
       cancel: 'Annuleren',
       openBoard: 'Bord bekijken',
+      promoTitle: '📣 Tijdens de actie open voor gasten',
+      promoBody: 'Nu kunnen zelfs mensen zonder account met elkaar praten. Iedereen kan onderaan het bord met \'Gastuitnodiging schrijven\' een uitnodiging plaatsen, en iedereen ter wereld kan erop tikken om mee te doen.\n• Gesprekken via gastuitnodigingen duren maximaal 3 minuten. 30 seconden voor het einde laten we het weten.\n• Eén uitnodiging per telefoon. Die verdwijnt na het gesprek en je kunt opnieuw plaatsen.\n• Begin met een groet en een korte introductie, en laat de ander uitpraten. De tolk geeft één persoon tegelijk door.\n• Geen gescheld, seksuele praat of vragen naar contactgegevens of sociale media. Voelt iemand onprettig, tik dan tijdens het gesprek op de vlag om te melden. Het gesprek stopt en jullie worden niet meer verbonden.\n• Wil je het gesprek in je Studieruimte bewaren en ermee oefenen, meld je dan na het gesprek aan.',
     ),
   };
 }
@@ -450,7 +480,7 @@ class IntroWelcomePageCopy {
   static const Map<String, Map<String, String>> _copies = {
     'en': {
       'tagline': 'Speak freely, Pick it up naturally',
-      'headlineBefore': "Don't look for the right answer,\nfind your own words.",
+      'headlineBefore': "In language,\nDon't look for the right answer,\nfind your own words.",
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo Invite',
@@ -463,7 +493,7 @@ class IntroWelcomePageCopy {
     },
     'ko': {
       'tagline': '자유롭게 말하고, 자연스럽게 익히세요',
-      'headlineBefore': '정답을 찾지 말고,\n내 말을 찾아보세요.',
+      'headlineBefore': '언어엔\n정답을 찾지 말고,\n내 말을 찾아보세요.',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo 초대',
@@ -476,7 +506,7 @@ class IntroWelcomePageCopy {
     },
     'ja': {
       'tagline': '自由に話して、自然に身につけよう',
-      'headlineBefore': '正解を探さずに、\n自分の言葉を見つけてください。',
+      'headlineBefore': '言葉には\n正解を探さずに、\n自分の言葉を見つけてください。',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo 招待',
@@ -489,7 +519,7 @@ class IntroWelcomePageCopy {
     },
     'zh': {
       'tagline': '自在开口，自然习得',
-      'headlineBefore': '不要寻找正确答案，\n去找到你自己的话。',
+      'headlineBefore': '语言里，\n不要寻找正确答案，\n去找到你自己的话。',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo 邀请',
@@ -502,7 +532,7 @@ class IntroWelcomePageCopy {
     },
     'es': {
       'tagline': 'Habla con libertad, aprende de forma natural',
-      'headlineBefore': 'No busques la respuesta correcta,\nencuentra tus propias palabras.',
+      'headlineBefore': 'En el idioma,\nNo busques la respuesta correcta,\nencuentra tus propias palabras.',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Invitación Duo',
@@ -515,7 +545,7 @@ class IntroWelcomePageCopy {
     },
     'fr': {
       'tagline': 'Parlez librement, apprenez naturellement',
-      'headlineBefore': 'Ne cherchez pas la bonne réponse,\ntrouvez vos propres mots.',
+      'headlineBefore': 'En langue,\nNe cherchez pas la bonne réponse,\ntrouvez vos propres mots.',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Invitation Duo',
@@ -528,7 +558,7 @@ class IntroWelcomePageCopy {
     },
     'de': {
       'tagline': 'Sprich frei, lerne ganz natürlich',
-      'headlineBefore': 'Such nicht die richtige Antwort,\nfinde deine eigenen Worte.',
+      'headlineBefore': 'In der Sprache\nSuch nicht die richtige Antwort,\nfinde deine eigenen Worte.',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo-Einladung',
@@ -541,7 +571,7 @@ class IntroWelcomePageCopy {
     },
     'hi': {
       'tagline': 'बेझिझक बोलें, स्वाभाविक रूप से सीखें',
-      'headlineBefore': 'सही जवाब मत खोजिए,\nअपनी बात खोजिए।',
+      'headlineBefore': 'भाषा में\nसही जवाब मत खोजिए,\nअपनी बात खोजिए।',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo आमंत्रण',
@@ -554,7 +584,7 @@ class IntroWelcomePageCopy {
     },
     'ru': {
       'tagline': 'Говорите свободно, учитесь естественно',
-      'headlineBefore': 'Не ищите правильный ответ,\nнайдите свои слова.',
+      'headlineBefore': 'В языке\nНе ищите правильный ответ,\nнайдите свои слова.',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Приглашение Duo',
@@ -567,7 +597,7 @@ class IntroWelcomePageCopy {
     },
     'pt': {
       'tagline': 'Fale livremente, aprenda naturalmente',
-      'headlineBefore': 'Não procure a resposta certa,\nencontre as suas palavras.',
+      'headlineBefore': 'No idioma,\nNão procure a resposta certa,\nencontre as suas palavras.',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Convite Duo',
@@ -580,7 +610,7 @@ class IntroWelcomePageCopy {
     },
     'it': {
       'tagline': 'Parla liberamente, impara in modo naturale',
-      'headlineBefore': 'Non cercare la risposta giusta,\ntrova le tue parole.',
+      'headlineBefore': 'Nella lingua,\nNon cercare la risposta giusta,\ntrova le tue parole.',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Invito Duo',
@@ -593,7 +623,7 @@ class IntroWelcomePageCopy {
     },
     'nl': {
       'tagline': 'Spreek vrijuit, leer vanzelf',
-      'headlineBefore': 'Zoek niet het juiste antwoord,\nvind je eigen woorden.',
+      'headlineBefore': 'In taal\nZoek niet het juiste antwoord,\nvind je eigen woorden.',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo-uitnodiging',

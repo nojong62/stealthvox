@@ -102,3 +102,12 @@ test("study trial grants AI access only inside its window", async () => {
   });
   assert.equal(over.allowed, false);
 });
+
+test("a guest host may use AI only in their own promo room", () => {
+  const {activePromoHostAccess} = require("../ai_access");
+  const room = {isDuoEnabled: true, promoGuestRoom: true, hostUid: "anonHost"};
+  assert.equal(activePromoHostAccess(room, "anonHost"), true);
+  assert.equal(activePromoHostAccess(room, "someoneElse"), false);
+  assert.equal(activePromoHostAccess({...room, promoGuestRoom: false}, "anonHost"), false);
+  assert.equal(activePromoHostAccess({...room, isDuoEnabled: false}, "anonHost"), false);
+});

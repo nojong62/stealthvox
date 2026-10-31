@@ -16,10 +16,12 @@ import 'dart:math' as math;
 import 'auth_progress_view.dart';
 import 'duo_board_sheet.dart';
 import '/custom_code/services/duo_board_host_presence.dart';
+import '/custom_code/services/duo_board_service.dart';
 import '/auth/social_auth_service.dart';
 import '/auth/account_discovery_service.dart';
 // 익명으로 초대받아 대화한 뒤 기존 계정으로 돌아온 사람의 Duo 기록 복구.
 import '/custom_code/services/duo_guest_handoff.dart';
+import '/custom_code/services/duo_history_handoff_ticket.dart';
 import '/custom_code/services/duo_board_push_service.dart';
 import '/custom_code/services/duo_board_intro_notice.dart';
 import '/custom_code/services/intro_faq_copy.dart';
@@ -152,9 +154,21 @@ class _IntroMasterState extends State<IntroMaster>
 
   bool get _requiresAuthOnlyIntro => FFAppState().isGuestSession;
 
+  /// 홍보 기간이면 오른쪽 위 광고 배지가 Duo Snapshot 대신 비회원 초대
+  /// 오픈을 알린다. 못 읽으면 예전 배지 그대로다.
+  bool _guestPromoOpen = false;
+
+  Future<void> _loadGuestPromo() async {
+    final promo = await DuoBoardService.fetchPromo();
+    if (mounted && promo.guestPostsEnabled != _guestPromoOpen) {
+      setState(() => _guestPromoOpen = promo.guestPostsEnabled);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    unawaited(_loadGuestPromo());
     _termsTapRecognizer = TapGestureRecognizer()
       ..onTap = () => _openLegalDocument(isTerms: true);
     _privacyTapRecognizer = TapGestureRecognizer()
@@ -285,6 +299,12 @@ class _IntroMasterState extends State<IntroMaster>
       return;
     }
     // 4순위: 비회원은 Intro에서 로그인 가능 상태로 대기
+    // 방금 비회원 초대글을 올린 사람은 게시판 첫 화면으로 바로 돌려보낸다.
+    if (DuoGuestHostLaunch.consumeBoardReturn()) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_showBoardAndJoin());
+      });
+    }
   }
 
   /// pending Duo 초대가 있으면 StealthRoom, 없으면 Lobby로 라우팅.
@@ -500,6 +520,59 @@ class _IntroMasterState extends State<IntroMaster>
         ),
       ],
     );
+  }
+
+  /// 홍보 기간 안내(비회원끼리 3분 통화·예절·신고). 창 어디를 눌러도
+  /// 게시판으로 간다. Duo 게시판 안내 창에 있던 내용을 이리 옮겼다.
+  Future<void> _showGuestPromoNotice() async {
+    final notice = DuoBoardIntroNoticeCopy.forSystemLocale();
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Navigator.pop(dialogContext, true),
+        child: AlertDialog(
+          backgroundColor: const Color(0xFF1E1E22),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(
+              color: const Color(0xFFFBBF24).withValues(alpha: 0.6),
+            ),
+          ),
+          title: Text(
+            notice.promoTitle,
+            style: const TextStyle(
+              color: Color(0xFFFDE68A),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          content: SingleChildScrollView(
+            child: Text(
+              notice.promoBody,
+              style: const TextStyle(
+                color: Color(0xFFF3F4F6),
+                height: 1.55,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(notice.cancel),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFB7791F),
+              ),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(notice.openBoard),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (open != true || !mounted) return;
+    await _showBoardAndJoin();
   }
 
   void _showDuoPromo() {
@@ -1369,12 +1442,18 @@ class _IntroMasterState extends State<IntroMaster>
             ),
           ),
           content: SingleChildScrollView(
-            child: Text(
-              notice.body,
-              style: const TextStyle(
-                color: Color(0xFFCFD2DA),
-                height: 1.55,
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  notice.body,
+                  style: const TextStyle(
+                    color: Color(0xFFCFD2DA),
+                    height: 1.55,
+                  ),
+                ),
+              ],
             ),
           ),
           actions: [
@@ -1391,11 +1470,27 @@ class _IntroMasterState extends State<IntroMaster>
       ),
     );
     if (continueToBoard != true || !mounted) return;
+    await _showBoardAndJoin();
+  }
+
+  /// 게시판 시트를 열고, 고른 결과(참여·비회원 초대)로 이동한다.
+  Future<void> _showBoardAndJoin() async {
     final claim = await showDuoBoardSheet(
       context,
       showInactivePosts: true,
     );
     if (!mounted || claim == null) return;
+    if (claim.startGuestHost) {
+      // 비회원 초대: 게스트가 아니라 방을 여는 호스트로 들어간다. Duo 방이
+      // 열리면 곧바로 주제 입력 창이 뜬다(`DuoGuestHostLaunch`).
+      DuoGuestHostLaunch.request();
+      FFAppState().isGuestSession = false;
+      FFAppState().duoRoomId = '';
+      FFAppState().pendingInviteType = '';
+      FFAppState().update(() {});
+      context.pushReplacementNamed('StealthRoom');
+      return;
+    }
     await DuoBoardHostPresence.instance.prepareForIncomingInvite(claim.roomId);
     if (!mounted) return;
     FFAppState().isGuestSession = true;
@@ -1750,13 +1845,14 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Widget _buildDuoSnapshotBadge() {
+    final promo = _guestPromoOpen;
     return Semantics(
       button: true,
-      label: 'Open Duo Snapshot preview',
+      label: promo ? 'Open free Duo invite notice' : 'Open Duo Snapshot preview',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: _showDuoPromo,
+          onTap: promo ? _showGuestPromoNotice : _showDuoPromo,
           borderRadius: BorderRadius.circular(12),
           child: SizedBox(
             // 시각 배지는 126×27 그대로 두고 터치 영역만 넓힌다.
@@ -1764,7 +1860,8 @@ class _IntroMasterState extends State<IntroMaster>
             height: 59,
             child: Center(
               child: Ink(
-                width: 126,
+                // 홍보 문구가 세 글자 길다. 가운데를 그대로 두고 양쪽으로 넓힌다.
+                width: promo ? 142 : 126,
                 height: 27,
                 decoration: BoxDecoration(
                   color: const Color(0xFF7661EA),
@@ -1772,7 +1869,7 @@ class _IntroMasterState extends State<IntroMaster>
                 ),
                 child: Center(
                   child: Text(
-                    'AD · Duo Snapshot',
+                    promo ? 'AD · Free Duo Invite' : 'AD · Duo Snapshot',
                     maxLines: 1,
                     textScaler: _cappedScaler(context, 1.0),
                     style: const TextStyle(
@@ -1964,7 +2061,8 @@ class _IntroMasterState extends State<IntroMaster>
                         ),
                       ),
                       // 제목 밑은 넉넉히 비운다(실장님, 2026-10-25).
-                      SizedBox(height: veryCompact ? 40 : 64),
+                      // 제목이 세 줄이 된 뒤 더 늘림 — 어차피 아래는 스크롤(10-31).
+                      SizedBox(height: veryCompact ? 56 : 92),
                       const Spacer(flex: 5),
                       if (!_showEnglishTesterGoogleEntry) ...[
                         _buildWelcomeStudyTrialAction(),
@@ -3221,6 +3319,9 @@ class _IntroMasterState extends State<IntroMaster>
     //   ⚠️ 표(`duoGuestClaim`)는 위에서 지우는 값에 들어 있지 않다. 그것을
     //   같이 지우면 복구할 근거가 사라진다.
     unawaited(restoreDuoHistoryAfterLogin(uid: user.uid));
+    // 🎫 통역 통화는 공유 결과가 없어 위 길을 못 탄다. 익명 때 받아 둔 표로
+    //   서버가 기록을 이 계정으로 옮긴다(가입으로 uid가 이어졌으면 표만 버린다).
+    unawaited(redeemDuoInterpHandoffTickets());
 
     if (!mounted) return;
     if (forceLobby) {

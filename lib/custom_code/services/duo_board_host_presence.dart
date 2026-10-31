@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
@@ -57,11 +58,13 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
   }
 
   Future<void> _handleUser(User? user) async {
-    if (user == null || user.isAnonymous || _uid != user.uid) {
+    // 비회원 초대자(익명)도 접속 표시를 유지한다. 같은 uid가 다시 오면
+    // 아무것도 지우지 않는다 — 앱이 앞으로 돌아올 때마다 오는 신호다.
+    if (user == null || _uid != user.uid) {
       ++_authGeneration;
       _restoreRetry?.cancel();
       _restoreRetry = null;
-      _uid = user == null || user.isAnonymous ? null : user.uid;
+      _uid = user?.uid;
       _ownsActivePost = false;
       _restoredThisSession = false;
       _restoreChoice = null;
@@ -76,6 +79,10 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
     }
     debugPrint('[DuoBoard] restore lifecycle: ' +
         WidgetsBinding.instance.lifecycleState.toString());
+    if (user != null && user.isAnonymous) {
+      await _resumeGuestHostPresence(user);
+      return;
+    }
     if (user == null ||
         user.isAnonymous ||
         _restoredThisSession ||
@@ -93,8 +100,25 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
         !_incomingInviteTakesPriority;
     _checkingUid = user.uid;
     try {
-      final posts = await DuoBoardService.findOwnActivePosts()
+      final allPosts = await DuoBoardService.findOwnActivePosts()
           .timeout(const Duration(seconds: 5));
+      if (!stillCurrent()) return;
+      // 비회원 때 올린 글(3분·서버 부담)은 회원이 된 순간 내린다. 그대로 두면
+      // 회원인데 과금되면서 3분에 끊기는 통화가 된다. 회원 글은 Duo 방에서
+      // 새로 올린다.
+      final posts = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+      for (final post in allPosts) {
+        if (post.data()['ownerIsMember'] == false) {
+          try {
+            await DuoBoardService.withdrawPost(post.id);
+            debugPrint('[DuoBoard] guest post withdrawn after sign-in: ${post.id}');
+          } catch (error) {
+            debugPrint('[DuoBoard] guest post withdraw failed: $error');
+          }
+        } else {
+          posts.add(post);
+        }
+      }
       if (!stillCurrent()) return;
       _ownsActivePost = false;
       debugPrint(
@@ -190,6 +214,38 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
       }
     } finally {
       if (generation == _authGeneration) _checkingUid = null;
+    }
+  }
+
+  /// 비회원 초대자(홍보 기간)에게는 로그인 순간이 없어 "유지할까요?"를 묻지
+  /// 않는다. 앱이 앞에 있고 살아 있는 내 글이 있으면 접속 표시만 다시 켠다.
+  /// 공개 여부는 서버 동기화(`syncDuoBoardHostPresence`)가 ownerPaused를 보고
+  /// 정하므로, 직접 꺼 둔 글은 이 경로로 다시 켜지지 않는다.
+  ///
+  /// 예전에는 이 길이 없어서, 앱을 다시 켠 비회원의 글이 앱을 열어 둬도
+  /// 계속 비활성으로 남았다(실기기 2026-10-30).
+  Future<void> _resumeGuestHostPresence(User user) async {
+    if (_ownsActivePost ||
+        _checkingUid == user.uid ||
+        _incomingInviteTakesPriority ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    _checkingUid = user.uid;
+    try {
+      final posts = await DuoBoardService.findOwnActivePosts()
+          .timeout(const Duration(seconds: 5));
+      if (posts.isEmpty ||
+          FirebaseAuth.instance.currentUser?.uid != user.uid ||
+          _incomingInviteTakesPriority) {
+        return;
+      }
+      await ensureOnline();
+      debugPrint('[DuoBoard] guest host presence resumed: ' + posts.first.id);
+    } catch (error) {
+      debugPrint('[DuoBoard] guest host presence resume failed: $error');
+    } finally {
+      if (_checkingUid == user.uid) _checkingUid = null;
     }
   }
 
@@ -313,7 +369,7 @@ class DuoBoardHostPresence with WidgetsBindingObserver {
 
   Future<void> ensureOnline() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || user.isAnonymous) return;
+    if (user == null) return;
     _uid = user.uid;
     _ownsActivePost = true;
     if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {

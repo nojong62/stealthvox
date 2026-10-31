@@ -145,7 +145,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       });
     }
 
-    if ((widget.hostRoomId ?? '').isNotEmpty) {
+    // 비회원 초대(Intro 게시판): 메뉴를 거치지 않고 Duo 호스트로 바로 연다.
+    // 표는 Duo 방이 읽고 지운다.
+    if ((widget.hostRoomId ?? '').isNotEmpty || DuoGuestHostLaunch.pending) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() => _currentMode = 1);
       });
