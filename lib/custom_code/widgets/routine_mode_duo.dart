@@ -92,10 +92,15 @@ import '/custom_code/services/duo_guest_handoff.dart';
 import 'duo_guest_study_page.dart';
 import 'duo_board_sheet.dart';
 import '/custom_code/services/duo_board_host_presence.dart';
+import '/custom_code/services/duo_board_service.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '/custom_code/services/duo_history_handoff_ticket.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/duo_canonical.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/duo_invite_localization.dart';
+import '/custom_code/services/duo_buddy_localization.dart';
+import '/custom_code/services/study_access.dart' show DuoPartnerPays;
 import '/custom_code/services/system_ui_language.dart';
 
 // ============================================================================
@@ -1225,9 +1230,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   String _duoState = 'idle';
   // 🆕 [과금정책] 게스트 입장 후에만 과금 시작 (호스트 대기 중 정지)
   bool _billingStarted = false;
+
+  /// 🤝 [DUO BUDDY] 서버가 Duo 버디 방에 박는 값. 버디(호스트) 시간은 쓰지 않고,
+  ///   회원 게스트가 낸다(`billPartner`). 비회원 게스트면 홍보 3분(서버 부담)이다.
+  bool _talkHostRoom = false;
+  bool _partnerPaysCall = false;
+  String? _talkHostRepostRoomId;
+
   void _startDuoBilling() {
-    // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금
-    if (!_amIHost) return;
+    // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금.
+    //   예외 하나: Duo 버디 방의 회원 게스트는 자기가 낸다.
+    if (!_amIHost && !_partnerPaysCall) return;
+    if (_amIHost && _talkHostRoom) return;
+    // 📣 [PROMO] 비회원 호스트의 통화는 홍보 비용(서버 부담)이다. 차감할
+    //   잔액도 없다. 대신 방 문서의 3분 상한이 통화를 끊는다.
+    if (FirebaseAuth.instance.currentUser?.isAnonymous == true) return;
     BillingTicker.instance.setSessionIdentifiers(
       sessionDocId: _myHistoryRef?.id,
       roomId: _duoSessionRef?.id ?? widget.roomId,
@@ -1247,10 +1264,230 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   }
 
   void _stopDuoBilling() {
-    if (!_amIHost) return;
+    if (!_amIHost && !_partnerPaysCall) return;
     _billingStarted = false;
     clearBillingIdle();
     BillingTicker.instance.pause();
+  }
+
+  // ── 📣 [PROMO] 비회원 초대 통화 상한 ──────────────────────────────
+  // 비회원이 연 방에는 서버가 `callLimitSeconds`(기본 180)를 박아 둔다.
+  // 두 폰이 각자 상대가 붙은 순간부터 센다. 30초 전에 한 번 알리고, 끝나면
+  // 저장·정리를 먼저 마친 뒤 안내 카드를 띄운다 — 카드가 떠 있는 동안
+  // 상대 퇴장 신호가 화면을 옮기지 못하게 하려는 순서다.
+  int _promoCallLimitSeconds = 0;
+  DateTime? _promoCallStartedAt;
+  Timer? _promoCallTicker;
+  /// 상대가 붙기 전에는 기본 3분을 보인다. 붙으면 방 문서 값으로 센다.
+  final ValueNotifier<int> _promoRemaining = ValueNotifier<int>(180);
+  bool _promoWarned = false;
+  bool _promoLimitReached = false;
+  bool _promoEndCardShown = false;
+
+  bool get _isPromoCall => _promoCallLimitSeconds > 0;
+
+  /// 비회원이 연 방의 호스트. 잔액이 없으니 보유시간 대신 3분 배지를 보인다.
+  bool get _isGuestHost =>
+      _amIHost && FirebaseAuth.instance.currentUser?.isAnonymous == true;
+
+  void _armPromoCallLimit(Object? rawSeconds) {
+    if (_promoCallStartedAt != null) return;
+    final seconds = rawSeconds is num ? rawSeconds.toInt() : 0;
+    if (seconds <= 0) return;
+    _promoCallLimitSeconds = seconds;
+    _promoCallStartedAt = DateTime.now();
+    _promoRemaining.value = seconds;
+    _lgDuo('[PROMO]', 'call_limit_armed seconds=$seconds role=$_myRole');
+    _promoCallTicker?.cancel();
+    _promoCallTicker = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _tickPromoCall(),
+    );
+    if (mounted) setState(() {});
+  }
+
+  void _tickPromoCall() {
+    final startedAt = _promoCallStartedAt;
+    if (startedAt == null || _isExiting || !mounted) {
+      _promoCallTicker?.cancel();
+      return;
+    }
+    final left = _promoCallLimitSeconds -
+        DateTime.now().difference(startedAt).inSeconds;
+    _promoRemaining.value = left < 0 ? 0 : left;
+    if (!_promoWarned && left > 0 && left <= 30) {
+      _promoWarned = true;
+      final copy = DuoInviteCopy.forSystemLocale();
+      _showDuoSnack(
+        icon: Icons.timer_outlined,
+        accent: const Color(0xFFFBBF24),
+        title: copy['promoThirtyTitle'],
+        detail: copy['promoThirtyDetail'],
+      );
+    }
+    if (left <= 0) {
+      _promoCallTicker?.cancel();
+      _promoLimitReached = true;
+      _lgDuo('[PROMO]', 'call_limit_reached role=$_myRole');
+      unawaited(_handleAutoSaveAndExit('promo_time_limit'));
+    }
+  }
+
+  /// 상대가 먼저 상한에 닿아 나간 경우도 같은 끝으로 본다(두 폰의 시계가
+  /// 몇 초 어긋난다).
+  bool get _promoCallEndedByLimit {
+    if (!_isPromoCall) return false;
+    if (_promoLimitReached) return true;
+    final startedAt = _promoCallStartedAt;
+    if (startedAt == null) return false;
+    return DateTime.now().difference(startedAt).inSeconds >=
+        _promoCallLimitSeconds - 10;
+  }
+
+  /// 홍보 통화가 끝났을 때의 안내 카드. 비회원에게는 가입 아이콘을 보여 주고
+  /// 'signup' / 'trial'(공부방 5분 체험, 남은 대화가 있을 때만) / 'later'를
+  /// 돌려준다. 회원에게는 확인 하나뿐이다.
+  Future<String?> _showPromoEndCard({
+    required bool fullTime,
+    required bool offerStudyTrial,
+  }) {
+    final copy = DuoInviteCopy.forSystemLocale();
+    final anonymous = FirebaseAuth.instance.currentUser?.isAnonymous ?? true;
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        // 로고 그림 파일은 프로젝트에 없다(Intro도 대체 아이콘을 쓴다).
+        // 아이콘으로 그린다.
+        Widget logo(Widget icon, Color background) => InkWell(
+              borderRadius: BorderRadius.circular(28),
+              onTap: () => Navigator.pop(dialogContext, 'signup'),
+              child: Container(
+                width: 52,
+                height: 52,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: background,
+                  borderRadius: BorderRadius.circular(26),
+                ),
+                child: icon,
+              ),
+            );
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1C2430),
+          title: Text(
+            fullTime ? copy['promoEndTitle'] : copy['promoEndTitleEarly'],
+            style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.w800),
+          ),
+          // 글자를 크게 쓰는 폰에서 넘쳐 잘렸다(10-30 S25). 스크롤로 감싼다.
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  anonymous
+                      ? copy['promoEndGuestBody']
+                      : copy['promoEndMemberBody'],
+                  style: const TextStyle(color: Color(0xFFCFD2DA), height: 1.5),
+                ),
+                if (anonymous) ...[
+                  const SizedBox(height: 18),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      logo(
+                        const FaIcon(FontAwesomeIcons.google,
+                            color: Color(0xFF4285F4), size: 24),
+                        Colors.white,
+                      ),
+                      const SizedBox(width: 18),
+                      logo(
+                        const Icon(Icons.chat_bubble,
+                            color: Color(0xFF191919), size: 22),
+                        const Color(0xFFFEE500),
+                      ),
+                    ],
+                  ),
+                  if (offerStudyTrial) ...[
+                    const SizedBox(height: 14),
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.pop(dialogContext, 'trial'),
+                      icon: const Icon(Icons.menu_book_rounded, size: 18),
+                      label: Text(copy['promoTryStudy']),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF93C5FD),
+                        side: const BorderSide(color: Color(0xFF3B4A63)),
+                      ),
+                    ),
+                  ],
+                ],
+              ],
+            ),
+          ),
+          actions: anonymous
+              ? [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext, 'later'),
+                    child: Text(copy['later']),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dialogContext, 'signup'),
+                    child: Text(copy['promoSignUp']),
+                  ),
+                ]
+              : [
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dialogContext, 'ok'),
+                    child: Text(copy['promoOk']),
+                  ),
+                ],
+        );
+      },
+    );
+  }
+
+  /// 🚩 통화 상대 신고. 한 번으로는 상대에게 불이익이 없다 — 나와 그 사람이
+  /// 다시 연결되지 않을 뿐이다. 누적 판단은 서버(`reportDuoPartner`)가 한다.
+  Future<void> _reportPartner() async {
+    final roomId = _duoSessionRef?.id;
+    if (roomId == null || _isExiting) return;
+    final copy = DuoInviteCopy.forSystemLocale();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF1C2430),
+        title: Text(copy['reportTitle'],
+            style: const TextStyle(color: Colors.white)),
+        content: Text(copy['reportBody'],
+            style: const TextStyle(color: Color(0xFFCFD2DA), height: 1.5)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(copy['reportCancel']),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626)),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(copy['reportConfirm']),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || _isExiting) return;
+    var reported = false;
+    try {
+      await DuoBoardService.reportPartner(roomId);
+      reported = true;
+      _lgDuo('[REPORT]', 'sent role=$_myRole');
+    } catch (error) {
+      _lgDuo('[REPORT]', 'failed=${error.runtimeType}');
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+        content: Text(reported ? copy['reportDone'] : copy['reportFailed'])));
+    await _handleAutoSaveAndExit('reported_partner');
   }
 
   // ── 💰 [BILLING-IDLE] Duo의 "대화 중" 판정 ────────────────────────
@@ -1819,7 +2056,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if ((widget.hostRoomId ?? '').isNotEmpty) {
+        DuoGuestHostLaunch.consume();
         unawaited(_restoreBoardHostRoom());
+        return;
+      }
+      if (_amIHost && DuoGuestHostLaunch.consume()) {
+        unawaited(_startGuestHostInvite());
         return;
       }
       final String? pendingRoomId = _resolveGuestRoomId();
@@ -1845,7 +2087,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   Future<void> _restoreBoardHostRoom() async {
     final user = FirebaseAuth.instance.currentUser;
     final roomId = widget.hostRoomId?.trim() ?? '';
-    if (user == null || user.isAnonymous || roomId.isEmpty) return;
+    // 비회원 초대자(홍보 기간)도 자기 방으로 돌아온다. 방 주인 확인은 아래에서 한다.
+    if (user == null || roomId.isEmpty) return;
     try {
       final roomRef =
           FirebaseFirestore.instance.collection('duo_sessions').doc(roomId);
@@ -1916,7 +2159,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   이미 마무리했으면 [_finalizeDuoSession]이 첫 줄에서 돌아간다.
     //   화면은 이미 없으므로 기다리지 않는다.
     unawaited(_finalizeDuoSession('dispose'));
+    _releasePartnerPays();
     WidgetsBinding.instance.removeObserver(this);
+    _promoCallTicker?.cancel();
+    _promoRemaining.dispose();
     _guestBackgroundExitTimer?.cancel();
     _guestBackgroundExitTimer = null;
     _partnerJoinedSubscription?.cancel();
@@ -2017,7 +2263,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           .getString(kDuoInterpTransportRemoteConfigKey)
           .trim()
           .toLowerCase();
-      final String? accessRoomId = _resolveGuestRoomId();
+      // 게스트는 초대받은 방, 비회원 초대자(홍보)는 자기가 연 방으로 자격을
+      // 받는다. 서버는 그 방의 promoGuestRoom·hostUid로 초대자를 확인한다.
+      final String? accessRoomId = _resolveGuestRoomId() ??
+          ((widget.hostRoomId ?? '').trim().isEmpty
+              ? null
+              : widget.hostRoomId!.trim());
       final String gatewayToken = await SecureAiGateway.gatewayToken(
         duoRoomId: accessRoomId,
       );
@@ -3428,6 +3679,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       final socket = OpenAiStreamingTranscribeSession(
         apiKey: _openAiKey,
         vadSilenceDurationMs: kDuoVadSilenceDurationMs,
+        // 비회원은 이 방으로 전사 토큰 자격을 받는다(게스트·홍보 초대자).
+        duoRoomId: _duoSessionRef?.id,
         // 🌐 [INTERP-ORIGIN] **첫 발화부터 로비 언어를 박는다.** Deepgram
         //   갈래와 같은 규칙이다(`_startInterpreterCapture`의
         //   `originLanguageCode`).
@@ -6368,9 +6621,34 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
   }
 
-  Future<void> _shareInviteCode() async {
+  /// 📣 [PROMO] 비회원이 Intro 게시판에서 "비회원으로 초대 올리기"를 눌러
+  /// 들어온 자리. 방식 선택·초대 방법 선택을 건너뛰고 만능 통역 방을 연 뒤
+  /// 곧장 주제 입력 창을 띄운다. 올리지 않고 닫으면 Intro로 돌아간다.
+  Future<void> _startGuestHostInvite() async {
+    // 비회원은 로비에서 언어를 고른 적이 없을 수 있다. 게스트와 같은 규칙으로
+    // 폰 언어를 대화 언어로 잡는다.
+    _normalizeGuestLangs();
+    final posted =
+        await _shareInviteCode(forcedMode: kDuoModeInterpreter, guestBoard: true);
+    if (!mounted) return;
+    if (posted) {
+      // 올린 뒤에는 방에서 기다리지 않는다. 방과 글은 그대로 두고(게시 중인
+      // 방은 정리에서 지우지 않는다) 게시판 첫 화면으로 돌아간다. 요청을
+      // 수락하면 `hostRoomId`로 이 방에 다시 들어온다.
+      _lgDuo('[PROMO]', 'guest_host_posted → board');
+      DuoGuestHostLaunch.requestBoardReturn();
+      await _handleAutoSaveAndExit('guest_host_posted');
+      return;
+    }
+    _lgDuo('[PROMO]', 'guest_host_post_cancelled');
+    await _handleAutoSaveAndExit('guest_host_cancelled');
+  }
+
+  /// 반환값: 비회원 게시판 경로에서 글이 올라갔는가. 다른 경로는 늘 false.
+  Future<bool> _shareInviteCode(
+      {String? forcedMode, bool guestBoard = false}) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null) return false;
     // 🆕 [모드 결정권] 대화 방식은 **초대를 만드는 호스트가 세션당 한 번** 정한다.
     //    고른 값은 세션 문서의 `mode` 필드로 들어가고, 그 문서가 모드의 유일한
     //    기준이 된다(딥링크 파라미터는 기준이 아니다).
@@ -6382,8 +6660,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final bool isNewSession = _duoSessionRef == null;
     String chosenMode = _duoMode;
     if (isNewSession) {
-      final String? picked = await _showHostModePicker();
-      if (picked == null) return; // 사용자가 취소
+      final String? picked = forcedMode ?? await _showHostModePicker();
+      if (picked == null) return false; // 사용자가 취소
       chosenMode = picked;
       if (mounted) setState(() => _duoMode = picked);
     }
@@ -6466,7 +6744,30 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       // 없으므로 복사·공유·Duo 게시판 등록을 먼저 앱 팝업에서 고른다.
       final t = modePickerTextForSystemUi();
       final inviteCopy = DuoInviteCopy.forSystemLocale();
-      if (!mounted) return;
+      if (!mounted) return false;
+      if (guestBoard) {
+        await _ensureHistoryRef();
+        if (_myHistoryRef == null) {
+          throw StateError('history unavailable');
+        }
+        if (!mounted) return false;
+        final posted = await showDuoBoardComposer(
+          context,
+          roomId: roomId,
+          historyPath: _myHistoryRef!.path,
+          mode: chosenMode,
+          directLanguage: _myNative(),
+        );
+        if (posted && mounted) {
+          _showDuoSnack(
+            icon: Icons.check_circle_rounded,
+            accent: const Color(0xFFFBBF24),
+            title: inviteCopy['guestPostedTitle'],
+            detail: inviteCopy['guestPostedDetail'],
+          );
+        }
+        return posted;
+      }
       final destination = await showModalBottomSheet<String>(
         context: context,
         backgroundColor: const Color(0xFF1C2430),
@@ -6503,14 +6804,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                       style: const TextStyle(
                           color: Colors.white, fontWeight: FontWeight.w700)),
                   subtitle: Text(inviteCopy['postToBoardDetail'],
-                      style: const TextStyle(color: Colors.white54)),
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 12)),
                   onTap: () => Navigator.pop(sheetContext, 'board'),
                 ),
             ]),
           ),
         ),
       );
-      if (!mounted || destination == null) return;
+      if (!mounted || destination == null) return false;
       if (destination == 'copy') {
         await Clipboard.setData(ClipboardData(text: inviteLink));
       } else if (destination == 'share') {
@@ -6527,7 +6829,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         if (_myHistoryRef == null) {
           throw StateError('history unavailable');
         }
-        if (!mounted) return;
+        if (!mounted) return false;
         await showDuoBoardSheet(
           context,
           composeDraft: DuoBoardComposeDraft(
@@ -6537,7 +6839,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             directLanguage: _myNative(),
           ),
         );
-        if (!mounted) return;
+        if (!mounted) return false;
       }
       if (mounted) {
         // 방식 선택 팝업과 같은 로비 Chat Lang 문구를 쓴다.
@@ -6562,6 +6864,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         );
       }
     }
+    return false;
   }
 
   /// Duo 안내 스낵바 한 벌.
@@ -6787,6 +7090,16 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //   게스트는 `_listenForPartnerJoined`를 걸지 않는다(호스트만 건다).
       //   입장에 성공한 이 시점이 곧 "상대(호스트)가 있다"는 확정이다.
       _maybeAutoStartDirectCall('guest_joined');
+      // 📣 [PROMO] 비회원이 연 방이면 여기서부터 3분을 센다.
+      _armPromoCallLimit(data['callLimitSeconds']);
+      // 🤝 [DUO BUDDY] 버디 방의 회원 게스트는 자기 시간으로 통화한다.
+      if (data['billPartner'] == true &&
+          FirebaseAuth.instance.currentUser?.isAnonymous == false) {
+        _partnerPaysCall = true;
+        DuoPartnerPays.active = true;
+        _lgDuo('[BUDDY]', 'partner_pays=true');
+        _startDuoBilling();
+      }
       // 🔵 [INTERP-LIVE] 만능 통역도 여기서 자동으로 붙는다. 예전에는 소켓만
       //   미리 열고 마이크는 버튼을 기다렸다.
       _maybeAutoStartInterpreter('guest_joined');
@@ -7166,7 +7479,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         });
         // 🆕 [과금정책] 게스트 입장 확정 시 과금 시작 / 퇴장 시 정지
         if (partnerJoined) {
+          _talkHostRoom = data['talkHostRoom'] == true;
           _startDuoBilling();
+          _armPromoCallLimit(data['callLimitSeconds']);
           if (!_activeCallNetworkProbed) {
             _activeCallNetworkProbed = true;
             unawaited(_probeDuoNetwork('partner_joined'));
@@ -7356,6 +7671,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           final String? hostUid = data?['hostUid']?.toString();
           final String? myUid = FirebaseAuth.instance.currentUser?.uid;
           if (hostUid != null && myUid != null && hostUid == myUid) {
+            // 🤝 [DUO BUDDY] 게시판으로 받은 버디 통화였다. 방을 지우기 전에
+            //   적어 두고, 나갈 때 같은 주제로 다시 올릴지 묻는다.
+            if (data?['talkHostRoom'] == true) {
+              _talkHostRepostRoomId = _duoSessionRef!.id;
+            }
             // 🧩 [CANONICAL] 직접 대화는 **문서를 지우지 않는다.**
             //   원본 발화(`messages`)와 공유 결과(`canonical/current`)가 이
             //   문서 아래 산다. 지우면 하위 컬렉션이 고아로 남아, 나중에 공부방
@@ -7419,17 +7739,212 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     );
   }
 
+  void _releasePartnerPays() {
+    if (!_partnerPaysCall) return;
+    _stopDuoBilling();
+    _partnerPaysCall = false;
+    DuoPartnerPays.active = false;
+    _lgDuo('[BUDDY]', 'partner_pays=false');
+  }
+
+  /// 🤝 [DUO BUDDY] 버디 통화가 끝났다. 같은 주제로 초대글을 다시 올릴지 묻고,
+  ///   푸시 받기 시간도 다시 고르게 한다. 올리면 새 방·새 기록을 만든다 — 방은
+  ///   통화 한 번짜리라 끝난 방을 다시 쓸 수 없다. 이 화면은 곧 닫히므로 위젯
+  ///   상태(`_duoSessionRef`·`_myHistoryRef`)는 건드리지 않는다.
+  Future<void> _offerTalkHostRepost(String endedRoomId) async {
+    Map<String, dynamic>? post;
+    try {
+      post = (await FirebaseFirestore.instance
+              .collection('duo_board_posts')
+              .doc(endedRoomId)
+              .get())
+          .data();
+    } catch (e) {
+      _lgDuo('[BUDDY]', 'repost_post_read_failed(${e.runtimeType})');
+    }
+    final topic = post?['topic']?.toString() ?? '';
+    final topicLanguage = post?['topicLanguage']?.toString() ?? '';
+    if (topic.isEmpty || topicLanguage.isEmpty || !mounted) return;
+    if (!(await DuoBoardService.fetchBuddyStatus()).active || !mounted) return;
+    final copy = DuoBuddyCopy.forSystemLocale();
+    final previous = (post?['pushHours'] as num?)?.toInt();
+    var hours = DuoBoardService.pushHourChoices.contains(previous)
+        ? previous!
+        : DuoBoardService.defaultPushHours;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (_, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF171A21),
+          title: Text(copy['repostTitle'],
+              style: const TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(copy.fill('repostBody', {'topic': topic}),
+                  style: const TextStyle(color: Colors.white70, height: 1.4)),
+              const SizedBox(height: 14),
+              DuoBoardPushHoursPicker(
+                value: hours,
+                onChanged: (next) => setDialogState(() => hours = next),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(copy['repostLater']),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(copy['repostConfirm']),
+            ),
+          ],
+        ),
+      ),
+    );
+    _lgDuo('[BUDDY]', 'repost choice=$confirmed hours=$hours');
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      final pushHours = await duoBoardEnsurePushHours(context, hours);
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null || user.isAnonymous) return;
+      final roomRef =
+          FirebaseFirestore.instance.collection('duo_sessions').doc();
+      // [_shareInviteCode]의 새 방과 같은 두 단계다(만든 뒤 켠다).
+      await roomRef.set({
+        'hostUid': user.uid,
+        'createdAt': FieldValue.serverTimestamp(),
+        'isDuoEnabled': false,
+        'isPartnerJoined': false,
+        'mode': kDuoModeInterpreter,
+        kDuoHostCallablePcV2Field: duoInterpreterCallableCapability(
+          remoteCandidate: _interpTransportRaw,
+        ),
+        kDuoHostSameOriginDirectV1Field: duoSameOriginDirectCapability(),
+        'hostLang': _myNative(),
+      });
+      await roomRef.update({
+        'isDuoEnabled': true,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      final historyRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('chat_history')
+          .doc();
+      await historyRef.set({
+        'created_at': FieldValue.serverTimestamp(),
+        'last_active': FieldValue.serverTimestamp(),
+        'last_message_time': FieldValue.serverTimestamp(),
+        'room_name': "Duo Connect Mode",
+        'is_pinned': false,
+        'msg_count': 0,
+        'native_lang': _myNative(),
+        'target_lang': _myTarget(),
+        kDuoRoomIdField: roomRef.id,
+        kDuoModeField: kDuoModeInterpreter,
+        'duo_requested_mode': kDuoModeInterpreter,
+        ...historyDraftSeed(),
+      });
+      try {
+        await DuoBoardHostPresence.instance
+            .ensureOnline()
+            .timeout(const Duration(seconds: 5));
+      } catch (presenceError) {
+        _lgDuo('[BUDDY]', 'repost_presence_pending(${presenceError.runtimeType})');
+      }
+      await DuoBoardService.publishPost(
+        roomId: roomRef.id,
+        historyPath: historyRef.path,
+        topic: topic,
+        topicLanguage: topicLanguage,
+        mode: kDuoModeInterpreter,
+        directLanguage: '',
+        availability: 'request',
+        pushHours: pushHours,
+      );
+      _lgDuo('[BUDDY]', 'reposted room=${roomRef.id} pushHours=$pushHours');
+      messenger?.showSnackBar(SnackBar(content: Text(copy['repostDone'])));
+    } catch (e) {
+      _lgDuo('[BUDDY]', 'repost_failed(${e.runtimeType})');
+      messenger?.showSnackBar(SnackBar(content: Text(copy['repostFailed'])));
+    }
+  }
+
   Future<void> _handleAutoSaveAndExit([String reason = 'user_exit']) async {
     _lgDuo(
       '[DUO-EXIT]',
       'requested reason=$reason role=$_myRole mode=$_effectiveDuoMode '
           'guestSession=${FFAppState().isGuestSession}',
     );
+    // 정리 전에 판단한다. 정리가 몇 초 걸리는 사이에 시계가 더 간다.
+    final bool promoEnded = _promoCallEndedByLimit;
+    _promoCallTicker?.cancel();
+    _releasePartnerPays();
     await _finalizeDuoSession(reason);
     // Restore the member's own board post after an incoming call ends.
     await DuoBoardHostPresence.instance.resumePausedPostAfterIncomingInvite();
     if (!mounted) return;
     final bool isInviteGuest = _exitWasInviteGuest;
+    final bool anonymousNow =
+        FirebaseAuth.instance.currentUser?.isAnonymous == true;
+    final historyRef = _myHistoryRef;
+    final bool hasLines = historyRef != null && _historyMessageCount > 0;
+
+    // 🎫 익명 통역 통화는 나중에 **기존 회원 계정**으로 로그인해도 되찾을 수
+    //   있게 표를 받아 둔다(직접 대화는 공유 결과로 따로 되찾는다).
+    if (anonymousNow && hasLines && !_isDirectMode) {
+      unawaited(issueDuoInterpHandoffTicket(historyRef.id));
+    }
+
+    // 📣 [PROMO] 홍보 통화가 끝났다. 3분을 다 채웠으면 누구에게나, 일찍
+    //   끝났어도 비회원이고 남은 대화가 있으면 안내 카드를 띄운다. 비회원은
+    //   초대자·게스트 모두 같은 끝(Intro)으로 가고, 공부방 체험은 고를 때만.
+    final bool showPromoCard =
+        _isPromoCall && (promoEnded || (anonymousNow && hasLines));
+    if (showPromoCard) {
+      // 상한 타이머와 상대 퇴장이 거의 같이 온다. 카드와 화면 이동은 한 번만.
+      if (_promoEndCardShown) return;
+      _promoEndCardShown = true;
+      final choice = await _showPromoEndCard(
+        fullTime: promoEnded,
+        offerStudyTrial: hasLines,
+      );
+      _lgDuo('[PROMO]', 'end_card choice=$choice anonymous=$anonymousNow '
+          'fullTime=$promoEnded lines=$_historyMessageCount');
+      if (!mounted) return;
+      if (anonymousNow) {
+        FFAppState().inviterUid = '';
+        FFAppState().duoRoomId = '';
+        FFAppState().pendingInviteType = '';
+        // 가입을 고른 사람만 로그인 화면에 세운다. 그 밖에는 Intro 첫 화면
+        // (게시판·광고 배지)으로 돌려보내 다음 초대를 고를 수 있게 한다.
+        // 게스트 표시가 남으면 Intro가 로그인 화면만 보여 줬다(10-30 실기기).
+        if (choice != 'signup') FFAppState().isGuestSession = false;
+        FFAppState().update(() {});
+        if (choice == 'trial' && historyRef != null) {
+          // 공부방 5분 체험. 초대자(호스트)도 게스트와 똑같이 5분으로 막는다.
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => DuoGuestStudyPage(
+                historyRef: historyRef,
+                forceLimitedStudy: true,
+              ),
+            ),
+          );
+          return;
+        }
+        // 가입은 Intro의 로그인 화면이 맡는다. 처음 가입이면 익명 계정에
+        // 그대로 붙어(uid 유지) 방금 대화가 남고, 기존 계정이면 위 표로 옮긴다.
+        context.goNamed('Intro');
+        return;
+      }
+    }
 
     if (mounted) {
       if (isInviteGuest) {
@@ -7471,7 +7986,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         // 한 마디도 오가지 않았으면 열어 봐야 빈 방이다.
         _lgDuo('[GUEST-EXIT]', 'intro reason=no_lines');
         context.goNamed('Intro');
-      } else if (StealthRoomMaster.exitCurrentMode != null) {
+        return;
+      } else if (anonymousNow) {
+        // 📣 [PROMO] 비회원 초대자. 볼 수 있는 메뉴·로비가 없다. 올린 글이
+        //   살아 있으면 Intro에서 기다리다 요청이 오면 이 방으로 돌아온다.
+        _lgDuo('[PROMO]', 'guest_host_exit reason=$reason');
+        context.goNamed('Intro');
+        return;
+      }
+      final repostRoomId = _talkHostRepostRoomId;
+      _talkHostRepostRoomId = null;
+      if (repostRoomId != null) {
+        await _offerTalkHostRepost(repostRoomId);
+        if (!mounted) return;
+      }
+      if (StealthRoomMaster.exitCurrentMode != null) {
         StealthRoomMaster.exitCurrentMode!();
       } else if (Navigator.canPop(context)) {
         Navigator.pop(context);
@@ -8332,6 +8861,16 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                 ),
               const SizedBox(width: 4),
               _buildPartnerIndicator(),
+              // 🚩 신고는 상대가 있을 때만. 초대 버튼이 사라진 자리를 쓴다.
+              if (_hasConversationPartner && !_isExiting)
+                IconButton(
+                  icon: const Icon(Icons.outlined_flag_rounded,
+                      color: Color(0xFFFCA5A5), size: 22),
+                  tooltip: DuoInviteCopy.forSystemLocale()['reportTooltip'],
+                  onPressed: _reportPartner,
+                  constraints:
+                      const BoxConstraints(minWidth: 44, minHeight: 44),
+                ),
             ],
           ),
           const Spacer(),
@@ -8356,16 +8895,45 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           //   위젯을 그대로 쓴다 — 같은 신호가 모드마다 다르면 안 된다.
           //     · 30초 전 — 시간 칸이 남은 초를 센다
           //     · 10초 전 — 점이 주황으로 깜빡인다
-          Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                  color: const Color(0xFF2563EB),
-                  borderRadius: BorderRadius.circular(20)),
-              child: Row(children: [
-                BillingSessionDot(onTapWhenPaused: resetBillingIdle),
-                const SizedBox(width: 6),
-                const BillingTimeLabel(),
-              ])),
+          // 📣 [PROMO] 비회원 초대 통화는 보유시간이 아니라 남은 3분을 보인다.
+          if (_isPromoCall || _isGuestHost)
+            ValueListenableBuilder<int>(
+              valueListenable: _promoRemaining,
+              builder: (_, left, __) => Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                    color: left <= 30
+                        ? const Color(0xFFB45309)
+                        : const Color(0xFF2563EB),
+                    borderRadius: BorderRadius.circular(20)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.timer_outlined,
+                      color: Colors.white, size: 15),
+                  const SizedBox(width: 5),
+                  Text(
+                    '${left ~/ 60}:${(left % 60).toString().padLeft(2, '0')}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ]),
+              ),
+            )
+          else
+            Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                    color: const Color(0xFF2563EB),
+                    borderRadius: BorderRadius.circular(20)),
+                child: Row(children: [
+                  BillingSessionDot(onTapWhenPaused: resetBillingIdle),
+                  const SizedBox(width: 6),
+                  const BillingTimeLabel(),
+                ])),
         ],
       ),
     );

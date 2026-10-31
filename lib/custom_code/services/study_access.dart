@@ -128,6 +128,14 @@ bool isDuoBillingSuppressed({
 }) =>
     isDuoGuest || isStudyTrial;
 
+/// 🤝 Duo 버디 방에서 회원 게스트가 통화 시간을 내는 중인가. Duo 방만 켜고
+/// 끈다. 켜져 있으면 그 게스트는 "무료 Duo 게스트"가 아니다 — 차감도 돌고
+/// 공부 기능도 열린다(서버가 방에 billPartner를 박았을 때만).
+class DuoPartnerPays {
+  DuoPartnerPays._();
+  static bool active = false;
+}
+
 /// 🎟️ 공부방 체험 화면이 지금 떠 있는가. 체험 화면만 켜고 끈다.
 class StudyTrialSession {
   StudyTrialSession._();
@@ -152,7 +160,11 @@ StudyAccess resolveStudyAccess({
 }) {
   // ⓪ 공부방 체험 — 인트로 버튼으로 받은 사본 하나. 그 화면이 넘겨줄 때만.
   if (hasStudyTrial) return _kAllowed;
-  if (isDuoGuest && hasDuoGuestStudyPreview) return _kAllowed;
+  // 통화 뒤 5분 체험 화면이 넘겨준 미리보기. 초대받은 게스트뿐 아니라 홍보
+  // 기간 비회원 초대자(게스트 표시가 없다)도 같은 5분을 쓴다.
+  if ((isDuoGuest || !isSignedInMember) && hasDuoGuestStudyPreview) {
+    return _kAllowed;
+  }
   if (isDuoGuest) return _kDuoGuest;
   if (!isSignedInMember) return _kNotSignedIn;
   return _kAllowed;

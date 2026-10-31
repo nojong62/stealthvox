@@ -254,6 +254,39 @@ async function setHold({db, adminUid, uid, hold, reason, requestId, now}) {
   });
 }
 
+// 대화맨 해제·복원. 해제하면 adminDisabled가 남아 본인이 다시 켤 수 없다.
+// 복원은 표시만 걷는다 — 다시 대화맨이 되려면 본인이 앱에서 신청한다.
+async function setTalkHost({db, adminUid, uid, disabled, reason, requestId, now}) {
+  if (typeof disabled !== "boolean") {
+    throw new HttpsError("invalid-argument", "disabled must be boolean.");
+  }
+  const why = typeof reason === "string" ? reason.trim() : "";
+  if (disabled && (!why || why.length > REASON_MAX_LENGTH)) {
+    throw new HttpsError("invalid-argument", "reason is required (max 200 characters).");
+  }
+  const hostRef = db.doc(`duo_talk_hosts/${uid}`);
+  const logRef = auditRef(db, "set_talk_host", requestId);
+
+  return db.runTransaction(async (tx) => {
+    const [logSnap, hostSnap] = await Promise.all([tx.get(logRef), tx.get(hostRef)]);
+    if (logSnap.exists) return {duplicate: true};
+    if (!hostSnap.exists) throw new HttpsError("not-found", "Not a talk host.");
+    const host = hostSnap.data() || {};
+    const before = {active: host.active === true, adminDisabled: host.adminDisabled === true};
+    const after = disabled
+      ? {active: false, adminDisabled: true, adminReason: why, adminDisabledAt: now,
+        adminDisabledBy: adminUid}
+      : {adminDisabled: false, adminReason: "", adminRestoredAt: now, adminRestoredBy: adminUid};
+
+    tx.set(hostRef, {...after, updatedAt: now}, {merge: true});
+    tx.set(logRef, auditEntry({
+      action: "set_talk_host", targetUid: uid, before,
+      after: {adminDisabled: disabled}, reason: why, adminUid, now,
+    }));
+    return {duplicate: false, adminDisabled: disabled};
+  });
+}
+
 function createAdminOps(admin) {
   const db = () => admin.firestore();
   const now = () => admin.firestore.FieldValue.serverTimestamp();
@@ -312,6 +345,17 @@ function createAdminOps(admin) {
         requestId: requireRequestId(data.requestId),
       });
     }),
+    adminSetTalkHost: onCall(options, async (request) => {
+      const adminUid = requireAdmin(request);
+      const data = request.data || {};
+      return setTalkHost({
+        db: db(), adminUid, now: now(),
+        uid: requireUid(data.uid),
+        disabled: data.disabled,
+        reason: data.reason,
+        requestId: requireRequestId(data.requestId),
+      });
+    }),
     adminAdjustTime: onCall(options, async (request) => {
       const adminUid = requireAdmin(request);
       const data = request.data || {};
@@ -336,5 +380,6 @@ module.exports = {
   requireUid,
   setBlocked,
   setHold,
+  setTalkHost,
   setTestAccount,
 };

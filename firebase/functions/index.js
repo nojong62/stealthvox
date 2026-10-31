@@ -84,6 +84,12 @@ exports.setDuoBoardPostVisibility = duoBoard.setDuoBoardPostVisibility;
 exports.syncDuoBoardHostPresence = duoBoard.syncDuoBoardHostPresence;
 exports.completeDuoBoardPostOnJoin = duoBoard.completeDuoBoardPostOnJoin;
 exports.expireInactiveDuoBoardPosts = duoBoard.expireInactiveDuoBoardPosts;
+exports.reportDuoPartner = duoBoard.reportDuoPartner;
+exports.setDuoBoardPushWindow = duoBoard.setDuoBoardPushWindow;
+exports.setDuoTalkHost = require("./duo_talk_host").setDuoTalkHost;
+const duoHistoryHandoff = require("./duo_history_handoff");
+exports.issueDuoHistoryHandoff = duoHistoryHandoff.issueDuoHistoryHandoff;
+exports.redeemDuoHistoryHandoff = duoHistoryHandoff.redeemDuoHistoryHandoff;
 exports.mintAiGatewaySession = secureAiGateway.mintAiGatewaySession;
 exports.mintDeepgramToken = secureAiGateway.mintDeepgramToken;
 exports.mintOpenAiRealtimeToken = secureAiGateway.mintOpenAiRealtimeToken;
@@ -99,6 +105,7 @@ exports.adminSetTestAccount = adminOps.adminSetTestAccount;
 exports.adminAdjustTime = adminOps.adminAdjustTime;
 exports.adminSetBlocked = adminOps.adminSetBlocked;
 exports.adminSetHold = adminOps.adminSetHold;
+exports.adminSetTalkHost = adminOps.adminSetTalkHost;
 
 // 공부방 체험 (인트로 버튼). firebase/functions/study_trial.js
 const studyTrial = require("./study_trial").createStudyTrial({admin});

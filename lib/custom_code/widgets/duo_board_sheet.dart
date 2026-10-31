@@ -5,7 +5,10 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import '/app_state.dart';
 import '/custom_code/services/duo_invite_localization.dart';
+import '/custom_code/services/duo_buddy_localization.dart';
+import '/custom_code/services/duo_board_push_service.dart';
 import '/custom_code/services/duo_board_service.dart';
 import '/custom_code/services/duo_board_host_presence.dart';
 import '/custom_code/services/duo_board_topic_translation.dart';
@@ -64,6 +67,139 @@ Future<bool> showDuoBoardComposer(
   return saved == true;
 }
 
+/// 서버가 `details.reason`으로 알려 준 거절 이유를 화면 언어로 바꾼다.
+/// 모르는 이유면 null — 부르는 쪽이 원래 문구를 쓴다.
+String? duoBoardErrorText(DuoInviteCopy copy, FirebaseFunctionsException error) {
+  final details = error.details;
+  final reason = details is Map ? details['reason']?.toString() : null;
+  switch (reason) {
+    case 'topic_rejected':
+      return copy['topicRejected'];
+    case 'one_post_per_guest':
+      return copy['onePostOnly'];
+    case 'daily_guest_limit':
+      return copy['dailyGuestLimit'];
+    case 'guest_daily_limit_personal':
+      return copy['guestDailyLimitPersonal'];
+    case 'host_daily_limit':
+      return copy['hostDailyLimit'];
+    case 'promo_closed':
+      return copy['promoClosed'];
+    case 'suspended':
+      return copy['boardSuspended'];
+    case 'requester_no_time':
+      return DuoBuddyCopy.forSystemLocale()['requesterNoTime'];
+  }
+  return null;
+}
+
+/// 푸시 받기를 골랐으면 알림 권한과 토큰을 먼저 챙긴다. 권한이 없으면 0으로
+/// 낮추고 안내한다 — 알림이 안 뜨는 폰으로 요청을 보내면 요청자가 헛되이 기다린다.
+Future<int> duoBoardEnsurePushHours(BuildContext context, int hours) async {
+  if (hours <= 0) return 0;
+  var enabled = false;
+  try {
+    enabled = await DuoBoardPushService.enableForCurrentUser()
+        .timeout(const Duration(seconds: 20));
+  } catch (error) {
+    debugPrint('[DuoBoard] push enable failed: $error');
+  }
+  if (enabled) return hours;
+  if (context.mounted) {
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+        content: Text(DuoBuddyCopy.forSystemLocale()['pushDenied'])));
+  }
+  return 0;
+}
+
+/// 푸시 받기 시간 풀다운(끄기·1·2·4·8시간).
+class DuoBoardPushHoursPicker extends StatelessWidget {
+  const DuoBoardPushHoursPicker({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final copy = DuoBuddyCopy.forSystemLocale();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(children: [
+          const Icon(Icons.notifications_active_outlined,
+              color: Color(0xFF52D4C3), size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(copy['pushFor'],
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700)),
+          ),
+          DropdownButton<int>(
+            value: value,
+            dropdownColor: const Color(0xFF232833),
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            underline: const SizedBox.shrink(),
+            items: [
+              for (final hours in DuoBoardService.pushHourChoices)
+                DropdownMenuItem(value: hours, child: Text(copy.hours(hours))),
+            ],
+            onChanged: (next) {
+              if (next != null) onChanged(next);
+            },
+          ),
+        ]),
+        Text(copy['pushHint'],
+            style: const TextStyle(
+                color: Colors.white54, fontSize: 11, height: 1.35)),
+      ],
+    );
+  }
+}
+
+/// 이 폰에서 회원 로그인 이력이 있는가(Intro의 "이전 방식" 버튼과 같은 값).
+bool duoBoardDeviceHasMemberLogin(String lastAuthProvider) =>
+    const {'kakao', 'google', 'email'}.contains(lastAuthProvider.trim());
+
+/// 초대자가 회원인지 비회원인지. 예전 글에는 값이 없고 그때는 회원만
+/// 쓸 수 있었으므로 회원으로 본다.
+bool duoBoardPostOwnerIsMember(Map<String, dynamic> data) =>
+    data['ownerIsMember'] != false;
+
+class _OwnerBadge extends StatelessWidget {
+  const _OwnerBadge({required this.member, required this.copy});
+
+  final bool member;
+  final DuoInviteCopy copy;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = member ? const Color(0xFF52D4C3) : const Color(0xFFFBBF24);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: color.withValues(alpha: 0.55)),
+      ),
+      child: Text(
+        member ? copy['memberBadge'] : copy['guestBadge'],
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
 /// The composer owns its [TextEditingController] so it is disposed only after
 /// the sheet route is gone. Disposing it right after `showModalBottomSheet`
 /// returned broke the closing animation: the keyboard was still collapsing and
@@ -87,6 +223,7 @@ class _DuoBoardComposer extends StatefulWidget {
 class _DuoBoardComposerState extends State<_DuoBoardComposer> {
   final DuoInviteCopy copy = DuoInviteCopy.forSystemLocale();
   final TextEditingController topic = TextEditingController();
+  int pushHours = DuoBoardService.defaultPushHours;
   bool saving = false;
   String? error;
 
@@ -107,6 +244,8 @@ class _DuoBoardComposerState extends State<_DuoBoardComposer> {
       error = null;
     });
     try {
+      final hours = await duoBoardEnsurePushHours(context, pushHours);
+      if (!mounted) return;
       // Presence is best-effort. A slow/unavailable Realtime
       // Database must not prevent the Firestore post itself
       // from being created.
@@ -132,9 +271,19 @@ class _DuoBoardComposerState extends State<_DuoBoardComposer> {
           topicLanguage: originLanguage,
           mode: 'interpreter',
           directLanguage: '',
-          availability: 'request');
-      debugPrint('[DuoBoard] post published: $postId');
+          availability: 'request',
+          pushHours: hours);
+      debugPrint('[DuoBoard] post published: $postId pushHours=$hours');
       if (mounted) Navigator.pop(context, true);
+    } on FirebaseFunctionsException catch (publishError) {
+      debugPrint('[DuoBoard] post publish failed: '
+          '${publishError.code} ${publishError.details}');
+      unawaited(DuoBoardHostPresence.instance.postEnded());
+      if (!mounted) return;
+      setState(() {
+        saving = false;
+        error = duoBoardErrorText(copy, publishError) ?? copy['postFailed'];
+      });
     } catch (publishError) {
       debugPrint('[DuoBoard] post publish failed: $publishError');
       unawaited(DuoBoardHostPresence.instance.postEnded());
@@ -172,7 +321,11 @@ class _DuoBoardComposerState extends State<_DuoBoardComposer> {
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
           ),
         ),
-        const SizedBox(height: 8),
+        DuoBoardPushHoursPicker(
+          value: pushHours,
+          onChanged: (hours) => setState(() => pushHours = hours),
+        ),
+        const SizedBox(height: 12),
         SizedBox(
             width: double.infinity,
             child: ElevatedButton(
@@ -202,12 +355,49 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
   String? _claiming;
   String? _error;
   final Map<String, bool> _pendingVisibility = {};
+  DuoBoardPromo _promo = DuoBoardPromo.closed;
+  bool _promoLoaded = false;
+  StreamSubscription<DuoBoardPromo>? _promoSubscription;
   DuoInviteCopy get _copy => DuoInviteCopy.forSystemLocale();
 
   @override
   void initState() {
     super.initState();
     _postsStream = DuoBoardService.watchPosts();
+    _promoSubscription = DuoBoardService.watchPromo().listen((promo) {
+      if (mounted) {
+        setState(() {
+          _promo = promo;
+          _promoLoaded = true;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _promoSubscription?.cancel();
+    super.dispose();
+  }
+
+  /// 비회원 초대 버튼을 보일지. 홍보 스위치가 켜져 있고, 지금 사용자가
+  /// 비회원이며, 아직 살아 있는 내 글이 없을 때만이다(폰 하나에 글 하나).
+  ///
+  /// 이 폰에서 회원으로 로그인한 적이 있으면 로그아웃 중이어도 숨긴다.
+  /// 회원은 로그인해서 회원으로 쓰게 한다. `lastAuthProvider`는 로그아웃에서는
+  /// 남고 탈퇴에서만 지워진다.
+  bool _showGuestHostButton(bool hasOwnActivePost) {
+    final user = FirebaseAuth.instance.currentUser;
+    return _promo.guestPostsEnabled &&
+        widget.composeDraft == null &&
+        user != null &&
+        user.isAnonymous &&
+        !duoBoardDeviceHasMemberLogin(FFAppState().lastAuthProvider) &&
+        !hasOwnActivePost;
+  }
+
+  void _startGuestHost() {
+    Navigator.pop(context, const DuoBoardClaim.startGuestHost());
   }
 
   void _retryPosts() {
@@ -248,17 +438,20 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
     });
     DatabaseReference? presence;
     final attemptId = DuoBoardService.createRequestAttemptId();
+    DuoBoardService.awaitingOwnRequest = true;
     try {
       presence = await DuoBoardService.startWaitingPresence(attemptId);
-      final requestId = await DuoBoardService.requestPost(postId, attemptId);
+      final ticket = await DuoBoardService.requestPost(postId, attemptId);
       if (!mounted) return;
       final claim = await showDialog<DuoBoardClaim>(
         context: context,
         barrierDismissible: false,
         builder: (_) => _DuoWaitingDialog(
-          requestId: requestId,
+          requestId: ticket.requestId,
           attemptId: attemptId,
           presence: presence!,
+          viaPush: ticket.viaPush,
+          expiresAtMillis: ticket.expiresAtMillis,
         ),
       );
       if (claim != null && mounted) {
@@ -272,7 +465,8 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
       if (mounted) {
         setState(() {
           _claiming = null;
-          _error = error.message ?? _copy['requestFailed'];
+          // 서버 문구(한국어 고정)는 쓰지 않는다. 폰 언어 문구만 보인다.
+          _error = duoBoardErrorText(_copy, error) ?? _copy['requestFailed'];
         });
       }
     } catch (error) {
@@ -286,6 +480,8 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
               : _copy['requestFailed'];
         });
       }
+    } finally {
+      DuoBoardService.awaitingOwnRequest = false;
     }
   }
 
@@ -293,16 +489,15 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
     final ok = await showDialog<bool>(
         context: context,
         builder: (d) => AlertDialog(
-                title: const Text('Delete post?'),
-                content:
-                    const Text('Remove your Duo invitation from the board?'),
+                title: Text(_copy['deleteTitle']),
+                content: Text(_copy['deleteBody']),
                 actions: [
                   TextButton(
                       onPressed: () => Navigator.pop(d, false),
-                      child: const Text('Cancel')),
+                      child: Text(_copy['cancel'])),
                   FilledButton(
                       onPressed: () => Navigator.pop(d, true),
-                      child: const Text('Delete'))
+                      child: Text(_copy['deleteConfirm']))
                 ]));
     if (ok != true || !mounted) return;
     setState(() => _claiming = postId);
@@ -310,18 +505,63 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
       await DuoBoardService.withdrawPost(postId);
       await DuoBoardHostPresence.instance.postEnded();
     } on FirebaseFunctionsException catch (error) {
-      if (mounted) {
-        setState(() => _error = error.message ?? 'Could not delete the post.');
-      }
+      // 서버 문구는 한국어 고정이라 쓰지 않는다. 화면 언어 문구를 쓴다.
+      debugPrint('[DuoBoard] withdraw failed: ${error.code} ${error.message}');
+      if (mounted) setState(() => _error = _copy['deleteFailed']);
     } catch (_) {
-      if (mounted) setState(() => _error = 'Could not delete the post.');
+      if (mounted) setState(() => _error = _copy['deleteFailed']);
     } finally {
       if (mounted) setState(() => _claiming = null);
     }
   }
 
+  /// 내 글의 푸시 받기 남은 시간("1:45"). 꺼져 있거나 끝났으면 null.
+  String? _pushLeftLabel(Map<String, dynamic> data) {
+    final until = data['pushUntil'];
+    if (until is! Timestamp) return null;
+    final left = until.toDate().difference(DateTime.now());
+    if (left.inMinutes < 1) return null;
+    final minutes = (left.inMinutes % 60).toString().padLeft(2, '0');
+    return DuoBuddyCopy.forSystemLocale()
+        .fill('pushLeft', {'t': '${left.inHours}:$minutes'});
+  }
+
+  /// 꺼진 내 글을 켤 때 푸시 받기 시간을 다시 고른다. null이면 취소.
+  Future<int?> _askPushHours() {
+    var hours = DuoBoardService.defaultPushHours;
+    return showDialog<int>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (_, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF171A21),
+          content: DuoBoardPushHoursPicker(
+            value: hours,
+            onChanged: (next) => setDialogState(() => hours = next),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(_copy['cancel']),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, hours),
+              child: Text(_copy['activatePost']),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _togglePostVisibility(
       String postId, bool currentlyVisible) async {
+    int pushHours = 0;
+    if (!currentlyVisible) {
+      final picked = await _askPushHours();
+      if (picked == null || !mounted) return;
+      pushHours = await duoBoardEnsurePushHours(context, picked);
+      if (!mounted) return;
+    }
     DuoBoardHostPresence.instance.postVisibilityChanged();
     final nextVisible = !currentlyVisible;
     setState(() {
@@ -339,10 +579,15 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
           debugPrint('[DuoBoard] presence refresh before activation: $error');
         }
       }
-      await DuoBoardService.setPostVisibility(
-        postId,
-        enabled: nextVisible,
-      );
+      if (pushHours > 0) {
+        // 시간을 켜면 서버가 글도 함께 활성으로 켠다.
+        await DuoBoardService.setPushWindow(postId, pushHours);
+      } else {
+        await DuoBoardService.setPostVisibility(
+          postId,
+          enabled: nextVisible,
+        );
+      }
       Future<void>.delayed(const Duration(milliseconds: 800), () {
         if (mounted) {
           setState(() => _pendingVisibility.remove(postId));
@@ -419,7 +664,7 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                         TextButton.icon(
                           onPressed: _retryPosts,
                           icon: const Icon(Icons.refresh_rounded),
-                          label: const Text('Retry'),
+                          label: Text(_copy['retry']),
                         ),
                       ],
                     ),
@@ -435,6 +680,13 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                   final mine = data['ownerUid'] == uid;
                   final available = data['discoverable'] == true;
                   final isOpenInvitation = data['state'] != 'reserved';
+                  if (!mine && !duoBoardPostOwnerIsMember(data)) {
+                    // 비회원 글은 지금 받을 수 있을 때만 보인다. 꺼진 비회원
+                    // 글은 대부분 주인이 떠났거나(기존 계정 로그인 등) 홍보가
+                    // 끝난 글이라 기다려도 열리지 않는다.
+                    return available &&
+                        (!_promoLoaded || _promo.guestPostsEnabled);
+                  }
                   return mine ||
                       available ||
                       (widget.showInactivePosts && isOpenInvitation);
@@ -480,6 +732,7 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                 });
                 final hasOwnActivePost =
                     allDocs.any((doc) => doc.data()['ownerUid'] == uid);
+                final showGuestHost = _showGuestHostButton(hasOwnActivePost);
 
                 return Column(
                   children: [
@@ -549,6 +802,14 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                                             ),
                                                           ),
                                                         ),
+                                                        // 배지는 비회원 글에만 단다.
+                                                        // 회원 글은 표시 없이 둔다.
+                                                        if (!duoBoardPostOwnerIsMember(
+                                                            data))
+                                                          _OwnerBadge(
+                                                            member: false,
+                                                            copy: _copy,
+                                                          ),
                                                       ],
                                                     ),
                                                     const SizedBox(height: 5),
@@ -594,6 +855,27 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                                                 Colors.white38,
                                                             fontSize: 8,
                                                             height: 1.1,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    if (mine &&
+                                                        _pushLeftLabel(data) !=
+                                                            null)
+                                                      Padding(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .only(top: 4),
+                                                        child: Text(
+                                                          _pushLeftLabel(
+                                                              data)!,
+                                                          style:
+                                                              const TextStyle(
+                                                            color: Color(
+                                                                0xFF86EFAC),
+                                                            fontSize: 10,
+                                                            fontWeight:
+                                                                FontWeight
+                                                                    .w700,
                                                           ),
                                                         ),
                                                       ),
@@ -716,6 +998,45 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                           ),
                         ),
                       ),
+                    // 홍보 기간: 비회원도 가입 없이 초대글을 올린다.
+                    if (showGuestHost)
+                      SafeArea(
+                        top: false,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _copy['guestHostPitch'],
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Color(0xFFFDE68A),
+                                  fontSize: 11,
+                                  height: 1.4,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: FilledButton.icon(
+                                  onPressed:
+                                      _claiming == null ? _startGuestHost : null,
+                                  icon: const Icon(Icons.public_rounded,
+                                      size: 18),
+                                  label: Text(_copy['guestHostWrite']),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: const Color(0xFFB7791F),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 15),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                   ],
                 );
               },
@@ -766,11 +1087,17 @@ class _DuoWaitingDialog extends StatefulWidget {
     required this.requestId,
     required this.attemptId,
     required this.presence,
+    this.viaPush = false,
+    this.expiresAtMillis = 0,
   });
 
   final String requestId;
   final String attemptId;
   final DatabaseReference presence;
+
+  /// 초대자 앱이 꺼져 있어 알림으로 불렀다. 서버가 더 오래 기다린다.
+  final bool viaPush;
+  final int expiresAtMillis;
 
   @override
   State<_DuoWaitingDialog> createState() => _DuoWaitingDialogState();
@@ -813,7 +1140,13 @@ class _DuoWaitingDialogState extends State<_DuoWaitingDialog> {
         );
       }
     });
-    _timer = Timer(const Duration(seconds: 35), () {
+    // 서버 만료 시각에 5초를 더 준다(시계 차이). 값이 없는 옛 서버면 35초.
+    final untilExpiry =
+        widget.expiresAtMillis - DateTime.now().millisecondsSinceEpoch;
+    final wait = untilExpiry > 0
+        ? Duration(milliseconds: untilExpiry + 5000)
+        : const Duration(seconds: 35);
+    _timer = Timer(wait, () {
       if (mounted) Navigator.pop(context);
     });
   }
@@ -841,7 +1174,9 @@ class _DuoWaitingDialogState extends State<_DuoWaitingDialog> {
         children: [
           const CircularProgressIndicator(),
           const SizedBox(height: 18),
-          Text(copy['waitingShort']),
+          Text(widget.viaPush
+              ? DuoBuddyCopy.forSystemLocale()['pushSent']
+              : copy['waitingShort']),
         ],
       ),
       actions: [

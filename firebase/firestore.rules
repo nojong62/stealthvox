@@ -77,6 +77,49 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 홍보 스위치(비회원 초대 열림 여부·3분·하루 상한). 앱은 읽기만 한다.
+    // 로그인 전 Intro 안내 창도 읽어야 해서 인증을 묻지 않는다. 비밀은 없다.
+    match /app_config/{configId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 비회원 통화 일일 집계, 신고, 짝 차단, 게시판 정지. 쓰기는 duo_board.js만 한다.
+    match /duo_board_promo_daily/{day} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /duo_reports/{reportId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /duo_pair_blocks/{pairId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /duo_board_suspensions/{uid} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // 대화맨 등록·통화 수. 본인은 자기 문서만 읽는다. 쓰기는 duo_talk_host.js·admin_ops.js.
+    match /duo_talk_hosts/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if false;
+      match /{sub=**} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+    }
+
+    // 익명 통역 통화를 회원 계정으로 옮기는 표. 해시만 저장한다.
+    match /duo_history_handoffs/{ticketHash} {
+      allow read, write: if false;
+    }
+
     match /duo_board_requests/{requestId} {
       allow read: if isAuth() &&
         (resource.data.ownerUid == request.auth.uid ||

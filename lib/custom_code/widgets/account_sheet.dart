@@ -16,7 +16,10 @@ import 'package:intl/intl.dart';
 import '/auth/firebase_auth/auth_util.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/app_state.dart';
+import '/custom_code/services/duo_board_service.dart';
+import '/custom_code/services/duo_buddy_localization.dart';
 import '/custom_code/services/origin_surface_localization.dart';
+import 'duo_buddy_sheet.dart';
 import 'lobby_master.dart' show LobbyBrain;
 
 const Color _kSheetBg = Color(0xFF222222);
@@ -199,6 +202,10 @@ class _AccountSheetState extends State<_AccountSheet> {
                     ? '-'
                     : DateFormat('yyyy.MM.dd').format(createdAt.toLocal()),
               ),
+              const SizedBox(height: 8),
+
+              // ── Duo 버디 (회원만. 구독 여부와 무관) ──
+              if (user != null && !user.isAnonymous) _buddyRow(),
               const SizedBox(height: 18),
 
               SizedBox(
@@ -306,6 +313,57 @@ class _AccountSheetState extends State<_AccountSheet> {
                 onPressed: _saveDisplayName,
               ),
       ],
+    );
+  }
+
+  Widget _buddyRow() {
+    final buddy = DuoBuddyCopy.forSystemLocale();
+    return StreamBuilder<DuoBuddyStatus>(
+      stream: DuoBoardService.watchBuddyStatus(),
+      builder: (context, snapshot) {
+        final status = snapshot.data ?? DuoBuddyStatus.none;
+        return InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => showDuoBuddySheet(context),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: _kRowBg,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                  color: status.active ? _kAccent : Colors.white10),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.record_voice_over_rounded,
+                    color: status.active ? _kAccent : Colors.white38,
+                    size: 17),
+                const SizedBox(width: 10),
+                Text(buddy['buddyTitle'],
+                    style:
+                        const TextStyle(color: Colors.white54, fontSize: 13)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    status.active
+                        ? buddy.fill('buddyOn', {'n': '${status.dailyHours}'})
+                        : buddy['buddyEntry'],
+                    textAlign: TextAlign.right,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: status.active ? _kAccent : Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500),
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded,
+                    color: Colors.white38, size: 18),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

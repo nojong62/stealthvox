@@ -40,20 +40,26 @@ let allCursor = null;
 
 // 테스트·차단 표시는 수가 적으니 한 번에 읽어 두고 목록 태그에 쓴다.
 let flagsByUid = new Map();
+// 대화맨(duo_talk_hosts, 앱에서 본인이 신청). 활성인 사람만 목록 태그에 쓴다.
+let talkHostsByUid = new Map();
 async function loadFlags() {
-  const [tests, blocked, robots, held] = await Promise.all([
+  const [tests, blocked, robots, held, talkHosts] = await Promise.all([
     getDocs(query(collection(db, "user_flags"), where("isTest", "==", true))),
     getDocs(query(collection(db, "user_flags"), where("blocked", "==", true))),
     getDocs(query(collection(db, "user_flags"), where("isRobot", "==", true))),
     getDocs(query(collection(db, "user_flags"), where("isHold", "==", true))),
+    getDocs(query(collection(db, "duo_talk_hosts"), where("active", "==", true))),
   ]);
   flagsByUid = new Map();
   for (const d of [...tests.docs, ...blocked.docs, ...robots.docs, ...held.docs]) flagsByUid.set(d.id, d.data());
+  talkHostsByUid = new Map(talkHosts.docs.map((d) => [d.id, d.data()]));
 }
 
 function flagTags(uid) {
   const f = flagsByUid.get(uid) || {};
+  const talkHost = talkHostsByUid.get(uid);
   return [
+    talkHost ? [" ", el("span", {class: "tag test"}, `대화맨 · ${talkHost.callCount || 0}통`)] : null,
     f.isTest ? [" ", el("span", {class: "tag test"}, f.testLabel ? `TEST · ${f.testLabel}` : "TEST")] : null,
     f.blocked ? [" ", el("span", {class: "tag blocked"}, "차단")] : null,
     // 출시 전 테스트 로봇(2026-10-21 일괄 표시). 테스트 계정과 달리 SANDBOX 결제 허용이 없다.
@@ -263,6 +269,9 @@ async function runSearch(q) {
       const uids = [...flagsByUid.entries()].filter(([, f]) => f.isHold).map(([uid]) => uid);
       rows = await membersForUids(uids);
       label = "보류 회원";
+    } else if (filter === "talkhost") {
+      rows = await membersForUids([...talkHostsByUid.keys()]);
+      label = `대화맨 ${rows.length}명 (5명 이상이면 공개 대화방을 열 수 있습니다)`;
     } else if (filter === "members") {
       // 정식회원 = real_members(익명 제외) 중 테스트·차단 표시가 없는 사람.
       const snap = await getDocs(query(collection(db, "real_members"),
@@ -453,7 +462,8 @@ async function showMember(uid) {
   box.replaceChildren(el("p", {class: "muted"}, "불러오는 중…"));
   try {
     const userRef = doc(db, "users", uid);
-    const [memberSnap, userSnap, purchases, usage, flagSnap, notes, adjustments, coupons] = await Promise.all([
+    const [memberSnap, userSnap, purchases, usage, flagSnap, notes, adjustments, coupons,
+      talkHostSnap] = await Promise.all([
       getDoc(doc(db, "real_members", uid)),
       getDoc(userRef),
       getDocs(query(collection(userRef, "purchases"), orderBy("purchased_at", "desc"), limit(50))),
@@ -462,6 +472,7 @@ async function showMember(uid) {
       getDocs(query(collection(db, "admin_notes", uid, "notes"), orderBy("createdAt", "desc"), limit(100))),
       getDocs(query(collection(userRef, "admin_adjustments"), orderBy("created_at", "desc"), limit(LIST_LIMIT))),
       getDocs(query(collection(userRef, "coupon_redemptions"), orderBy("at", "desc"), limit(LIST_LIMIT))),
+      getDoc(doc(db, "duo_talk_hosts", uid)),
     ]);
     if (!memberSnap.exists() && !userSnap.exists()) {
       box.replaceChildren(el("p", {class: "error"}, `UID ${uid}: 회원 문서가 없습니다.`));
@@ -498,6 +509,7 @@ async function showMember(uid) {
       couponTable(coupons.docs),
       testAccountCard(uid, flagSnap.exists() ? flagSnap.data() : {}),
       holdCard(uid, flagSnap.exists() ? flagSnap.data() : {}),
+      talkHostCard(uid, talkHostSnap.exists() ? talkHostSnap.data() : null),
       blockCard(uid, flagSnap.exists() ? flagSnap.data() : {}),
       notesCard(uid, notes.docs.filter((d) => d.data().deleted !== true)),
       purchaseTable(purchases.docs),
@@ -650,6 +662,48 @@ function blockCard(uid, flags) {
     el("p", {class: "muted"}, "AI 대화·통역·Duo 게시판·체험 지급을 서버에서 거절합니다. 15초 안에 반영됩니다."),
     el("div", {class: "inline"}, reason, button),
     flags.unblockedAt ? el("p", {class: "muted"}, `마지막 해제 ${fmtTime(flags.unblockedAt)}`) : null);
+}
+
+// 대화맨: 본인이 앱 계정정보에서 신청한다(서약 동의 포함). 관리자는 해제만 한다.
+// 해제하면 본인이 다시 켤 수 없고, "해제 풀기"는 표시만 걷는다(재신청은 본인).
+function talkHostCard(uid, host) {
+  if (!host) return null;
+  const status = host.adminDisabled ? "관리자 해제" : host.active ? "활동 중" : "본인 중단";
+  const info = kv([
+    ["상태", status],
+    ["하루 가능 시간", host.dailyHours ? `${host.dailyHours}시간` : "—"],
+    ["누적 통화", `${host.callCount || 0}통`],
+    ["마지막 통화", fmtTime(host.lastCallAt)],
+    ["서약", host.pledgedAt ? `v${host.pledgeVersion || 1} · ${fmtTime(host.pledgedAt)}` : "—"],
+    ["관리자 사유", host.adminReason || "—"],
+  ]);
+  if (host.adminDisabled) {
+    const button = el("button", {
+      class: "ghost",
+      onclick: () => {
+        if (!confirm("관리자 해제를 풀까요? 본인이 앱에서 다시 신청할 수 있게 됩니다.")) return;
+        runAction(button, uid, () => call("adminSetTalkHost", {uid, disabled: false}));
+      },
+    }, "해제 풀기");
+    return el("div", {class: "card"}, el("h3", {}, "대화맨"), info, el("div", {class: "inline"}, button));
+  }
+  const reason = el("input", {type: "text", maxlength: "200", placeholder: "해제 사유 (필수)"});
+  const button = el("button", {
+    class: "ghost",
+    onclick: () => {
+      if (!reason.value.trim()) {
+        alertLine(button, "해제 사유를 입력하세요.");
+        reason.focus();
+        return;
+      }
+      if (!confirm(`이 회원의 대화맨을 해제할까요?\n사유: ${reason.value.trim()}`)) return;
+      runAction(button, uid, () => call("adminSetTalkHost", {uid, disabled: true, reason: reason.value}));
+    },
+  }, "대화맨 해제");
+  return el("div", {class: "card"},
+    el("h3", {}, el("span", {class: "tag test"}, "대화맨")),
+    info,
+    el("div", {class: "inline"}, reason, button));
 }
 
 // 보류: 정식회원 목록에서만 뺀다. 이용·데이터에는 영향이 없다(차단과 다르다).

@@ -35,9 +35,12 @@ class DuoBoardPushService {
         settings.authorizationStatus == AuthorizationStatus.provisional;
   }
 
-  static Future<bool> enableForCurrentMember() async {
+  /// 푸시 받기를 고른 초대자의 알림 토큰을 저장한다. 비회원(익명)도 저장한다 —
+  /// 홍보 기간에는 비회원도 초대글을 올리고 앱을 닫은 채 요청을 받는다.
+  /// 권한이 거절되면 false.
+  static Future<bool> enableForCurrentUser() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || user.isAnonymous) return false;
+    if (user == null) return false;
 
     final messaging = FirebaseMessaging.instance;
     final settings = await messaging.requestPermission(
@@ -87,6 +90,9 @@ class DuoBoardPushService {
   static Future<void> refreshChatLanguageForCurrentMember() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.isAnonymous) return;
+    // 권한을 받은 적이 없는 폰은 건드리지 않는다. 토큰만 있고 알림이 안 뜨는
+    // 폰으로 요청을 보내면 요청자가 1분을 헛되이 기다린다.
+    if (!await isAuthorized) return;
     final token = await FirebaseMessaging.instance.getToken();
     if (token == null || token.isEmpty) return;
     await _saveToken(user.uid, token);
@@ -172,7 +178,8 @@ class DuoBoardPushService {
     final generation = ++_requestWatchGeneration;
     await _requestSubscription?.cancel();
     _requestSubscription = null;
-    if (user == null || user.isAnonymous) return;
+    // 비회원 초대자도 요청을 받는다(홍보 기간). 알림 토큰은 회원만 쓴다.
+    if (user == null) return;
     final query = FirebaseFirestore.instance
         .collection('duo_board_requests')
         .where('ownerUid', isEqualTo: user.uid);
@@ -231,6 +238,17 @@ class DuoBoardPushService {
   static Future<void> _prompt(String requestId, BuildContext context) async {
     if (_handledRequests.contains(requestId) || !context.mounted) return;
     _handledRequests.add(requestId);
+    if (DuoBoardService.awaitingOwnRequest) {
+      try {
+        await DuoBoardService.declineRequest(requestId, reason: 'busy');
+        debugPrint('[DuoBoard] incoming request declined while waiting: $requestId');
+      } catch (error) {
+        debugPrint('[DuoBoard] auto-decline failed: $error');
+      } finally {
+        _handledRequests.remove(requestId);
+      }
+      return;
+    }
     final copy = DuoInviteCopy.forSystemLocale();
     Timer? timeout;
     try {

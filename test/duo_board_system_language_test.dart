@@ -39,7 +39,8 @@ void main() {
       expect(launcher, isNot(contains('.dispose()')));
       expect(launcher, isNot(contains('TextEditingController')));
       expect(board, contains('void dispose() {\n    topic.dispose();'));
-      expect(board, contains("debugPrint('[DuoBoard] post published: \$postId');"));
+      expect(board,
+          contains("debugPrint('[DuoBoard] post published: \$postId pushHours=\$hours');"));
     });
 
     test('restore-post dialog is translated for every supported language', () {
