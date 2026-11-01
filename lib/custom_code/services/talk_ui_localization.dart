@@ -100,7 +100,7 @@ class TalkUiCopy {
     },
     'Japanese': {
       'modesTitle': '会話モードを選択',
-      'duoMenuSubtitle': '友だちと会話\nリアルタイム通訳',
+      'duoMenuSubtitle': '直接通話 / 通訳通話',
       'circleMenuSubtitle': 'グループ会話',
       'scenarioMenuSubtitle': '実践シナリオ',
       'navModes': 'モード',
@@ -137,7 +137,7 @@ class TalkUiCopy {
     },
     'Chinese': {
       'modesTitle': '选择对话模式',
-      'duoMenuSubtitle': '与朋友通话\n实时翻译',
+      'duoMenuSubtitle': '直接通话 / 翻译通话',
       'circleMenuSubtitle': '群组对话',
       'scenarioMenuSubtitle': '真实场景',
       'navModes': '模式',
@@ -174,7 +174,7 @@ class TalkUiCopy {
     },
     'Spanish': {
       'modesTitle': 'Elige un modo de conversación',
-      'duoMenuSubtitle': 'Hablar con un amigo\nInterpretación en vivo',
+      'duoMenuSubtitle': 'Llamada directa / Llamada con intérprete',
       'circleMenuSubtitle': 'Conversación en grupo',
       'scenarioMenuSubtitle': 'Situaciones reales',
       'navModes': 'Modos',
@@ -215,7 +215,7 @@ class TalkUiCopy {
     },
     'French': {
       'modesTitle': 'Choisir un mode de conversation',
-      'duoMenuSubtitle': 'Parler avec un ami\nInterprétation en direct',
+      'duoMenuSubtitle': 'Appel direct / Appel interprété',
       'circleMenuSubtitle': 'Conversation de groupe',
       'scenarioMenuSubtitle': 'Situations réelles',
       'navModes': 'Modes',
@@ -255,7 +255,7 @@ class TalkUiCopy {
     },
     'German': {
       'modesTitle': 'Gesprächsmodus wählen',
-      'duoMenuSubtitle': 'Mit einem Freund sprechen\nLive-Dolmetschen',
+      'duoMenuSubtitle': 'Direktanruf / Gedolmetschter Anruf',
       'circleMenuSubtitle': 'Gruppengespräch',
       'scenarioMenuSubtitle': 'Reale Situationen',
       'navModes': 'Modi',
@@ -296,7 +296,7 @@ class TalkUiCopy {
     },
     'Hindi': {
       'modesTitle': 'बातचीत मोड चुनें',
-      'duoMenuSubtitle': 'दोस्त से बात करें\nलाइव अनुवाद',
+      'duoMenuSubtitle': 'सीधी कॉल / अनुवाद कॉल',
       'circleMenuSubtitle': 'समूह बातचीत',
       'scenarioMenuSubtitle': 'वास्तविक परिस्थितियाँ',
       'navModes': 'मोड',
@@ -333,7 +333,7 @@ class TalkUiCopy {
     },
     'Russian': {
       'modesTitle': 'Выберите режим разговора',
-      'duoMenuSubtitle': 'Разговор с другом\nСинхронный перевод',
+      'duoMenuSubtitle': 'Прямой звонок / Звонок с переводом',
       'circleMenuSubtitle': 'Групповой разговор',
       'scenarioMenuSubtitle': 'Реальные ситуации',
       'navModes': 'Режимы',
@@ -374,7 +374,7 @@ class TalkUiCopy {
     },
     'Portuguese': {
       'modesTitle': 'Escolha um modo de conversa',
-      'duoMenuSubtitle': 'Falar com um amigo\nInterpretação ao vivo',
+      'duoMenuSubtitle': 'Chamada direta / Chamada com intérprete',
       'circleMenuSubtitle': 'Conversa em grupo',
       'scenarioMenuSubtitle': 'Situações reais',
       'navModes': 'Modos',
@@ -414,7 +414,7 @@ class TalkUiCopy {
     },
     'Italian': {
       'modesTitle': 'Scegli una modalità di conversazione',
-      'duoMenuSubtitle': 'Parla con un amico\nInterpretazione dal vivo',
+      'duoMenuSubtitle': 'Chiamata diretta / Chiamata con interprete',
       'circleMenuSubtitle': 'Conversazione di gruppo',
       'scenarioMenuSubtitle': 'Situazioni reali',
       'navModes': 'Modalità',
@@ -453,7 +453,7 @@ class TalkUiCopy {
     },
     'Dutch': {
       'modesTitle': 'Kies een gespreksmodus',
-      'duoMenuSubtitle': 'Praat met een vriend\nLive vertaling',
+      'duoMenuSubtitle': 'Direct gesprek / Gesprek met tolk',
       'circleMenuSubtitle': 'Groepsgesprek',
       'scenarioMenuSubtitle': 'Praktijksituaties',
       'navModes': 'Modi',
