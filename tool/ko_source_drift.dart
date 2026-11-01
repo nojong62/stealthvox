@@ -525,6 +525,19 @@ void _write(_FileCopy f, List<_Edit> edits) {
 
 // ── 실행 ────────────────────────────────────────────────────────
 
+/// 키를 넣기 전에 켜 둔 앱·터미널은 환경 변수를 모른다. Windows면 사용자 환경 변수를
+/// 레지스트리에서 직접 읽는다.
+String _openAiKey() {
+  final fromEnv = Platform.environment['OPENAI_API_KEY'] ?? '';
+  if (fromEnv.isNotEmpty || !Platform.isWindows) return fromEnv;
+  final r = Process.runSync(
+      'reg', ['query', r'HKCU\Environment', '/v', 'OPENAI_API_KEY']);
+  if (r.exitCode != 0) return '';
+  final m = RegExp(r'OPENAI_API_KEY\s+REG_\w+\s+(\S+)')
+      .firstMatch(r.stdout as String);
+  return m?.group(1) ?? '';
+}
+
 Future<void> main(List<String> args) async {
   final sync = args.contains('--sync');
   final stage = args.contains('--stage');
@@ -555,7 +568,7 @@ Future<void> main(List<String> args) async {
   }
 
   if (total == 0) return;
-  final apiKey = Platform.environment['OPENAI_API_KEY'] ?? '';
+  final apiKey = _openAiKey();
   if (apiKey.isEmpty) {
     stderr.writeln('한글 문구 $total건이 바뀌었는데 OPENAI_API_KEY가 없어 다른 언어를 '
         '맞추지 못했습니다. 키를 넣고 다시 커밋하세요.');
