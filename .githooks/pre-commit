@@ -1,0 +1,29 @@
+#!/bin/sh
+# 한글 문구를 고친 커밋이면 나머지 언어를 한글 뜻에 맞춰 자동으로 다시 쓴다.
+# 켜기: git config core.hooksPath .githooks   도구: tool/ko_source_drift.dart
+
+copy_files="
+lib/custom_code/services/coupon_localization.dart
+lib/custom_code/services/duo_buddy_localization.dart
+lib/custom_code/services/duo_invite_localization.dart
+lib/custom_code/services/guide_ui_localization.dart
+lib/custom_code/services/talk_ui_localization.dart
+lib/custom_code/services/duo_board_intro_notice.dart
+lib/custom_code/widgets/routine_mode_duo.dart
+lib/custom_code/widgets/chat_history_list_master.dart
+lib/custom_code/services/intro_faq_copy.dart
+lib/custom_code/services/origin_surface_localization.dart
+"
+
+staged=$(git diff --cached --name-only -- $copy_files)
+[ -z "$staged" ] && exit 0
+
+# 반만 스테이징한 문구 파일이 있으면 자동 번역이 나머지까지 커밋에 싣게 된다.
+partial=$(git diff --name-only -- $staged)
+if [ -n "$partial" ]; then
+  echo "문구 파일에 스테이징하지 않은 수정이 있습니다. 모두 add하거나 stash한 뒤 커밋하세요:"
+  echo "$partial"
+  exit 1
+fi
+
+dart run tool/ko_source_drift.dart --sync --stage
