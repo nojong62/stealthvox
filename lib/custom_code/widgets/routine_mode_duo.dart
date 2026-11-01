@@ -6763,7 +6763,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             icon: Icons.check_circle_rounded,
             accent: const Color(0xFFFBBF24),
             title: inviteCopy['guestPostedTitle'],
-            detail: inviteCopy['guestPostedDetail'],
+            // 푸시를 골랐으면 앱을 닫아도 된다는 안내로 바꾼다.
+            detail: duoBoardLastPostedPushHours > 0
+                ? DuoBuddyCopy.forSystemLocale().fill('guestPostedPush',
+                    {'n': '$duoBoardLastPostedPushHours'})
+                : inviteCopy['guestPostedDetail'],
           );
         }
         return posted;

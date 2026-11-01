@@ -46,6 +46,9 @@ Future<DuoBoardClaim?> showDuoBoardSheet(
   );
 }
 
+/// 방금 올린 글에 고른 푸시 받기 시간(0=끄기). 올린 뒤 안내 문구가 읽는다.
+int duoBoardLastPostedPushHours = 0;
+
 Future<bool> showDuoBoardComposer(
   BuildContext context, {
   required String roomId,
@@ -275,6 +278,7 @@ class _DuoBoardComposerState extends State<_DuoBoardComposer> {
           availability: 'request',
           pushHours: hours);
       debugPrint('[DuoBoard] post published: $postId pushHours=$hours');
+      duoBoardLastPostedPushHours = hours;
       if (mounted) Navigator.pop(context, true);
     } on FirebaseFunctionsException catch (publishError) {
       debugPrint('[DuoBoard] post publish failed: '
