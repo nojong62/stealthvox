@@ -69,7 +69,8 @@ Future<bool> showDuoBoardComposer(
 
 /// 서버가 `details.reason`으로 알려 준 거절 이유를 화면 언어로 바꾼다.
 /// 모르는 이유면 null — 부르는 쪽이 원래 문구를 쓴다.
-String? duoBoardErrorText(DuoInviteCopy copy, FirebaseFunctionsException error) {
+String? duoBoardErrorText(
+    DuoInviteCopy copy, FirebaseFunctionsException error) {
   final details = error.details;
   final reason = details is Map ? details['reason']?.toString() : null;
   switch (reason) {
@@ -106,8 +107,8 @@ Future<int> duoBoardEnsurePushHours(BuildContext context, int hours) async {
   }
   if (enabled) return hours;
   if (context.mounted) {
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-        content: Text(DuoBuddyCopy.forSystemLocale()['pushDenied'])));
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(content: Text(DuoBuddyCopy.forSystemLocale()['pushDenied'])));
   }
   return 0;
 }
@@ -297,42 +298,48 @@ class _DuoBoardComposerState extends State<_DuoBoardComposer> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-          22, 22, 22, 22 + MediaQuery.viewInsetsOf(context).bottom),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text(copy['composerTitle'],
-            style: const TextStyle(
-                color: Colors.white,
-                fontSize: 21,
-                fontWeight: FontWeight.w800)),
-        const SizedBox(height: 18),
-        TextField(
-          controller: topic,
-          autofocus: true,
-          maxLength: 80,
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            labelText: copy['topic'],
-            hintText: copy['topicHint'],
-            errorText: error,
-            filled: true,
-            fillColor: const Color(0xFF232833),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+    // 푸시 시간 줄이 들어오며 키보드가 올라오면 "게시하기"가 내비게이션 바
+    // 밑에 깔렸다(11-01 실기기). 아래 시스템 영역을 비키고, 모자라면 스크롤한다.
+    return SafeArea(
+      top: false,
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+            22, 22, 22, 22 + MediaQuery.viewInsetsOf(context).bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(copy['composerTitle'],
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 21,
+                  fontWeight: FontWeight.w800)),
+          const SizedBox(height: 18),
+          TextField(
+            controller: topic,
+            autofocus: true,
+            maxLength: 80,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              labelText: copy['topic'],
+              hintText: copy['topicHint'],
+              errorText: error,
+              filled: true,
+              fillColor: const Color(0xFF232833),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+            ),
           ),
-        ),
-        DuoBoardPushHoursPicker(
-          value: pushHours,
-          onChanged: (hours) => setState(() => pushHours = hours),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: saving ? null : _publish,
-              child: Text(saving ? copy['posting'] : copy['post']),
-            )),
-      ]),
+          DuoBoardPushHoursPicker(
+            value: pushHours,
+            onChanged: (hours) => setState(() => pushHours = hours),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: saving ? null : _publish,
+                child: Text(saving ? copy['posting'] : copy['post']),
+              )),
+        ]),
+      ),
     );
   }
 }
@@ -866,16 +873,14 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                                                             const EdgeInsets
                                                                 .only(top: 4),
                                                         child: Text(
-                                                          _pushLeftLabel(
-                                                              data)!,
+                                                          _pushLeftLabel(data)!,
                                                           style:
                                                               const TextStyle(
                                                             color: Color(
                                                                 0xFF86EFAC),
                                                             fontSize: 10,
                                                             fontWeight:
-                                                                FontWeight
-                                                                    .w700,
+                                                                FontWeight.w700,
                                                           ),
                                                         ),
                                                       ),
@@ -1020,8 +1025,9 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                               SizedBox(
                                 width: double.infinity,
                                 child: FilledButton.icon(
-                                  onPressed:
-                                      _claiming == null ? _startGuestHost : null,
+                                  onPressed: _claiming == null
+                                      ? _startGuestHost
+                                      : null,
                                   icon: const Icon(Icons.public_rounded,
                                       size: 18),
                                   label: Text(_copy['guestHostWrite']),
