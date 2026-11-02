@@ -480,7 +480,7 @@ class IntroWelcomePageCopy {
   static const Map<String, Map<String, String>> _copies = {
     'en': {
       'tagline': 'Speak freely, Pick it up naturally',
-      'headlineBefore': "In language,\nDon't look for the right answer,\nfind your own words.",
+      'headlineBefore': 'Speak,\nrephrase,\nuntil it rolls off your tongue',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo Invite',
@@ -493,7 +493,7 @@ class IntroWelcomePageCopy {
     },
     'ko': {
       'tagline': '자유롭게 말하고, 자연스럽게 익히세요',
-      'headlineBefore': '언어엔\n정답을 찾지 말고,\n내 말을 찾아보세요.',
+      'headlineBefore': '말하고,\n바꿔 말하며\n입에 붙이는 연습장',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo 초대',
@@ -506,7 +506,7 @@ class IntroWelcomePageCopy {
     },
     'ja': {
       'tagline': '自由に話して、自然に身につけよう',
-      'headlineBefore': '言葉には\n正解を探さずに、\n自分の言葉を見つけてください。',
+      'headlineBefore': '話して、\n言い換えて、\n口になじむまで練習',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo 招待',
@@ -519,7 +519,7 @@ class IntroWelcomePageCopy {
     },
     'zh': {
       'tagline': '自在开口，自然习得',
-      'headlineBefore': '语言里，\n不要寻找正确答案，\n去找到你自己的话。',
+      'headlineBefore': '说出来，\n换种说法，\n练到脱口而出',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo 邀请',
@@ -532,7 +532,8 @@ class IntroWelcomePageCopy {
     },
     'es': {
       'tagline': 'Habla con libertad, aprende de forma natural',
-      'headlineBefore': 'En el idioma,\nNo busques la respuesta correcta,\nencuentra tus propias palabras.',
+      'headlineBefore':
+          'Habla,\nexprésalo de otra forma,\nhasta que te salga con naturalidad',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Invitación Duo',
@@ -545,7 +546,8 @@ class IntroWelcomePageCopy {
     },
     'fr': {
       'tagline': 'Parlez librement, apprenez naturellement',
-      'headlineBefore': 'En langue,\nNe cherchez pas la bonne réponse,\ntrouvez vos propres mots.',
+      'headlineBefore':
+          'Parlez,\nreformulez,\njusqu’à ce que ça devienne naturel',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Invitation Duo',
@@ -558,7 +560,8 @@ class IntroWelcomePageCopy {
     },
     'de': {
       'tagline': 'Sprich frei, lerne ganz natürlich',
-      'headlineBefore': 'In der Sprache\nSuch nicht die richtige Antwort,\nfinde deine eigenen Worte.',
+      'headlineBefore':
+          'Sprich,\nformuliere es um,\nbis es dir leicht über die Lippen geht',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo-Einladung',
@@ -571,7 +574,8 @@ class IntroWelcomePageCopy {
     },
     'hi': {
       'tagline': 'बेझिझक बोलें, स्वाभाविक रूप से सीखें',
-      'headlineBefore': 'भाषा में\nसही जवाब मत खोजिए,\nअपनी बात खोजिए।',
+      'headlineBefore':
+          'बोलिए,\nअपने शब्दों में कहिए,\nजब तक बात ज़ुबान पर न आ जाए',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo आमंत्रण',
@@ -584,7 +588,8 @@ class IntroWelcomePageCopy {
     },
     'ru': {
       'tagline': 'Говорите свободно, учитесь естественно',
-      'headlineBefore': 'В языке\nНе ищите правильный ответ,\nнайдите свои слова.',
+      'headlineBefore':
+          'Говорите,\nперефразируйте,\nпока слова не начнут легко слетать с языка',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Приглашение Duo',
@@ -597,7 +602,8 @@ class IntroWelcomePageCopy {
     },
     'pt': {
       'tagline': 'Fale livremente, aprenda naturalmente',
-      'headlineBefore': 'No idioma,\nNão procure a resposta certa,\nencontre as suas palavras.',
+      'headlineBefore':
+          'Fale,\ndiga de outro jeito,\naté as palavras saírem naturalmente',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Convite Duo',
@@ -610,7 +616,8 @@ class IntroWelcomePageCopy {
     },
     'it': {
       'tagline': 'Parla liberamente, impara in modo naturale',
-      'headlineBefore': 'Nella lingua,\nNon cercare la risposta giusta,\ntrova le tue parole.',
+      'headlineBefore':
+          'Parla,\nriformula,\nfinché le parole non ti verranno spontanee',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Invito Duo',
@@ -623,7 +630,8 @@ class IntroWelcomePageCopy {
     },
     'nl': {
       'tagline': 'Spreek vrijuit, leer vanzelf',
-      'headlineBefore': 'In taal\nZoek niet het juiste antwoord,\nvind je eigen woorden.',
+      'headlineBefore':
+          'Spreek,\nzeg het in je eigen woorden,\ntot het vanzelf gaat',
       'headlineAccent': '',
       'headlineAfter': '',
       'duoInvite': 'Duo-uitnodiging',
