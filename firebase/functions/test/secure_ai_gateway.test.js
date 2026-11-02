@@ -16,7 +16,7 @@ const {
   splitForGoogleTts,
   chirpAudioConfig,
   chirpMarkupForRequest,
-  koreanChirpInputWithCommaPauses,
+  chirpInputWithCommaPauses,
   realtimeClientSecret,
 } = require("../secure_ai_gateway");
 
@@ -155,36 +155,55 @@ test("Google TTS input is split by UTF-8 bytes, not characters", () => {
   for (const piece of cut) assert.ok(Buffer.byteLength(piece, "utf8") <= 5000);
 });
 
-test("Korean TTS pauses after every comma", () => {
+test("Chirp TTS pauses after every comma", () => {
   assert.deepEqual(
-    koreanChirpInputWithCommaPauses("네, 기본 포장은 무료예요."),
+    chirpInputWithCommaPauses("네, 기본 포장은 무료예요."),
     { markup: "네, [pause short] 기본 포장은 무료예요." },
   );
   assert.deepEqual(
-    koreanChirpInputWithCommaPauses("회원님,PT 시간 변경을 도와드릴게요."),
+    chirpInputWithCommaPauses("회원님,PT 시간 변경을 도와드릴게요."),
     { markup: "회원님, [pause short] PT 시간 변경을 도와드릴게요." },
   );
   assert.deepEqual(
-    koreanChirpInputWithCommaPauses("기본 포장은 무료예요."),
+    chirpInputWithCommaPauses("기본 포장은 무료예요."),
     { text: "기본 포장은 무료예요." },
   );
   assert.deepEqual(
-    koreanChirpInputWithCommaPauses("날씨가 좋고, 바람도 시원하고, 산책하기 좋아요."),
+    chirpInputWithCommaPauses("날씨가 좋고, 바람도 시원하고, 산책하기 좋아요."),
     { markup: "날씨가 좋고, [pause short] 바람도 시원하고, [pause short] 산책하기 좋아요." },
   );
 });
 
-test("Korean comma pause skips digit grouping and bracketed text", () => {
+test("Comma pause applies to English and CJK commas too", () => {
   assert.deepEqual(
-    koreanChirpInputWithCommaPauses("가격은 1,000원이에요."),
+    chirpInputWithCommaPauses("Yes, Mom. Still, I was wrong."),
+    { markup: "Yes, [pause short] Mom. Still, [pause short] I was wrong." },
+  );
+  assert.deepEqual(
+    chirpInputWithCommaPauses("It costs 1,000 dollars."),
+    { text: "It costs 1,000 dollars." },
+  );
+  assert.deepEqual(
+    chirpInputWithCommaPauses("はい、わかりました。"),
+    { markup: "はい、 [pause short] わかりました。" },
+  );
+  assert.deepEqual(
+    chirpInputWithCommaPauses("好的，没问题。"),
+    { markup: "好的， [pause short] 没问题。" },
+  );
+});
+
+test("Comma pause skips digit grouping and bracketed text", () => {
+  assert.deepEqual(
+    chirpInputWithCommaPauses("가격은 1,000원이에요."),
     { text: "가격은 1,000원이에요." },
   );
   assert.deepEqual(
-    koreanChirpInputWithCommaPauses("3, 4번 중에 고르세요."),
+    chirpInputWithCommaPauses("3, 4번 중에 고르세요."),
     { markup: "3, [pause short] 4번 중에 고르세요." },
   );
   assert.deepEqual(
-    koreanChirpInputWithCommaPauses("[참고] 네, 좋아요."),
+    chirpInputWithCommaPauses("[참고] 네, 좋아요."),
     { text: "[참고] 네, 좋아요." },
   );
 });

@@ -263,15 +263,17 @@ function splitForGoogleTts(text, maxBytes = MAX_GOOGLE_TTS_INPUT_BYTES) {
   return pieces;
 }
 
-// Chirp runs Korean clauses together across a comma ("회원님,PT 시간...",
-// "좋고,산책하기..."). Add a short Chirp pause after every comma without
-// changing the text shown in the UI or kept in history. Digit grouping
-// ("1,000") is not a clause break, and text that already holds brackets is
-// left alone so it is not misread as a pause tag.
-function koreanChirpInputWithCommaPauses(text) {
+// Chirp runs clauses together across a comma ("회원님,PT 시간...",
+// "Yes, Mom"). Measured 2026-11-02: plain text left 0–120 ms at the comma in
+// both Korean and English; `[pause short]` gave 390–670 ms. So every locale
+// gets a short pause after every comma (incl. 、，،) without changing the
+// text shown in the UI or kept in history. Digit grouping ("1,000") is not a
+// clause break, and text that already holds brackets is left alone so it is
+// not misread as a pause tag.
+function chirpInputWithCommaPauses(text) {
   const input = String(text || "").trim();
   if (input.includes("[") || input.includes("]")) return { text: input };
-  const markup = input.replace(/(?<!\d)([,，])\s*(?=\S)|(?<=\d)([,，])(?!\d)\s*(?=\S)/gu,
+  const markup = input.replace(/(?<!\d)([,，、،])\s*(?=\S)|(?<=\d)([,，、،])(?!\d)\s*(?=\S)/gu,
     (_, a, b) => (a || b) + " [pause short] ");
   if (markup === input) return { text: input };
   // Do not make a request that would exceed the provider's input cap solely
@@ -359,9 +361,7 @@ async function synthesizeChirp(body, locale) {
   const pieces = splitForGoogleTts(input);
   const audio = [];
   for (let i = 0; i < pieces.length; i++) {
-    const speechInput = locale === "ko-KR"
-      ? koreanChirpInputWithCommaPauses(pieces[i])
-      : { text: pieces[i] };
+    const speechInput = chirpInputWithCommaPauses(pieces[i]);
     // Raw PCM and MP3 frames both play back correctly when concatenated.
     audio.push(await synthesizeChirpPiece(
       client, speechInput, locale, voiceName, audioConfig, format));
@@ -607,7 +607,7 @@ module.exports = {
   splitForGoogleTts,
   chirpAudioConfig,
   chirpMarkupForRequest,
-  koreanChirpInputWithCommaPauses,
+  chirpInputWithCommaPauses,
   mintAiGatewaySession,
   mintDeepgramToken,
   mintOpenAiRealtimeToken,
