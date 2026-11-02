@@ -1361,6 +1361,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }
 
   Future<void> _fetchRemoteConfig({bool force = false}) async {
+    // 원격 설정 fetch가 실패해도 토큰은 받는다. 둘을 한 try에 묶어 두었더니
+    // fetch 예외 하나로 토큰 받기까지 건너뛰어, 그 화면이 닫힐 때까지 키가
+    // 빈 채로 남았다 — 확정 직후 번역·ESSAY가 전부 "API 키 없음"으로 실패
+    // (2026-11-02 정식 252, 그동안 게이트웨이 호출 0건). 토큰은 원격 설정
+    // 값이 아니라 서버 함수에서 받으므로 fetch 결과와 상관이 없다.
+    // 서클톡 `_fetchKeys`와 같은 순서다.
     try {
       final remoteConfig = FirebaseRemoteConfig.instance;
       if (force) {
@@ -1371,20 +1377,40 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           minimumFetchInterval: Duration.zero,
         ));
       }
-      await remoteConfig.fetchAndActivate();
+      await remoteConfig
+          .fetchAndActivate()
+          .timeout(const Duration(seconds: 20));
+    } catch (e) {
+      debugPrint("[fetchRemoteConfig] fetch $e");
+    }
+    // 두 토큰도 따로 받는다. 전사 토큰 실패가 번역·ESSAY 키까지 막지 않게.
+    try {
       final gatewayToken = await SecureAiGateway.gatewayToken();
-      final deepgramToken = await SecureAiGateway.deepgramToken();
       if (mounted) {
-        setState(() {
-          _apiKey = gatewayToken;
-          _deepgramKey = deepgramToken;
-        });
+        setState(() => _apiKey = gatewayToken);
         _recoverOriginRestoration(caller: 'remote_config');
         _scheduleMissingTargetGeneration(_cachedDocs);
       }
     } catch (e) {
-      debugPrint("[fetchRemoteConfig] $e");
+      debugPrint("[fetchRemoteConfig] gateway $e");
     }
+    try {
+      final deepgramToken = await SecureAiGateway.deepgramToken();
+      if (mounted) setState(() => _deepgramKey = deepgramToken);
+    } catch (e) {
+      debugPrint("[fetchRemoteConfig] deepgram $e");
+    }
+  }
+
+  /// 키가 비어 있으면 강제로 다시 받는다. 받았으면 true.
+  ///
+  /// 화면을 열 때 토큰 받기가 실패하면(네트워크가 잠깐 끊긴 경우 등) 그
+  /// 화면에서는 저절로 다시 받지 않는다. 사용자가 누른 동작이 GPT를 부르기
+  /// 직전에 여기서 한 번 더 받는다.
+  Future<bool> _ensureApiKey() async {
+    if (_apiKey.isNotEmpty) return true;
+    await _fetchRemoteConfig(force: true);
+    return mounted && _apiKey.isNotEmpty;
   }
 
   /// 이미 다시 쓰인 원문을 되돌린 줄. 한 세션에 한 줄당 한 번이다.
@@ -1765,13 +1791,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     final original = (data['original_text'] ?? '').toString().trim();
     if (original.isEmpty) return;
     _resumeHistoryFromUserAction();
-    if (_apiKey.isEmpty) {
-      await _fetchRemoteConfig(force: true);
+    if (!await _ensureApiKey()) {
       if (!mounted) return;
-      if (_apiKey.isEmpty) {
-        _showRoomEntryToast('설정을 아직 받지 못했습니다. 잠시 후 다시 시도해 주세요');
-        return;
-      }
+      _showRoomEntryToast('설정을 아직 받지 못했습니다. 잠시 후 다시 시도해 주세요');
+      return;
     }
     _clearTargetFailure(doc.id); // 배지 → "번역 중"으로 바뀐다
     final ok = await _generateAndCacheHistoryTarget(
@@ -2103,6 +2126,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       // 대화 재생 연습(Practice)으로 들어간다. MY ENGLISH / NATIVE ENGLISH는
       // 학습 경로 카드를 누를 때 각각 만든다.
       await _remoteConfigFuture;
+      // 확정 직후 번역 생성과 ESSAY가 바로 키를 쓴다. 열 때 못 받았으면 여기서.
+      await _ensureApiKey();
+      if (!mounted) return;
       var messageDocs = _cachedDocs;
       if (messageDocs.isEmpty) {
         final messagesSnap = await widget.historyDoc
@@ -8548,6 +8574,9 @@ RULES — follow exactly:
         return true;
       }
 
+      // ESSAY "다시 시도"가 빈 키로 같은 실패만 되풀이하지 않게.
+      await _ensureApiKey();
+      if (!mounted) return false;
       final result = await MySpeechBuilder.build(
         apiKey: _apiKey,
         turns: _speechTranscriptTurns(),
