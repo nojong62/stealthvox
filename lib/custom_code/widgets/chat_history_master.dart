@@ -6055,7 +6055,13 @@ RULES — follow exactly:
                   final key =
                       _practiceItemKeys.putIfAbsent(i, () => GlobalKey());
                   final line = _tutorLines[i];
-                  final bool lineIsAi = _isAiTurn(line); // 🆕 [BOX-32] 스왑 반영
+                  // 🔁 [BOX-32] 역할을 바꿔도 화면은 그대로다(실장님 지시,
+                  //   2026-11-02). 위치·아이콘은 원래 말한 사람(`onLeft`)을
+                  //   따르고, 바뀌는 것은 누가 읽느냐(`lineIsAi`) — 녹음 중 /
+                  //   AI 재생 중 표시와 테두리 색뿐이다. 예전에는 둘을 한 값으로
+                  //   써서 AI 아이콘을 누르면 말풍선이 좌우로 넘어갔다.
+                  final bool lineIsAi = _isAiTurn(line);
+                  final bool onLeft = _lineRepresentsAi(line);
                   final bool isCurrent = i == currentIndex;
                   final bool isPast = i < currentIndex;
                   final Color roleColor =
@@ -6063,7 +6069,7 @@ RULES — follow exactly:
 
                   return Align(
                     alignment:
-                        lineIsAi ? Alignment.centerLeft : Alignment.centerRight,
+                        onLeft ? Alignment.centerLeft : Alignment.centerRight,
                     child: AnimatedOpacity(
                       key: key,
                       duration: const Duration(milliseconds: 300),
@@ -6088,19 +6094,19 @@ RULES — follow exactly:
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (lineIsAi) ...[
+                            if (onLeft) ...[
                               _buildTurnPracticeSpeakerIcon(
-                                  lineIsAi, isCurrent, roleColor),
+                                  onLeft, isCurrent, roleColor),
                               const SizedBox(width: 10),
                             ],
                             Flexible(
                               child: Column(
-                                crossAxisAlignment: lineIsAi
+                                crossAxisAlignment: onLeft
                                     ? CrossAxisAlignment.start
                                     : CrossAxisAlignment.end,
                                 children: [
                                   _buildPracticeLineText(
-                                      line, isCurrent, lineIsAi),
+                                      line, isCurrent, onLeft),
                                   // 📐 아래 세 줄 안내(녹음 중 / 다시 읽어
                                   //   주세요 / AI 재생 중)는 Icon + Text를
                                   //   Row에 나란히 둔다. Text를 그냥 두면
@@ -6157,10 +6163,10 @@ RULES — follow exactly:
                                 ],
                               ),
                             ),
-                            if (!lineIsAi) ...[
+                            if (!onLeft) ...[
                               const SizedBox(width: 10),
                               _buildTurnPracticeSpeakerIcon(
-                                  lineIsAi, isCurrent, roleColor),
+                                  onLeft, isCurrent, roleColor),
                             ],
                           ],
                         ),
