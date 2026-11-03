@@ -5877,6 +5877,8 @@ RULES — follow exactly:
     final bool isAwaiting = _tutorAwaitingStart;
     final bool isComplete = currentIndex >= _tutorLines.length;
 
+    final bool personChosen = !isAwaiting && !_swapRoles;
+    final bool aiChosen = !isAwaiting && _swapRoles;
     return Stack(
       children: [
         Column(
@@ -5895,7 +5897,10 @@ RULES — follow exactly:
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // 좌측: 유저 아이콘 — 역할 선택(대기) 또는 재녹음
+                        // 좌측: 인물 아이콘 — 역할 선택(대기) 또는 재녹음.
+                        // 🔁 두 아이콘은 "내가 맡은 역할"을 표시한다(실장님 지시,
+                        //   2026-11-03). 지금 누가 말하는지가 아니라, 고른
+                        //   아이콘이 대화 끝까지 켜져 있다.
                         AnimatedBuilder(
                           animation: _blinkController,
                           builder: (context, child) => Opacity(
@@ -5906,32 +5911,32 @@ RULES — follow exactly:
                             behavior: HitTestBehavior.opaque,
                             onTap: isAwaiting
                                 ? () => _confirmStart(swap: false)
-                                : _onTutorUserIconTap,
+                                : (personChosen ? _onTutorUserIconTap : null),
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 250),
                               padding: const EdgeInsets.all(9),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: _tutorUserRecording
+                                color: personChosen
                                     ? Colors.greenAccent.withValues(alpha: 0.15)
                                     : isAwaiting
                                         ? Colors.greenAccent
                                             .withValues(alpha: 0.08)
                                         : Colors.white.withValues(alpha: 0.04),
                                 border: Border.all(
-                                  color: _tutorUserRecording
+                                  color: personChosen
                                       ? Colors.greenAccent
                                       : isAwaiting
                                           ? Colors.greenAccent
                                               .withValues(alpha: 0.65)
                                           : Colors.white24,
-                                  width: _tutorUserRecording ? 2 : 1.5,
+                                  width: personChosen ? 2 : 1.5,
                                 ),
                               ),
                               child: Icon(
                                 Icons.person_rounded,
                                 size: 18,
-                                color: _tutorUserRecording
+                                color: personChosen
                                     ? Colors.greenAccent
                                     : isAwaiting
                                         ? Colors.greenAccent
@@ -5975,30 +5980,30 @@ RULES — follow exactly:
                             behavior: HitTestBehavior.opaque,
                             onTap: isAwaiting
                                 ? () => _confirmStart(swap: true)
-                                : null,
+                                : (aiChosen ? _onTutorUserIconTap : null),
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 250),
                               padding: const EdgeInsets.all(9),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: _tutorAiSpeaking
+                                color: aiChosen
                                     ? Colors.blue.withValues(alpha: 0.15)
                                     : isAwaiting
                                         ? Colors.blue.withValues(alpha: 0.08)
                                         : Colors.white.withValues(alpha: 0.04),
                                 border: Border.all(
-                                  color: _tutorAiSpeaking
+                                  color: aiChosen
                                       ? Colors.blue
                                       : isAwaiting
                                           ? Colors.blue.withValues(alpha: 0.65)
                                           : Colors.white24,
-                                  width: _tutorAiSpeaking ? 2 : 1.5,
+                                  width: aiChosen ? 2 : 1.5,
                                 ),
                               ),
                               child: Icon(
                                 Icons.smart_toy_rounded,
                                 size: 18,
-                                color: _tutorAiSpeaking
+                                color: aiChosen
                                     ? Colors.blue
                                     : isAwaiting
                                         ? Colors.blue.withValues(alpha: 0.85)
