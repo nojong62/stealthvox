@@ -34,6 +34,8 @@ import 'study_trial_page.dart';
 
 enum IntroScreen { welcome, auth, accountDiscovery }
 
+enum _AgeCheck { passed, cancelled, underAge }
+
 class IntroMaster extends StatefulWidget {
   const IntroMaster({
     super.key,
@@ -3270,9 +3272,10 @@ class _IntroMasterState extends State<IntroMaster>
         final hasBirthYear =
             userDoc.exists && userDoc.data()?['birthYear'] != null;
         if (!hasBirthYear && mounted) {
-          final ageCheckCompleted = await _showBirthYearDialog();
-          if (!ageCheckCompleted) {
-            await _showAgeCheckRequiredDialog();
+          final ageCheck = await _showBirthYearDialog();
+          if (ageCheck != _AgeCheck.passed) {
+            await _showAgeCheckRequiredDialog(
+                underAge: ageCheck == _AgeCheck.underAge);
             await DuoBoardPushService.signOut();
             FFAppState().remainingTime = 0;
             FFAppState().remainingTimeLoaded = false;
@@ -3341,8 +3344,10 @@ class _IntroMasterState extends State<IntroMaster>
     }
   }
 
-  /// 신규 가입 시 태어난 해 확인 + 14세 미만 보호자 이메일 수집
-  Future<bool> _showBirthYearDialog() async {
+  /// 신규 가입 시 태어난 해 확인. 만 14세 미만은 받지 않는다(실장님, 2026-11-04).
+  ///   보호자 동의 경로는 동의 전에도 다 열려 있어 형식만 남았었다.
+  ///   큰 언어 앱들처럼 최소 연령으로 정리하고, 미만이면 생년도 저장하지 않는다.
+  Future<_AgeCheck> _showBirthYearDialog() async {
     final currentYear = DateTime.now().year;
     int selectedYear = currentYear - 20;
 
@@ -3371,7 +3376,7 @@ class _IntroMasterState extends State<IntroMaster>
                 child: Column(
                   children: [
                     Text(
-                      'This is required to verify your age.\nMinors may sign up with a parent or guardian\'s consent.',
+                      'This is required to verify your age.\nYou must be 14 or older to use StealthVox.',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Colors.white70,
@@ -3450,49 +3455,21 @@ class _IntroMasterState extends State<IntroMaster>
       },
     );
 
-    if (confirmed != true || !mounted) return false;
+    if (confirmed != true || !mounted) return _AgeCheck.cancelled;
 
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return false;
+    if (user == null) return _AgeCheck.cancelled;
 
-    final age = currentYear - selectedYear;
-    final userRef =
-        FirebaseFirestore.instance.collection('users').doc(user.uid);
+    if (currentYear - selectedYear < 14) return _AgeCheck.underAge;
 
-    if (age >= 14) {
-      await userRef.set({'birthYear': selectedYear}, SetOptions(merge: true));
-      return true;
-    } else {
-      final parentEmail = await _showParentEmailDialog();
-      if (parentEmail != null && parentEmail.isNotEmpty) {
-        await userRef.set({
-          'birthYear': selectedYear,
-          'parentEmail': parentEmail,
-          'parentConsentPending': true,
-        }, SetOptions(merge: true));
-
-        // 보호자 동의 이메일은 users/{uid} 변경을 감지하는 Cloud Function에서 발송한다.
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'A consent request was sent to your parent or guardian.\nAll features will be available after they approve it.',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              backgroundColor: const Color(0xFF4A90D9),
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
-        return true;
-      } else {
-        return false;
-      }
-    }
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .set({'birthYear': selectedYear}, SetOptions(merge: true));
+    return _AgeCheck.passed;
   }
 
-  Future<void> _showAgeCheckRequiredDialog() async {
+  Future<void> _showAgeCheckRequiredDialog({bool underAge = false}) async {
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -3504,7 +3481,9 @@ class _IntroMasterState extends State<IntroMaster>
           side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
         ),
         title: Text(
-          'Age verification is required',
+          underAge
+              ? 'You must be 14 or older'
+              : 'Age verification is required',
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
@@ -3512,7 +3491,9 @@ class _IntroMasterState extends State<IntroMaster>
           ),
         ),
         content: Text(
-          'Selecting your birth year is required to verify whether you are a minor.\n\nMinors may sign up with a parent or guardian\'s consent.\nYou will return to the login page.',
+          underAge
+              ? 'StealthVox is available to users aged 14 and older.\nYou will return to the login page.'
+              : 'Selecting your birth year is required to verify your age.\n\nStealthVox is available to users aged 14 and older.\nYou will return to the login page.',
           style: const TextStyle(
             color: Colors.white70,
             fontSize: 14,
@@ -3547,97 +3528,6 @@ class _IntroMasterState extends State<IntroMaster>
         ],
       ),
     );
-  }
-
-  /// 14세 미만: 보호자 이메일 입력 다이얼로그
-  Future<String?> _showParentEmailDialog() async {
-    final controller = TextEditingController();
-
-    final result = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF161616),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-            side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
-          ),
-          title: Text(
-            'Parent or guardian consent is required',
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 17,
-            ),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Users under 14 need consent from a parent or guardian.\nEnter their email address.',
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: controller,
-                keyboardType: TextInputType.emailAddress,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'Parent or guardian email',
-                  hintStyle: const TextStyle(color: Colors.white30),
-                  filled: true,
-                  fillColor: Colors.black.withValues(alpha: 0.5),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  prefixIcon: const Icon(
-                    Icons.email_outlined,
-                    color: Colors.white38,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(null),
-              child: Text(
-                'Later',
-                style: const TextStyle(color: Colors.white38),
-              ),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF4A90D9),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              onPressed: () {
-                final email = controller.text.trim();
-                Navigator.of(dialogContext).pop(email.isEmpty ? null : email);
-              },
-              child: Text(
-                'Send consent request',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-
-    controller.dispose();
-    return result;
   }
 
   Future<void> _grantSignupBonusIfPossible() async {
