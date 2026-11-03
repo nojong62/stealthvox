@@ -189,7 +189,10 @@ async function loadList() {
     const snap = await getDocs(query(collection(db, "coupons"),
       orderBy("createdAt", "desc"), limit(LIST_LIMIT)));
     const now = Date.now();
-    const rows = snap.docs.map((d) => {
+    // 한 명이라도 쓴 쿠폰을 위로. 같은 무리 안에서는 최근 발행순(쿼리가 이미 createdAt desc, 정렬은 안정).
+    const docs = [...snap.docs].sort((a, b) =>
+      Number((b.data().usedCount || 0) > 0) - Number((a.data().usedCount || 0) > 0));
+    const rows = docs.map((d) => {
       const c = d.data();
       const expired = typeof c.expiresAtMs === "number" && c.expiresAtMs <= now;
       const full = (c.usedCount || 0) >= c.maxUses;
