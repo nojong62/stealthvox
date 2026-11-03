@@ -265,8 +265,10 @@ function splitForGoogleTts(text, maxBytes = MAX_GOOGLE_TTS_INPUT_BYTES) {
 
 // Chirp runs clauses together across a comma ("회원님,PT 시간...",
 // "Yes, Mom"). Measured 2026-11-02: plain text left 0–120 ms at the comma in
-// both Korean and English; `[pause short]` gave 390–670 ms. So every locale
-// gets a short pause after every comma (incl. 、，،) without changing the
+// both Korean and English. `[pause short]` was not enough in English
+// (re-measured 2026-11-03: 150–280 ms on Charon, 3 runs each); `[pause]` gave
+// 410–830 ms in English and 600–720 ms in Korean. So every locale gets a
+// `[pause]` after every comma (incl. 、，،) without changing the
 // text shown in the UI or kept in history. Digit grouping ("1,000") is not a
 // clause break, and text that already holds brackets is left alone so it is
 // not misread as a pause tag.
@@ -274,7 +276,7 @@ function chirpInputWithCommaPauses(text) {
   const input = String(text || "").trim();
   if (input.includes("[") || input.includes("]")) return { text: input };
   const markup = input.replace(/(?<!\d)([,，、،])\s*(?=\S)|(?<=\d)([,，、،])(?!\d)\s*(?=\S)/gu,
-    (_, a, b) => (a || b) + " [pause short] ");
+    (_, a, b) => (a || b) + " [pause] ");
   if (markup === input) return { text: input };
   // Do not make a request that would exceed the provider's input cap solely
   // because the audio-only pause markers were added.

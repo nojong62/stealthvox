@@ -158,11 +158,11 @@ test("Google TTS input is split by UTF-8 bytes, not characters", () => {
 test("Chirp TTS pauses after every comma", () => {
   assert.deepEqual(
     chirpInputWithCommaPauses("네, 기본 포장은 무료예요."),
-    { markup: "네, [pause short] 기본 포장은 무료예요." },
+    { markup: "네, [pause] 기본 포장은 무료예요." },
   );
   assert.deepEqual(
     chirpInputWithCommaPauses("회원님,PT 시간 변경을 도와드릴게요."),
-    { markup: "회원님, [pause short] PT 시간 변경을 도와드릴게요." },
+    { markup: "회원님, [pause] PT 시간 변경을 도와드릴게요." },
   );
   assert.deepEqual(
     chirpInputWithCommaPauses("기본 포장은 무료예요."),
@@ -170,14 +170,14 @@ test("Chirp TTS pauses after every comma", () => {
   );
   assert.deepEqual(
     chirpInputWithCommaPauses("날씨가 좋고, 바람도 시원하고, 산책하기 좋아요."),
-    { markup: "날씨가 좋고, [pause short] 바람도 시원하고, [pause short] 산책하기 좋아요." },
+    { markup: "날씨가 좋고, [pause] 바람도 시원하고, [pause] 산책하기 좋아요." },
   );
 });
 
 test("Comma pause applies to English and CJK commas too", () => {
   assert.deepEqual(
     chirpInputWithCommaPauses("Yes, Mom. Still, I was wrong."),
-    { markup: "Yes, [pause short] Mom. Still, [pause short] I was wrong." },
+    { markup: "Yes, [pause] Mom. Still, [pause] I was wrong." },
   );
   assert.deepEqual(
     chirpInputWithCommaPauses("It costs 1,000 dollars."),
@@ -185,11 +185,11 @@ test("Comma pause applies to English and CJK commas too", () => {
   );
   assert.deepEqual(
     chirpInputWithCommaPauses("はい、わかりました。"),
-    { markup: "はい、 [pause short] わかりました。" },
+    { markup: "はい、 [pause] わかりました。" },
   );
   assert.deepEqual(
     chirpInputWithCommaPauses("好的，没问题。"),
-    { markup: "好的， [pause short] 没问题。" },
+    { markup: "好的， [pause] 没问题。" },
   );
 });
 
@@ -200,7 +200,7 @@ test("Comma pause skips digit grouping and bracketed text", () => {
   );
   assert.deepEqual(
     chirpInputWithCommaPauses("3, 4번 중에 고르세요."),
-    { markup: "3, [pause short] 4번 중에 고르세요." },
+    { markup: "3, [pause] 4번 중에 고르세요." },
   );
   assert.deepEqual(
     chirpInputWithCommaPauses("[참고] 네, 좋아요."),
