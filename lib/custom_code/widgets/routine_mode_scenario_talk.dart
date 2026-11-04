@@ -45,7 +45,6 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:record/record.dart';
 import '/custom_code/services/mic_record_config.dart';
-import '/custom_code/services/shorts_scenario_service.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -102,9 +101,6 @@ class ScenarioStore {
   static String situation = '';
   static String aiRole = '';
   static String userRole = '';
-
-  /// 쇼츠 링크로 만든 시나리오의 핵심 표현. 추천·직접 입력이면 빈 목록.
-  static List<ShortsExpression> expressions = const [];
 }
 
 /// ==================================================================== [Box
@@ -651,7 +647,7 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
         : '';
     return '''
 You are the assigned character inside a live $nativeLang scenario conversation.
-Situation: ${_aiSituation.trim()}
+Situation: ${_scenarioSituation.trim()}
 Your role: ${_scenarioPartnerLabel.trim()}
 User role: ${_scenarioUserLabel.trim()}
 ${_rolloverSummary.isEmpty ? '' : '''
@@ -793,12 +789,6 @@ $finalLanguageRule''';
   // 🎭 롤플레이 시나리오
   String _scenarioKeyword = "";
   String _scenarioSituation = "";
-
-  /// 쇼츠 표현(있으면)을 붙인 상황 — AI에게만 간다. 화면 제목·저장은
-  /// [_scenarioSituation] 그대로다.
-  List<ShortsExpression> _scenarioExpressions = const [];
-  String get _aiSituation =>
-      _scenarioSituation + shortsExpressionsPromptBlock(_scenarioExpressions);
   String _scenarioAiRole = "";
   String _scenarioUserRole = "";
   bool _isGeneratingScenario = false;
@@ -1156,7 +1146,6 @@ $finalLanguageRule''';
             ScenarioStore.userRole.isNotEmpty) {
           setState(() {
             _scenarioSituation = ScenarioStore.situation;
-            _scenarioExpressions = ScenarioStore.expressions;
             _scenarioAiRole = ScenarioStore.aiRole;
             _scenarioUserRole = ScenarioStore.userRole;
             _scenarioKeyword = ScenarioStore.situation;
@@ -1205,7 +1194,6 @@ $finalLanguageRule''';
         setState(() {
           _scenarioKeyword = result['situation'] ?? '';
           _scenarioSituation = result['situation'] ?? '';
-          _scenarioExpressions = const [];
           _scenarioAiRole = result['ai_role'] ?? '';
           _scenarioUserRole = result['user_role'] ?? '';
           _sessionDocId = null;
@@ -1215,7 +1203,6 @@ $finalLanguageRule''';
         });
         // 🛡️ [v4] 재진입 보존용 홀더 동기화
         ScenarioStore.situation = _scenarioSituation;
-        ScenarioStore.expressions = const [];
         ScenarioStore.aiRole = _scenarioAiRole;
         ScenarioStore.userRole = _scenarioUserRole;
         _maybeAutoStartScenario();
@@ -1356,7 +1343,7 @@ $finalLanguageRule''';
       var aiKorean = await ScenarioBrain.generateOpener(
         apiKey: _openAiKey,
         onLog: (message) => _log('🧪 [AI-HTTP]', 'opener $message'),
-        situation: _aiSituation,
+        situation: _scenarioSituation,
         aiRole: _scenarioPartnerLabel.trim(),
         userRole: _scenarioUserLabel.trim(),
         languageName: nativeLang,
@@ -1443,7 +1430,7 @@ $finalLanguageRule''';
 
       await for (final chunk in ScenarioBrain.generateAiOpener(
         apiKey: _openAiKey,
-        situation: _aiSituation,
+        situation: _scenarioSituation,
         aiRole: _scenarioAiRole,
         userRole: _scenarioUserRole,
         targetLang: targetLangName,
@@ -3579,7 +3566,7 @@ $finalLanguageRule''';
         targetLang: targetLangName,
         contextStr: contextStr,
         userRole: _scenarioUserRole,
-        situation: _aiSituation,
+        situation: _scenarioSituation,
         isCorrectionRetry: isCorrectionRetry,
         disableHeardConfirmation: understandingConfirmed,
       );
@@ -3792,7 +3779,7 @@ $finalLanguageRule''';
           apiKey: _openAiKey,
           userTargetText: lastUserTarget,
           contextStr: regenContextStr,
-          situation: _aiSituation,
+          situation: _scenarioSituation,
           aiRole: _scenarioAiRole,
           userRole: _scenarioUserRole,
           myTarget: targetLangName,
@@ -3970,7 +3957,7 @@ $finalLanguageRule''';
         apiKey: _openAiKey,
         userTargetText: userTargetText,
         contextStr: latestContextStr,
-        situation: _aiSituation,
+        situation: _scenarioSituation,
         aiRole: _scenarioAiRole,
         userRole: _scenarioUserRole,
         myTarget: targetLangName, // 🌐 [v3.1] 유저가 선택한 타겟 언어

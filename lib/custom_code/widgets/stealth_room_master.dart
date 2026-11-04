@@ -19,7 +19,6 @@ import '/custom_code/actions/index.dart';
 import 'dart:ui';
 import 'dart:async';
 import 'package:flutter/services.dart'; // 쇼츠 링크 클립보드
-import 'package:url_launcher/url_launcher.dart'; // 쇼츠 출처 링크
 import '/custom_code/services/shorts_scenario_service.dart';
 import 'dart:convert';
 import 'dart:math'; // 서클 분야 순서 셔플
@@ -99,8 +98,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   // 🎞️ 쇼츠 링크로 만든 시나리오의 핵심 표현(위 Target, 아래 작은 Origin).
   //   추천을 다시 받으면 비운다 — 다른 장면의 표현이 남으면 안 된다.
   bool _isReadingShorts = false;
-  List<ShortsExpression> _shortsExpressions = const [];
-  String _shortsSourceUrl = '';
+  bool _scenarioFromShorts = false;
+  final TextEditingController _shortsUrlController = TextEditingController();
 
   /// 설정 화면과 추천 결과는 로비 Chat Lang 하나만 따른다.
   String get _chatLanguage => FFAppState().chatLang.trim().isEmpty
@@ -329,6 +328,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     StealthRoomMaster.openBoardHostMatch = null;
     _circleController.dispose();
     _situationController.dispose();
+    _shortsUrlController.dispose();
     _aiRoleController.dispose();
     _userRoleController.dispose();
     unawaited(DeepgramPrewarmSession.instance.discard(reason: 'room_dispose'));
@@ -491,8 +491,6 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
         _situationController.text = result['situation'] ?? '';
         _aiRoleController.text = result['ai_role'] ?? '';
         _userRoleController.text = result['user_role'] ?? '';
-        _shortsExpressions = const [];
-        _shortsSourceUrl = '';
       });
     } catch (error) {
       final code = error is ScenarioRecommendationException
@@ -518,100 +516,219 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     }
   }
 
-  /// 쇼츠 링크 창. 클립보드에 유튜브 링크가 있으면 미리 넣어 둔다.
-  Future<void> _askShortsLink() async {
-    final copy = _setupCopy;
-    String initial = '';
+  /// 쇼츠 칸으로 바꾼다. 클립보드에 유튜브 링크가 있으면 미리 넣어 둔다.
+  Future<void> _selectShortsSource() async {
+    setState(() => _scenarioFromShorts = true);
+    if (_shortsUrlController.text.trim().isNotEmpty) return;
     try {
       final clip = (await Clipboard.getData(Clipboard.kTextPlain))?.text ?? '';
-      if (looksLikeYoutubeLink(clip)) initial = clip.trim();
+      if (mounted && looksLikeYoutubeLink(clip)) {
+        setState(() => _shortsUrlController.text = clip.trim());
+      }
     } catch (_) {}
-    if (!mounted) return;
-    final controller = TextEditingController(text: initial);
-    const accent = Color(0xFF16A34A);
-    final url = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: Text(copy['shortsLinkTitle'],
-            style: const TextStyle(color: Colors.white, fontSize: 18)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(copy['shortsLinkBody'],
-                style: const TextStyle(
-                    color: Colors.white60, fontSize: 13, height: 1.5)),
-            const SizedBox(height: 12),
-            // 유의 사항 — 만 18세 이상, 공개 영상, 개인 연습용(Gemini API 약관).
-            Container(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFF121212),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(copy['shortsLinkNotice'],
-                  style: const TextStyle(
-                      color: Colors.white54, fontSize: 12, height: 1.6)),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: controller,
-              autofocus: initial.isEmpty,
-              keyboardType: TextInputType.url,
-              style: const TextStyle(color: Colors.white, fontSize: 14),
-              decoration: InputDecoration(
-                hintText: 'https://youtube.com/shorts/...',
-                hintStyle: const TextStyle(color: Colors.white30),
-                filled: true,
-                fillColor: const Color(0xFF121212),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: accent, width: 1.5),
-                ),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(copy['cancel'],
-                style: const TextStyle(color: Colors.white54)),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            style: FilledButton.styleFrom(backgroundColor: accent),
-            child: Text(copy['shortsLinkGo']),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (url == null || url.isEmpty || !mounted) return;
-    await _readShortsLink(url);
   }
 
+  void _submitShortsLink() {
+    final url = _shortsUrlController.text.trim();
+    if (url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(_setupCopy['shortsError_notYoutube']),
+      ));
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    _readShortsLink(url);
+  }
+
+  /// 상황 추천 | 쇼츠 링크 — 둘 중 하나를 고르는 막대. 쇼츠를 고르면 그 자리에
+  /// 링크 칸이 펼쳐진다(팝업은 자판에 밀려 깨졌다, 11-05 실기기).
+  Widget _buildScenarioSourcePicker(Color accent) {
+    final copy = _setupCopy;
+    final busy = _isRecommendingScenario || _isReadingShorts;
+    Widget segment({
+      required bool selected,
+      required IconData icon,
+      required String label,
+      required bool loading,
+      required VoidCallback onTap,
+    }) {
+      return Expanded(
+        child: GestureDetector(
+          onTap: busy ? null : onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            height: 44,
+            decoration: BoxDecoration(
+              color: selected ? accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(22),
+            ),
+            alignment: Alignment.center,
+            child: loading
+                ? SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: selected ? Colors.white : accent,
+                    ),
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(icon,
+                          size: 17,
+                          color: selected ? Colors.white : Colors.white60),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          label,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: selected ? Colors.white : Colors.white60,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A1A),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: const Color(0x1FFFFFFF)),
+          ),
+          child: Row(
+            children: [
+              segment(
+                selected: !_scenarioFromShorts,
+                icon: Icons.auto_awesome,
+                label: copy['scenarioRecommend'],
+                loading: _isRecommendingScenario,
+                onTap: () {
+                  setState(() => _scenarioFromShorts = false);
+                  _recommendScenario();
+                },
+              ),
+              segment(
+                selected: _scenarioFromShorts,
+                icon: Icons.smart_display_outlined,
+                label: copy['shortsLink'],
+                loading: false,
+                onTap: _selectShortsSource,
+              ),
+            ],
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          alignment: Alignment.topCenter,
+          child: !_scenarioFromShorts
+              ? const SizedBox(width: double.infinity)
+              : Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextField(
+                        controller: _shortsUrlController,
+                        keyboardType: TextInputType.url,
+                        textInputAction: TextInputAction.go,
+                        onSubmitted: (_) => _submitShortsLink(),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: copy['shortsLinkTitle'],
+                          hintStyle: const TextStyle(
+                              color: Colors.white30, fontSize: 14),
+                          filled: true,
+                          fillColor: const Color(0xFF1A1A1A),
+                          contentPadding:
+                              const EdgeInsets.fromLTRB(18, 16, 6, 16),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide:
+                                const BorderSide(color: Color(0x1FFFFFFF)),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide(color: accent, width: 1.5),
+                          ),
+                          suffixIcon: Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: _isReadingShorts
+                                ? Padding(
+                                    padding: const EdgeInsets.all(14),
+                                    child: SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: accent),
+                                    ),
+                                  )
+                                : TextButton(
+                                    onPressed: _submitShortsLink,
+                                    style: TextButton.styleFrom(
+                                        foregroundColor: accent),
+                                    child: Text(
+                                      copy['shortsLinkGo'],
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ),
+                      // 유의 사항 — 만 18세 이상, 공개 영상, 개인 연습용(Gemini API 약관).
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(6, 10, 6, 0),
+                        child: Text(
+                          copy['shortsLinkNotice'],
+                          style: const TextStyle(
+                              color: Colors.white38,
+                              fontSize: 11.5,
+                              height: 1.6),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  /// 쇼츠 링크 → 공부방을 새로 만들고 바로 그 방으로 들어간다. 대화방은 거치지
+  /// 않는다(11-05 실장님: 정리한 대화로 공부방에서 연습한다).
   Future<void> _readShortsLink(String url) async {
     if (_isReadingShorts) return;
     setState(() => _isReadingShorts = true);
     try {
       final target = FFAppState().targetLang.trim();
-      final result = await ShortsScenarioService.extract(
+      final roomRef = await ShortsScenarioService.createStudyRoom(
         url: url,
         originLanguage: _chatLanguage,
         targetLanguage: target.isEmpty ? 'English' : target,
       );
       if (!mounted) return;
-      setState(() {
-        _situationController.text = result.situation;
-        _aiRoleController.text = result.aiRole;
-        _userRoleController.text = result.userRole;
-        _shortsExpressions = result.expressions;
-        _shortsSourceUrl = result.sourceUrl;
-      });
+      _shortsUrlController.clear();
+      // 공부방 안은 과금 구간이다(목록 첫 페이지만 무과금).
+      if (!guardBillingEntry(context)) return;
+      context.pushNamed(
+        'ChatDetail',
+        queryParameters: {
+          'historyRef': serializeParam(roomRef, ParamType.DocumentReference),
+        }.withoutNulls,
+      );
     } on ShortsScenarioException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -620,95 +737,6 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     } finally {
       if (mounted) setState(() => _isReadingShorts = false);
     }
-  }
-
-  /// 핵심 표현 목록 — 위 Target(큰 글씨), 아래 Origin(작은 글씨).
-  Widget _buildShortsExpressions(Color accent) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                _setupCopy['shortsExpressions'],
-                style: const TextStyle(
-                    color: Colors.white54, fontSize: 13, height: 1.4),
-              ),
-            ),
-            TextButton(
-              onPressed: () => setState(() {
-                _shortsExpressions = const [];
-                _shortsSourceUrl = '';
-              }),
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.white38,
-                minimumSize: const Size(0, 36),
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-              ),
-              child: Text(_setupCopy['shortsExpressionsClear'],
-                  style: const TextStyle(fontSize: 12)),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Container(
-          padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A1A1A),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0x1FFFFFFF)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var i = 0; i < _shortsExpressions.length; i++) ...[
-                if (i > 0) const SizedBox(height: 14),
-                Text(
-                  _shortsExpressions[i].text,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    height: 1.4,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (_shortsExpressions[i].meaning.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Text(
-                      _shortsExpressions[i].meaning,
-                      style: const TextStyle(
-                          color: Colors.white54, fontSize: 12.5, height: 1.4),
-                    ),
-                  ),
-              ],
-            ],
-          ),
-        ),
-        // 출처 — 원본 쇼츠 링크. 누르면 유튜브로 연다.
-        if (_shortsSourceUrl.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 8, left: 4),
-            child: InkWell(
-              onTap: () => launchUrl(Uri.parse(_shortsSourceUrl),
-                  mode: LaunchMode.externalApplication),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Text(
-                  '${_setupCopy['shortsSource']} ${_shortsSourceUrl.replaceFirst('https://www.', '')}',
-                  style: TextStyle(
-                    color: accent.withValues(alpha: 0.8),
-                    fontSize: 12,
-                    decoration: TextDecoration.underline,
-                    decorationColor: accent.withValues(alpha: 0.5),
-                  ),
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
   }
 
   Future<void> _enterScenarioTalk() async {
@@ -727,7 +755,6 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     _freeTalkRoom = freeTalk;
     // 방은 이 홀더를 읽어 시나리오를 세팅한다(재진입 보존과 같은 경로).
     ScenarioStore.situation = situation;
-    ScenarioStore.expressions = _shortsExpressions;
     ScenarioStore.aiRole = aiRole;
     ScenarioStore.userRole = userRole;
     setState(() {
@@ -1535,7 +1562,7 @@ Return ONLY valid JSON: {"name":"..."}.
     required List<Widget> fields,
     required String startLabel,
     required VoidCallback onStart,
-    Widget? secondaryAction,
+    Widget? actionArea,
   }) {
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
     final visibleHeight = _setupVisibleHeight(keyboardInset);
@@ -1616,11 +1643,10 @@ Return ONLY valid JSON: {"name":"..."}.
                     const SizedBox(height: 26),
                     // 추천 알약은 글자 폭만 쓴다 — 전체 폭을 채우면 아래
                     // 시작 버튼과 무게가 같아져 무엇이 결론인지 흐려진다.
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                    OutlinedButton(
+                    actionArea ??
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton(
                         onPressed: recommending ? null : onRecommend,
                         style: OutlinedButton.styleFrom(
                           foregroundColor: accent,
@@ -1649,8 +1675,6 @@ Return ONLY valid JSON: {"name":"..."}.
                                 ),
                               ),
                       ),
-                        if (secondaryAction != null) secondaryAction,
-                      ],
                     ),
                     const SizedBox(height: 26),
                     ...fields,
@@ -1714,34 +1738,9 @@ Return ONLY valid JSON: {"name":"..."}.
       title: copy['scenarioTitle'],
       subtitle: copy['scenarioSubtitle'],
       recommendLabel: copy['scenarioRecommend'],
-      recommending: _isRecommendingScenario || _isReadingShorts,
+      recommending: _isRecommendingScenario,
       onRecommend: _recommendScenario,
-      secondaryAction: OutlinedButton.icon(
-        onPressed: _isRecommendingScenario || _isReadingShorts
-            ? null
-            : _askShortsLink,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: accent,
-          side: BorderSide(color: accent, width: 1.4),
-          shape: const StadiumBorder(),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
-        ),
-        icon: _isReadingShorts
-            ? SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2, color: accent),
-              )
-            : const Icon(Icons.smart_display_outlined, size: 18),
-        label: Text(
-          copy['shortsLink'],
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.4,
-          ),
-        ),
-      ),
+      actionArea: _buildScenarioSourcePicker(accent),
       fields: [
         _setupField(_situationController, accent, copy['situation'],
             copy['situationHint']),
@@ -1751,10 +1750,6 @@ Return ONLY valid JSON: {"name":"..."}.
         const SizedBox(height: 18),
         _setupField(_userRoleController, accent, copy['userRole'],
             copy['userRoleHint']),
-        if (_shortsExpressions.isNotEmpty) ...[
-          const SizedBox(height: 24),
-          _buildShortsExpressions(accent),
-        ],
       ],
       startLabel: copy['scenarioStart'],
       onStart: _enterScenarioTalk,

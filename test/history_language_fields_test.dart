@@ -35,6 +35,8 @@ const List<String> _writers = <String>[
   'lib/custom_code/widgets/chat_history_list_master.dart',
   // Free Talk 방이 끝난 뒤 짝을 로비 Origin/Target으로 되돌리는 자리.
   'lib/custom_code/services/free_talk_history_flip.dart',
+  // 쇼츠 링크로 공부방을 바로 만드는 자리(로비 Origin/Target).
+  'lib/custom_code/services/shorts_scenario_service.dart',
 ];
 
 String _read(String path) =>

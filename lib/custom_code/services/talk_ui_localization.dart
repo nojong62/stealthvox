@@ -48,18 +48,14 @@ class TalkUiCopy {
       'scenarioRecommendError':
           'Could not suggest a scenario. Please try again.',
       'scenarioRequired': 'Please fill in the situation and both roles.',
-      'shortsLink': 'Create from a Shorts link',
-      'shortsLinkTitle': 'Paste a Shorts link',
-      'shortsLinkBody':
-          'Paste a YouTube Shorts link and we’ll build the scenario and roles around the scene, then pull out the expressions used in the video.',
+      'shortsLink': 'Shorts link',
+      'shortsLinkTitle': 'Paste a YouTube Shorts link',
       'shortsLinkGo': 'Create',
       'shortsLinkNotice':
-          'Please note\n· For users aged 18 and over only. If you’re under 18, please use Suggest a scenario or enter your own.\n· Only public YouTube videos can be analyzed.\n· We don’t store the video or its full dialogue—only notes on the scene and a few short expressions.\n· The video’s copyright belongs to its creator. Please use it for personal practice only.',
+          'Please note\n· For users aged 18 and over only. If you’re under 18, please use Suggest a scenario or enter your own.\n· Only public YouTube videos can be analyzed.\n· We turn the conversations in the video into a dialogue between two people and add it to your study room as a new room. We don’t store the video itself.\n· The video’s copyright belongs to its creator. Please use it for personal practice only.',
       'shortsSource': 'Source:',
       'shortsError_adultOnly':
           'Shorts links are only available to users 18 or older. Try a suggested scenario or enter your own.',
-      'shortsExpressions': 'Expressions from Shorts',
-      'shortsExpressionsClear': 'Clear',
       'shortsError_notYoutube':
           'That is not a YouTube link. Please paste a Shorts link.',
       'shortsError_unavailable':
@@ -108,15 +104,12 @@ class TalkUiCopy {
       'scenarioStart': '상황 대화 시작',
       'scenarioRecommendError': '상황을 추천하지 못했습니다. 다시 눌러 주세요.',
       'scenarioRequired': '상황과 두 역할을 모두 채워 주세요.',
-      'shortsLink': '쇼츠 링크로 만들기',
-      'shortsLinkTitle': '쇼츠 링크 넣기',
-      'shortsLinkBody': '유튜브 쇼츠 링크를 붙여 넣으면 그 장면으로 상황과 역할을 채워 드려요. 영상 속 표현도 함께 정리해 드려요.',
+      'shortsLink': '쇼츠 링크',
+      'shortsLinkTitle': '유튜브 쇼츠 링크 붙여넣기',
       'shortsLinkGo': '만들기',
-      'shortsLinkNotice': '유의 사항\n· 만 18세 이상만 쓸 수 있어요. 18세 미만은 상황 추천이나 직접 입력으로 이용해 주세요.\n· 공개된 유튜브 영상만 읽을 수 있어요.\n· 영상 자체와 대사 전체는 저장하지 않고, 장면과 짧은 표현만 정리해요.\n· 영상의 저작권은 만든 분에게 있어요. 개인 연습용으로만 써 주세요.',
+      'shortsLinkNotice': '유의 사항\n· 만 18세 이상만 쓸 수 있어요. 18세 미만은 상황 추천이나 직접 입력으로 이용해 주세요.\n· 공개된 유튜브 영상만 읽을 수 있어요.\n· 영상 속 대화를 두 사람 대화로 정리해 내 공부방에 새 방으로 넣어 드려요. 영상 자체는 저장하지 않아요.\n· 영상의 저작권은 만든 분에게 있어요. 개인 연습용으로만 써 주세요.',
       'shortsSource': '출처:',
       'shortsError_adultOnly': '쇼츠 링크는 만 18세 이상만 쓸 수 있어요. 상황 추천이나 직접 입력으로 이용해 주세요.',
-      'shortsExpressions': '쇼츠 속 표현',
-      'shortsExpressionsClear': '지우기',
       'shortsError_notYoutube': '유튜브 링크가 아니에요. 쇼츠 링크를 붙여 넣어 주세요.',
       'shortsError_unavailable': '이 영상을 볼 수 없어요. 공개된 영상인지 확인해 주세요.',
       'shortsError_unusable': '이 영상에는 따라 해 볼 대화가 없어요. 다른 쇼츠로 해 보세요.',
@@ -161,23 +154,19 @@ class TalkUiCopy {
       'scenarioRecommendError': 'シナリオを提案できませんでした。もう一度お試しください。',
       'scenarioRequired': '状況と両方の役割を入力してください。',
       'shortsError_limit': '今日のShortsリンクはすべて使い切りました。明日またお試しください。',
-      'shortsLink': 'ショート動画のリンクから作成',
-      'shortsExpressions': 'ショート動画の表現',
+      'shortsLink': 'ショート動画のリンク',
       'shortsError_notYoutube': 'YouTubeのリンクではありません。Shortsのリンクを貼り付けてください。',
       'shortsError_adultOnly':
           'ショート動画のリンクは18歳以上の方のみ利用できます。シナリオのおすすめを選ぶか、自分で入力してください。',
       'shortsError_failed': '動画を読み込めませんでした。少し時間をおいて、もう一度お試しください。',
-      'shortsLinkTitle': 'ショート動画のリンクを貼り付ける',
+      'shortsLinkTitle': 'YouTube ショートのリンクを貼り付ける',
       'shortsLinkGo': '作成',
-      'shortsLinkBody':
-          'YouTubeショートのリンクを貼り付けると、そのシーンをもとに状況や役割を設定し、動画に出てくる表現もまとめます。',
       'shortsError_unavailable': 'この動画は視聴できません。公開されている動画か確認してください。',
       'shortsSource': '出典：',
       'shortsError_noTime': '残り時間がないと、ショート動画のリンクは使えません。',
       'shortsError_unusable': 'この動画には練習できる会話がありません。別のショート動画を試してください。',
       'shortsLinkNotice':
-          'ご利用にあたって\n· 18歳以上の方のみご利用いただけます。18歳未満の方は、「シチュエーションを提案」または自由入力をご利用ください。\n· 公開されているYouTube動画のみ読み取れます。\n· 動画そのものや会話の全文は保存せず、シーンと短い表現のみをまとめます。\n· 動画の著作権は制作者に帰属します。個人の練習目的でのみご利用ください。',
-      'shortsExpressionsClear': '消去',
+          'ご利用にあたって\n· 18歳以上の方のみご利用いただけます。18歳未満の方は、「シチュエーションを提案」または自由入力をご利用ください。\n· 公開されているYouTube動画のみ読み取れます。\n· 動画内の会話を2人の会話にまとめ、学習ルームに新しいルームとして追加します。動画そのものは保存しません。\n· 動画の著作権は制作者に帰属します。個人の練習目的でのみご利用ください。',
       'circleTitle': 'Circle Talk\n設定',
       'circleSubtitle': '提案を受けるか、好きなサークルを入力できます。',
       'circleRecommend': 'サークルを提案',
@@ -215,21 +204,18 @@ class TalkUiCopy {
       'scenarioStart': '开始Scenario Talk',
       'scenarioRecommendError': '无法推荐情境，请重试。',
       'scenarioRequired': '请填写情境和两个角色。',
-      'shortsLinkTitle': '粘贴 Shorts 链接',
+      'shortsLinkTitle': '粘贴 YouTube Shorts 链接',
       'shortsError_limit': '今天的 Shorts 链接已经用完了，请明天再试。',
       'shortsError_unavailable': '无法观看此视频。请确认视频是否已公开。',
       'shortsLinkGo': '创建',
       'shortsError_adultOnly': '仅限年满18岁的用户使用 Shorts 链接。请使用情景推荐，或自行输入。',
       'shortsError_noTime': '有剩余时间才能使用 Shorts 链接。',
-      'shortsExpressions': '短视频中的表达',
       'shortsSource': '来源：',
       'shortsLinkNotice':
-          '请注意\n· 仅限年满18岁者使用。未满18岁请使用“推荐情境”或自行输入。\n· 仅支持读取公开的 YouTube 视频。\n· 我们不会保存视频本身或完整对白，只整理场景和简短表达。\n· 视频版权归创作者所有。请仅用于个人练习。',
-      'shortsLink': '通过 Shorts 链接创建',
-      'shortsExpressionsClear': '清除',
+          '请注意\n· 仅限年满18岁者使用。未满18岁请使用“推荐情境”或自行输入。\n· 仅支持读取公开的 YouTube 视频。\n· 我们会将视频中的对话整理成两人对话，作为新房间添加到你的学习空间。不会保存视频本身。\n· 视频版权归创作者所有。请仅用于个人练习。',
+      'shortsLink': 'Shorts 链接',
       'shortsError_unusable': '这段视频没有可供练习的对话。试试其他 Shorts。',
       'shortsError_failed': '无法读取视频。请稍后再试。',
-      'shortsLinkBody': '粘贴 YouTube Shorts 链接，我们就会根据视频片段设置情境和角色，并整理视频中用到的表达。',
       'shortsError_notYoutube': '这不是 YouTube 链接。请粘贴 Shorts 链接。',
       'circleTitle': 'Circle Talk\n设置',
       'circleSubtitle': '可以获取推荐，也可以自行输入想要的社群。',
@@ -273,25 +259,21 @@ class TalkUiCopy {
       'shortsLinkGo': 'Crear',
       'shortsError_unusable':
           'Este video no tiene ningún diálogo para practicar. Prueba con otro Short.',
-      'shortsLinkBody':
-          'Pega el enlace de un YouTube Short y crearemos una situación y unos roles a partir de esa escena. También recopilaremos las expresiones que aparecen en el video.',
       'shortsLinkNotice':
-          'Ten en cuenta\n· Solo para mayores de 18 años. Si tienes menos de 18, usa «Sugerir una situación» o introduce una propia.\n· Solo se pueden analizar vídeos públicos de YouTube.\n· No guardamos el vídeo ni todos sus diálogos, solo una descripción de la escena y algunas expresiones breves.\n· Los derechos de autor del vídeo pertenecen a su creador. Úsalo solo para practicar por tu cuenta.',
+          'Ten en cuenta\n· Solo para mayores de 18 años. Si tienes menos de 18, usa «Sugerir una situación» o introduce una propia.\n· Solo se pueden analizar vídeos públicos de YouTube.\n· Convertimos los diálogos del vídeo en una conversación entre dos personas y la añadimos a tu sala de estudio como una sala nueva. No guardamos el vídeo.\n· Los derechos de autor del vídeo pertenecen a su creador. Úsalo solo para practicar por tu cuenta.',
       'shortsError_noTime':
           'Necesitas tener tiempo disponible para usar enlaces de Shorts.',
       'shortsSource': 'Fuente:',
       'shortsError_unavailable':
           'No se puede ver este video. Comprueba que sea público.',
-      'shortsLinkTitle': 'Pega un enlace de Shorts',
+      'shortsLinkTitle': 'Pega un enlace de YouTube Shorts',
       'shortsError_adultOnly':
           'Los enlaces de Shorts solo están disponibles para mayores de 18 años. Elige una situación recomendada o escribe la tuya.',
       'shortsError_notYoutube':
           'Ese no es un enlace de YouTube. Pega un enlace de Shorts.',
       'shortsError_failed':
           'No se pudo cargar el video. Inténtalo de nuevo en un momento.',
-      'shortsLink': 'Crear desde un enlace de Shorts',
-      'shortsExpressions': 'Expresiones de Shorts',
-      'shortsExpressionsClear': 'Borrar',
+      'shortsLink': 'Enlace de Shorts',
       'shortsError_limit':
           'Ya has usado todos los enlaces de Shorts de hoy. Vuelve a intentarlo mañana.',
       'circleTitle': 'Circle Talk\nConfiguración',
@@ -338,15 +320,13 @@ class TalkUiCopy {
       'shortsLinkGo': 'Créer',
       'shortsError_limit':
           'Vous avez utilisé tous les liens Shorts d’aujourd’hui. Réessayez demain.',
-      'shortsLinkBody':
-          'Collez le lien d’un YouTube Short : nous créerons une situation et des rôles à partir de la scène, et relèverons aussi les expressions utilisées dans la vidéo.',
       'shortsError_unusable':
           'Cette vidéo ne contient aucun dialogue à pratiquer. Essayez un autre Short.',
       'shortsLinkNotice':
-          'À noter\n· Réservé aux personnes de 18 ans et plus. Si vous avez moins de 18 ans, utilisez « Suggérer une situation » ou saisissez la vôtre.\n· Seules les vidéos YouTube publiques peuvent être analysées.\n· Nous ne conservons ni la vidéo ni l’intégralité des dialogues, seulement la scène et quelques expressions courtes.\n· Les droits d’auteur de la vidéo appartiennent à son créateur. Utilisez-la uniquement pour vous entraîner à titre personnel.',
+          'À noter\n· Réservé aux personnes de 18 ans et plus. Si vous avez moins de 18 ans, utilisez « Suggérer une situation » ou saisissez la vôtre.\n· Seules les vidéos YouTube publiques peuvent être analysées.\n· Nous transformons les dialogues de la vidéo en une conversation entre deux personnes et l’ajoutons à votre espace d’étude sous forme de nouvelle salle. Nous ne conservons pas la vidéo elle-même.\n· Les droits d’auteur de la vidéo appartiennent à son créateur. Utilisez-la uniquement pour vous entraîner à titre personnel.',
       'shortsError_noTime':
           'Il vous faut du temps restant pour utiliser les liens Shorts.',
-      'shortsLinkTitle': 'Collez un lien Shorts',
+      'shortsLinkTitle': 'Collez un lien YouTube Shorts',
       'shortsSource': 'Source :',
       'shortsError_adultOnly':
           'Les liens Shorts sont réservés aux personnes de 18 ans et plus. Choisissez une situation suggérée ou saisissez la vôtre.',
@@ -356,9 +336,7 @@ class TalkUiCopy {
           'Impossible de regarder cette vidéo. Vérifiez qu’elle est publique.',
       'shortsError_failed':
           'Impossible de lire la vidéo. Veuillez réessayer dans un instant.',
-      'shortsLink': 'Créer à partir d’un lien Shorts',
-      'shortsExpressions': 'Expressions des Shorts',
-      'shortsExpressionsClear': 'Effacer',
+      'shortsLink': 'Lien Shorts',
       'circleTitle': 'Circle Talk\nParamètres',
       'circleSubtitle':
           'Recevez une suggestion ou saisissez le cercle souhaité.',
@@ -399,30 +377,26 @@ class TalkUiCopy {
       'scenarioRecommendError':
           'Szenario konnte nicht vorgeschlagen werden. Bitte erneut versuchen.',
       'scenarioRequired': 'Bitte Situation und beide Rollen ausfüllen.',
-      'shortsExpressionsClear': 'Löschen',
       'shortsError_limit':
           'Du hast alle Shorts-Links für heute aufgebraucht. Versuch es morgen noch einmal.',
       'shortsError_failed':
           'Das Video konnte nicht geladen werden. Bitte versuche es gleich noch einmal.',
-      'shortsLink': 'Über einen Shorts-Link erstellen',
+      'shortsLink': 'Shorts-Link',
       'shortsError_unusable':
           'In diesem Video gibt es keinen Dialog zum Üben. Probier einen anderen Short aus.',
       'shortsError_noTime':
           'Du brauchst noch verfügbare Zeit, um Shorts-Links zu nutzen.',
       'shortsError_adultOnly':
           'Shorts-Links sind erst ab 18 Jahren verfügbar. Wähle einen Szenario-Vorschlag aus oder gib selbst einen ein.',
-      'shortsLinkBody':
-          'Füge einen YouTube-Shorts-Link ein. Wir erstellen passend zur Szene eine Situation und Rollen und sammeln außerdem die Ausdrücke aus dem Video.',
       'shortsError_notYoutube':
           'Das ist kein YouTube-Link. Bitte füge einen Shorts-Link ein.',
       'shortsSource': 'Quelle:',
-      'shortsLinkTitle': 'Shorts-Link einfügen',
+      'shortsLinkTitle': 'YouTube-Shorts-Link einfügen',
       'shortsError_unavailable':
           'Dieses Video ist nicht verfügbar. Bitte prüfen Sie, ob es öffentlich ist.',
       'shortsLinkGo': 'Erstellen',
       'shortsLinkNotice':
-          'Bitte beachten\n· Nur für Personen ab 18 Jahren. Wenn du unter 18 bist, nutze „Situation vorschlagen“ oder gib selbst eine ein.\n· Es können nur öffentliche YouTube-Videos gelesen werden.\n· Wir speichern weder das Video selbst noch den vollständigen Dialog, sondern nur die Szene und einige kurze Ausdrücke.\n· Das Urheberrecht am Video liegt bei der erstellenden Person. Bitte nutze es nur zum persönlichen Üben.',
-      'shortsExpressions': 'Ausdrücke aus Shorts',
+          'Bitte beachten\n· Nur für Personen ab 18 Jahren. Wenn du unter 18 bist, nutze „Situation vorschlagen“ oder gib selbst eine ein.\n· Es können nur öffentliche YouTube-Videos gelesen werden.\n· Wir fassen die Gespräche im Video als Dialog zwischen zwei Personen zusammen und fügen ihn deinem Lernraum als neuen Raum hinzu. Das Video selbst speichern wir nicht.\n· Das Urheberrecht am Video liegt bei der erstellenden Person. Bitte nutze es nur zum persönlichen Üben.',
       'circleTitle': 'Circle Talk\nEinstellungen',
       'circleSubtitle':
           'Lass dir etwas vorschlagen oder gib deinen Kreis selbst ein.',
@@ -465,21 +439,17 @@ class TalkUiCopy {
       'shortsSource': 'स्रोत:',
       'shortsError_failed':
           'वीडियो पढ़ नहीं पाए। कृपया कुछ देर बाद फिर से कोशिश करें।',
-      'shortsLink': 'Shorts लिंक से बनाएँ',
-      'shortsExpressions': 'शॉर्ट्स में इस्तेमाल होने वाले वाक्यांश',
-      'shortsExpressionsClear': 'मिटाएँ',
-      'shortsLinkTitle': 'Shorts लिंक पेस्ट करें',
+      'shortsLink': 'Shorts लिंक',
+      'shortsLinkTitle': 'YouTube Shorts का लिंक पेस्ट करें',
       'shortsError_noTime':
           'Shorts लिंक इस्तेमाल करने के लिए आपके पास समय बचा होना चाहिए।',
-      'shortsLinkBody':
-          'YouTube Shorts का लिंक पेस्ट करें। हम उस दृश्य के आधार पर स्थिति और भूमिकाएँ तैयार करेंगे और वीडियो में इस्तेमाल हुए वाक्यांश भी चुनकर देंगे।',
       'shortsError_limit':
           'आज के सभी Shorts लिंक इस्तेमाल हो चुके हैं। कृपया कल फिर से कोशिश करें।',
       'shortsLinkGo': 'बनाएं',
       'shortsError_unusable':
           'इस वीडियो में अभ्यास करने के लिए कोई बातचीत नहीं है। कोई दूसरा Short आज़माएँ।',
       'shortsLinkNotice':
-          'कृपया ध्यान दें\n· केवल 18 वर्ष या उससे अधिक उम्र के लोग इसका उपयोग कर सकते हैं। 18 वर्ष से कम उम्र के लोग “स्थिति सुझाएँ” या अपनी स्थिति खुद दर्ज करें।\n· केवल सार्वजनिक YouTube वीडियो पढ़े जा सकते हैं।\n· हम वीडियो या उसके पूरे संवाद को सेव नहीं करते, सिर्फ़ दृश्य और कुछ छोटे वाक्यांशों को संकलित करते हैं।\n· वीडियो का कॉपीराइट उसके निर्माता के पास है। कृपया इसका उपयोग केवल निजी अभ्यास के लिए करें।',
+          'कृपया ध्यान दें\n· केवल 18 वर्ष या उससे अधिक उम्र के लोग इसका उपयोग कर सकते हैं। 18 वर्ष से कम उम्र के लोग “स्थिति सुझाएँ” या अपनी स्थिति खुद दर्ज करें।\n· केवल सार्वजनिक YouTube वीडियो पढ़े जा सकते हैं।\n· हम वीडियो की बातचीत को दो लोगों के संवाद के रूप में संकलित करके आपके स्टडी रूम में एक नए रूम के तौर पर जोड़ते हैं। वीडियो को स्वयं सेव नहीं करते।\n· वीडियो का कॉपीराइट उसके निर्माता के पास है। कृपया इसका उपयोग केवल निजी अभ्यास के लिए करें।',
       'shortsError_unavailable':
           'यह वीडियो नहीं देखा जा सकता। कृपया जांचें कि यह सार्वजनिक है या नहीं।',
       'shortsError_adultOnly':
@@ -529,25 +499,21 @@ class TalkUiCopy {
           'Это видео недоступно. Проверьте, что оно опубликовано для всех.',
       'shortsError_limit':
           'Вы использовали все ссылки Shorts на сегодня. Попробуйте снова завтра.',
-      'shortsLinkTitle': 'Вставьте ссылку на Shorts',
+      'shortsLinkTitle': 'Вставьте ссылку на YouTube Shorts',
       'shortsSource': 'Источник:',
       'shortsError_notYoutube':
           'Это не ссылка на YouTube. Вставьте ссылку на Shorts.',
-      'shortsExpressionsClear': 'Очистить',
       'shortsError_adultOnly':
           'Ссылки Shorts доступны только пользователям от 18 лет. Выберите предложенный сценарий или введите свой.',
       'shortsError_noTime':
           'Чтобы использовать ссылки на Shorts, нужно, чтобы у вас оставалось время.',
-      'shortsLink': 'Создать по ссылке на Shorts',
+      'shortsLink': 'Ссылка на Shorts',
       'shortsLinkNotice':
-          'Обратите внимание\n· Только для пользователей от 18 лет. Если вам ещё нет 18, воспользуйтесь функцией «Предложить ситуацию» или введите свою.\n· Можно обрабатывать только общедоступные видео на YouTube.\n· Мы не сохраняем само видео или диалоги целиком — только описание сцены и несколько коротких выражений.\n· Авторские права на видео принадлежат его создателю. Используйте его только для личной практики.',
-      'shortsExpressions': 'Выражения из Shorts',
+          'Обратите внимание\n· Только для пользователей от 18 лет. Если вам ещё нет 18, воспользуйтесь функцией «Предложить ситуацию» или введите свою.\n· Можно обрабатывать только общедоступные видео на YouTube.\n· Мы оформляем диалоги из видео как разговор двух собеседников и добавляем его в вашу учебную комнату как новую комнату. Само видео не сохраняется.\n· Авторские права на видео принадлежат его создателю. Используйте его только для личной практики.',
       'shortsError_unusable':
           'В этом видео нет диалога для практики. Попробуйте другой Short.',
       'shortsError_failed':
           'Не удалось загрузить видео. Попробуйте ещё раз чуть позже.',
-      'shortsLinkBody':
-          'Вставьте ссылку на YouTube Shorts — мы создадим ситуацию и роли по этому фрагменту, а также соберём выражения из видео.',
       'shortsLinkGo': 'Создать',
       'circleTitle': 'Circle Talk\nНастройки',
       'circleSubtitle':
@@ -592,26 +558,22 @@ class TalkUiCopy {
       'scenarioRequired': 'Preencha a situação e os dois papéis.',
       'shortsError_notYoutube':
           'Esse não é um link do YouTube. Cole um link do Shorts.',
-      'shortsLinkTitle': 'Cole um link do Shorts',
+      'shortsLinkTitle': 'Cole um link do YouTube Shorts',
       'shortsSource': 'Fonte:',
-      'shortsLinkBody':
-          'Cole o link de um YouTube Shorts e vamos criar uma situação e os papéis com base na cena. Também reuniremos as expressões usadas no vídeo.',
       'shortsError_unavailable':
           'Não é possível assistir a este vídeo. Confira se ele está público.',
       'shortsLinkNotice':
-          'Atenção\n· Disponível apenas para pessoas com 18 anos ou mais. Se você tem menos de 18, use “Sugerir uma situação” ou digite uma situação própria.\n· Só é possível analisar vídeos públicos do YouTube.\n· Não armazenamos o vídeo nem o diálogo completo, apenas a cena e algumas expressões curtas.\n· Os direitos autorais do vídeo pertencem ao criador. Use-o apenas para praticar por conta própria.',
+          'Atenção\n· Disponível apenas para pessoas com 18 anos ou mais. Se você tem menos de 18, use “Sugerir uma situação” ou digite uma situação própria.\n· Só é possível analisar vídeos públicos do YouTube.\n· Organizamos as conversas do vídeo em um diálogo entre duas pessoas e o adicionamos à sua sala de estudos como uma nova sala. Não armazenamos o vídeo em si.\n· Os direitos autorais do vídeo pertencem ao criador. Use-o apenas para praticar por conta própria.',
       'shortsError_adultOnly':
           'Os links do Shorts estão disponíveis apenas para maiores de 18 anos. Escolha uma situação sugerida ou escreva a sua.',
       'shortsError_limit':
           'Você já usou todos os links de Shorts de hoje. Tente novamente amanhã.',
-      'shortsExpressions': 'Expressões dos Shorts',
       'shortsLinkGo': 'Criar',
-      'shortsExpressionsClear': 'Limpar',
       'shortsError_unusable':
           'Este vídeo não tem nenhum diálogo para praticar. Experimente outro Short.',
       'shortsError_failed':
           'Não foi possível carregar o vídeo. Tente novamente daqui a pouco.',
-      'shortsLink': 'Criar por um link do Shorts',
+      'shortsLink': 'Link do Shorts',
       'shortsError_noTime':
           'Você precisa ter tempo restante para usar links do Shorts.',
       'circleTitle': 'Circle Talk\nConfigurações',
@@ -654,25 +616,21 @@ class TalkUiCopy {
       'scenarioRecommendError': 'Impossibile suggerire uno scenario. Riprova.',
       'scenarioRequired': 'Compila la situazione e i due ruoli.',
       'shortsSource': 'Fonte:',
-      'shortsExpressions': 'Espressioni dagli Shorts',
       'shortsLinkNotice':
-          'Nota bene\n· Solo per utenti dai 18 anni in su. Se hai meno di 18 anni, usa «Suggerisci una situazione» oppure inseriscine una tu.\n· È possibile leggere solo video pubblici di YouTube.\n· Non conserviamo il video né i dialoghi integrali: raccogliamo solo la scena e alcune brevi espressioni.\n· I diritti d’autore del video appartengono al suo creatore. Usalo solo per esercitarti personalmente.',
+          'Nota bene\n· Solo per utenti dai 18 anni in su. Se hai meno di 18 anni, usa «Suggerisci una situazione» oppure inseriscine una tu.\n· È possibile leggere solo video pubblici di YouTube.\n· Organizziamo i dialoghi del video come una conversazione tra due persone e la aggiungiamo alla tua stanza di studio come nuova stanza. Non conserviamo il video.\n· I diritti d’autore del video appartengono al suo creatore. Usalo solo per esercitarti personalmente.',
       'shortsError_unavailable':
           'Non è possibile guardare questo video. Verifica che sia pubblico.',
       'shortsError_adultOnly':
           'I link di Shorts sono disponibili solo per chi ha almeno 18 anni. Scegli una situazione suggerita o inseriscine una tua.',
       'shortsError_unusable':
           'In questo video non c’è nessun dialogo da praticare. Prova un altro Short.',
-      'shortsLinkBody':
-          'Incolla il link di uno YouTube Short: creeremo una situazione e dei ruoli partendo dalla scena e raccoglieremo anche le espressioni usate nel video.',
-      'shortsExpressionsClear': 'Cancella',
       'shortsError_limit':
           'Hai esaurito tutti i link Shorts di oggi. Riprova domani.',
-      'shortsLinkTitle': 'Incolla un link di Shorts',
+      'shortsLinkTitle': 'Incolla un link di YouTube Shorts',
       'shortsLinkGo': 'Crea',
       'shortsError_noTime':
           'Devi avere ancora del tempo per usare i link di Shorts.',
-      'shortsLink': 'Crea da un link Shorts',
+      'shortsLink': 'Link Shorts',
       'shortsError_failed': 'Impossibile caricare il video. Riprova tra poco.',
       'shortsError_notYoutube':
           'Questo non è un link di YouTube. Incolla un link a uno Short.',
@@ -720,7 +678,7 @@ class TalkUiCopy {
       'shortsError_failed':
           'De video kon niet worden geladen. Probeer het over een tijdje opnieuw.',
       'shortsLinkNotice':
-          'Let op\n· Alleen voor gebruikers van 18 jaar en ouder. Ben je jonger dan 18, gebruik dan ‘Een situatie voorstellen’ of voer er zelf een in.\n· Alleen openbare YouTube-video’s kunnen worden uitgelezen.\n· We bewaren de video zelf of de volledige dialogen niet; alleen de scène en een paar korte uitdrukkingen.\n· Het auteursrecht op de video ligt bij de maker. Gebruik de video alleen om zelf te oefenen.',
+          'Let op\n· Alleen voor gebruikers van 18 jaar en ouder. Ben je jonger dan 18, gebruik dan ‘Een situatie voorstellen’ of voer er zelf een in.\n· Alleen openbare YouTube-video’s kunnen worden uitgelezen.\n· We zetten de gesprekken in de video om in een dialoog tussen twee personen en voegen die als nieuwe ruimte toe aan je studieruimte. De video zelf bewaren we niet.\n· Het auteursrecht op de video ligt bij de maker. Gebruik de video alleen om zelf te oefenen.',
       'shortsError_unavailable':
           'Deze video is niet beschikbaar. Controleer of deze openbaar is.',
       'shortsLinkGo': 'Maken',
@@ -728,18 +686,14 @@ class TalkUiCopy {
           'Shorts-links zijn alleen beschikbaar voor gebruikers van 18 jaar en ouder. Kies een voorgesteld scenario of voer er zelf een in.',
       'shortsError_unusable':
           'In deze video is geen gesprek om mee te oefenen. Probeer een andere Short.',
-      'shortsExpressionsClear': 'Wissen',
-      'shortsLinkBody':
-          'Plak een YouTube Shorts-link en we maken een situatie en rollen op basis van de scène. Ook zetten we de uitdrukkingen uit de video voor je op een rij.',
-      'shortsExpressions': 'Uitdrukkingen uit Shorts',
       'shortsError_notYoutube':
           'Dit is geen YouTube-link. Plak een Shorts-link.',
       'shortsError_limit':
           'Je hebt alle Shorts-links voor vandaag gebruikt. Probeer het morgen opnieuw.',
-      'shortsLinkTitle': 'Plak een Shorts-link',
+      'shortsLinkTitle': 'Plak een YouTube Shorts-link',
       'shortsError_noTime':
           'Je hebt resterende tijd nodig om Shorts-links te gebruiken.',
-      'shortsLink': 'Maken via een Shorts-link',
+      'shortsLink': 'Shorts-link',
       'circleTitle': 'Circle Talk\nInstellingen',
       'circleSubtitle':
           'Krijg een suggestie of voer zelf de gewenste kring in.',

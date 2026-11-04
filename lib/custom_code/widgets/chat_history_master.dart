@@ -66,6 +66,7 @@ import '/custom_code/services/duo_final_transcription.dart';
 import '/custom_code/services/duo_final_transcription_runner.dart';
 import '/custom_code/services/duo_canonical.dart';
 import '/custom_code/services/study_access.dart';
+import 'package:url_launcher/url_launcher.dart'; // 쇼츠 방 출처 링크
 import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate, pcm16DurationMs, pcm16ToWav;
 
@@ -4561,6 +4562,7 @@ RULES — follow exactly:
 
     final accent =
         isScenario ? const Color(0xFF60A5FA) : const Color(0xFFFBBF24);
+    final shortsSource = _historyString(room, 'shorts_source_url');
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Container(
@@ -4615,6 +4617,27 @@ RULES — follow exactly:
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.58),
                   fontSize: 11 * _fontScale,
+                ),
+              ),
+            ],
+            // 🎞️ 쇼츠로 만든 방은 원본 출처를 남긴다(누르면 유튜브로 연다).
+            if (shortsSource.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              InkWell(
+                onTap: () => launchUrl(Uri.parse(shortsSource),
+                    mode: LaunchMode.externalApplication),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    '${copy['shortsSource']} '
+                    '${shortsSource.replaceFirst('https://www.', '')}',
+                    style: TextStyle(
+                      color: accent.withValues(alpha: 0.85),
+                      fontSize: 11 * _fontScale,
+                      decoration: TextDecoration.underline,
+                      decorationColor: accent.withValues(alpha: 0.5),
+                    ),
+                  ),
                 ),
               ),
             ],

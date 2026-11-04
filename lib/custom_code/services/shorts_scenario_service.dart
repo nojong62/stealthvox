@@ -1,44 +1,63 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
-/// 쇼츠 링크 → 시나리오톡 세 칸 + 핵심 표현 (서버 `extractShortsScenario`,
+import 'history_finalize.dart';
+
+/// 쇼츠 링크 → 공부방 (서버 `extractShortsScenario`,
 /// firebase/functions/shorts_scenario.js).
 ///
-/// 상황·역할은 로비 Origin, 표현 문장은 로비 Target, 표현 뜻은 Origin으로
-/// 받는다. 대사 전문은 서버가 돌려주지 않는다.
-class ShortsExpression {
-  const ShortsExpression({required this.text, required this.meaning});
+/// 서버가 영상 속 장면을 두 사람 대화로 정리해 돌려주면, 그 대화로 유저
+/// 공부방에 방을 하나 만든다. 대화방을 거치지 않는다.
+///
+/// 줄마다 Target 문장(쇼츠 속 말)은 `translated_text`, Origin 뜻은
+/// `original_text`에 넣는다. 공부방은 `translated_text`가 채워진 줄을 다시
+/// 번역하지 않으므로(`_historyTargetNeedsWork`) 쇼츠 원래 문장이 그대로
+/// 공부 자료가 된다. 방은 다른 방처럼 검수 단계(DRAFT)로 시작한다.
+class ShortsLine {
+  const ShortsLine({
+    required this.isUser,
+    required this.text,
+    required this.meaning,
+  });
 
-  /// Target 언어 문장 — 화면 위, 큰 글씨.
+  /// 내가 말할 줄(HOST)인가, 상대 줄(SYSTEM)인가.
+  final bool isUser;
+
+  /// Target 언어 문장 — 공부방 위.
   final String text;
 
-  /// Origin 언어 뜻 — 화면 아래, 작은 글씨.
+  /// Origin 언어 뜻 — 공부방 아래.
   final String meaning;
 
-  static ShortsExpression? fromMap(Object? value) {
+  static ShortsLine? fromMap(Object? value) {
     if (value is! Map) return null;
     final text = (value['text'] ?? '').toString().trim();
-    if (text.isEmpty) return null;
-    return ShortsExpression(
+    final meaning = (value['meaning'] ?? '').toString().trim();
+    if (text.isEmpty || meaning.isEmpty) return null;
+    return ShortsLine(
+      isUser: value['speaker'] == 'user',
       text: text,
-      meaning: (value['meaning'] ?? '').toString().trim(),
+      meaning: meaning,
     );
   }
 }
 
-class ShortsScenarioResult {
-  const ShortsScenarioResult({
-    required this.situation,
-    required this.aiRole,
+class ShortsDialogue {
+  const ShortsDialogue({
+    required this.title,
     required this.userRole,
-    required this.expressions,
+    required this.partnerRole,
+    required this.lines,
     this.sourceUrl = '',
   });
 
-  final String situation;
-  final String aiRole;
+  /// 장면 한 줄(Origin) — 공부방 목록의 상황 자리.
+  final String title;
   final String userRole;
-  final List<ShortsExpression> expressions;
+  final String partnerRole;
+  final List<ShortsLine> lines;
 
   /// 출처 표시용 원본 링크(서버가 검증한 ID로 만든 것).
   final String sourceUrl;
@@ -54,27 +73,31 @@ class ShortsScenarioException implements Exception {
   String toString() => 'ShortsScenarioException($code)';
 }
 
-/// 서버 결과 맵 → 결과. 쓸 수 없는 영상이면 unusable 예외.
+/// 서버 결과 맵 → 대화. 쓸 수 없는 영상이면 unusable 예외.
 @visibleForTesting
-ShortsScenarioResult parseShortsScenarioResult(Object? data) {
+ShortsDialogue parseShortsDialogue(Object? data) {
   if (data is! Map) throw const ShortsScenarioException('failed');
   if (data['usable'] != true) throw const ShortsScenarioException('unusable');
   String field(String key) => (data[key] ?? '').toString().trim();
-  final situation = field('situation');
-  final aiRole = field('aiRole');
+  final raw = data['lines'];
+  final lines = raw is List
+      ? raw.map(ShortsLine.fromMap).whereType<ShortsLine>().toList()
+      : <ShortsLine>[];
+  final title = field('title');
   final userRole = field('userRole');
-  if (situation.isEmpty || aiRole.isEmpty || userRole.isEmpty) {
+  final partnerRole = field('partnerRole');
+  if (title.isEmpty ||
+      userRole.isEmpty ||
+      partnerRole.isEmpty ||
+      lines.length < 2 ||
+      !lines.any((l) => l.isUser)) {
     throw const ShortsScenarioException('unusable');
   }
-  final raw = data['expressions'];
-  final expressions = raw is List
-      ? raw.map(ShortsExpression.fromMap).whereType<ShortsExpression>().toList()
-      : <ShortsExpression>[];
-  return ShortsScenarioResult(
-    situation: situation,
-    aiRole: aiRole,
+  return ShortsDialogue(
+    title: title,
     userRole: userRole,
-    expressions: expressions,
+    partnerRole: partnerRole,
+    lines: lines,
     sourceUrl: field('sourceUrl'),
   );
 }
@@ -103,16 +126,58 @@ bool looksLikeYoutubeLink(String value) {
   return v.contains('youtube.com/') || v.contains('youtu.be/');
 }
 
-/// AI 프롬프트에 붙는 표현 블록. 표현이 없으면 빈 문자열이라 기존 프롬프트가
-/// 글자 하나 바뀌지 않는다.
-String shortsExpressionsPromptBlock(List<ShortsExpression> expressions) {
-  if (expressions.isEmpty) return '';
-  final lines = expressions.map((e) =>
-      e.meaning.isEmpty ? '- ${e.text}' : '- ${e.text} (= ${e.meaning})');
-  return '\nKey expressions from the video this scene came from. Let the '
-      'conversation naturally give the user chances to use them, and when a '
-      'line means the same thing, prefer these exact wordings:\n'
-      '${lines.join('\n')}';
+/// 공부방 방 문서. 시나리오톡 대화방이 만드는 방(`_ensureHistoryRef`)과 같은
+/// 모양이라 목록·공부방이 따로 알 것이 없다. [createdAt]·[lastActive]는
+/// 호출부가 넘긴다(이 함수는 Firestore 서버 시각을 모른다).
+@visibleForTesting
+Map<String, dynamic> shortsRoomDoc(
+  ShortsDialogue dialogue, {
+  required String nativeLang,
+  required String targetLang,
+  required Object createdAt,
+}) {
+  return <String, dynamic>{
+    'created_at': createdAt,
+    'last_active': createdAt,
+    'room_name': 'Scenario Talk Mode',
+    'mode': 'scenario_talk',
+    'scenario_situation': dialogue.title,
+    'scenario_keyword': dialogue.title,
+    'user_role': dialogue.userRole,
+    'ai_role': dialogue.partnerRole,
+    'user_label': dialogue.userRole,
+    'partner_label': dialogue.partnerRole,
+    'is_pinned': false,
+    'msg_count': dialogue.lines.length,
+    // 목록은 last_message가 없는 방을 숨긴다(chat_history_list_master).
+    'last_message': dialogue.lines.last.meaning,
+    'native_lang': nativeLang,
+    'target_lang': targetLang,
+    'source': 'shorts',
+    if (dialogue.sourceUrl.isNotEmpty) 'shorts_source_url': dialogue.sourceUrl,
+    ...historyDraftSeed(),
+  };
+}
+
+/// 공부방 줄 문서들. 공부방은 `created_at` 순서로 줄을 세우므로 1초씩 띄운다
+/// (한 batch에 서버 시각을 쓰면 모든 줄이 같은 시각이 된다).
+@visibleForTesting
+List<Map<String, dynamic>> shortsMessageDocs(
+  ShortsDialogue dialogue, {
+  required DateTime base,
+}) {
+  return [
+    for (var i = 0; i < dialogue.lines.length; i++)
+      <String, dynamic>{
+        'role': dialogue.lines[i].isUser ? 'HOST' : 'SYSTEM',
+        'original_text': dialogue.lines[i].meaning,
+        'translated_text': dialogue.lines[i].text,
+        'target_generated_at':
+            Timestamp.fromDate(base.add(Duration(seconds: i))),
+        'created_at': Timestamp.fromDate(base.add(Duration(seconds: i))),
+        'source': 'shorts',
+      },
+  ];
 }
 
 class ShortsScenarioService {
@@ -121,7 +186,8 @@ class ShortsScenarioService {
   static final FirebaseFunctions _functions =
       FirebaseFunctions.instanceFor(region: 'asia-northeast3');
 
-  static Future<ShortsScenarioResult> extract({
+  /// 링크 → 대화 → 공부방. 만든 방의 문서 참조를 돌려준다.
+  static Future<DocumentReference<Map<String, dynamic>>> createStudyRoom({
     required String url,
     required String originLanguage,
     required String targetLanguage,
@@ -129,7 +195,10 @@ class ShortsScenarioService {
     if (!looksLikeYoutubeLink(url)) {
       throw const ShortsScenarioException('notYoutube');
     }
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw const ShortsScenarioException('failed');
     final sw = Stopwatch()..start();
+    final ShortsDialogue dialogue;
     try {
       final response = await _functions
           .httpsCallable(
@@ -141,11 +210,7 @@ class ShortsScenarioService {
         'originLanguage': originLanguage,
         'targetLanguage': targetLanguage,
       });
-      final result = parseShortsScenarioResult(response.data);
-      debugPrint('[SHORTS-SCENARIO] ok ms=${sw.elapsedMilliseconds} '
-          'expressions=${result.expressions.length} '
-          'cached=${(response.data as Map)['cached'] == true}');
-      return result;
+      dialogue = parseShortsDialogue(response.data);
     } on FirebaseFunctionsException catch (error) {
       debugPrint('[SHORTS-SCENARIO] failed code=${error.code} '
           'ms=${sw.elapsedMilliseconds}');
@@ -157,6 +222,34 @@ class ShortsScenarioService {
     } catch (error) {
       debugPrint('[SHORTS-SCENARIO] failed code=failed '
           'reason=${error.runtimeType} ms=${sw.elapsedMilliseconds}');
+      throw const ShortsScenarioException('failed');
+    }
+
+    try {
+      final db = FirebaseFirestore.instance;
+      final roomRef =
+          db.collection('users').doc(user.uid).collection('chat_history').doc();
+      final batch = db.batch();
+      batch.set(
+        roomRef,
+        shortsRoomDoc(
+          dialogue,
+          nativeLang: originLanguage,
+          targetLang: targetLanguage,
+          createdAt: FieldValue.serverTimestamp(),
+        ),
+      );
+      for (final message
+          in shortsMessageDocs(dialogue, base: DateTime.now())) {
+        batch.set(roomRef.collection('messages').doc(), message);
+      }
+      await batch.commit();
+      debugPrint('[SHORTS-SCENARIO] room=${roomRef.id} '
+          'lines=${dialogue.lines.length} ms=${sw.elapsedMilliseconds}');
+      return roomRef;
+    } catch (error) {
+      debugPrint('[SHORTS-SCENARIO] room write failed '
+          'reason=${error.runtimeType}');
       throw const ShortsScenarioException('failed');
     }
   }
