@@ -1,16 +1,17 @@
 "use strict";
 
-// 쇼츠 링크 → 시나리오톡 세 칸(상황·AI 역할·내 역할) + 핵심 표현 (2026-11-05 실장님).
+// 쇼츠 링크 → 공부방에 넣을 두 사람 대화 (2026-11-05 실장님).
 //
 //   · 유튜브 공개 영상의 URL을 Gemini에 그대로 넘긴다. 영상을 내려받지 않는다.
-//   · 돌려주는 것은 상황·역할·핵심 표현(최대 5개)뿐이다. 대사 전문은 앱에
-//     보내지도, 저장하지도 않는다(저작권 부담).
-//   · 역할은 장면 속 인물이다. "튜터/학습자"가 나오면 시나리오톡이 수업이 된다
+//   · 영상 속 장면을 두 사람의 대화(최대 16줄)로 정리해 돌려준다. 줄마다
+//     Target 문장(공부방 위)과 Origin 뜻(공부방 아래)이 있다. 앱이 그대로
+//     유저 공부방에 방을 만든다 — 대화방을 거치지 않는다.
+//   · 대화는 그 유저 공부방에만 들어간다. 서버에는 남기지 않는다(유저끼리 나눠
+//     쓰는 캐시를 두지 않는 이유 — 대사가 거의 그대로라서).
+//   · 역할은 장면 속 인물이다. "튜터/학습자"가 나오면 수업 대본이 된다
 //     (11-05 첫 시험에서 실제로 그렇게 나왔다).
-//   · 시간이 남은 회원(paid)만. 하루 상한이 있고, 같은 영상·같은 언어 쌍은
-//     캐시를 돌려준다(상한에 세지 않는다).
+//   · 만 18세 이상(Gemini API 약관), 시간이 남은 회원(paid)만, 하루 상한.
 
-const crypto = require("crypto");
 const {HttpsError, onCall} = require("firebase-functions/v2/https");
 const {defineSecret} = require("firebase-functions/params");
 const {resolveAiAccess} = require("./ai_access");
@@ -23,15 +24,12 @@ const GEMINI_TIMEOUT_MS = 90 * 1000;
 // 쇼츠는 3분까지다. 긴 영상이 들어와도 앞 3분만 본다(토큰 = 비용).
 const MAX_VIDEO_SECONDS = 180;
 const DAILY_LIMIT = 10;
-const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const USAGE_COLLECTION = "shorts_scenario_usage";
-const CACHE_COLLECTION = "shorts_scenario_cache";
 
-// 앱 설정 칸(stealth_room_master.dart _setupField)이 maxLength 60이다.
-const MAX_SITUATION_CHARS = 60;
+const MAX_TITLE_CHARS = 60;
 const MAX_ROLE_CHARS = 30;
-const MAX_EXPRESSIONS = 5;
-const MAX_EXPRESSION_CHARS = 160;
+const MAX_LINES = 16;
+const MAX_LINE_CHARS = 240;
 
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
 
@@ -62,7 +60,7 @@ function youtubeVideoId(value) {
   return id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
 }
 
-/** 화면에 붙이는 출처 링크. 앱이 보낸 글자가 아니라 검증한 ID로 만든다. */
+/** 공부방에 붙이는 출처 링크. 앱이 보낸 글자가 아니라 검증한 ID로 만든다. */
 function sourceUrlFor(videoId) {
   return "https://www.youtube.com/shorts/" + videoId;
 }
@@ -74,29 +72,27 @@ function languageOr(value, fallback) {
 
 function buildPrompt({originLanguage, targetLanguage}) {
   return [
-    "You are preparing a role-play for a language-learning app.",
-    "Watch this short video and listen to its audio, including any on-screen subtitles.",
-    "Turn the scene in the video into a role-play the learner can act out.",
+    "You are turning a short video into a study dialogue for a language-learning app.",
+    "Watch the video and listen to its audio, including any on-screen subtitles.",
+    "Write the acted scene as a clean dialogue between exactly two people.",
     "",
     "Rules:",
-    "- ai_role and user_role must be characters inside the scene (for example a store clerk and a customer).",
-    "  Even if the video is a language lesson, do not make it a lesson: never use a tutor, language teacher,",
-    "  learner or narrator as a role. Use the people in the acted scene.",
-    "- user_role is the character who says the most useful lines; ai_role is the person they talk to.",
-    "- situation: one short sentence, written in " + originLanguage + ", describing where they are",
-    "  and what the user_role wants, so the conversation can start right away. Max " + MAX_SITUATION_CHARS + " characters.",
-    "  Describe only the scene as if it is happening now. Do not mention the video, the lesson,",
-    "  any language, expressions, or what the video teaches. Bad: \"...and learns the right English phrase.\"",
-    "  Good: \"At a small restaurant, the owner brings the customer a free side dish.\"",
-    "- ai_role and user_role: short names written in " + originLanguage + ", max " + MAX_ROLE_CHARS + " characters.",
-    "- key_expressions: up to " + MAX_EXPRESSIONS + " of the most useful lines actually spoken or shown in the video.",
-    "  text MUST be written in " + targetLanguage + ". If the video speaks another language, translate the line",
+    "- user_role and partner_role are two characters inside the scene (for example a customer and a store clerk).",
+    "  Even if the video is a language lesson, never use a tutor, language teacher, learner or narrator.",
+    "  user_role is the character who says the most useful lines; partner_role is the person they talk to.",
+    "  If more than two people speak, keep the two who talk to each other the most and fold the rest out.",
+    "- lines: the dialogue in order, at most " + MAX_LINES + " lines. speaker is \"user\" or \"partner\".",
+    "  Keep the lines as they are spoken in the video. You may only remove fillers (um, uh), stutters,",
+    "  narration, and on-screen teaching captions such as \"How do you say this in English?\".",
+    "- text MUST be written in " + targetLanguage + ". If the video speaks another language, translate each line",
     "  into natural " + targetLanguage + " that a native speaker would say in the same moment.",
-    "  meaning is its meaning in " + originLanguage + ".",
-    "- Do not invent lines that are not in the video.",
-    "- If the video presents a line as a mistake or as unnatural (\"don't say this\", Konglish, a wrong example),",
-    "  never include that line. Include only the correct version.",
-    "- If the video has no conversation that could be role-played (music only, no speech, unrelated content),",
+    "- meaning is the natural meaning of the line in " + originLanguage + ".",
+    "- If the video presents a line as a mistake (\"don't say this\", Konglish, a wrong example), leave it out",
+    "  and keep only the correct version.",
+    "- title: one short sentence in " + originLanguage + " describing the scene, max " + MAX_TITLE_CHARS + " characters.",
+    "  Describe only the scene. Do not mention the video, a lesson or any language.",
+    "- user_role and partner_role: short names written in " + originLanguage + ", max " + MAX_ROLE_CHARS + " characters.",
+    "- If the video has no conversation between people (music only, a single person explaining, no speech),",
     "  set usable to false and leave the other fields empty.",
   ].join("\n");
 }
@@ -105,22 +101,23 @@ const RESPONSE_SCHEMA = {
   type: "OBJECT",
   properties: {
     usable: {type: "BOOLEAN"},
-    situation: {type: "STRING"},
-    ai_role: {type: "STRING"},
+    title: {type: "STRING"},
     user_role: {type: "STRING"},
-    key_expressions: {
+    partner_role: {type: "STRING"},
+    lines: {
       type: "ARRAY",
       items: {
         type: "OBJECT",
         properties: {
+          speaker: {type: "STRING", enum: ["user", "partner"]},
           text: {type: "STRING"},
           meaning: {type: "STRING"},
         },
-        required: ["text", "meaning"],
+        required: ["speaker", "text", "meaning"],
       },
     },
   },
-  required: ["usable", "situation", "ai_role", "user_role", "key_expressions"],
+  required: ["usable", "title", "user_role", "partner_role", "lines"],
 };
 
 function buildGeminiRequest({videoId, originLanguage, targetLanguage}) {
@@ -172,19 +169,25 @@ function parseGeminiResponse(body) {
   }
   if (!json || typeof json !== "object") return null;
   if (json.usable === false) return {usable: false};
-  const situation = clip(json.situation, MAX_SITUATION_CHARS);
-  const aiRole = clip(json.ai_role, MAX_ROLE_CHARS);
+  const title = clip(json.title, MAX_TITLE_CHARS);
   const userRole = clip(json.user_role, MAX_ROLE_CHARS);
-  if (!situation || !aiRole || !userRole) return {usable: false};
-  if (LESSON_ROLE.test(aiRole) || LESSON_ROLE.test(userRole)) return null;
-  const expressions = (Array.isArray(json.key_expressions) ? json.key_expressions : [])
-    .map((e) => ({
-      text: clip(e && e.text, MAX_EXPRESSION_CHARS),
-      meaning: clip(e && e.meaning, MAX_EXPRESSION_CHARS),
+  const partnerRole = clip(json.partner_role, MAX_ROLE_CHARS);
+  if (!title || !userRole || !partnerRole) return {usable: false};
+  if (LESSON_ROLE.test(userRole) || LESSON_ROLE.test(partnerRole)) return null;
+  const lines = (Array.isArray(json.lines) ? json.lines : [])
+    .map((l) => ({
+      speaker: l && l.speaker === "user" ? "user" : "partner",
+      text: clip(l && l.text, MAX_LINE_CHARS),
+      meaning: clip(l && l.meaning, MAX_LINE_CHARS),
     }))
-    .filter((e) => e.text)
-    .slice(0, MAX_EXPRESSIONS);
-  return {usable: true, situation, aiRole, userRole, expressions};
+    .filter((l) => l.text && l.meaning)
+    .slice(0, MAX_LINES);
+  // 공부방은 내가 말할 줄이 있어야 연습이 된다. 두 사람이 다 말해야 대화다.
+  if (lines.length < 2 || !lines.some((l) => l.speaker === "user") ||
+      !lines.some((l) => l.speaker === "partner")) {
+    return {usable: false};
+  }
+  return {usable: true, title, userRole, partnerRole, lines};
 }
 
 /** Gemini 한 번 호출. 테스트·로컬 시험에서도 그대로 쓴다. */
@@ -210,6 +213,11 @@ async function extractScenario({apiKey, videoId, originLanguage, targetLanguage,
   }
 }
 
+/** KST 날짜 문자열. 하루 상한은 한국 자정에 풀린다. */
+function kstDay(nowMs = Date.now()) {
+  return new Date(nowMs + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 /**
  * Gemini API 약관(Age Requirements): 이용자는 18세 이상이어야 한다.
  * 가입 때 받는 건 태어난 해뿐이라(intro_master.dart birthYear) 생일 전인
@@ -224,22 +232,11 @@ function isAdultByBirthYear(birthYear, nowMs = Date.now()) {
   return nowYear - year >= 19;
 }
 
-/** KST 날짜 문자열. 하루 상한은 한국 자정에 풀린다. */
-function kstDay(nowMs = Date.now()) {
-  return new Date(nowMs + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
 /** 오늘 쓴 횟수 기록 → 이번 호출을 허락하면 다음 기록, 아니면 null. */
 function nextUsage(record, day, limit = DAILY_LIMIT) {
   const count = record && record.day === day ? Number(record.count) || 0 : 0;
   if (count >= limit) return null;
   return {day, count: count + 1};
-}
-
-function cacheKey(videoId, originLanguage, targetLanguage) {
-  return crypto.createHash("sha256")
-    .update(videoId + "|" + originLanguage + "|" + targetLanguage)
-    .digest("hex").slice(0, 40);
 }
 
 function createShortsScenario({admin}) {
@@ -268,16 +265,6 @@ function createShortsScenario({admin}) {
     if (access.reason === "blocked") throw new HttpsError("permission-denied", "This account is restricted.");
     if (!access.allowed || access.reason !== "paid") {
       throw new HttpsError("permission-denied", "Requires available time.");
-    }
-
-    const cacheRef = db.doc(CACHE_COLLECTION + "/" + cacheKey(videoId, originLanguage, targetLanguage));
-    const cached = await cacheRef.get();
-    if (cached.exists) {
-      const c = cached.data();
-      const createdMs = c.createdAt && typeof c.createdAt.toMillis === "function" ? c.createdAt.toMillis() : 0;
-      if (c.result && Date.now() - createdMs < CACHE_TTL_MS) {
-        return {...c.result, sourceUrl: sourceUrlFor(videoId), cached: true};
-      }
     }
 
     const usageRef = db.doc(USAGE_COLLECTION + "/" + uid);
@@ -309,6 +296,7 @@ function createShortsScenario({admin}) {
       videoId, status: outcome.ok ? 200 : outcome.status, elapsedMs: outcome.elapsedMs,
       tokens: outcome.usage && outcome.usage.totalTokenCount,
       usable: outcome.result && outcome.result.usable,
+      lines: outcome.result && outcome.result.lines && outcome.result.lines.length,
     });
     if (!outcome.ok) {
       await refund();
@@ -320,17 +308,10 @@ function createShortsScenario({admin}) {
     }
     if (!outcome.result) {
       await refund();
-      throw new HttpsError("internal", "Video could not be turned into a scenario.");
+      throw new HttpsError("internal", "Video could not be turned into a dialogue.");
     }
-    await cacheRef.set({
-      result: outcome.result,
-      videoId,
-      originLanguage,
-      targetLanguage,
-      model: GEMINI_MODEL,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    return {...outcome.result, sourceUrl: sourceUrlFor(videoId), cached: false};
+    if (!outcome.result.usable) await refund();
+    return {...outcome.result, sourceUrl: sourceUrlFor(videoId)};
   });
   return {extractShortsScenario};
 }
@@ -338,16 +319,15 @@ function createShortsScenario({admin}) {
 module.exports = {
   DAILY_LIMIT,
   GEMINI_MODEL,
-  MAX_EXPRESSIONS,
+  MAX_LINES,
   buildGeminiRequest,
   buildPrompt,
-  cacheKey,
   createShortsScenario,
   extractScenario,
   isAdultByBirthYear,
   kstDay,
-  sourceUrlFor,
   nextUsage,
   parseGeminiResponse,
+  sourceUrlFor,
   youtubeVideoId,
 };

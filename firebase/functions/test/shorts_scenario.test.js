@@ -2,15 +2,14 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   DAILY_LIMIT,
-  MAX_EXPRESSIONS,
+  MAX_LINES,
   buildGeminiRequest,
-  cacheKey,
   extractScenario,
   isAdultByBirthYear,
   kstDay,
-  sourceUrlFor,
   nextUsage,
   parseGeminiResponse,
+  sourceUrlFor,
   youtubeVideoId,
 } = require("../shorts_scenario");
 
@@ -38,46 +37,66 @@ test("anything that is not a youtube video is refused", () => {
   ]) assert.equal(youtubeVideoId(url), null, String(url));
 });
 
-test("the request sends the canonical watch URL and caps the video at 3 minutes", () => {
+test("the request sends the canonical watch URL, caps the video and asks for a two-person dialogue", () => {
   const req = buildGeminiRequest({videoId: "QEw4oTtNUac", originLanguage: "Korean", targetLanguage: "English"});
   const [video, prompt] = req.contents[0].parts;
   assert.equal(video.fileData.fileUri, "https://www.youtube.com/watch?v=QEw4oTtNUac");
   assert.equal(video.videoMetadata.endOffset, "180s");
-  assert.match(prompt.text, /written in Korean/);
+  assert.match(prompt.text, /exactly two people/);
   assert.match(prompt.text, /text MUST be written in English/);
-  assert.match(prompt.text, /never include that line/);
+  assert.match(prompt.text, /meaning of the line in Korean/);
   assert.match(prompt.text, /never use a tutor/);
+  assert.match(prompt.text, /leave it out/);
+  assert.deepEqual(req.generationConfig.responseSchema.properties.lines.items.properties.speaker.enum, ["user", "partner"]);
 });
 
 function geminiBody(obj, extraParts = []) {
   return {candidates: [{content: {parts: [...extraParts, {text: JSON.stringify(obj)}]}}]};
 }
 
-test("a good answer is trimmed to the three fields plus at most five expressions", () => {
-  const out = parseGeminiResponse(geminiBody({
-    usable: true,
-    situation: "  옷가게 피팅룸.   더 작은 사이즈를 찾는다. ",
-    ai_role: "점원",
-    user_role: "손님",
-    key_expressions: Array.from({length: 8}, (_, i) => ({text: "Line " + i, meaning: "뜻 " + i})),
-  }, [{text: "thinking...", thought: true}]));
+const base = {usable: true, title: "옷가게에서 더 작은 사이즈를 찾는다", user_role: "손님", partner_role: "점원"};
+
+test("a good answer becomes title, two roles and ordered lines", () => {
+  const lines = Array.from({length: 20}, (_, i) => ({
+    speaker: i % 2 === 0 ? "user" : "partner", text: "  Line   " + i, meaning: "뜻 " + i,
+  }));
+  const out = parseGeminiResponse(geminiBody({...base, lines}, [{text: "thinking", thought: true}]));
   assert.equal(out.usable, true);
-  assert.equal(out.situation, "옷가게 피팅룸. 더 작은 사이즈를 찾는다.");
-  assert.equal(out.aiRole, "점원");
+  assert.equal(out.title, "옷가게에서 더 작은 사이즈를 찾는다");
   assert.equal(out.userRole, "손님");
-  assert.equal(out.expressions.length, MAX_EXPRESSIONS);
-  assert.deepEqual(out.expressions[0], {text: "Line 0", meaning: "뜻 0"});
-  assert.equal("dialogue" in out, false);
+  assert.equal(out.partnerRole, "점원");
+  assert.equal(out.lines.length, MAX_LINES);
+  assert.deepEqual(out.lines[0], {speaker: "user", text: "Line 0", meaning: "뜻 0"});
+  assert.equal(out.lines[1].speaker, "partner");
 });
 
-test("classroom roles are rejected, unusable videos pass through, broken JSON is null", () => {
-  const base = {usable: true, situation: "s", key_expressions: []};
-  assert.equal(parseGeminiResponse(geminiBody({...base, ai_role: "영어 회화 튜터", user_role: "영어 학습자"})), null);
-  assert.equal(parseGeminiResponse(geminiBody({...base, ai_role: "English Tutor", user_role: "Customer"})), null);
-  // 교실 장면의 교사·학생은 정상 역할이다.
-  assert.equal(parseGeminiResponse(geminiBody({...base, ai_role: "담임 선생님", user_role: "학생"})).usable, true);
-  assert.deepEqual(parseGeminiResponse(geminiBody({usable: false, situation: "", ai_role: "", user_role: "", key_expressions: []})), {usable: false});
-  assert.deepEqual(parseGeminiResponse(geminiBody({...base, ai_role: "", user_role: "손님"})), {usable: false});
+test("lines missing text or meaning are dropped, unknown speakers become partner", () => {
+  const out = parseGeminiResponse(geminiBody({...base, lines: [
+    {speaker: "user", text: "Hi", meaning: "안녕"},
+    {speaker: "narrator", text: "Hello", meaning: "안녕하세요"},
+    {speaker: "user", text: "", meaning: "빈 줄"},
+    {speaker: "user", text: "No meaning", meaning: ""},
+  ]}));
+  assert.equal(out.lines.length, 2);
+  assert.equal(out.lines[1].speaker, "partner");
+});
+
+test("a dialogue needs both people and at least two lines", () => {
+  assert.deepEqual(parseGeminiResponse(geminiBody({...base, lines: [
+    {speaker: "user", text: "A", meaning: "가"}, {speaker: "user", text: "B", meaning: "나"},
+  ]})), {usable: false});
+  assert.deepEqual(parseGeminiResponse(geminiBody({...base, lines: [
+    {speaker: "partner", text: "A", meaning: "가"},
+  ]})), {usable: false});
+});
+
+test("lesson roles are rejected, classroom roles pass, unusable and broken answers", () => {
+  const lines = [{speaker: "user", text: "A", meaning: "가"}, {speaker: "partner", text: "B", meaning: "나"}];
+  assert.equal(parseGeminiResponse(geminiBody({...base, user_role: "영어 학습자", partner_role: "영어 회화 튜터", lines})), null);
+  assert.equal(parseGeminiResponse(geminiBody({...base, partner_role: "English Tutor", lines})), null);
+  assert.equal(parseGeminiResponse(geminiBody({...base, user_role: "학생", partner_role: "담임 선생님", lines})).usable, true);
+  assert.deepEqual(parseGeminiResponse(geminiBody({usable: false, title: "", user_role: "", partner_role: "", lines: []})), {usable: false});
+  assert.deepEqual(parseGeminiResponse(geminiBody({...base, title: "", lines})), {usable: false});
   assert.equal(parseGeminiResponse({candidates: [{content: {parts: [{text: "not json"}]}}]}), null);
   assert.equal(parseGeminiResponse({}), null);
 });
@@ -106,13 +125,6 @@ test("adults only: year difference of 19 or more, missing birth year is refused"
 
 test("source link is rebuilt from the verified id", () => {
   assert.equal(sourceUrlFor("QEw4oTtNUac"), "https://www.youtube.com/shorts/QEw4oTtNUac");
-});
-
-test("cache key depends on the video and both languages", () => {
-  const a = cacheKey("QEw4oTtNUac", "Korean", "English");
-  assert.equal(a, cacheKey("QEw4oTtNUac", "Korean", "English"));
-  assert.notEqual(a, cacheKey("QEw4oTtNUac", "Japanese", "English"));
-  assert.notEqual(a, cacheKey("QEw4oTtNUac", "Korean", "Spanish"));
 });
 
 test("extractScenario reports upstream errors without throwing", async () => {
