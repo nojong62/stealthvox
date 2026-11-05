@@ -110,6 +110,7 @@ exports.adminSetTalkHost = adminOps.adminSetTalkHost;
 // 공부방 체험 (인트로 버튼). firebase/functions/study_trial.js
 const studyTrial = require("./study_trial").createStudyTrial({admin});
 exports.startStudyTrial = studyTrial.startStudyTrial;
+const signupBonus = require("./signup_bonus");
 
 // 쿠폰 코드 (스토어 입력칸 + 관리자 웹 발급). firebase/functions/coupons.js
 const coupons = require("./coupons").createCouponFunctions({admin});
@@ -417,9 +418,10 @@ exports.deductRemainingTime = functions.https.onCall(async (data, context) => {
 // Grants a one-time signup bonus during the test period. The client may call
 // this after Google/Kakao auth, but the server owns the idempotency check.
 //
-// The bonus is 0 since 2026-10-17: new members try the app through the Study
-// Room trial instead. The call still marks signup_bonus_given, because the
-// client reads that flag to tell a returning member from a new one.
+// The bonus was 0 from 2026-10-17 (Study Room trial instead). Since 2026-11-06
+// it is 30 minutes, once per phone (signup_bonus_devices/{sha256(deviceId)}).
+// The call always marks signup_bonus_given, because the client reads that flag
+// to tell a returning member from a new one.
 // ----------------------------------------------------------------------------
 exports.grantSignupBonus = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
@@ -437,10 +439,15 @@ exports.grantSignupBonus = functions.https.onCall(async (data, context) => {
     );
   }
   const userRef = admin.firestore().doc("users/" + uid);
-  const bonusSeconds = 0;
+  // 2026-11-06: 폰 하나에 한 번 30분(signup_bonus.js). 기기 ID가 없으면 0.
+  const deviceKey = signupBonus.bonusDeviceKey(data && data.deviceId);
+  const deviceRef = deviceKey
+    ? admin.firestore().doc(signupBonus.DEVICE_COLLECTION + "/" + deviceKey)
+    : null;
 
   const result = await admin.firestore().runTransaction(async (tx) => {
     const snap = await tx.get(userRef);
+    const deviceSnap = deviceRef ? await tx.get(deviceRef) : null;
     const userData = snap.exists ? snap.data() : {};
     const current =
       userData && typeof userData.remainingTime === "number"
@@ -451,6 +458,17 @@ exports.grantSignupBonus = functions.https.onCall(async (data, context) => {
       return { granted: false, remainingTime: current };
     }
 
+    const bonusSeconds = signupBonus.bonusSecondsFor({
+      key: deviceKey,
+      deviceRecordExists: !!(deviceSnap && deviceSnap.exists),
+    });
+    if (deviceRef && !(deviceSnap && deviceSnap.exists)) {
+      tx.set(deviceRef, {
+        uid: uid,
+        grantedSeconds: bonusSeconds,
+        grantedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
     const updated = current + bonusSeconds;
     tx.set(
       userRef,

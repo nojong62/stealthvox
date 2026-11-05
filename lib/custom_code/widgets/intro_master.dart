@@ -709,6 +709,10 @@ class _IntroMasterState extends State<IntroMaster>
   //   두고 그걸로 "남은 시간" 문구만 바꾼다. 판정은 늘 서버가 한다.
   static const String _kStudyTrialExpiryKey = 'study_trial_expires_at_ms';
 
+  /// 공부방 체험 버튼 노출. 2026-11-06 실장님: 가입 30분 보너스로 대체해 숨김.
+  /// 코드·서버(`startStudyTrial`)는 그대로 두었다 — true로 바꾸면 다시 보인다.
+  static const bool _kShowStudyTrialButton = false;
+
   Future<void> _rememberStudyTrialExpiry(int remainingSeconds) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -2066,7 +2070,8 @@ class _IntroMasterState extends State<IntroMaster>
                       // 제목이 세 줄이 된 뒤 더 늘림 — 어차피 아래는 스크롤(10-31).
                       SizedBox(height: veryCompact ? 56 : 92),
                       const Spacer(flex: 5),
-                      if (!_showEnglishTesterGoogleEntry) ...[
+                      if (_kShowStudyTrialButton &&
+                          !_showEnglishTesterGoogleEntry) ...[
                         _buildWelcomeStudyTrialAction(),
                         const SizedBox(height: 10),
                       ],
@@ -3535,7 +3540,16 @@ class _IntroMasterState extends State<IntroMaster>
       final callable = FirebaseFunctions.instanceFor(
         region: 'us-central1',
       ).httpsCallable('grantSignupBonus');
-      final result = await callable.call<Map<String, dynamic>>({});
+      // 보너스는 폰 하나에 한 번 — 서버가 기기 ID로 가른다. 못 읽으면 보너스 없음.
+      String? deviceId;
+      try {
+        deviceId = await const AndroidId().getId();
+      } catch (e) {
+        debugPrint('[SignupBonus] device id failed: $e');
+      }
+      final result = await callable.call<Map<String, dynamic>>({
+        if (deviceId != null && deviceId.isNotEmpty) 'deviceId': deviceId,
+      });
       final remainingTime = (result.data['remainingTime'] as num?)?.toInt();
       final granted = result.data['granted'] == true;
       if (remainingTime != null) {
