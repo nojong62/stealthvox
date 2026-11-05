@@ -100,8 +100,13 @@ function buildPrompt({originLanguage, targetLanguage}) {
     "- title: one short sentence in " + originLanguage + " describing the scene, max " + MAX_TITLE_CHARS + " characters.",
     "  Describe only the scene. Do not mention the video, a lesson or any language.",
     "- user_role and partner_role: short names written in " + originLanguage + ", max " + MAX_ROLE_CHARS + " characters.",
-    "- If the video has no conversation between people (music only, a single person explaining, no speech),",
-    "  set usable to false and leave the other fields empty.",
+    "- If only one person speaks (explaining, presenting, a monologue or a lesson), do NOT give up. Turn what they",
+    "  say into a natural two-person conversation: a second person asks, reacts or answers in short lines, and the",
+    "  speaker's own useful sentences and expressions are kept as spoken. Choose everyday roles inside a believable",
+    "  scene (for example two friends, a coworker and a colleague), never a tutor, teacher or learner.",
+    "  The partner's added lines must stay short and plain and must not add new facts.",
+    "- Only when there is nothing to build on (music only, no speech, no readable captions) set usable to false",
+    "  and leave the other fields empty.",
   ].join("\n");
 }
 
