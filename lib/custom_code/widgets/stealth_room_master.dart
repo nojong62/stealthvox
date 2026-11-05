@@ -99,6 +99,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   //   추천을 다시 받으면 비운다 — 다른 장면의 표현이 남으면 안 된다.
   bool _isReadingShorts = false;
   bool _scenarioFromShorts = false;
+
+  /// 쇼츠 링크로 방을 만들 때 고른 Free Talk 여부(기본은 로비 설정 그대로).
+  bool _shortsFreeTalk = false;
   final TextEditingController _shortsUrlController = TextEditingController();
 
   /// 설정 화면과 추천 결과는 로비 Chat Lang 하나만 따른다.
@@ -540,6 +543,65 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     _readShortsLink(url);
   }
 
+  /// 링크 칸 아래: Free Talk / 기본 고르기 + 만들기 버튼.
+  /// 로비 두 언어가 같으면 Free Talk이 기본과 같아 고르는 칸을 감춘다.
+  List<Widget> _buildShortsChoiceAndGo(Color accent) {
+    final copy = _setupCopy;
+    final origin = FFAppState().chatLang.trim();
+    final target = FFAppState().targetLang.trim();
+    final canChoose = origin.isNotEmpty && target.isNotEmpty && origin != target;
+    final choiceCopy = FreeTalkChoiceCopy.forSystemLocale();
+    String lang(String name) => _surfaceCopy.languageName(name);
+    return [
+      if (canChoose) ...[
+        const SizedBox(height: 14),
+        Text(
+          choiceCopy.title,
+          style: const TextStyle(
+              color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        _buildFreeTalkChoice(
+          accent: accent,
+          highlighted: _shortsFreeTalk,
+          title: 'Free Talk',
+          desc: choiceCopy.freeTalkDesc.replaceAll('{lang}', lang(target)),
+          onTap: () => setState(() => _shortsFreeTalk = true),
+        ),
+        const SizedBox(height: 8),
+        _buildFreeTalkChoice(
+          accent: accent,
+          highlighted: !_shortsFreeTalk,
+          title: choiceCopy.standard,
+          desc: choiceCopy.standardDesc.replaceAll('{lang}', lang(origin)),
+          onTap: () => setState(() => _shortsFreeTalk = false),
+        ),
+      ],
+      const SizedBox(height: 16),
+      FilledButton(
+        onPressed: _isReadingShorts ? null : _submitShortsLink,
+        style: FilledButton.styleFrom(
+          backgroundColor: accent,
+          foregroundColor: Colors.white,
+          minimumSize: const Size.fromHeight(56),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        ),
+        child: _isReadingShorts
+            ? const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2.2, color: Colors.white),
+              )
+            : Text(
+                copy['shortsLinkGo'],
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+      ),
+    ];
+  }
+
   /// 상황 추천 | 쇼츠 링크 — 둘 중 하나를 고르는 막대. 쇼츠를 고르면 그 자리에
   /// 링크 칸이 펼쳐진다(팝업은 자판에 밀려 깨졌다, 11-05 실기기).
   Widget _buildScenarioSourcePicker(Color accent) {
@@ -663,31 +725,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                             borderRadius: BorderRadius.circular(16),
                             borderSide: BorderSide(color: accent, width: 1.5),
                           ),
-                          suffixIcon: Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: _isReadingShorts
-                                ? Padding(
-                                    padding: const EdgeInsets.all(14),
-                                    child: SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2, color: accent),
-                                    ),
-                                  )
-                                : TextButton(
-                                    onPressed: _submitShortsLink,
-                                    style: TextButton.styleFrom(
-                                        foregroundColor: accent),
-                                    child: Text(
-                                      copy['shortsLinkGo'],
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                          ),
                         ),
                       ),
+                      ..._buildShortsChoiceAndGo(accent),
                       // 유의 사항 — 만 18세 이상, 공개 영상, 개인 연습용(Gemini API 약관).
                       Padding(
                         padding: const EdgeInsets.fromLTRB(6, 10, 6, 0),
@@ -718,6 +758,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
         url: url,
         originLanguage: _chatLanguage,
         targetLanguage: target.isEmpty ? 'English' : target,
+        freeTalk: _shortsFreeTalk,
       );
       final roomRef = room.ref;
       // 서버가 링크 한 번에 시간을 뺐다면 로비·과금 시계의 남은 시간을 그 값에 맞춘다.
@@ -1570,6 +1611,7 @@ Return ONLY valid JSON: {"name":"..."}.
     required String startLabel,
     required VoidCallback onStart,
     Widget? actionArea,
+    bool showStart = true,
   }) {
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
     final visibleHeight = _setupVisibleHeight(keyboardInset);
@@ -1690,6 +1732,7 @@ Return ONLY valid JSON: {"name":"..."}.
               ),
             ),
             // ── 결론 ── 바닥에 붙어 자판 위로 밀린다.
+            if (showStart)
             Padding(
               padding: EdgeInsets.fromLTRB(
                 24,
@@ -1760,6 +1803,8 @@ Return ONLY valid JSON: {"name":"..."}.
       ],
       startLabel: copy['scenarioStart'],
       onStart: _enterScenarioTalk,
+      // 쇼츠 링크는 링크 칸 아래 '만들기'가 결론이라 시작 버튼을 두지 않는다.
+      showStart: !_scenarioFromShorts,
     );
   }
 
