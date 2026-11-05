@@ -41,7 +41,7 @@ test("the request sends the canonical watch URL, caps the video and asks for a t
   const req = buildGeminiRequest({videoId: "QEw4oTtNUac", originLanguage: "Korean", targetLanguage: "English"});
   const [video, prompt] = req.contents[0].parts;
   assert.equal(video.fileData.fileUri, "https://www.youtube.com/watch?v=QEw4oTtNUac");
-  assert.equal(video.videoMetadata.endOffset, "180s");
+  assert.equal(video.videoMetadata.endOffset, "300s");
   assert.match(prompt.text, /exactly two people/);
   assert.match(prompt.text, /text MUST be written in English/);
   assert.match(prompt.text, /meaning of the line in Korean/);

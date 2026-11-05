@@ -21,8 +21,9 @@ const GEMINI_MODEL = "gemini-3.5-flash";
 const GEMINI_ENDPOINT =
   "https://generativelanguage.googleapis.com/v1beta/models/" + GEMINI_MODEL + ":generateContent";
 const GEMINI_TIMEOUT_MS = 90 * 1000;
-// 쇼츠는 3분까지다. 긴 영상이 들어와도 앞 3분만 본다(토큰 = 비용).
-const MAX_VIDEO_SECONDS = 180;
+// 긴 영상이 들어와도 앞 5분만 본다(토큰 = 비용; 초당 약 91토큰이라 5분 ≈ 27,000토큰).
+// 2026-11-05 실장님: 3분 → 5분. 10분까지 넓히면 영상 비용이 3분의 3배 넘게 든다.
+const MAX_VIDEO_SECONDS = 300;
 const DAILY_LIMIT = 10;
 const USAGE_COLLECTION = "shorts_scenario_usage";
 
