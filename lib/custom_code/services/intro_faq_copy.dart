@@ -60,8 +60,8 @@ class IntroFaqCopy {
         'You pay only for the time you use; it is deducted from your remaining time. Top up in the Store. The Study Room trial on the first screen gives you 10 minutes without signing up, once per phone.',
       ],
       [
-        'Can I practice with English conversation Shorts?',
-        'Yes. In Scenario Talk settings, select [Shorts link] and paste a YouTube Shorts link. The scene from the video will be turned into a conversation between two people and added as a new room in your study space. Practice the expressions you’ve only watched others use with Practice, role swapping, and Shadowing. Available only for public videos and users aged 18 or older. For personal practice only.',
+        'Can I practice directly with English conversation Shorts?',
+        'Yes. In Scenario Talk settings, select [Shorts link] and paste a YouTube Shorts link. The scene from the video will be turned into a conversation between two people and added as a new room in your study space. Practice the expressions you’ve only watched others use with Practice, role swapping, and Shadowing. Available only to users aged 18 or older and for public videos (the first 3 minutes are used). Each link uses 1 minute of your time. For personal practice only.',
       ],
     ]),
     'ko': IntroFaqCopy._('자주 묻는 질문', [
@@ -99,7 +99,7 @@ class IntroFaqCopy {
       ],
       [
         '본 영어회화 쇼츠로 직접 연습할 수 있나요?',
-        '네. 시나리오톡 설정에서 [쇼츠 링크]를 고르고 유튜브 쇼츠 링크를 붙여 넣으면, 영상 속 장면이 두 사람의 대화로 정리되어 공부방에 새 방으로 들어갑니다. 보기만 하던 표현을 Practice·역할 교환·쉐도잉으로 내 입으로 연습해 보세요. 만 18세 이상, 공개 영상만 가능하고 개인 연습용으로만 써 주세요.',
+        '네. 시나리오톡 설정에서 [쇼츠 링크]를 고르고 유튜브 쇼츠 링크를 붙여 넣으면, 영상 속 장면이 두 사람의 대화로 정리되어 공부방에 새 방으로 들어갑니다. 보기만 하던 표현을 Practice·역할 교환·쉐도잉으로 내 입으로 연습해 보세요. 만 18세 이상, 공개 영상만 가능하고(앞 3분 사용) 링크 한 번에 시간이 1분 쓰이며, 개인 연습용으로만 써 주세요.',
       ],
     ]),
     'ja': IntroFaqCopy._('よくある質問', [
@@ -137,7 +137,7 @@ class IntroFaqCopy {
       ],
       [
         '英会話のショート動画を使って、自分でも練習できますか？',
-        'はい。Scenario Talkの設定で［ショート動画のリンク］を選び、YouTubeショートのリンクを貼り付けると、動画の場面が2人の会話にまとめられ、学習スペースに新しいルームとして追加されます。見ているだけだった表現を、Practice・役割交代・Shadowingで自分の口から練習してみましょう。18歳以上の方が、公開動画のみ利用できます。個人練習のためにご利用ください。',
+        'はい。Scenario Talkの設定で［ショート動画のリンク］を選び、YouTubeショートのリンクを貼り付けると、動画の場面が2人の会話にまとめられ、学習スペースに新しいルームとして追加されます。見ているだけだった表現を、Practice・役割交代・Shadowingで自分の口から練習してみましょう。18歳以上の方が、公開動画のみ利用できます（冒頭3分を使用）。リンク1件につき時間を1分消費します。個人練習のためにご利用ください。',
       ],
     ]),
     'zh': IntroFaqCopy._('常见问题', [
@@ -175,7 +175,7 @@ class IntroFaqCopy {
       ],
       [
         '可以用英语会话短视频亲自练习吗？',
-        '可以。在 Scenario Talk 设置中选择【短视频链接】，然后粘贴 YouTube Shorts 链接，视频中的场景就会整理成两个人的对话，并作为新房间添加到学习空间。通过 Practice、角色互换和 Shadowing，亲口练习那些原本只能看着别人说的表达吧。仅限18岁及以上用户使用公开视频，仅供个人练习。',
+        '可以。在 Scenario Talk 设置中选择【短视频链接】，然后粘贴 YouTube Shorts 链接，视频中的场景就会整理成两个人的对话，并作为新房间添加到学习空间。通过 Practice、角色互换和 Shadowing，亲口练习那些原本只能看着别人说的表达吧。仅限18岁及以上用户使用公开视频（使用视频开头3分钟）。每个链接会消耗1分钟时长。仅供个人练习。',
       ],
     ]),
     'es': IntroFaqCopy._('Preguntas frecuentes', [
@@ -213,7 +213,7 @@ class IntroFaqCopy {
       ],
       [
         '¿Puedo practicar por mi cuenta con Shorts de conversaciones en inglés?',
-        'Sí. En los ajustes de Scenario Talk, selecciona [Enlace de Shorts] y pega un enlace de YouTube Shorts. La escena del vídeo se convertirá en un diálogo entre dos personas y se añadirá como una nueva sala a tu espacio de estudio. Practica en voz alta las expresiones que antes solo veías usando con Practice, el intercambio de roles y Shadowing. Solo para mayores de 18 años y vídeos públicos. Úsalo únicamente para practicar de forma personal.',
+        'Sí. En los ajustes de Scenario Talk, selecciona [Enlace de Shorts] y pega un enlace de YouTube Shorts. La escena del vídeo se convertirá en un diálogo entre dos personas y se añadirá como una nueva sala a tu espacio de estudio. Practica en voz alta las expresiones que antes solo veías usar a otras personas con Practice, el intercambio de roles y Shadowing. Solo para mayores de 18 años y vídeos públicos (se usan los 3 primeros minutos). Cada enlace consume 1 minuto de tiempo. Úsalo únicamente para practicar de forma personal.',
       ],
     ]),
     'fr': IntroFaqCopy._('Questions fréquentes', [
@@ -251,7 +251,7 @@ class IntroFaqCopy {
       ],
       [
         'Puis-je m’entraîner moi-même avec des Shorts de conversation en anglais ?',
-        'Oui. Dans les réglages de Scenario Talk, sélectionnez [Lien Shorts] et collez un lien YouTube Shorts. La scène de la vidéo sera transformée en dialogue entre deux personnes et ajoutée comme nouvelle salle dans votre espace d’étude. Entraînez-vous à dire vous-même les expressions que vous ne faisiez jusque-là que regarder, avec Practice, l’échange des rôles et Shadowing. Réservé aux personnes de 18 ans et plus et aux vidéos publiques. À utiliser uniquement pour un entraînement personnel.',
+        'Oui. Dans les réglages de Scenario Talk, sélectionnez [Lien Shorts] et collez un lien YouTube Shorts. La scène de la vidéo sera transformée en dialogue entre deux personnes et ajoutée comme nouvelle salle dans votre espace d’étude. Entraînez-vous à dire vous-même les expressions que vous ne faisiez jusque-là que regarder, avec Practice, l’échange des rôles et Shadowing. Réservé aux personnes de 18 ans et plus et aux vidéos publiques (les 3 premières minutes sont utilisées). Chaque lien consomme 1 minute de temps. À utiliser uniquement pour un entraînement personnel.',
       ],
     ]),
     'de': IntroFaqCopy._('Häufige Fragen', [
@@ -289,7 +289,7 @@ class IntroFaqCopy {
       ],
       [
         'Kann ich mit englischen Gesprächs-Shorts selbst üben?',
-        'Ja. Wähle in den Einstellungen von Scenario Talk [Shorts-Link] aus und füge einen YouTube-Shorts-Link ein. Die Szene aus dem Video wird zu einem Dialog zwischen zwei Personen zusammengefasst und als neuer Raum zu deinem Lernbereich hinzugefügt. Sprich die Ausdrücke, die du bisher nur gehört hast, mit Practice, Rollentausch und Shadowing selbst nach. Nur für Personen ab 18 Jahren und öffentliche Videos. Nur zum persönlichen Üben.',
+        'Ja. Wähle in den Einstellungen von Scenario Talk [Shorts-Link] aus und füge einen YouTube-Shorts-Link ein. Die Szene aus dem Video wird zu einem Dialog zwischen zwei Personen zusammengefasst und als neuer Raum zu deinem Lernbereich hinzugefügt. Sprich die Ausdrücke, die du bisher nur andere hast verwenden sehen, mit Practice, Rollentausch und Shadowing selbst nach. Nur für Personen ab 18 Jahren und öffentliche Videos (die ersten 3 Minuten werden verwendet). Jeder Link kostet 1 Minute. Nur zum persönlichen Üben.',
       ],
     ]),
     'hi': IntroFaqCopy._('अक्सर पूछे जाने वाले सवाल', [
@@ -327,7 +327,7 @@ class IntroFaqCopy {
       ],
       [
         'क्या मैं अंग्रेज़ी बातचीत वाले Shorts से खुद अभ्यास कर सकता/सकती हूँ?',
-        'हाँ। Scenario Talk की सेटिंग में [Shorts लिंक] चुनें और YouTube Shorts का लिंक पेस्ट करें। वीडियो का दृश्य दो लोगों की बातचीत में बदलकर आपके स्टडी स्पेस में नए रूम के रूप में जुड़ जाएगा। जिन वाक्यांशों को अब तक सिर्फ़ दूसरों को बोलते देखा है, उन्हें Practice, भूमिका बदलकर और Shadowing के ज़रिए खुद बोलकर अभ्यास करें। यह सुविधा केवल 18 वर्ष या उससे अधिक उम्र के लोगों और सार्वजनिक वीडियो के लिए है। सिर्फ़ निजी अभ्यास के लिए इस्तेमाल करें।',
+        'हाँ। Scenario Talk की सेटिंग में [Shorts लिंक] चुनें और YouTube Shorts का लिंक पेस्ट करें। वीडियो का दृश्य दो लोगों की बातचीत में बदलकर आपके स्टडी स्पेस में नए रूम के रूप में जुड़ जाएगा। जिन वाक्यांशों को अब तक सिर्फ़ दूसरों को बोलते देखा है, उन्हें Practice, भूमिका बदलकर और Shadowing के ज़रिए खुद बोलकर अभ्यास करें। यह सुविधा केवल 18 वर्ष या उससे अधिक उम्र के लोगों और सार्वजनिक वीडियो के लिए है (शुरुआती 3 मिनट इस्तेमाल होते हैं)। हर लिंक पर 1 मिनट का समय खर्च होता है। सिर्फ़ निजी अभ्यास के लिए इस्तेमाल करें।',
       ],
     ]),
     'ru': IntroFaqCopy._('Частые вопросы', [
@@ -365,7 +365,7 @@ class IntroFaqCopy {
       ],
       [
         'Можно ли самостоятельно заниматься по Shorts с диалогами на английском?',
-        'Да. В настройках Scenario Talk выберите [Ссылка на Shorts] и вставьте ссылку на YouTube Shorts. Сцена из видео будет оформлена как диалог двух людей и добавлена в учебное пространство в виде новой комнаты. Практикуйте вслух выражения, которые раньше только слышали, с помощью Practice, смены ролей и Shadowing. Доступно только пользователям от 18 лет и для общедоступных видео. Используйте только для личных занятий.',
+        'Да. В настройках Scenario Talk выберите [Ссылка на Shorts] и вставьте ссылку на YouTube Shorts. Сцена из видео будет оформлена как диалог двух людей и добавлена в учебное пространство в виде новой комнаты. Практикуйте вслух выражения, которые раньше только слышали, с помощью Practice, смены ролей и Shadowing. Доступно только пользователям от 18 лет и для общедоступных видео (используются первые 3 минуты). Каждая ссылка расходует 1 минуту. Используйте только для личных занятий.',
       ],
     ]),
     'pt': IntroFaqCopy._('Perguntas frequentes', [
@@ -403,7 +403,7 @@ class IntroFaqCopy {
       ],
       [
         'Posso praticar por conta própria com Shorts de conversação em inglês?',
-        'Sim. Nas configurações do Scenario Talk, selecione [Link do Shorts] e cole um link do YouTube Shorts. A cena do vídeo será transformada em um diálogo entre duas pessoas e adicionada como uma nova sala ao seu espaço de estudos. Pratique falando as expressões que antes você só via outras pessoas usando, com Practice, troca de papéis e Shadowing. Disponível apenas para maiores de 18 anos e vídeos públicos. Use somente para prática pessoal.',
+        'Sim. Nas configurações do Scenario Talk, selecione [Link do Shorts] e cole um link do YouTube Shorts. A cena do vídeo será transformada em um diálogo entre duas pessoas e adicionada como uma nova sala ao seu espaço de estudos. Pratique falando as expressões que antes você só via outras pessoas usando, com Practice, troca de papéis e Shadowing. Disponível apenas para maiores de 18 anos e vídeos públicos (são usados os 3 primeiros minutos). Cada link consome 1 minuto. Use somente para prática pessoal.',
       ],
     ]),
     'it': IntroFaqCopy._('Domande frequenti', [
@@ -441,7 +441,7 @@ class IntroFaqCopy {
       ],
       [
         'Posso esercitarmi direttamente con gli Shorts di conversazione in inglese?',
-        'Sì. Nelle impostazioni di Scenario Talk, seleziona [Link Shorts] e incolla un link di YouTube Shorts. La scena del video verrà trasformata in un dialogo tra due persone e aggiunta come nuova stanza nel tuo spazio di studio. Prova a dire ad alta voce le espressioni che finora hai solo guardato, con Practice, lo scambio dei ruoli e Shadowing. Disponibile solo per chi ha almeno 18 anni e per i video pubblici. Da usare esclusivamente per esercitarsi personalmente.',
+        'Sì. Nelle impostazioni di Scenario Talk, seleziona [Link Shorts] e incolla un link di YouTube Shorts. La scena del video verrà trasformata in un dialogo tra due persone e aggiunta come nuova stanza nel tuo spazio di studio. Prova a dire ad alta voce le espressioni che finora hai solo guardato, con Practice, lo scambio dei ruoli e Shadowing. Disponibile solo per chi ha almeno 18 anni e per i video pubblici (vengono usati i primi 3 minuti). Ogni link consuma 1 minuto. Da usare esclusivamente per esercitarsi personalmente.',
       ],
     ]),
     'nl': IntroFaqCopy._('Veelgestelde vragen', [
@@ -479,7 +479,7 @@ class IntroFaqCopy {
       ],
       [
         'Kan ik zelf oefenen met Shorts met Engelse gesprekken?',
-        'Ja. Kies in de instellingen van Scenario Talk voor [Shorts-link] en plak een YouTube Shorts-link. De scène uit de video wordt omgezet in een gesprek tussen twee personen en als nieuwe ruimte aan je studieruimte toegevoegd. Oefen de uitdrukkingen die je eerst alleen anderen hoorde gebruiken zelf hardop met Practice, rolwissel en Shadowing. Alleen voor gebruikers van 18 jaar en ouder en openbare video’s. Alleen bedoeld voor persoonlijk oefenen.',
+        'Ja. Kies in de instellingen van Scenario Talk voor [Shorts-link] en plak een YouTube Shorts-link. De scène uit de video wordt omgezet in een gesprek tussen twee personen en als nieuwe ruimte aan je studieruimte toegevoegd. Oefen de uitdrukkingen die je eerst alleen anderen hoorde gebruiken zelf hardop met Practice, rolwissel en Shadowing. Alleen voor gebruikers van 18 jaar en ouder en openbare video’s (de eerste 3 minuten worden gebruikt). Elke link kost 1 minuut. Alleen bedoeld voor persoonlijk oefenen.',
       ],
     ]),
   };

@@ -714,11 +714,18 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     setState(() => _isReadingShorts = true);
     try {
       final target = FFAppState().targetLang.trim();
-      final roomRef = await ShortsScenarioService.createStudyRoom(
+      final room = await ShortsScenarioService.createStudyRoom(
         url: url,
         originLanguage: _chatLanguage,
         targetLanguage: target.isEmpty ? 'English' : target,
       );
+      final roomRef = room.ref;
+      // 서버가 링크 한 번에 시간을 뺐다면 로비·과금 시계의 남은 시간을 그 값에 맞춘다.
+      final left = room.remainingSeconds;
+      if (left != null) {
+        FFAppState().remainingTime = left;
+        BillingTicker.instance.remainingSecondsNotifier.value = left;
+      }
       if (!mounted) return;
       _shortsUrlController.clear();
       // 공부방 안은 과금 구간이다(목록 첫 페이지만 무과금).

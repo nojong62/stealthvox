@@ -51,6 +51,7 @@ class ShortsDialogue {
     required this.partnerRole,
     required this.lines,
     this.sourceUrl = '',
+    this.remainingSeconds,
   });
 
   /// 장면 한 줄(Origin) — 공부방 목록의 상황 자리.
@@ -61,6 +62,16 @@ class ShortsDialogue {
 
   /// 출처 표시용 원본 링크(서버가 검증한 ID로 만든 것).
   final String sourceUrl;
+
+  /// 서버가 링크 한 번에 시간을 뺀 경우, 뺀 뒤 남은 초(없으면 차감이 꺼져 있다).
+  final int? remainingSeconds;
+}
+
+/// 만든 공부방과, 서버가 시간을 뺐다면 남은 시간.
+class ShortsRoomResult {
+  const ShortsRoomResult({required this.ref, this.remainingSeconds});
+  final DocumentReference<Map<String, dynamic>> ref;
+  final int? remainingSeconds;
 }
 
 /// 실패 이유. 화면 문구는 [code]로 고른다.
@@ -99,6 +110,9 @@ ShortsDialogue parseShortsDialogue(Object? data) {
     partnerRole: partnerRole,
     lines: lines,
     sourceUrl: field('sourceUrl'),
+    remainingSeconds: data['remainingSeconds'] is num
+        ? (data['remainingSeconds'] as num).toInt()
+        : null,
   );
 }
 
@@ -186,8 +200,8 @@ class ShortsScenarioService {
   static final FirebaseFunctions _functions =
       FirebaseFunctions.instanceFor(region: 'asia-northeast3');
 
-  /// 링크 → 대화 → 공부방. 만든 방의 문서 참조를 돌려준다.
-  static Future<DocumentReference<Map<String, dynamic>>> createStudyRoom({
+  /// 링크 → 대화 → 공부방. 만든 방의 문서 참조와(서버가 시간을 뺐다면) 남은 시간을 돌려준다.
+  static Future<ShortsRoomResult> createStudyRoom({
     required String url,
     required String originLanguage,
     required String targetLanguage,
@@ -246,7 +260,10 @@ class ShortsScenarioService {
       await batch.commit();
       debugPrint('[SHORTS-SCENARIO] room=${roomRef.id} '
           'lines=${dialogue.lines.length} ms=${sw.elapsedMilliseconds}');
-      return roomRef;
+      return ShortsRoomResult(
+        ref: roomRef,
+        remainingSeconds: dialogue.remainingSeconds,
+      );
     } catch (error) {
       debugPrint('[SHORTS-SCENARIO] room write failed '
           'reason=${error.runtimeType}');

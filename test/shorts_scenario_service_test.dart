@@ -33,6 +33,15 @@ void main() {
     expect(d.sourceUrl, 'https://www.youtube.com/shorts/QEw4oTtNUac');
   });
 
+  test('remainingSeconds is read only when the server sends a number', () {
+    expect(parseShortsDialogue(_server()).remainingSeconds, isNull);
+    expect(
+      parseShortsDialogue({..._server(), 'remainingSeconds': 540})
+          .remainingSeconds,
+      540,
+    );
+  });
+
   test('unusable or broken results throw the right code', () {
     Matcher code(String c) =>
         throwsA(isA<ShortsScenarioException>().having((e) => e.code, 'code', c));
