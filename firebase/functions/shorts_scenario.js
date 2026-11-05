@@ -3,7 +3,7 @@
 // 쇼츠 링크 → 공부방에 넣을 두 사람 대화 (2026-11-05 실장님).
 //
 //   · 유튜브 공개 영상의 URL을 Gemini에 그대로 넘긴다. 영상을 내려받지 않는다.
-//   · 영상 속 장면을 두 사람의 대화(최대 16줄)로 정리해 돌려준다. 줄마다
+//   · 영상 속 장면을 두 사람의 대화(최대 20개)로 정리해 돌려준다. 줄마다
 //     Target 문장(공부방 위)과 Origin 뜻(공부방 아래)이 있다. 앱이 그대로
 //     유저 공부방에 방을 만든다 — 대화방을 거치지 않는다.
 //   · 대화는 그 유저 공부방에만 들어간다. 서버에는 남기지 않는다(유저끼리 나눠
@@ -36,7 +36,7 @@ const MAX_DEDUCT_SECONDS = 600;
 
 const MAX_TITLE_CHARS = 60;
 const MAX_ROLE_CHARS = 30;
-const MAX_LINES = 16;
+const MAX_LINES = 20;
 const MAX_LINE_CHARS = 240;
 
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
