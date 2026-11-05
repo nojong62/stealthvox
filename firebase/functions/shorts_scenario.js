@@ -12,20 +12,27 @@
 //     (11-05 첫 시험에서 실제로 그렇게 나왔다).
 //   · 만 18세 이상(Gemini API 약관), 시간이 남은 회원(paid)만, 하루 상한.
 
+const crypto = require("crypto");
 const {HttpsError, onCall} = require("firebase-functions/v2/https");
 const {defineSecret} = require("firebase-functions/params");
 const {resolveAiAccess} = require("./ai_access");
+const {deductTimeIdempotently} = require("./deduct_time");
 
 const REGION = "asia-northeast3";
 const GEMINI_MODEL = "gemini-3.5-flash";
 const GEMINI_ENDPOINT =
   "https://generativelanguage.googleapis.com/v1beta/models/" + GEMINI_MODEL + ":generateContent";
 const GEMINI_TIMEOUT_MS = 90 * 1000;
-// 긴 영상이 들어와도 앞 5분만 본다(토큰 = 비용; 초당 약 91토큰이라 5분 ≈ 27,000토큰).
-// 2026-11-05 실장님: 3분 → 5분. 10분까지 넓히면 영상 비용이 3분의 3배 넘게 든다.
-const MAX_VIDEO_SECONDS = 300;
+// 긴 영상이 들어와도 앞 3분만 본다(토큰 = 비용; 초당 약 91토큰이라 3분 ≈ 16,400토큰).
+// 2026-11-05 실장님: 3분으로 두고 링크 한 번에 1분을 차감한다(5분 시험은 되돌림).
+const MAX_VIDEO_SECONDS = 180;
 const DAILY_LIMIT = 10;
 const USAGE_COLLECTION = "shorts_scenario_usage";
+// 링크 한 번에 차감할 시간(초). 스위치는 app_config/shorts_link 문서의 deductSeconds 하나다.
+// 문서가 없거나 0이면 차감하지 않는다 — 입력창 안내("시간이 1분 쓰여요")가 들어간 앱 빌드가
+// 나온 뒤에 60으로 켠다(안내 없이 차감되면 회원이 놀란다).
+const DEDUCT_CONFIG_PATH = "app_config/shorts_link";
+const MAX_DEDUCT_SECONDS = 600;
 
 const MAX_TITLE_CHARS = 60;
 const MAX_ROLE_CHARS = 30;
@@ -240,6 +247,13 @@ function nextUsage(record, day, limit = DAILY_LIMIT) {
   return {day, count: count + 1};
 }
 
+/** app_config/shorts_link 문서 → 차감 초(0이면 끔). 숫자가 아니거나 음수·과대 값은 0으로 본다. */
+function deductSecondsFrom(config) {
+  const v = Number(config && config.deductSeconds);
+  if (!Number.isFinite(v) || v <= 0 || v > MAX_DEDUCT_SECONDS) return 0;
+  return Math.floor(v);
+}
+
 function createShortsScenario({admin}) {
   const extractShortsScenario = onCall({
     region: REGION,
@@ -278,13 +292,48 @@ function createShortsScenario({admin}) {
       return true;
     });
     if (!allowed) throw new HttpsError("resource-exhausted", "Daily limit reached.");
-    const refund = () => usageRef.update({count: admin.firestore.FieldValue.increment(-1)}).catch(() => {});
+    // 되돌릴 것: 하루 횟수 1, 그리고 이미 뺀 시간(deducted)
+    let deducted = 0;
+    const refund = async () => {
+      await usageRef.update({count: admin.firestore.FieldValue.increment(-1)}).catch(() => {});
+      if (deducted > 0) {
+        await db.doc("users/" + uid)
+          .update({remainingTime: admin.firestore.FieldValue.increment(deducted)}).catch(() => {});
+        deducted = 0;
+      }
+    };
 
     const key = geminiApiKey.value();
     if (!key) {
       await refund();
       throw new HttpsError("failed-precondition", "Video reader is not configured.");
     }
+
+    // 링크 한 번에 일정 시간을 뺀다(켜져 있을 때만). 읽지 못하거나 대화가 없으면 아래에서 되돌린다.
+    const cfgSnap = await db.doc(DEDUCT_CONFIG_PATH).get();
+    const deductSeconds = deductSecondsFrom(cfgSnap.exists ? cfgSnap.data() : null);
+    let remainingSeconds = null;
+    if (deductSeconds > 0) {
+      const balance = Number(userSnap.get("remainingTime"));
+      if (!(balance >= deductSeconds)) {
+        await refund();
+        throw new HttpsError("permission-denied", "Requires available time.");
+      }
+      try {
+        const res = await deductTimeIdempotently({
+          db, uid, seconds: deductSeconds,
+          requestId: "shorts:" + videoId + ":" + Date.now() + ":" + crypto.randomBytes(4).toString("hex"),
+          serverTimestamp: () => admin.firestore.FieldValue.serverTimestamp(),
+        });
+        deducted = deductSeconds;
+        remainingSeconds = res.after;
+      } catch (error) {
+        await refund();
+        console.error("extractShortsScenario deduction failed", {message: error.message});
+        throw new HttpsError("unavailable", "Time could not be deducted.");
+      }
+    }
+
     let outcome;
     try {
       outcome = await extractScenario({apiKey: key, videoId, originLanguage, targetLanguage});
@@ -311,8 +360,17 @@ function createShortsScenario({admin}) {
       await refund();
       throw new HttpsError("internal", "Video could not be turned into a dialogue.");
     }
-    if (!outcome.result.usable) await refund();
-    return {...outcome.result, sourceUrl: sourceUrlFor(videoId)};
+    if (!outcome.result.usable) {
+      const back = deducted;
+      await refund();
+      if (remainingSeconds !== null) remainingSeconds += back;
+    }
+    // remainingSeconds: 차감을 켠 경우에만 있다(앱이 남은 시간 표시를 맞춘다)
+    return {
+      ...outcome.result,
+      sourceUrl: sourceUrlFor(videoId),
+      ...(remainingSeconds !== null ? {remainingSeconds} : {}),
+    };
   });
   return {extractShortsScenario};
 }
@@ -324,6 +382,7 @@ module.exports = {
   buildGeminiRequest,
   buildPrompt,
   createShortsScenario,
+  deductSecondsFrom,
   extractScenario,
   isAdultByBirthYear,
   kstDay,

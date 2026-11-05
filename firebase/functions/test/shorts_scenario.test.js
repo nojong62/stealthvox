@@ -4,6 +4,7 @@ const {
   DAILY_LIMIT,
   MAX_LINES,
   buildGeminiRequest,
+  deductSecondsFrom,
   extractScenario,
   isAdultByBirthYear,
   kstDay,
@@ -41,7 +42,7 @@ test("the request sends the canonical watch URL, caps the video and asks for a t
   const req = buildGeminiRequest({videoId: "QEw4oTtNUac", originLanguage: "Korean", targetLanguage: "English"});
   const [video, prompt] = req.contents[0].parts;
   assert.equal(video.fileData.fileUri, "https://www.youtube.com/watch?v=QEw4oTtNUac");
-  assert.equal(video.videoMetadata.endOffset, "300s");
+  assert.equal(video.videoMetadata.endOffset, "180s");
   assert.match(prompt.text, /exactly two people/);
   assert.match(prompt.text, /text MUST be written in English/);
   assert.match(prompt.text, /meaning of the line in Korean/);
@@ -121,6 +122,18 @@ test("adults only: year difference of 19 or more, missing birth year is refused"
   assert.equal(isAdultByBirthYear("abc", now), false);
   // 12-31 15:00 UTC는 KST로 다음 해 1월 1일이다.
   assert.equal(isAdultByBirthYear(2008, Date.UTC(2026, 11, 31, 15, 0)), true);
+});
+
+test("deduction is off unless app_config/shorts_link sets a sane number of seconds", () => {
+  assert.equal(deductSecondsFrom(null), 0);
+  assert.equal(deductSecondsFrom({}), 0);
+  assert.equal(deductSecondsFrom({deductSeconds: 0}), 0);
+  assert.equal(deductSecondsFrom({deductSeconds: -60}), 0);
+  assert.equal(deductSecondsFrom({deductSeconds: "abc"}), 0);
+  assert.equal(deductSecondsFrom({deductSeconds: 99999}), 0);
+  assert.equal(deductSecondsFrom({deductSeconds: 60}), 60);
+  assert.equal(deductSecondsFrom({deductSeconds: "90"}), 90);
+  assert.equal(deductSecondsFrom({deductSeconds: 59.9}), 59);
 });
 
 test("source link is rebuilt from the verified id", () => {
