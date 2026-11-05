@@ -149,7 +149,6 @@ Map<String, dynamic> shortsRoomDoc(
   required String nativeLang,
   required String targetLang,
   required Object createdAt,
-  bool freeTalk = false,
 }) {
   return <String, dynamic>{
     'created_at': createdAt,
@@ -169,9 +168,6 @@ Map<String, dynamic> shortsRoomDoc(
     'native_lang': nativeLang,
     'target_lang': targetLang,
     'source': 'shorts',
-    // 만들 때 고른 Free Talk 여부. 대사는 이미 완성돼 있어 방 모양은 안 바꾸고 표시만 남긴다
-    // (`free_talk`는 일부러 쓰지 않는다 — 그 값이 있으면 뒤집기가 한 번 더 돈다).
-    'shorts_free_talk': freeTalk,
     if (dialogue.sourceUrl.isNotEmpty) 'shorts_source_url': dialogue.sourceUrl,
     ...historyDraftSeed(),
   };
@@ -209,7 +205,6 @@ class ShortsScenarioService {
     required String url,
     required String originLanguage,
     required String targetLanguage,
-    bool freeTalk = false,
   }) async {
     if (!looksLikeYoutubeLink(url)) {
       throw const ShortsScenarioException('notYoutube');
@@ -256,7 +251,6 @@ class ShortsScenarioService {
           nativeLang: originLanguage,
           targetLang: targetLanguage,
           createdAt: FieldValue.serverTimestamp(),
-          freeTalk: freeTalk,
         ),
       );
       for (final message

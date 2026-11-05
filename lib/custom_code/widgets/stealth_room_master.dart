@@ -99,9 +99,6 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   //   추천을 다시 받으면 비운다 — 다른 장면의 표현이 남으면 안 된다.
   bool _isReadingShorts = false;
   bool _scenarioFromShorts = false;
-
-  /// 쇼츠 링크로 방을 만들 때 고른 Free Talk 여부(기본은 로비 설정 그대로).
-  bool _shortsFreeTalk = false;
   final TextEditingController _shortsUrlController = TextEditingController();
 
   /// 설정 화면과 추천 결과는 로비 Chat Lang 하나만 따른다.
@@ -543,40 +540,10 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     _readShortsLink(url);
   }
 
-  /// 링크 칸 아래: Free Talk / 기본 고르기 + 만들기 버튼.
-  /// 로비 두 언어가 같으면 Free Talk이 기본과 같아 고르는 칸을 감춘다.
+  /// 링크 칸 아래 만들기 버튼. 쇼츠는 바로 공부방으로 가므로 Free Talk 선택이 없다.
   List<Widget> _buildShortsChoiceAndGo(Color accent) {
     final copy = _setupCopy;
-    final origin = FFAppState().chatLang.trim();
-    final target = FFAppState().targetLang.trim();
-    final canChoose = origin.isNotEmpty && target.isNotEmpty && origin != target;
-    final choiceCopy = FreeTalkChoiceCopy.forSystemLocale();
-    String lang(String name) => _surfaceCopy.languageName(name);
     return [
-      if (canChoose) ...[
-        const SizedBox(height: 14),
-        Text(
-          choiceCopy.title,
-          style: const TextStyle(
-              color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 8),
-        _buildFreeTalkChoice(
-          accent: accent,
-          highlighted: _shortsFreeTalk,
-          title: 'Free Talk',
-          desc: choiceCopy.freeTalkDesc.replaceAll('{lang}', lang(target)),
-          onTap: () => setState(() => _shortsFreeTalk = true),
-        ),
-        const SizedBox(height: 8),
-        _buildFreeTalkChoice(
-          accent: accent,
-          highlighted: !_shortsFreeTalk,
-          title: choiceCopy.standard,
-          desc: choiceCopy.standardDesc.replaceAll('{lang}', lang(origin)),
-          onTap: () => setState(() => _shortsFreeTalk = false),
-        ),
-      ],
       const SizedBox(height: 16),
       FilledButton(
         onPressed: _isReadingShorts ? null : _submitShortsLink,
@@ -758,7 +725,6 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
         url: url,
         originLanguage: _chatLanguage,
         targetLanguage: target.isEmpty ? 'English' : target,
-        freeTalk: _shortsFreeTalk,
       );
       final roomRef = room.ref;
       // 서버가 링크 한 번에 시간을 뺐다면 로비·과금 시계의 남은 시간을 그 값에 맞춘다.
