@@ -40,7 +40,7 @@ class DuoBoardIntroNoticeCopy {
       promoBody: '지금은 가입하지 않은 비회원끼리도 통화할 수 있습니다. 게시판 아래 \'비회원 초대글 쓰기\'로 누구나 초대글을 올리고, 전 세계 누구나 눌러서 참여할 수 있습니다.\n• 비회원이 올린 초대 대화는 3분까지입니다. 끝나기 30초 전에 알려 드립니다.\n• 초대글은 폰 하나에 하나만 올릴 수 있고, 통화가 끝나면 사라집니다. 다시 올리면 됩니다.\n• 인사와 짧은 자기소개로 시작하고, 상대가 말할 때는 끝까지 기다려 주세요. 통역은 한 사람씩 전합니다.\n• 욕설, 성적인 말, 연락처·SNS 같은 개인정보 요구는 금지입니다. 불쾌한 상대는 통화 중 깃발 버튼으로 신고하세요. 바로 끝나고 다시 연결되지 않습니다.\n• 대화를 공부방에 저장해 연습하려면 통화가 끝난 뒤 회원으로 가입하세요.',
     ),
     'en': DuoBoardIntroNoticeCopy(
-      title: 'About the Duo Interpreter Board',
+      title: 'About the Duo Invite Board',
       body:
           'Anyone can have a 10-minute conversation with a member whose topic they like.\n\n'
           'Tap an invitation you want to join, then set Chat Lang in the language settings to the language you will speak. AI interpretation lets both people communicate naturally even when they use different languages.\n\n'
@@ -52,7 +52,7 @@ class DuoBoardIntroNoticeCopy {
       promoBody: 'Right now even people without an account can talk to each other. Anyone can post an invitation with \'Write a guest invitation\' at the bottom of the board, and anyone in the world can tap it to join.\n• Calls on guest invitations last up to 3 minutes. We\'ll let you know 30 seconds before the end.\n• One phone can post one invitation. It disappears after the call, and you can post again.\n• Start with a greeting and a short introduction, and let the other person finish speaking. The interpreter passes on one person at a time.\n• No swearing, sexual talk, or asking for contact details or social media. If someone makes you uncomfortable, tap the flag during the call to report them. The call ends and you won\'t be matched again.\n• To save the conversation to your Study Room and practice with it, sign up after the call.',
     ),
     'ja': DuoBoardIntroNoticeCopy(
-      title: 'Duo通訳掲示板のご案内',
+      title: 'Duo招待掲示板のご案内',
       body: '掲示板で気になる話題を投稿した会員と、どなたでも10分間会話できます。\n\n'
           '参加したい招待をタップし、言語設定のChat Langを実際に話す言語に設定してください。AI通訳により、異なる言語でも自然に会話できます。\n\n'
           '会話内容は学習ルームに保存されます。会員は保存された会話をスピーキング練習教材として利用できます。\n\n'
@@ -63,7 +63,7 @@ class DuoBoardIntroNoticeCopy {
       promoBody: '今は登録していないゲスト同士でも通話できます。掲示板下の「ゲスト招待を書く」で誰でも招待を投稿でき、世界中の誰でもタップして参加できます。\n• ゲストが投稿した招待の会話は3分までです。終了30秒前にお知らせします。\n• 招待は1台のスマホにつき1件まで。通話が終わると消えるので、また投稿できます。\n• あいさつと短い自己紹介から始め、相手が話している間は最後まで待ってください。通訳は1人ずつ伝えます。\n• 暴言、性的な発言、連絡先やSNSなど個人情報を求めることは禁止です。不快な相手は通話中の旗ボタンで通報してください。すぐに終了し、再びつながりません。\n• 会話を学習ルームに保存して練習するには、通話後に会員登録してください。',
     ),
     'zh': DuoBoardIntroNoticeCopy(
-      title: 'Duo 口译公告板说明',
+      title: 'Duo 邀请公告板说明',
       body: '任何人都可以与发布了感兴趣话题的会员进行10分钟对话。\n\n'
           '点击想参加的邀请，然后在语言设置中将 Chat Lang 设为您实际要使用的语言。通过 AI 口译，即使双方使用不同语言也能自然交流。\n\n'
           '对话内容会保存到学习室。会员可以将保存的对话用作口语练习资料。\n\n'
@@ -74,7 +74,7 @@ class DuoBoardIntroNoticeCopy {
       promoBody: '现在未注册的访客之间也可以通话。任何人都可以通过公告板下方的“写访客邀请”发布邀请，全世界任何人都可以点击参加。\n• 访客发布的邀请通话最长3分钟。结束前30秒会提醒您。\n• 每部手机只能发布一条邀请，通话结束后会消失，可以再次发布。\n• 先打招呼并简短自我介绍，对方说话时请耐心听完。口译一次只转达一个人的话。\n• 禁止脏话、性相关言论以及索要联系方式、社交账号等个人信息。遇到让您不适的人，请在通话中点击旗帜按钮举报，通话会立即结束且不会再匹配。\n• 想把对话保存到学习室练习，请在通话结束后注册会员。',
     ),
     'es': DuoBoardIntroNoticeCopy(
-      title: 'Acerca del tablón de intérprete Duo',
+      title: 'Acerca del tablón de invitaciones de Duo',
       body:
           'Cualquier persona puede conversar durante 10 minutos con un miembro cuyo tema le interese.\n\n'
           'Toca la invitación a la que quieras unirte y configura Chat Lang con el idioma que vas a hablar. La interpretación con IA permite conversar con naturalidad aunque uséis idiomas diferentes.\n\n'
@@ -86,7 +86,7 @@ class DuoBoardIntroNoticeCopy {
       promoBody: 'Ahora incluso las personas sin cuenta pueden hablar entre sí. Cualquiera puede publicar una invitación con «Escribir invitación de invitado» al final del tablón, y cualquier persona del mundo puede tocarla para unirse.\n• Las llamadas de invitaciones de invitados duran hasta 3 minutos. Te avisamos 30 segundos antes del final.\n• Cada teléfono puede publicar una invitación. Desaparece después de la llamada y puedes volver a publicar.\n• Empieza con un saludo y una breve presentación, y deja que la otra persona termine de hablar. El intérprete transmite a una persona cada vez.\n• Prohibidos los insultos, el contenido sexual y pedir contactos o redes sociales. Si alguien te incomoda, toca la bandera durante la llamada para denunciarlo. La llamada termina y no volveréis a coincidir.\n• Para guardar la conversación en tu Sala de estudio y practicar, regístrate después de la llamada.',
     ),
     'fr': DuoBoardIntroNoticeCopy(
-      title: 'À propos du tableau d’interprétation Duo',
+      title: 'À propos du tableau d’invitations Duo',
       body:
           'Tout le monde peut discuter pendant 10 minutes avec un membre dont le sujet lui plaît.\n\n'
           'Touchez l’invitation qui vous intéresse, puis choisissez dans Chat Lang la langue que vous parlerez. L’interprétation par IA permet de converser naturellement même dans des langues différentes.\n\n'
@@ -98,7 +98,7 @@ class DuoBoardIntroNoticeCopy {
       promoBody: 'En ce moment, même les personnes sans compte peuvent se parler. Tout le monde peut publier une invitation avec « Écrire une invitation invité » en bas du tableau, et n\'importe qui dans le monde peut la toucher pour participer.\n• Les appels sur les invitations d\'invités durent 3 minutes maximum. Nous vous prévenons 30 secondes avant la fin.\n• Un téléphone peut publier une invitation. Elle disparaît après l\'appel et vous pouvez en publier une autre.\n• Commencez par saluer et vous présenter brièvement, et laissez l\'autre personne finir de parler. L\'interprète transmet une personne à la fois.\n• Interdits : insultes, propos sexuels, demandes de coordonnées ou de réseaux sociaux. Si quelqu\'un vous met mal à l\'aise, touchez le drapeau pendant l\'appel pour le signaler. L\'appel se termine et vous ne serez plus mis en relation.\n• Pour enregistrer la conversation dans votre Salle d\'étude et vous entraîner, inscrivez-vous après l\'appel.',
     ),
     'de': DuoBoardIntroNoticeCopy(
-      title: 'Über das Duo-Dolmetscherboard',
+      title: 'Über das Duo-Einladungsboard',
       body:
           'Jeder kann zehn Minuten lang mit einem Mitglied sprechen, dessen Thema ihm gefällt.\n\n'
           'Tippe auf eine passende Einladung und stelle Chat Lang auf die Sprache ein, die du sprechen wirst. Die KI-Übersetzung ermöglicht eine natürliche Unterhaltung auch in unterschiedlichen Sprachen.\n\n'
@@ -110,7 +110,7 @@ class DuoBoardIntroNoticeCopy {
       promoBody: 'Gerade können auch Menschen ohne Konto miteinander sprechen. Jeder kann unten im Board mit „Gast-Einladung schreiben“ eine Einladung posten, und jeder auf der Welt kann sie antippen und mitmachen.\n• Gespräche über Gast-Einladungen dauern höchstens 3 Minuten. 30 Sekunden vor Ende geben wir Bescheid.\n• Pro Telefon eine Einladung. Sie verschwindet nach dem Gespräch, danach kannst du neu posten.\n• Beginne mit einem Gruß und einer kurzen Vorstellung und lass die andere Person ausreden. Der Dolmetscher überträgt jeweils eine Person.\n• Keine Beleidigungen, keine sexuellen Inhalte, keine Fragen nach Kontaktdaten oder Social Media. Wenn dir jemand unangenehm ist, tippe im Gespräch auf die Flagge und melde ihn. Das Gespräch endet und ihr werdet nicht wieder verbunden.\n• Um das Gespräch in deinem Lernraum zu speichern und damit zu üben, registriere dich nach dem Gespräch.',
     ),
     'hi': DuoBoardIntroNoticeCopy(
-      title: 'Duo दुभाषिया बोर्ड के बारे में',
+      title: 'Duo आमंत्रण बोर्ड के बारे में',
       body:
           'कोई भी व्यक्ति अपनी पसंद के विषय वाले सदस्य के साथ 10 मिनट बातचीत कर सकता है।\n\n'
           'जिस निमंत्रण में आपकी रुचि हो उसे टैप करें, फिर भाषा सेटिंग में Chat Lang को उस भाषा पर सेट करें जिसमें आप बोलेंगे। AI दुभाषिया अलग-अलग भाषाओं में भी सहज बातचीत संभव बनाता है।\n\n'
@@ -122,7 +122,7 @@ class DuoBoardIntroNoticeCopy {
       promoBody: 'अभी बिना खाते वाले लोग भी आपस में बात कर सकते हैं। बोर्ड के नीचे \'अतिथि निमंत्रण लिखें\' से कोई भी निमंत्रण पोस्ट कर सकता है, और दुनिया में कोई भी उसे टैप करके जुड़ सकता है।\n• अतिथि निमंत्रण की कॉल अधिकतम 3 मिनट की होती है। खत्म होने से 30 सेकंड पहले हम बताएँगे।\n• एक फ़ोन से एक निमंत्रण। कॉल के बाद यह हट जाता है और आप फिर से पोस्ट कर सकते हैं।\n• अभिवादन और छोटे परिचय से शुरू करें, और सामने वाले को बात पूरी करने दें। अनुवादक एक समय में एक व्यक्ति की बात पहुँचाता है।\n• गाली, यौन बातें, या संपर्क/सोशल मीडिया जानकारी माँगना मना है। कोई असहज करे तो कॉल के दौरान झंडा बटन से रिपोर्ट करें। कॉल तुरंत खत्म होगी और आप दोबारा नहीं जुड़ेंगे।\n• बातचीत को स्टडी रूम में सहेजकर अभ्यास करने के लिए कॉल के बाद सदस्य बनें।',
     ),
     'ru': DuoBoardIntroNoticeCopy(
-      title: 'О доске переводчика Duo',
+      title: 'О доске приглашений Duo',
       body:
           'Любой пользователь может десять минут поговорить с участником, тема которого ему интересна.\n\n'
           'Нажмите на подходящее приглашение и выберите в Chat Lang язык, на котором будете говорить. ИИ-перевод позволяет свободно общаться даже на разных языках.\n\n'
@@ -134,7 +134,7 @@ class DuoBoardIntroNoticeCopy {
       promoBody: 'Сейчас даже люди без аккаунта могут разговаривать друг с другом. Любой может опубликовать приглашение кнопкой «Написать гостевое приглашение» внизу доски, а любой человек в мире может нажать на него и присоединиться.\n• Разговоры по гостевым приглашениям длятся до 3 минут. За 30 секунд до конца мы предупредим.\n• С одного телефона — одно приглашение. После звонка оно исчезает, и можно опубликовать снова.\n• Начните с приветствия и короткого рассказа о себе и дайте собеседнику договорить. Переводчик передаёт речь по одному человеку.\n• Запрещены ругательства, сексуальные темы и просьбы о контактах или соцсетях. Если собеседник неприятен, нажмите флажок во время звонка, чтобы пожаловаться. Звонок завершится, и вас больше не соединят.\n• Чтобы сохранить разговор в Учебной комнате и практиковаться, зарегистрируйтесь после звонка.',
     ),
     'pt': DuoBoardIntroNoticeCopy(
-      title: 'Sobre o mural de intérprete Duo',
+      title: 'Sobre o mural de convites do Duo',
       body:
           'Qualquer pessoa pode conversar por 10 minutos com um membro cujo tema lhe interesse.\n\n'
           'Toque no convite desejado e defina Chat Lang como o idioma que você vai falar. A interpretação por IA permite conversar naturalmente mesmo usando idiomas diferentes.\n\n'
@@ -146,7 +146,7 @@ class DuoBoardIntroNoticeCopy {
       promoBody: 'Agora até pessoas sem conta podem conversar entre si. Qualquer um pode publicar um convite com «Escrever convite de convidado» no fim do quadro, e qualquer pessoa no mundo pode tocar para participar.\n• Chamadas de convites de convidados duram até 3 minutos. Avisamos 30 segundos antes do fim.\n• Cada telefone pode publicar um convite. Ele some depois da chamada e você pode publicar de novo.\n• Comece com um cumprimento e uma breve apresentação, e deixe a outra pessoa terminar de falar. O intérprete transmite uma pessoa por vez.\n• Proibidos palavrões, conteúdo sexual e pedir contatos ou redes sociais. Se alguém te incomodar, toque na bandeira durante a chamada para denunciar. A chamada termina e vocês não serão conectados de novo.\n• Para salvar a conversa na sua Sala de Estudo e praticar, cadastre-se depois da chamada.',
     ),
     'it': DuoBoardIntroNoticeCopy(
-      title: 'Informazioni sulla bacheca interprete Duo',
+      title: 'Informazioni sulla bacheca degli inviti Duo',
       body:
           'Chiunque può conversare per 10 minuti con un membro il cui argomento è di suo interesse.\n\n'
           'Tocca l’invito che preferisci e imposta Chat Lang sulla lingua che parlerai. L’interpretazione IA consente di comunicare naturalmente anche usando lingue diverse.\n\n'
@@ -158,7 +158,7 @@ class DuoBoardIntroNoticeCopy {
       promoBody: 'In questo periodo anche chi non ha un account può parlare con gli altri. Chiunque può pubblicare un invito con «Scrivi un invito da ospite» in fondo alla bacheca, e chiunque nel mondo può toccarlo per partecipare.\n• Le chiamate sugli inviti degli ospiti durano al massimo 3 minuti. Ti avvisiamo 30 secondi prima della fine.\n• Ogni telefono può pubblicare un invito. Sparisce dopo la chiamata e puoi pubblicarne un altro.\n• Inizia con un saluto e una breve presentazione, e lascia finire di parlare l\'altra persona. L\'interprete trasmette una persona alla volta.\n• Vietati insulti, contenuti sessuali e richieste di contatti o social. Se qualcuno ti mette a disagio, tocca la bandiera durante la chiamata per segnalarlo. La chiamata termina e non sarete più abbinati.\n• Per salvare la conversazione nella tua Aula studio ed esercitarti, registrati dopo la chiamata.',
     ),
     'nl': DuoBoardIntroNoticeCopy(
-      title: 'Over het Duo-tolkenbord',
+      title: 'Over het Duo-uitnodigingenbord',
       body:
           'Iedereen kan tien minuten praten met een lid van wie het onderwerp aanspreekt.\n\n'
           'Tik op een uitnodiging waaraan je wilt deelnemen en stel Chat Lang in op de taal die je gaat spreken. Dankzij AI-vertolking kun je ook met verschillende talen natuurlijk met elkaar praten.\n\n'
