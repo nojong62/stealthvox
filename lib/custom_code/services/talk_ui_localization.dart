@@ -52,7 +52,7 @@ class TalkUiCopy {
       'shortsLinkTitle': 'Paste a YouTube Shorts link',
       'shortsLinkGo': 'Create',
       'shortsLinkNotice':
-          'Please note\n· For users aged 18 and over only. If you’re under 18, please use Suggest a scenario or enter your own.\n· Only public YouTube videos can be analyzed. For longer videos, only the first 3 minutes are used.\n· We turn the conversations in the video into a dialogue between two people and add it to your study room as a new room. We don’t store the video itself.\n· The video’s copyright belongs to its creator. Please use it for personal practice only.',
+          'Please note\n· For users aged 18 and over only. If you’re under 18, please use Suggest a scenario or enter your own.\n· Only public YouTube videos can be analyzed. For longer videos, only the first 5 minutes are used.\n· We turn the conversations in the video into a dialogue between two people and add it to your study room as a new room. We don’t store the video itself.\n· The video’s copyright belongs to its creator. Please use it for personal practice only.',
       'shortsSource': 'Source:',
       'shortsError_adultOnly':
           'Shorts links are only available to users 18 or older. Try a suggested scenario or enter your own.',
@@ -107,7 +107,7 @@ class TalkUiCopy {
       'shortsLink': '쇼츠 링크',
       'shortsLinkTitle': '유튜브 쇼츠 링크 붙여넣기',
       'shortsLinkGo': '만들기',
-      'shortsLinkNotice': '유의 사항\n· 만 18세 이상만 쓸 수 있어요. 18세 미만은 상황 추천이나 직접 입력으로 이용해 주세요.\n· 공개된 유튜브 영상만 읽을 수 있어요. 긴 영상은 앞 3분만 사용해요.\n· 영상 속 대화를 두 사람 대화로 정리해 내 공부방에 새 방으로 넣어 드려요. 영상 자체는 저장하지 않아요.\n· 영상의 저작권은 만든 분에게 있어요. 개인 연습용으로만 써 주세요.',
+      'shortsLinkNotice': '유의 사항\n· 만 18세 이상만 쓸 수 있어요. 18세 미만은 상황 추천이나 직접 입력으로 이용해 주세요.\n· 공개된 유튜브 영상만 읽을 수 있어요. 긴 영상은 앞 5분만 사용해요.\n· 영상 속 대화를 두 사람 대화로 정리해 내 공부방에 새 방으로 넣어 드려요. 영상 자체는 저장하지 않아요.\n· 영상의 저작권은 만든 분에게 있어요. 개인 연습용으로만 써 주세요.',
       'shortsSource': '출처:',
       'shortsError_adultOnly': '쇼츠 링크는 만 18세 이상만 쓸 수 있어요. 상황 추천이나 직접 입력으로 이용해 주세요.',
       'shortsError_notYoutube': '유튜브 링크가 아니에요. 쇼츠 링크를 붙여 넣어 주세요.',
@@ -166,7 +166,7 @@ class TalkUiCopy {
       'shortsError_noTime': '残り時間がないと、ショート動画のリンクは使えません。',
       'shortsError_unusable': 'この動画には練習できる会話がありません。別のショート動画を試してください。',
       'shortsLinkNotice':
-          'ご利用にあたって\n· 18歳以上の方のみご利用いただけます。18歳未満の方は、「シチュエーションを提案」または自由入力をご利用ください。\n· 公開されているYouTube動画のみ読み取れます。長い動画は冒頭の3分のみ使用します。\n· 動画内の会話を2人の会話にまとめ、学習ルームに新しいルームとして追加します。動画そのものは保存しません。\n· 動画の著作権は制作者に帰属します。個人の練習目的でのみご利用ください。',
+          'ご利用にあたって\n· 18歳以上の方のみご利用いただけます。18歳未満の方は、「シチュエーションを提案」または自由入力をご利用ください。\n· 公開されているYouTube動画のみ読み取れます。長い動画は冒頭の5分のみ使用します。\n· 動画内の会話を2人の会話にまとめ、学習ルームに新しいルームとして追加します。動画そのものは保存しません。\n· 動画の著作権は制作者に帰属します。個人の練習目的でのみご利用ください。',
       'circleTitle': 'Circle Talk\n設定',
       'circleSubtitle': '提案を受けるか、好きなサークルを入力できます。',
       'circleRecommend': 'サークルを提案',
@@ -212,7 +212,7 @@ class TalkUiCopy {
       'shortsError_noTime': '有剩余时间才能使用 Shorts 链接。',
       'shortsSource': '来源：',
       'shortsLinkNotice':
-          '请注意\n· 仅限年满18岁者使用。未满18岁请使用“推荐情境”或自行输入。\n· 仅支持读取公开的 YouTube 视频。较长的视频仅使用前3分钟。\n· 我们会将视频中的对话整理成两人对话，作为新房间添加到你的学习空间。不会保存视频本身。\n· 视频版权归创作者所有。请仅用于个人练习。',
+          '请注意\n· 仅限年满18岁者使用。未满18岁请使用“推荐情境”或自行输入。\n· 仅支持读取公开的 YouTube 视频。较长的视频仅使用前5分钟。\n· 我们会将视频中的对话整理成两人对话，作为新房间添加到你的学习空间。不会保存视频本身。\n· 视频版权归创作者所有。请仅用于个人练习。',
       'shortsLink': 'Shorts 链接',
       'shortsError_unusable': '这段视频没有可供练习的对话。试试其他 Shorts。',
       'shortsError_failed': '无法读取视频。请稍后再试。',
@@ -260,7 +260,7 @@ class TalkUiCopy {
       'shortsError_unusable':
           'Este video no tiene ningún diálogo para practicar. Prueba con otro Short.',
       'shortsLinkNotice':
-          'Ten en cuenta\n· Solo para mayores de 18 años. Si tienes menos de 18, usa «Sugerir una situación» o introduce una propia.\n· Solo se pueden analizar vídeos públicos de YouTube. De los vídeos largos, solo se usan los 3 primeros minutos.\n· Convertimos los diálogos del vídeo en una conversación entre dos personas y la añadimos a tu sala de estudio como una sala nueva. No guardamos el vídeo.\n· Los derechos de autor del vídeo pertenecen a su creador. Úsalo solo para practicar por tu cuenta.',
+          'Ten en cuenta\n· Solo para mayores de 18 años. Si tienes menos de 18, usa «Sugerir una situación» o introduce una propia.\n· Solo se pueden analizar vídeos públicos de YouTube. De los vídeos largos, solo se usan los 5 primeros minutos.\n· Convertimos los diálogos del vídeo en una conversación entre dos personas y la añadimos a tu sala de estudio como una sala nueva. No guardamos el vídeo.\n· Los derechos de autor del vídeo pertenecen a su creador. Úsalo solo para practicar por tu cuenta.',
       'shortsError_noTime':
           'Necesitas tener tiempo disponible para usar enlaces de Shorts.',
       'shortsSource': 'Fuente:',
@@ -323,7 +323,7 @@ class TalkUiCopy {
       'shortsError_unusable':
           'Cette vidéo ne contient aucun dialogue à pratiquer. Essayez un autre Short.',
       'shortsLinkNotice':
-          'À noter\n· Réservé aux personnes de 18 ans et plus. Si vous avez moins de 18 ans, utilisez « Suggérer une situation » ou saisissez la vôtre.\n· Seules les vidéos YouTube publiques peuvent être analysées. Pour les vidéos longues, seules les 3 premières minutes sont utilisées.\n· Nous transformons les dialogues de la vidéo en une conversation entre deux personnes et l’ajoutons à votre espace d’étude sous forme de nouvelle salle. Nous ne conservons pas la vidéo elle-même.\n· Les droits d’auteur de la vidéo appartiennent à son créateur. Utilisez-la uniquement pour vous entraîner à titre personnel.',
+          'À noter\n· Réservé aux personnes de 18 ans et plus. Si vous avez moins de 18 ans, utilisez « Suggérer une situation » ou saisissez la vôtre.\n· Seules les vidéos YouTube publiques peuvent être analysées. Pour les vidéos longues, seules les 5 premières minutes sont utilisées.\n· Nous transformons les dialogues de la vidéo en une conversation entre deux personnes et l’ajoutons à votre espace d’étude sous forme de nouvelle salle. Nous ne conservons pas la vidéo elle-même.\n· Les droits d’auteur de la vidéo appartiennent à son créateur. Utilisez-la uniquement pour vous entraîner à titre personnel.',
       'shortsError_noTime':
           'Il vous faut du temps restant pour utiliser les liens Shorts.',
       'shortsLinkTitle': 'Collez un lien YouTube Shorts',
@@ -396,7 +396,7 @@ class TalkUiCopy {
           'Dieses Video ist nicht verfügbar. Bitte prüfen Sie, ob es öffentlich ist.',
       'shortsLinkGo': 'Erstellen',
       'shortsLinkNotice':
-          'Bitte beachten\n· Nur für Personen ab 18 Jahren. Wenn du unter 18 bist, nutze „Situation vorschlagen“ oder gib selbst eine ein.\n· Es können nur öffentliche YouTube-Videos gelesen werden. Bei längeren Videos werden nur die ersten 3 Minuten verwendet.\n· Wir fassen die Gespräche im Video als Dialog zwischen zwei Personen zusammen und fügen ihn deinem Lernraum als neuen Raum hinzu. Das Video selbst speichern wir nicht.\n· Das Urheberrecht am Video liegt bei der erstellenden Person. Bitte nutze es nur zum persönlichen Üben.',
+          'Bitte beachten\n· Nur für Personen ab 18 Jahren. Wenn du unter 18 bist, nutze „Situation vorschlagen“ oder gib selbst eine ein.\n· Es können nur öffentliche YouTube-Videos gelesen werden. Bei längeren Videos werden nur die ersten 5 Minuten verwendet.\n· Wir fassen die Gespräche im Video als Dialog zwischen zwei Personen zusammen und fügen ihn deinem Lernraum als neuen Raum hinzu. Das Video selbst speichern wir nicht.\n· Das Urheberrecht am Video liegt bei der erstellenden Person. Bitte nutze es nur zum persönlichen Üben.',
       'circleTitle': 'Circle Talk\nEinstellungen',
       'circleSubtitle':
           'Lass dir etwas vorschlagen oder gib deinen Kreis selbst ein.',
@@ -449,7 +449,7 @@ class TalkUiCopy {
       'shortsError_unusable':
           'इस वीडियो में अभ्यास करने के लिए कोई बातचीत नहीं है। कोई दूसरा Short आज़माएँ।',
       'shortsLinkNotice':
-          'कृपया ध्यान दें\n· केवल 18 वर्ष या उससे अधिक उम्र के लोग इसका उपयोग कर सकते हैं। 18 वर्ष से कम उम्र के लोग “स्थिति सुझाएँ” या अपनी स्थिति खुद दर्ज करें।\n· केवल सार्वजनिक YouTube वीडियो पढ़े जा सकते हैं। लंबे वीडियो में से केवल पहले 3 मिनट इस्तेमाल किए जाते हैं।\n· हम वीडियो की बातचीत को दो लोगों के संवाद के रूप में संकलित करके आपके स्टडी रूम में एक नए रूम के तौर पर जोड़ते हैं। वीडियो को स्वयं सेव नहीं करते।\n· वीडियो का कॉपीराइट उसके निर्माता के पास है। कृपया इसका उपयोग केवल निजी अभ्यास के लिए करें।',
+          'कृपया ध्यान दें\n· केवल 18 वर्ष या उससे अधिक उम्र के लोग इसका उपयोग कर सकते हैं। 18 वर्ष से कम उम्र के लोग “स्थिति सुझाएँ” या अपनी स्थिति खुद दर्ज करें।\n· केवल सार्वजनिक YouTube वीडियो पढ़े जा सकते हैं। लंबे वीडियो में से केवल पहले 5 मिनट इस्तेमाल किए जाते हैं।\n· हम वीडियो की बातचीत को दो लोगों के संवाद के रूप में संकलित करके आपके स्टडी रूम में एक नए रूम के तौर पर जोड़ते हैं। वीडियो को स्वयं सेव नहीं करते।\n· वीडियो का कॉपीराइट उसके निर्माता के पास है। कृपया इसका उपयोग केवल निजी अभ्यास के लिए करें।',
       'shortsError_unavailable':
           'यह वीडियो नहीं देखा जा सकता। कृपया जांचें कि यह सार्वजनिक है या नहीं।',
       'shortsError_adultOnly':
@@ -509,7 +509,7 @@ class TalkUiCopy {
           'Чтобы использовать ссылки на Shorts, нужно, чтобы у вас оставалось время.',
       'shortsLink': 'Ссылка на Shorts',
       'shortsLinkNotice':
-          'Обратите внимание\n· Только для пользователей от 18 лет. Если вам ещё нет 18, воспользуйтесь функцией «Предложить ситуацию» или введите свою.\n· Можно обрабатывать только общедоступные видео на YouTube. В длинных видео используются только первые 3 минуты.\n· Мы оформляем диалоги из видео как разговор двух собеседников и добавляем его в вашу учебную комнату как новую комнату. Само видео не сохраняется.\n· Авторские права на видео принадлежат его создателю. Используйте его только для личной практики.',
+          'Обратите внимание\n· Только для пользователей от 18 лет. Если вам ещё нет 18, воспользуйтесь функцией «Предложить ситуацию» или введите свою.\n· Можно обрабатывать только общедоступные видео на YouTube. В длинных видео используются только первые 5 минут.\n· Мы оформляем диалоги из видео как разговор двух собеседников и добавляем его в вашу учебную комнату как новую комнату. Само видео не сохраняется.\n· Авторские права на видео принадлежат его создателю. Используйте его только для личной практики.',
       'shortsError_unusable':
           'В этом видео нет диалога для практики. Попробуйте другой Short.',
       'shortsError_failed':
@@ -563,7 +563,7 @@ class TalkUiCopy {
       'shortsError_unavailable':
           'Não é possível assistir a este vídeo. Confira se ele está público.',
       'shortsLinkNotice':
-          'Atenção\n· Disponível apenas para pessoas com 18 anos ou mais. Se você tem menos de 18, use “Sugerir uma situação” ou digite uma situação própria.\n· Só é possível analisar vídeos públicos do YouTube. De vídeos mais longos, usamos apenas os 3 primeiros minutos.\n· Organizamos as conversas do vídeo em um diálogo entre duas pessoas e o adicionamos à sua sala de estudos como uma nova sala. Não armazenamos o vídeo em si.\n· Os direitos autorais do vídeo pertencem ao criador. Use-o apenas para praticar por conta própria.',
+          'Atenção\n· Disponível apenas para pessoas com 18 anos ou mais. Se você tem menos de 18, use “Sugerir uma situação” ou digite uma situação própria.\n· Só é possível analisar vídeos públicos do YouTube. De vídeos mais longos, usamos apenas os 5 primeiros minutos.\n· Organizamos as conversas do vídeo em um diálogo entre duas pessoas e o adicionamos à sua sala de estudos como uma nova sala. Não armazenamos o vídeo em si.\n· Os direitos autorais do vídeo pertencem ao criador. Use-o apenas para praticar por conta própria.',
       'shortsError_adultOnly':
           'Os links do Shorts estão disponíveis apenas para maiores de 18 anos. Escolha uma situação sugerida ou escreva a sua.',
       'shortsError_limit':
@@ -617,7 +617,7 @@ class TalkUiCopy {
       'scenarioRequired': 'Compila la situazione e i due ruoli.',
       'shortsSource': 'Fonte:',
       'shortsLinkNotice':
-          'Nota bene\n· Solo per utenti dai 18 anni in su. Se hai meno di 18 anni, usa «Suggerisci una situazione» oppure inseriscine una tu.\n· È possibile leggere solo video pubblici di YouTube. Per i video più lunghi, vengono usati solo i primi 3 minuti.\n· Organizziamo i dialoghi del video come una conversazione tra due persone e la aggiungiamo alla tua stanza di studio come nuova stanza. Non conserviamo il video.\n· I diritti d’autore del video appartengono al suo creatore. Usalo solo per esercitarti personalmente.',
+          'Nota bene\n· Solo per utenti dai 18 anni in su. Se hai meno di 18 anni, usa «Suggerisci una situazione» oppure inseriscine una tu.\n· È possibile leggere solo video pubblici di YouTube. Per i video più lunghi, vengono usati solo i primi 5 minuti.\n· Organizziamo i dialoghi del video come una conversazione tra due persone e la aggiungiamo alla tua stanza di studio come nuova stanza. Non conserviamo il video.\n· I diritti d’autore del video appartengono al suo creatore. Usalo solo per esercitarti personalmente.',
       'shortsError_unavailable':
           'Non è possibile guardare questo video. Verifica che sia pubblico.',
       'shortsError_adultOnly':
@@ -678,7 +678,7 @@ class TalkUiCopy {
       'shortsError_failed':
           'De video kon niet worden geladen. Probeer het over een tijdje opnieuw.',
       'shortsLinkNotice':
-          'Let op\n· Alleen voor gebruikers van 18 jaar en ouder. Ben je jonger dan 18, gebruik dan ‘Een situatie voorstellen’ of voer er zelf een in.\n· Alleen openbare YouTube-video’s kunnen worden uitgelezen. Van langere video’s worden alleen de eerste 3 minuten gebruikt.\n· We zetten de gesprekken in de video om in een dialoog tussen twee personen en voegen die als nieuwe ruimte toe aan je studieruimte. De video zelf bewaren we niet.\n· Het auteursrecht op de video ligt bij de maker. Gebruik de video alleen om zelf te oefenen.',
+          'Let op\n· Alleen voor gebruikers van 18 jaar en ouder. Ben je jonger dan 18, gebruik dan ‘Een situatie voorstellen’ of voer er zelf een in.\n· Alleen openbare YouTube-video’s kunnen worden uitgelezen. Van langere video’s worden alleen de eerste 5 minuten gebruikt.\n· We zetten de gesprekken in de video om in een dialoog tussen twee personen en voegen die als nieuwe ruimte toe aan je studieruimte. De video zelf bewaren we niet.\n· Het auteursrecht op de video ligt bij de maker. Gebruik de video alleen om zelf te oefenen.',
       'shortsError_unavailable':
           'Deze video is niet beschikbaar. Controleer of deze openbaar is.',
       'shortsLinkGo': 'Maken',
