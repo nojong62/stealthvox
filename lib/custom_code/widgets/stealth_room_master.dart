@@ -1757,16 +1757,19 @@ Return ONLY valid JSON: {"name":"..."}.
       recommending: _isRecommendingScenario,
       onRecommend: _recommendScenario,
       actionArea: _buildScenarioSourcePicker(accent),
-      fields: [
-        _setupField(_situationController, accent, copy['situation'],
-            copy['situationHint']),
-        const SizedBox(height: 18),
-        _setupField(
-            _aiRoleController, accent, copy['aiRole'], copy['aiRoleHint']),
-        const SizedBox(height: 18),
-        _setupField(_userRoleController, accent, copy['userRole'],
-            copy['userRoleHint']),
-      ],
+      // 쇼츠 링크는 상황·역할을 영상에서 뽑으므로 입력칸을 보여주지 않는다.
+      fields: _scenarioFromShorts
+          ? const <Widget>[]
+          : [
+              _setupField(_situationController, accent, copy['situation'],
+                  copy['situationHint']),
+              const SizedBox(height: 18),
+              _setupField(_aiRoleController, accent, copy['aiRole'],
+                  copy['aiRoleHint']),
+              const SizedBox(height: 18),
+              _setupField(_userRoleController, accent, copy['userRole'],
+                  copy['userRoleHint']),
+            ],
       startLabel: copy['scenarioStart'],
       onStart: _enterScenarioTalk,
       // 쇼츠 링크는 링크 칸 아래 '만들기'가 결론이라 시작 버튼을 두지 않는다.
