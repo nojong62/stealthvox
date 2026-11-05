@@ -29,7 +29,7 @@ class DuoBoardIntroNoticeCopy {
 
   static const _copies = <String, DuoBoardIntroNoticeCopy>{
     'ko': DuoBoardIntroNoticeCopy(
-      title: 'Duo 통역 게시판 안내',
+      title: 'Duo 초대 게시판 안내',
       body: '누구나 게시판에서 마음에 드는 주제를 올린 회원과 10분 동안 대화할 수 있습니다.\n\n'
           '대화하고 싶은 초대글을 누른 다음, 언어 설정에서 Chat Lang을 실제로 대화할 언어로 선택해 주세요. AI 통역을 통해 서로 다른 언어로도 자연스럽게 대화할 수 있습니다.\n\n'
           '대화 내용은 공부방에 저장되며, 회원은 저장된 대화를 대화 연습 자료로 활용할 수 있습니다.\n\n'
