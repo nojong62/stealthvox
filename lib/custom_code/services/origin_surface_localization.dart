@@ -1044,7 +1044,7 @@ class OriginSurfaceCopy {
       'Kies eerst je talen en pas daarna de AI-instellingen hieronder aan.'
     ],
     'languageLabelOrigin': [
-      'Chat Language',
+      'Chat Lang',
       '대화 언어',
       '会話言語',
       '聊天语言',
@@ -1058,8 +1058,8 @@ class OriginSurfaceCopy {
       'Gesprekstaal'
     ],
     'languageLabelLearning': [
-      'Learn Language',
-      '학습 언어',
+      'Learn Lang',
+      '배울 언어',
       '学習言語',
       '学习语言',
       'Idioma de aprendizaje',
@@ -1070,6 +1070,20 @@ class OriginSurfaceCopy {
       'Idioma de aprendizado',
       'Lingua di apprendimento',
       'Leertaal'
+    ],
+    'languageSection': [
+      'LANGUAGE',
+      '언어',
+      '言語',
+      '语言',
+      'IDIOMA',
+      'LANGUE',
+      'SPRACHE',
+      'भाषा',
+      'ЯЗЫК',
+      'IDIOMA',
+      'LINGUA',
+      'TAAL'
     ],
     'roomNotFound': [
       'We could not find that room.',
