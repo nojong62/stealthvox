@@ -392,7 +392,7 @@ Future<Map<String, List<String>>> _translate({
         'of that language. Do not translate word for word.')
     ..writeln('Rules: keep placeholders such as {n} exactly; keep line breaks '
         '(\\n) where the Korean has them; keep product and feature names in '
-        'Latin letters as they are (StealthVox, Duo, Duo Connect, Circle Talk, '
+        'Latin letters as they are (StealthVox, Duo, Duo Call, Circle Talk, '
         'Scenario Talk, PRACTICE, ESSAY, Keepers, Snap Echoing, Shadowing, '
         'Origin, Target); keep roughly the Korean length; match the tone and '
         'terminology of the current translation when it is still correct.')

@@ -1306,7 +1306,7 @@ Return ONLY valid JSON: {"name":"..."}.
                   const SizedBox(height: 20),
                   _buildMenuCard(
                     1,
-                    "Duo Connect",
+                    "Duo Call",
                     _setupCopy['duoMenuSubtitle'],
                     Icons.people,
                     const Color(0xFF3B82F6),

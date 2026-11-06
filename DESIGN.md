@@ -43,7 +43,7 @@
 
 | 모드 | 밝은 톤(500) | 짙은 톤(600) |
 |---|---|---|
-| Duo Connect | `0xFF3B82F6` | `0xFF2563EB` |
+| Duo Call | `0xFF3B82F6` | `0xFF2563EB` |
 | Circle Talk | `0xFFA855F7` | `0xFF9333EA` |
 | Scenario Talk | `0xFF22C55E` | `0xFF16A34A` |
 
@@ -132,7 +132,7 @@ MY SPEECH의 하늘색은 **"다른 표현 보기"와 같은 값**이다(`alt_st
 
 ```
 ┌───────────────────────────┐  ← 위쪽 4px 띠 = 모드 색
-│  ●   Duo Connect       ›  │
+│  ●   Duo Call       ›  │
 │      초청 직접 대화        │
 └───────────────────────────┘
 ```
