@@ -522,17 +522,11 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   /// 스크롤 안에 넣어 자판이 떠도 넘치지 않게 한다. 실패는 팝업 안에 적는다
   /// — 팝업 뒤 스낵바는 가려 보이지 않는다.
   Future<void> _openShortsDialog() async {
-    if (_shortsUrlController.text.trim().isEmpty) {
-      try {
-        final clip =
-            (await Clipboard.getData(Clipboard.kTextPlain))?.text ?? '';
-        if (looksLikeYoutubeLink(clip)) {
-          _shortsUrlController.text = clip.trim();
-        }
-      } catch (_) {}
-    }
-    if (!mounted) return;
-    const accent = Color(0xFFDC2626);
+    // 열 때마다 빈 칸으로 시작한다 — 전에 넣었다가 닫은 링크가 남지 않게.
+    // (클립보드 자동 채움도 뺐다: 옛 링크가 복사돼 있으면 남은 것처럼 보인다.)
+    _shortsUrlController.clear();
+    // 로고(빨강)와 겹치지 않는 인디고 — 입력칸 포커스와 생성 버튼에 쓴다.
+    const action = Color(0xFF6366F1);
     final copy = _setupCopy;
     final roomRef = await showDialog<DocumentReference>(
       context: context,
@@ -585,13 +579,12 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
             return PopScope(
               canPop: !busy,
               child: Dialog(
-                // 로비의 쇼츠 알약과 같은 짙은 빨강 바탕 + 빨간 테두리.
-                backgroundColor: const Color(0xFF2A1414),
+                backgroundColor: const Color(0xFF1E1E1E),
                 insetPadding:
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
-                  side: BorderSide(color: accent.withValues(alpha: 0.55)),
+                  side: const BorderSide(color: Color(0x1FFFFFFF)),
                 ),
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
@@ -647,23 +640,23 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                           hintStyle: const TextStyle(
                               color: Colors.white30, fontSize: 14),
                           filled: true,
-                          fillColor: const Color(0xFF1A0C0C),
+                          fillColor: const Color(0xFF121212),
                           contentPadding:
                               const EdgeInsets.fromLTRB(16, 16, 8, 16),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide(
-                                color: accent.withValues(alpha: 0.35)),
+                            borderSide:
+                                const BorderSide(color: Color(0x1FFFFFFF)),
                           ),
                           disabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide(
-                                color: accent.withValues(alpha: 0.2)),
+                            borderSide:
+                                const BorderSide(color: Color(0x14FFFFFF)),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
                             borderSide:
-                                const BorderSide(color: accent, width: 1.5),
+                                const BorderSide(color: action, width: 1.5),
                           ),
                         ),
                       ),
@@ -681,9 +674,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                       FilledButton(
                         onPressed: busy ? null : create,
                         style: FilledButton.styleFrom(
-                          backgroundColor: accent,
+                          backgroundColor: action,
                           disabledBackgroundColor:
-                              accent.withValues(alpha: 0.5),
+                              action.withValues(alpha: 0.5),
                           foregroundColor: Colors.white,
                           minimumSize: const Size.fromHeight(54),
                           shape: RoundedRectangleBorder(
@@ -723,6 +716,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
         );
       },
     );
+    // 팝업을 닫으면(만들기 성공·취소 모두) 칸을 비운다.
+    _shortsUrlController.clear();
     if (roomRef == null || !mounted) return;
     // 공부방 안은 과금 구간이다(목록 첫 페이지만 무과금).
     if (!guardBillingEntry(context)) return;
@@ -748,27 +743,27 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
           customBorder: const StadiumBorder(),
           onTap: _openShortsDialog,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 // 유튜브 모양 — 빨간 둥근 사각형 안에 흰 재생 삼각형.
                 Container(
-                  width: 28,
-                  height: 20,
+                  width: 24,
+                  height: 17,
                   decoration: BoxDecoration(
                     color: const Color(0xFFFF0000),
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(5),
                   ),
                   child: const Icon(Icons.play_arrow,
-                      color: Colors.white, size: 16),
+                      color: Colors.white, size: 14),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 7),
                 Text(
                   _setupCopy['shortsLink'],
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 15,
+                    fontSize: 13,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
