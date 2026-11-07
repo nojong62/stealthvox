@@ -730,27 +730,27 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   Widget _buildShortsLinkEntry() {
     const accent = Color(0xFFDC2626);
     return Align(
-      alignment: Alignment.centerLeft,
+      alignment: Alignment.centerRight,
       child: Material(
-        color: accent.withValues(alpha: 0.14),
+        color: accent.withValues(alpha: 0.1),
         shape: StadiumBorder(
-          side: BorderSide(color: accent.withValues(alpha: 0.55)),
+          side: BorderSide(color: accent.withValues(alpha: 0.4)),
         ),
         child: InkWell(
           customBorder: const StadiumBorder(),
           onTap: _openShortsDialog,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.smart_display, color: accent, size: 20),
+                const Icon(Icons.smart_display, color: accent, size: 18),
                 const SizedBox(width: 6),
                 Text(
                   _setupCopy['shortsLink'],
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 14,
+                    fontSize: 12.5,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -1304,7 +1304,7 @@ Return ONLY valid JSON: {"name":"..."}.
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _buildShortsLinkEntry(),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Text(
                     _setupCopy['modesTitle'],
                     style: TextStyle(
