@@ -485,6 +485,8 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Duo Invite',
       'loginOrJoin': 'Login or Join',
+      'signupBonus':
+          'Sign up and get 1 hour added automatically (once per phone)',
       'swipeContinue': 'Swipe to Continue',
       'studyTrial': 'Try the Study Room',
       'studyTrialUsed': 'This phone has already used the trial.',
@@ -498,6 +500,7 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Duo 초대',
       'loginOrJoin': '로그인 또는 가입',
+      'signupBonus': '가입하면 1시간이 자동으로 충전돼요 (폰 한 대당 한 번)',
       'swipeContinue': '스와이프하여 계속',
       'studyTrial': '공부방 체험',
       'studyTrialUsed': '이 폰에서는 이미 체험했어요.',
@@ -511,6 +514,7 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Duo 招待',
       'loginOrJoin': 'ログイン・新規登録',
+      'signupBonus': '登録すると1時間が自動でチャージされます（1台につき1回）',
       'swipeContinue': 'スワイプして続ける',
       'studyTrial': '学習ルーム体験',
       'studyTrialUsed': 'この端末ではすでに体験済みです。',
@@ -524,6 +528,7 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Duo 邀请',
       'loginOrJoin': '登录或注册',
+      'signupBonus': '注册后自动赠送1小时（每台手机限领一次）',
       'swipeContinue': '滑动以继续',
       'studyTrial': '体验学习室',
       'studyTrialUsed': '此手机已体验过。',
@@ -538,6 +543,8 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Invitación Duo',
       'loginOrJoin': 'Iniciar sesión o unirse',
+      'signupBonus':
+          'Regístrate y recibe 1 hora automáticamente (una vez por teléfono)',
       'swipeContinue': 'Desliza para continuar',
       'studyTrial': 'Prueba la sala de estudio',
       'studyTrialUsed': 'Este teléfono ya usó la prueba.',
@@ -552,6 +559,8 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Invitation Duo',
       'loginOrJoin': 'Se connecter ou s’inscrire',
+      'signupBonus':
+          'Inscrivez-vous et recevez automatiquement 1 heure (une seule fois par téléphone)',
       'swipeContinue': 'Balayez pour continuer',
       'studyTrial': 'Essayer la salle d’étude',
       'studyTrialUsed': 'Ce téléphone a déjà utilisé l’essai.',
@@ -566,6 +575,8 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Duo-Einladung',
       'loginOrJoin': 'Anmelden oder registrieren',
+      'signupBonus':
+          'Melde dich an und erhalte automatisch 1 Stunde (einmal pro Handy)',
       'swipeContinue': 'Wischen zum Fortfahren',
       'studyTrial': 'Lernraum testen',
       'studyTrialUsed': 'Dieses Telefon hat den Test bereits genutzt.',
@@ -580,6 +591,8 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Duo आमंत्रण',
       'loginOrJoin': 'लॉग इन या जुड़ें',
+      'signupBonus':
+          'साइन अप करते ही 1 घंटा अपने-आप जुड़ जाएगा (हर फ़ोन पर एक बार)',
       'swipeContinue': 'जारी रखने के लिए स्वाइप करें',
       'studyTrial': 'स्टडी रूम आज़माएँ',
       'studyTrialUsed': 'इस फ़ोन पर ट्रायल पहले ही उपयोग हो चुका है।',
@@ -594,6 +607,8 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Приглашение Duo',
       'loginOrJoin': 'Войти или зарегистрироваться',
+      'signupBonus':
+          'Зарегистрируйтесь — 1 час будет добавлен автоматически (один раз на телефон)',
       'swipeContinue': 'Смахните, чтобы продолжить',
       'studyTrial': 'Попробовать учебную комнату',
       'studyTrialUsed': 'На этом телефоне пробный доступ уже использован.',
@@ -608,6 +623,8 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Convite Duo',
       'loginOrJoin': 'Entrar ou cadastrar-se',
+      'signupBonus':
+          'Cadastre-se e ganhe 1 hora automaticamente (uma vez por celular)',
       'swipeContinue': 'Deslize para continuar',
       'studyTrial': 'Experimente a sala de estudo',
       'studyTrialUsed': 'Este telefone já usou o teste.',
@@ -622,6 +639,8 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Invito Duo',
       'loginOrJoin': 'Accedi o iscriviti',
+      'signupBonus':
+          'Registrati e ricevi 1 ora automaticamente (una volta per telefono)',
       'swipeContinue': 'Scorri per continuare',
       'studyTrial': 'Prova la sala studio',
       'studyTrialUsed': 'Questo telefono ha già usato la prova.',
@@ -636,6 +655,8 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Duo-uitnodiging',
       'loginOrJoin': 'Inloggen of aanmelden',
+      'signupBonus':
+          'Meld je aan en ontvang automatisch 1 uur (eenmalig per telefoon)',
       'swipeContinue': 'Veeg om door te gaan',
       'studyTrial': 'Probeer de studieruimte',
       'studyTrialUsed': 'Deze telefoon heeft de proef al gebruikt.',

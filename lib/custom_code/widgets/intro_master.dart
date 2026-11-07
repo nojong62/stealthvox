@@ -2080,6 +2080,22 @@ class _IntroMasterState extends State<IntroMaster>
                           : _buildWelcomeDuoAction(),
                       SizedBox(height: compact ? 4 : 8),
                       _buildWelcomeLoginAction(),
+                      // 가입 보너스 안내 — 서버 grantSignupBonus(폰 한 대당 1시간)와 같은 값.
+                      if ((copy['signupBonus'] ?? '').isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            copy['signupBonus']!,
+                            textAlign: TextAlign.center,
+                            textScaler: _cappedScaler(context, 1.15),
+                            style: const TextStyle(
+                              color: Color(0xFF43CCBD),
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
                       const Spacer(flex: 2),
                       Center(child: _buildPageIndicator(0, tealActive: true)),
                       const Spacer(flex: 2),

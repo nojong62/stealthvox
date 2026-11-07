@@ -1,6 +1,6 @@
 "use strict";
 
-// 가입 보너스 — 폰 하나에 한 번(2026-11-06 실장님: 공부방 체험을 대신해 30분).
+// 가입 보너스 — 폰 하나에 한 번(2026-11-06 공부방 체험을 대신해 30분, 2026-11-07 실장님: 1시간).
 //
 //   · 기기 ID(해시)로 `signup_bonus_devices/{hash}`를 남긴다. 이미 있으면 보너스 없음.
 //   · 기기 ID가 없거나 형식이 틀리면 보너스 없음(옛 앱은 ID를 안 보낸다 = 지금처럼 0).
@@ -8,7 +8,7 @@
 
 const crypto = require("crypto");
 
-const SIGNUP_BONUS_SECONDS = 30 * 60;
+const SIGNUP_BONUS_SECONDS = 60 * 60;
 const DEVICE_COLLECTION = "signup_bonus_devices";
 
 /** 형식이 맞으면 해시, 아니면 null. 에러를 던지지 않는다(보너스만 빠진다). */

@@ -419,7 +419,8 @@ exports.deductRemainingTime = functions.https.onCall(async (data, context) => {
 // this after Google/Kakao auth, but the server owns the idempotency check.
 //
 // The bonus was 0 from 2026-10-17 (Study Room trial instead). Since 2026-11-06
-// it is 30 minutes, once per phone (signup_bonus_devices/{sha256(deviceId)}).
+// it is 30 minutes (1 hour from 2026-11-07), once per phone
+// (signup_bonus_devices/{sha256(deviceId)}).
 // The call always marks signup_bonus_given, because the client reads that flag
 // to tell a returning member from a new one.
 // ----------------------------------------------------------------------------
@@ -439,7 +440,7 @@ exports.grantSignupBonus = functions.https.onCall(async (data, context) => {
     );
   }
   const userRef = admin.firestore().doc("users/" + uid);
-  // 2026-11-06: 폰 하나에 한 번 30분(signup_bonus.js). 기기 ID가 없으면 0.
+  // 2026-11-06: 폰 하나에 한 번(11-07부터 1시간, signup_bonus.js). 기기 ID가 없으면 0.
   const deviceKey = signupBonus.bonusDeviceKey(data && data.deviceId);
   const deviceRef = deviceKey
     ? admin.firestore().doc(signupBonus.DEVICE_COLLECTION + "/" + deviceKey)
