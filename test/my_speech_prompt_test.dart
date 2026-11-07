@@ -13,7 +13,7 @@ void main() {
   group('유저 1인칭으로 대화를 다시 들려준다', () {
     test('유저가 1인칭으로 말한다', () {
       expect(prompt,
-          contains('**Write it as the USER, in the first person.**'));
+          contains('**Speak as the USER, in the first person.**'));
       expect(prompt, contains('in the first person.'));
     });
 
@@ -89,27 +89,25 @@ void main() {
     });
   });
 
-  group('호흡·분절은 이 단계가 설계하지 않는다', () {
-    test('텍스트 단계에서 호흡 경계를 만들라고 시키지 않는다', () {
-      // 글을 청크에 맞추지 않는다. 완성된 글을 읽은 실제 소리를
-      // audio_silence_analyzer가 나누고 BreathEchoingEngine이 굴린다.
-      for (final gone in <String>[
-        'breath',
-        'echo and shadow',
-        'shadowing',
-        'chunk',
-      ]) {
-        expect(prompt.toLowerCase(), isNot(contains(gone)), reason: gone);
-      }
+  group('MY STORY — 친구에게 말하듯, 한 줄 = 한 호흡', () {
+    test('에세이가 아니라 친구에게 하는 말이다', () {
+      expect(prompt, contains('telling a friend what just happened'));
+      expect(prompt, contains('It is not an essay and not a piece of writing.'));
+      expect(prompt.toLowerCase(), isNot(contains('speaking-practice essay')));
     });
 
-    test('단어 수나 길이로 자르는 규칙이 없다', () {
-      expect(prompt, isNot(contains('5-7')));
-      expect(prompt, isNot(contains('5–7')));
-      expect(prompt.toLowerCase(), isNot(contains('words per')));
+    test('한 줄 = 한 호흡으로 줄을 바꾼다', () {
+      expect(prompt, contains('[ONE LINE = ONE BREATH]'));
+      expect(prompt, contains('Put a line break after every breath'));
+      expect(prompt, contains('No blank lines, no numbering, no bullets'));
     });
 
-    test('실제로 다시 쓸 수 있는 쉬운 영어다', () {
+    test('단위 나누기 단계(Snap chunk)의 규칙을 끌어오지 않는다', () {
+      expect(prompt, isNot(contains('Quick Snap')));
+      expect(prompt, isNot(contains('Full Breath')));
+    });
+
+    test('실제로 다시 쓸 수 있는 쉬운 말이다', () {
       expect(
         prompt,
         contains('Keep it something the user could genuinely say again'),
@@ -121,16 +119,35 @@ void main() {
     });
   });
 
+  group('언어별 말투', () {
+    test('한국어는 해요체, 문어체·반말 금지', () {
+      final ko = buildMySpeechInstructions(targetLang: 'Korean');
+      expect(ko, contains('해요체'));
+      expect(ko, contains('never use 반말'));
+    });
+
+    test('일본어는 です・ます체, 문어체·タメ口 금지', () {
+      final ja = buildMySpeechInstructions(targetLang: 'Japanese');
+      expect(ja, contains('です・ます体'));
+      expect(ja, contains('never use タメ口'));
+    });
+
+    test('다른 언어는 그 나라 친구 사이 일상 말투', () {
+      final es = buildMySpeechInstructions(targetLang: 'Spanish');
+      expect(es, contains('everyday spoken Spanish'));
+      expect(es, contains('telling a friend what just happened'));
+    });
+  });
+
   group('한 문장이 아니라 한 발화다', () {
     test('여러 문장이어도 된다고 적혀 있다', () {
-      expect(prompt,
-          contains('Several sentences that connect into one flowing account.'));
+      expect(prompt, contains('Short, natural spoken sentences.'));
       expect(
         prompt,
         contains('Do not force it into one grammatical sentence'),
       );
       expect(prompt,
-          contains('One person, speaking naturally and continuously, in the first person.'));
+          contains('One person, talking naturally and continuously, in the first person.'));
       // 길이를 채우려고 한 문장을 늘이지도 않는다.
       expect(
         prompt,
@@ -139,11 +156,11 @@ void main() {
     });
 
     test('설명·라벨·따옴표 없이 발화만 낸다', () {
-      expect(prompt, contains('Output only My English.'));
+      expect(prompt, contains('Output only My Story.'));
       expect(
         prompt,
         contains(
-            'Do not add headings, quotation marks, commentary, or analysis.'),
+            'Do not add a title, headings, quotation marks, commentary, or analysis.'),
       );
     });
   });
@@ -169,7 +186,6 @@ void main() {
   group('타겟 언어를 따른다', () {
     test('영어가 아니면 그 언어로 적으라고 지시한다', () {
       final japanese = buildMySpeechInstructions(targetLang: 'Japanese');
-      expect(japanese, contains('everyday spoken Japanese'));
       expect(japanese, contains('Write it in Japanese only.'));
       // 영어 타겟이 아니면 로비 스타일 블록은 붙지 않는다.
       expect(japanese, isNot(contains('[ENGLISH STYLE')));
@@ -260,6 +276,13 @@ void main() {
     test('따옴표를 벗긴다', () {
       expect(sanitizeSpeechOutput('"I want to leave."'), 'I want to leave.');
       expect(sanitizeSpeechOutput('“I want to leave.”'), 'I want to leave.');
+    });
+
+    test('한 줄 = 한 호흡 줄바꿈은 살리고 빈 줄만 걷는다', () {
+      expect(
+          sanitizeSpeechOutput(
+              'My Story:\nSo I was talking  \n\n  about my job.\n'),
+          'So I was talking\nabout my job.');
     });
 
     test('본문 안의 따옴표는 건드리지 않는다', () {

@@ -5549,7 +5549,7 @@ RULES — follow exactly:
                     if (speechReady) ...[
                       const SizedBox(height: 12),
                       _buildStudyPathCard(
-                        title: "ESSAY",
+                        title: "MY STORY",
                         icon: Icons.record_voice_over_rounded,
                         color: const Color(0xFF38BDF8),
                         // 📖 만들어 둔 글이 있으면 누르기 전에 읽어 볼 수 있다.
@@ -7693,7 +7693,7 @@ RULES — follow exactly:
     try {
       // ① ESSAY
       if (_mySpeech.trim().isEmpty) {
-        _setTrialPrep('ESSAY 만드는 중');
+        _setTrialPrep('MY STORY 만드는 중');
         if (!await _ensureMySpeech()) throw StateError('essay');
       }
       // ② 다른 표현
@@ -8405,7 +8405,9 @@ RULES — follow exactly:
   /// 칸에 들어 있어도 전혀 다른 물건이다. 판을 올려 옛 글을 안 읽는다.
   /// `my_english_v2`는 대화에 없던 내용을 붙이던 확장 글이다. v3부터는
   /// 대화 안에서만, 유저 1인칭으로 쓴다(2026-10-15).
-  static const String _kSpeechSchemaVersion = 'my_english_v3';
+  /// `my_story_v1`부터는 친구에게 말하듯 그 나라 일상 말투, 한 줄 = 한
+  /// 호흡이다(2026-11-08). 옛 ESSAY는 방을 열 때 새로 만든다.
+  static const String _kSpeechSchemaVersion = 'my_story_v1';
   static const String _kNativeEnglishSchemaVersion = 'natural_sharp_trevor_v1';
 
   /// 저장된 MY ENGLISH를 그대로 써도 되는가.

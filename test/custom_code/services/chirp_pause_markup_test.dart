@@ -28,6 +28,16 @@ void main() {
           'はい、 [pause short] そうです。 [pause short] 行きましょう');
     });
 
+    test('MY STORY: every line end pauses once, with or without punctuation', () {
+      expect(
+          chirpPauseMarkup(
+              'So I was talking\nabout my job, \nand it went well.',
+              ChirpPause.long),
+          'So I was talking [pause long] about my job, [pause long] and it went well.');
+      expect(chirpPauseMarkup('今日は\n話しました。\nよかったです', ChirpPause.short),
+          '今日は [pause short] 話しました。 [pause short] よかったです');
+    });
+
     test('text that already has brackets is not touched', () {
       expect(chirpPauseMarkup('Say [this], then go.', ChirpPause.medium),
           'Say [this], then go.');

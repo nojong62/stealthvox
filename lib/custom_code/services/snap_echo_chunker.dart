@@ -25,7 +25,8 @@ import 'history_text_model.dart';
 import 'secure_ai_gateway.dart';
 
 /// 이 규칙으로 만든 소리를 캐시에서 가르는 판. 규칙을 바꾸면 올린다.
-const String kSnapChunkVersion = 'snap_chunk_v3';
+/// v4(2026-11-08): MY STORY의 줄바꿈(한 줄 = 한 호흡)을 넘어 단위를 잇지 않는다.
+const String kSnapChunkVersion = 'snap_chunk_v4';
 
 /// 한 호흡 의미 단위의 길이.
 enum SnapUnitSize { quick, full }
@@ -51,6 +52,7 @@ Rules:
 - One group = one idea that makes sense on its own: a short clause, or a phrase that carries a complete piece of meaning.
 ${_lengthRule(size)}
 - Keep neighbouring groups similar in length so the reading keeps an even beat.
+- If the passage has line breaks, each line break is a mandatory cut: a group never runs across a line break. A line that is already a good length stays one group; a long line may be split further.
 - Prefer to cut at punctuation and at clause boundaries; otherwise before a prepositional phrase or after a conjunction — wherever the meaning naturally rests.
 - Never cut inside a fixed expression, phrasal verb, name, number with its unit, or a noun phrase.
 - Keep every character of the passage, in order. Do not add, drop, reorder, or change any word or punctuation mark. Punctuation stays attached to the word before it.

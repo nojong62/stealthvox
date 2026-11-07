@@ -28,7 +28,10 @@ extension ChirpPauseTag on ChirpPause {
 final RegExp _halfWidthBreak = RegExp(r'([,;:.!?])\s+(?=\S)');
 final RegExp _fullWidthBreak = RegExp(r'([，、；：。！？।])\s*(?=\S)');
 
-/// [text]의 문장부호 뒤마다 [pause] 태그를 넣는다. 맨 끝에는 넣지 않는다.
+// MY STORY는 한 줄 = 한 호흡이다(2026-11-08). 문장부호 없이 끝나는 줄도 쉰다.
+final RegExp _lineBreak = RegExp(r'[ \t]*\r?\n\s*');
+
+/// [text]의 문장부호 뒤·줄 끝마다 [pause] 태그를 넣는다. 맨 끝에는 넣지 않는다.
 /// 이미 대괄호가 있는 문장은 그대로 돌려준다 — 태그로 오인될 수 있다.
 String chirpPauseMarkup(String text, ChirpPause pause) {
   final input = text.trim();
@@ -36,7 +39,10 @@ String chirpPauseMarkup(String text, ChirpPause pause) {
     return input;
   }
   final tag = pause.tag;
+  // 문장부호 뒤의 줄바꿈은 아래 두 규칙이 먹는다. 남는 줄바꿈은 문장부호
+  // 없이 끝난 줄이고, 거기에도 쉼을 넣는다.
   return input
       .replaceAllMapped(_halfWidthBreak, (m) => '${m[1]} $tag ')
-      .replaceAllMapped(_fullWidthBreak, (m) => '${m[1]} $tag ');
+      .replaceAllMapped(_fullWidthBreak, (m) => '${m[1]} $tag ')
+      .replaceAll(_lineBreak, ' $tag ');
 }

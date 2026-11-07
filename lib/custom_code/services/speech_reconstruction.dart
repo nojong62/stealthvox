@@ -89,7 +89,7 @@ String sanitizeSpeechOutput(String raw) {
   // 옛 이름("My Speech:")도 함께 걷는다 — 모델이 종종 옛 라벨을 붙인다.
   text = text.replaceFirst(
     RegExp(
-        r'^\s*(my\s*speech|my\s*english|native\s*english|output)\s*[:\-–]\s*',
+        r'^\s*(my\s*story|my\s*speech|my\s*english|native\s*english|output)\s*[:\-–]\s*',
         caseSensitive: false),
     '',
   );
@@ -100,7 +100,12 @@ String sanitizeSpeechOutput(String raw) {
           (text.startsWith("'") && text.endsWith("'")))) {
     text = text.substring(1, text.length - 1).trim();
   }
-  return text;
+  // 📏 MY STORY는 한 줄 = 한 호흡이다. 줄은 살리고, 빈 줄·줄 앞뒤 공백만 걷는다.
+  return text
+      .split(RegExp(r'\r?\n'))
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .join('\n');
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -158,7 +163,31 @@ Never condense it, never drop material to make it simpler, and never trade conte
 
 ''';
 
-/// 🗣️ [MY-ENGLISH] 화면 이름은 **ESSAY**다(2026-10-15).
+/// 🗣️ [MY-STORY] 언어마다 친구 사이에 쓰는 말투 한 줄.
+///
+/// 한국어·일본어는 **해요체·です체**다(실장님 지시, 2026-11-08) — 반말·タメ口가
+/// 아니다. 나머지 언어는 그 나라 사람이 친구에게 하는 평소 말로 둔다.
+String myStoryRegisterLine(String language) {
+  final lower = language.trim().toLowerCase();
+  if (lower.startsWith('korean')) {
+    return 'Use polite but relaxed spoken Korean, 해요체 (e.g. "~했어요", "~더라고요", "~거든요"). '
+        'Never use the written "~했다/~이다" style, and never use 반말.';
+  }
+  if (lower.startsWith('japanese')) {
+    return 'Use polite but relaxed spoken Japanese, です・ます体 as people actually say it '
+        '(e.g. "~たんです", "~ました", "~んですけど", "~ですよね"). '
+        'Never use the written "~である/~だ" style, and never use タメ口.';
+  }
+  return 'Use the everyday spoken $language that people in its home countries use when telling a friend what just happened: '
+      'natural contractions and casual connecting words, not textbook or written style.';
+}
+
+/// 🗣️ [MY-STORY] 화면 이름은 **MY STORY**다(2026-11-08, 그 전엔 ESSAY).
+///
+/// "에세이"는 글말이라 구어체 독백에 안 맞는다(실장님 지시, 2026-11-08).
+/// 이제 이 글은 **친구에게 방금 있었던 일을 말해 주는** 그 나라 일상 말투다.
+/// **한 줄 = 한 호흡**으로 줄을 바꿔 낸다 — 쉐도잉은 줄 끝에서도 쉬고
+/// ([chirpPauseMarkup]), Snap Echoing은 줄을 넘어 단위를 잇지 않는다.
 ///
 /// **대화 안에서만 쓴다**(실장님 지시, 2026-10-15). 유저가 1인칭으로 이 대화를
 /// 제 말로 다시 들려주는 글이다. 원 대화에 없던 이유·예시·생각·결론을 붙이던
@@ -173,10 +202,8 @@ Never condense it, never drop material to make it simpler, and never trade conte
 ///
 /// 저장 칸은 `my_speech` 그대로다 — 이름만 바뀌었고 자리는 같다.
 ///
-/// ⚠️ **호흡·분절은 여기서 설계하지 않는다.** 글을 청크에 맞추지 않고, 완성된
-/// 글을 읽은 **실제 소리**를 나눈다 — TTS 전체 음성을 `audio_silence_analyzer`가
-/// 훑고 `BreathEchoingEngine`이 그 분절로 에코잉·쉐도잉을 돌린다. 이 프롬프트는
-/// 자연스러운 spoken English 하나에만 집중한다.
+/// 소리를 자르는 자리는 여전히 **실제 소리의 무음**이다(`audio_silence_analyzer`
+/// → `BreathEchoingEngine`). 줄바꿈은 그 무음이 생길 자리를 TTS에 알려 줄 뿐이다.
 ///
 /// 로비 AI STYLE은 [AiStyleReach.wording]으로만 닿는다 — 어휘와 말맛까지다.
 /// 로비에서 Native를 골랐어도 **여기서 사고 배열을 다시 짜지 않는다.** 그건
@@ -195,21 +222,22 @@ String buildMySpeechInstructions({
   final partner = partnerLabel.trim();
   final whoLine =
       StringBuffer('The transcript marks every line as USER or OTHER. '
-          'USER is the learner you are writing this speech for.');
+          'USER is the learner whose story you are telling.');
   if (user.isNotEmpty) whoLine.write(' USER is $user.');
   if (partner.isNotEmpty) whoLine.write(' OTHER is $partner.');
   final situationLine = situation.trim().isEmpty
       ? ''
       : '\nSituation: ${situation.trim()}. Use it only to understand the conversation; do not add details from it.';
 
-  return '''${persona}You are writing ONE speaking-practice essay for a language learner, built only from their own conversation.
-**Write it as the USER, in the first person.** It is the user telling the story of this conversation in their own words — "I", "my", "me".
+  return '''${persona}You are writing MY STORY: the USER, a language learner, telling a friend what just happened in this conversation — out loud, the way people really talk.
+**Speak as the USER, in the first person.** "I", "my", "me".
+It is not an essay and not a piece of writing. It is casual everyday talk, as if the user just walked in and said, "So, I was just talking about…"
 
 The conversation may contain many turns between the user and another person or AI.
 $whoLine$situationLine
 
 This is NOT a transcript and NOT a third-person summary.
-Read the whole conversation and retell, as one person speaking, what the USER talked about: what they said, asked, decided, felt, and found out.
+Read the whole conversation and retell, as one person talking to a friend, what the USER talked about: what they said, asked, decided, felt, and found out.
 
 [STAY INSIDE THE CONVERSATION]
 Use only what the conversation actually contains.
@@ -220,7 +248,7 @@ You may add plain connecting words so the thoughts flow, but a "because" or "so"
 
 [LENGTH FOLLOWS THE CONVERSATION]
 Cover the topics the user actually discussed, in a natural order.
-A short conversation gives a short essay; a long conversation gives a longer one. Never pad it, and never drop a topic the user really talked about.
+A short conversation gives a short story; a long conversation gives a longer one. Never pad it, and never drop a topic the user really talked about.
 
 [HARD LIMITS]
 Never contradict the conversation.
@@ -228,15 +256,25 @@ Never invent a specific or sensitive fact about the user. No names, places, empl
 Never write a dialogue, a question-and-answer, or a string of exchanged turns. It is ONE person speaking continuously.
 Never reverse the user's stance or make it stronger or weaker than it was.
 
-[OUTPUT STYLE]
-One person, speaking naturally and continuously, in the first person.
-Several sentences that connect into one flowing account. Do not force it into one grammatical sentence, and do not stretch one sentence to make it long.
+[HOW IT SOUNDS]
+One person, talking naturally and continuously, in the first person.
+${myStoryRegisterLine(language)}
+It should sound like a native speaker chatting, not like a report, a diary, or a school composition.
+Short, natural spoken sentences. Do not force it into one grammatical sentence, and do not stretch one sentence to make it long.
 Keep it something the user could genuinely say again in their own life.
-Plain, everyday spoken $language. No literary phrasing, no heavy idioms, no showy vocabulary.
+No literary phrasing, no heavy idioms, no showy vocabulary. No fillers such as "um" or "uh".
+
+[ONE LINE = ONE BREATH]
+Put a line break after every breath: each line is one short piece a learner can hear, then say back in a single breath.
+Break where a native speaker would naturally pause. Usually about 4 to 10 words per line (in languages written without spaces, about 6 to 20 characters).
+A long sentence runs over several lines; a short sentence can be one line.
+No blank lines, no numbering, no bullets, no indentation.
+
+[OUTPUT]
 Write it in $language only. Render any name, role label, or situation that appears in another language into natural $language (translate role or description phrases; romanize real personal names).
 Do not explain what you changed.
-Do not add headings, quotation marks, commentary, or analysis.
-Output only My English.${aiStylePromptBlock(targetLang: language, scope: 'the My English text you output', reach: AiStyleReach.wording)}''';
+Do not add a title, headings, quotation marks, commentary, or analysis.
+Output only My Story.${aiStylePromptBlock(targetLang: language, scope: 'the My Story text you output', reach: AiStyleReach.wording)}''';
 }
 
 /// My English 한 벌을 만든다. 실패하면 [SpeechBuildResult.failed]다 —
@@ -285,7 +323,7 @@ class MySpeechBuilder {
                 <String, String>{'role': 'system', 'content': sysPrompt},
                 <String, String>{
                   'role': 'user',
-                  'content': 'Conversation:\n$transcript\n\nMy English:',
+                  'content': 'Conversation:\n$transcript\n\nMy Story:',
                 },
               ],
             }),

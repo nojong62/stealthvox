@@ -687,7 +687,8 @@ class StudyTrialGuideCopy {
       'altExpr': 'Other expressions — see different ways to say the same thing.',
       'speakTitle': 'Yellow button at the top · Speaking practice',
       'practice': 'PRACTICE — have the same conversation again, swapping roles with the AI.',
-      'essay': 'ESSAY — the conversation woven into one story of your own. Practice it with Snap Echoing, which cuts it into meaning units, and shadowing. Voice, repeats and speed are set when you first press Start and stay that way.',
+      'essay':
+          'MY STORY — Tell a friend what happened in the conversation, in your own words. Each line is one breath. Practice with Snap Echoing, which breaks it into meaning units, and shadowing. Voice, repeats and speed are set when you first press Start and stay that way.',
       'tipTitle': 'Tip',
       'tip': 'Turn the volume down while speaking along. Only the AI gets quieter; your voice is still recorded clearly.',
       'timeTitle': 'Time',
@@ -705,7 +706,7 @@ class StudyTrialGuideCopy {
       'altExpr': '다른 표현 보기 — 같은 말을 다르게 하는 방법을 봅니다.',
       'speakTitle': '위쪽 노란 버튼 · 말하기 연습',
       'practice': 'PRACTICE — AI와 역할을 바꿔 가며 같은 대화를 다시 해 봅니다.',
-      'essay': 'ESSAY — 대화 내용을 내 이야기 한 편으로 엮은 글입니다. 의미 단위로 끊어 따라 말하는 Snap Echoing과 쉐도잉으로 연습합니다. 목소리·반복·속도는 처음 Start를 누를 때 정해지고, 그 뒤로는 바뀌지 않습니다.',
+      'essay': 'MY STORY — 대화에서 있었던 일을 친구에게 말하듯 들려주는 내 이야기입니다. 한 줄이 한 호흡입니다. 의미 단위로 끊어 따라 말하는 Snap Echoing과 쉐도잉으로 연습합니다. 목소리·반복·속도는 처음 Start를 누를 때 정해지고, 그 뒤로는 바뀌지 않습니다.',
       'tipTitle': '팁',
       'tip': '따라 말할 때 볼륨을 줄이면 AI 소리만 작아집니다. 내 목소리는 그대로 또렷하게 녹음됩니다.',
       'timeTitle': '시간',
@@ -723,7 +724,8 @@ class StudyTrialGuideCopy {
       'altExpr': '別の表現 — 同じことを別の言い方で見られます。',
       'speakTitle': '上の黄色いボタン・スピーキング練習',
       'practice': 'PRACTICE — AIと役割を入れ替えて、同じ会話をもう一度します。',
-      'essay': 'ESSAY — 会話の内容を自分の話一つにまとめた文章です。意味のまとまりごとに区切って繰り返すSnap Echoingとシャドーイングで練習します。声・反復・速度は最初にStartを押した時に決まり、その後は変わりません。',
+      'essay':
+          'MY STORY — 会話であったことを、友達に話すように伝える自分のストーリーです。1行がひと呼吸分です。意味のまとまりごとに区切って繰り返すSnap Echoingとシャドーイングで練習します。声・反復・速度は最初にStartを押した時に決まり、その後は変わりません。',
       'tipTitle': 'ヒント',
       'tip': '一緒に話す時に音量を下げると、AIの声だけが小さくなります。自分の声はそのままはっきり録音されます。',
       'timeTitle': '時間',
@@ -741,7 +743,8 @@ class StudyTrialGuideCopy {
       'altExpr': '其他表达 — 查看同一句话的不同说法。',
       'speakTitle': '顶部黄色按钮 · 口语练习',
       'practice': 'PRACTICE — 与AI互换角色，把同一段对话再说一遍。',
-      'essay': 'ESSAY — 把对话内容编成一篇属于你自己的故事。按意义单位切分跟读的Snap Echoing和影子跟读来练习。声音、重复次数和速度在第一次按Start时确定，之后不再改变。',
+      'essay':
+          'MY STORY — 像讲给朋友听一样，讲述对话中发生的事。每一行是一口气的长度。通过按意义单位切分跟读的Snap Echoing和影子跟读来练习。声音、重复次数和速度在第一次按Start时确定，之后不再改变。',
       'tipTitle': '提示',
       'tip': '跟读时调低音量，只有AI的声音会变小，你的声音仍会被清晰录下。',
       'timeTitle': '时间',
@@ -759,7 +762,8 @@ class StudyTrialGuideCopy {
       'altExpr': 'Otras expresiones — mira otras formas de decir lo mismo.',
       'speakTitle': 'Botón amarillo de arriba · Práctica oral',
       'practice': 'PRACTICE — repite la misma conversación intercambiando papeles con la IA.',
-      'essay': 'ESSAY — la conversación convertida en una historia propia. Practícala con Snap Echoing, que la divide en unidades de sentido, y con shadowing. La voz, las repeticiones y la velocidad se fijan al pulsar Start por primera vez y ya no cambian.',
+      'essay':
+          'MY STORY — Cuenta a un amigo lo que pasó en la conversación, como si se lo contaras en persona. Cada línea es una respiración. Practica con Snap Echoing, que divide el texto en unidades de sentido, y con shadowing. La voz, las repeticiones y la velocidad se fijan al pulsar Start por primera vez y ya no cambian.',
       'tipTitle': 'Consejo',
       'tip': 'Baja el volumen mientras repites. Solo se reduce la voz de la IA; tu voz se sigue grabando con claridad.',
       'timeTitle': 'Tiempo',
@@ -777,7 +781,8 @@ class StudyTrialGuideCopy {
       'altExpr': 'Autres expressions — découvrez d’autres façons de dire la même chose.',
       'speakTitle': 'Bouton jaune en haut · Expression orale',
       'practice': 'PRACTICE — refaites la même conversation en échangeant les rôles avec l’IA.',
-      'essay': 'ESSAY — la conversation réécrite en une histoire bien à vous. Entraînez-vous avec le Snap Echoing, qui la découpe en unités de sens, et le shadowing. La voix, les répétitions et la vitesse sont fixées au premier appui sur Start et ne changent plus.',
+      'essay':
+          'MY STORY — Racontez à un ami ce qui s’est passé dans la conversation, comme si vous y étiez. Chaque ligne correspond à une respiration. Entraînez-vous avec le Snap Echoing, qui découpe le texte en unités de sens, et le shadowing. La voix, les répétitions et la vitesse sont fixées au premier appui sur Start et ne changent plus.',
       'tipTitle': 'Astuce',
       'tip': 'Baissez le volume quand vous répétez. Seule la voix de l’IA diminue ; la vôtre reste enregistrée clairement.',
       'timeTitle': 'Durée',
@@ -795,7 +800,8 @@ class StudyTrialGuideCopy {
       'altExpr': 'Andere Ausdrücke — sieh dir an, wie man dasselbe anders sagen kann.',
       'speakTitle': 'Gelbe Schaltfläche oben · Sprechübung',
       'practice': 'PRACTICE — führe dasselbe Gespräch noch einmal und tausche dabei die Rollen mit der KI.',
-      'essay': 'ESSAY — das Gespräch als deine eigene Geschichte. Übe sie mit Snap Echoing, das sie in Sinneinheiten teilt, und mit Shadowing. Stimme, Wiederholungen und Tempo werden beim ersten Druck auf Start festgelegt und bleiben dann so.',
+      'essay':
+          'MY STORY — Erzähle einem Freund, was im Gespräch passiert ist, als würdest du es ihm persönlich berichten. Jede Zeile entspricht einem Atemzug. Übe mit Snap Echoing, das den Text in Sinneinheiten teilt, und mit Shadowing. Stimme, Wiederholungen und Tempo werden beim ersten Druck auf Start festgelegt und bleiben dann so.',
       'tipTitle': 'Tipp',
       'tip': 'Dreh beim Mitsprechen die Lautstärke herunter. Nur die KI wird leiser; deine Stimme wird weiterhin klar aufgenommen.',
       'timeTitle': 'Zeit',
@@ -813,7 +819,8 @@ class StudyTrialGuideCopy {
       'altExpr': 'दूसरे भाव — वही बात कहने के दूसरे तरीके देखें।',
       'speakTitle': 'ऊपर का पीला बटन · बोलने का अभ्यास',
       'practice': 'PRACTICE — AI के साथ भूमिकाएँ बदलकर वही बातचीत फिर से करें।',
-      'essay': 'ESSAY — बातचीत को आपकी अपनी एक कहानी के रूप में लिखा गया पाठ। इसे अर्थ-इकाइयों में बाँटकर दोहराने वाले Snap Echoing और शैडोइंग से अभ्यास करें। आवाज़, दोहराव और गति पहली बार Start दबाने पर तय होते हैं और फिर नहीं बदलते।',
+      'essay':
+          'MY STORY — बातचीत में जो हुआ, उसे ऐसे अपनी कहानी के रूप में सुनाएँ जैसे किसी दोस्त को बता रहे हों। हर पंक्ति एक साँस में बोलने लायक है। अर्थ-इकाइयों में बाँटकर दोहराने वाले Snap Echoing और शैडोइंग से अभ्यास करें। आवाज़, दोहराव और गति पहली बार Start दबाने पर तय होते हैं और फिर नहीं बदलते।',
       'tipTitle': 'सुझाव',
       'tip': 'साथ बोलते समय आवाज़ कम करें। सिर्फ़ AI की आवाज़ धीमी होती है; आपकी आवाज़ साफ़ रिकॉर्ड होती रहती है।',
       'timeTitle': 'समय',
@@ -831,7 +838,8 @@ class StudyTrialGuideCopy {
       'altExpr': 'Другие выражения — посмотрите, как сказать то же самое иначе.',
       'speakTitle': 'Жёлтая кнопка вверху · Разговорная практика',
       'practice': 'PRACTICE — повторите тот же разговор, поменявшись ролями с ИИ.',
-      'essay': 'ESSAY — разговор, пересказанный как ваша собственная история. Тренируйтесь с помощью Snap Echoing, который делит текст на смысловые части, и шэдоуинга. Голос, повторы и скорость задаются при первом нажатии Start и потом не меняются.',
+      'essay':
+          'MY STORY — Расскажите другу о том, что произошло в разговоре, будто делитесь своей историей. Каждая строка — на один вдох. Тренируйтесь с помощью Snap Echoing, который делит текст на смысловые части, и шэдоуинга. Голос, повторы и скорость задаются при первом нажатии Start и потом не меняются.',
       'tipTitle': 'Совет',
       'tip': 'Убавьте громкость, когда повторяете. Тише станет только ИИ, а ваш голос по-прежнему запишется чётко.',
       'timeTitle': 'Время',
@@ -849,7 +857,8 @@ class StudyTrialGuideCopy {
       'altExpr': 'Outras expressões — veja outras formas de dizer a mesma coisa.',
       'speakTitle': 'Botão amarelo no topo · Prática de fala',
       'practice': 'PRACTICE — refaça a mesma conversa trocando de papel com a IA.',
-      'essay': 'ESSAY — a conversa transformada numa história sua. Pratique com o Snap Echoing, que a divide em unidades de sentido, e com shadowing. A voz, as repetições e a velocidade ficam definidas no primeiro toque em Start e não mudam depois.',
+      'essay':
+          'MY STORY — Conte a um amigo o que aconteceu na conversa, como se estivesse contando a sua própria história. Cada linha corresponde a uma respiração. Pratique com o Snap Echoing, que divide o texto em unidades de sentido, e com shadowing. A voz, as repetições e a velocidade ficam definidas no primeiro toque em Start e não mudam depois.',
       'tipTitle': 'Dica',
       'tip': 'Abaixe o volume enquanto repete. Só a voz da IA fica mais baixa; a sua continua a ser gravada com clareza.',
       'timeTitle': 'Tempo',
@@ -867,7 +876,8 @@ class StudyTrialGuideCopy {
       'altExpr': 'Altre espressioni — scopri altri modi per dire la stessa cosa.',
       'speakTitle': 'Pulsante giallo in alto · Pratica orale',
       'practice': 'PRACTICE — rifai la stessa conversazione scambiandoti i ruoli con l’IA.',
-      'essay': 'ESSAY — la conversazione trasformata in una tua storia. Esercitati con lo Snap Echoing, che la divide in unità di senso, e con lo shadowing. Voce, ripetizioni e velocità si fissano al primo tocco su Start e poi non cambiano.',
+      'essay':
+          'MY STORY — Racconta a un amico quello che è successo nella conversazione, come se stessi condividendo la tua storia. Ogni riga corrisponde a un respiro. Esercitati con lo Snap Echoing, che divide il testo in unità di senso, e con lo shadowing. Voce, ripetizioni e velocità si fissano al primo tocco su Start e poi non cambiano.',
       'tipTitle': 'Suggerimento',
       'tip': 'Abbassa il volume mentre ripeti. Si abbassa solo la voce dell’IA; la tua resta registrata in modo chiaro.',
       'timeTitle': 'Tempo',
@@ -885,7 +895,8 @@ class StudyTrialGuideCopy {
       'altExpr': 'Andere uitdrukkingen — bekijk andere manieren om hetzelfde te zeggen.',
       'speakTitle': 'Gele knop bovenaan · Spreekoefening',
       'practice': 'PRACTICE — voer hetzelfde gesprek opnieuw en wissel van rol met de AI.',
-      'essay': 'ESSAY — het gesprek verwerkt tot één eigen verhaal. Oefen het met Snap Echoing, dat het in betekeniseenheden opdeelt, en met shadowing. Stem, herhalingen en snelheid liggen vast zodra je voor het eerst op Start drukt.',
+      'essay':
+          'MY STORY — Vertel een vriend wat er in het gesprek is gebeurd, alsof je je eigen verhaal vertelt. Elke regel is één ademhaling. Oefen met Snap Echoing, dat de tekst opdeelt in betekeniseenheden, en met shadowing. Stem, herhalingen en snelheid liggen vast zodra je voor het eerst op Start drukt.',
       'tipTitle': 'Tip',
       'tip': 'Zet het volume lager terwijl je meespreekt. Alleen de AI wordt zachter; jouw stem wordt nog steeds duidelijk opgenomen.',
       'timeTitle': 'Tijd',
