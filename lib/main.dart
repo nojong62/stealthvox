@@ -185,7 +185,7 @@ class MyAppScrollBehavior extends MaterialScrollBehavior {
       child;
 }
 
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   ThemeMode _themeMode = FlutterFlowTheme.themeMode;
 
   late AppStateNotifier _appStateNotifier;
@@ -215,9 +215,23 @@ class _MyAppState extends State<MyApp> {
     }
   });
 
+  /// ⌨️ 자판이 떠 있는 채로 앱을 나가면(홈 버튼 등) 돌아왔을 때 자판은
+  /// 닫혀 있는데 화면은 자판 높이(1060px)만큼 비어 회색으로 남는다 — 다른
+  /// 화면으로 가도 그대로다(11-07 S25 재현: 공부방 대사 편집 중 홈 → 복귀).
+  /// 나갈 때 입력칸 포커스를 놓아 자판을 앱 안에서 먼저 닫는다.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      FocusManager.instance.primaryFocus?.unfocus();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     _appStateNotifier = AppStateNotifier.instance;
     _router = createRouter(_appStateNotifier);
@@ -258,6 +272,7 @@ class _MyAppState extends State<MyApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     authUserSub.cancel();
 
     super.dispose();
