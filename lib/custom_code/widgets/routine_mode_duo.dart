@@ -2019,6 +2019,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 게스트는 과금 대상이 아니라 소진 신호 자체가 뜨지 않는다).
     StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
     WidgetsBinding.instance.addObserver(this);
+    // 이전 통화의 말투 문맥이 이번 통화에 섞이지 않게 비운다.
+    DuoBrain.clearContext();
     unawaited(_probeDuoNetwork('session_start'));
     // 상태등 맥박. 발화 중에만 돈다(`_setInterpMicPhase`가 켜고 끈다).
     _interpPulse = AnimationController(
@@ -2148,6 +2150,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   @override
   void dispose() {
+    DuoBrain.clearContext();
     if (StealthRoomMaster.saveAndExitCurrentMode == _handleAutoSaveAndExit) {
       StealthRoomMaster.saveAndExitCurrentMode = null;
     }
@@ -4906,6 +4909,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         }
       }
       lat.translationComplete = DateTime.now();
+      DuoBrain.rememberContextLine('Partner', raw);
 
       // 남은 꼬리가 **마지막 조각**이다. 여기서만 세션이 닫힌다.
       final tail = chunker.flush();
@@ -5548,6 +5552,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       // 🚫 못 보냈다고 Firestore로 갈아타지 않는다. 받는 쪽이 그 스냅샷을
       //   건너뛰므로 소용이 없고, 통로 고정 원칙도 깨진다.
       if (!sent) _queueInterpPendingSend(payload);
+      DuoBrain.rememberContextLine('Me', spoken);
       _lgDuo(
           '[INTERP-DATA]',
           'send ok=$sent seq=$seq lang=$myNative len=${spoken.length} '
@@ -6047,6 +6052,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         toLang: myNative,
       );
       lat.translationComplete = DateTime.now();
+      DuoBrain.rememberContextLine('Partner', raw);
       // ⚠️ **원문을 그대로 재생하지 않는다.** 예전에는 "못 알아들을지언정
       //   원문이라도 남기는 편이 낫다"고 보고 raw를 그대로 읽었다. 그런데
       //   raw는 상대의 언어이고 TTS 목소리는 내 언어다 — 한국어 문장을
@@ -9275,6 +9281,41 @@ Return strict JSON only:
   /// 공부방이 히스토리를 열 때 만든다). 그래서 여기서는 JSON도 쓰지 않고
   /// 평문 한 줄만 받는다 — 나올 글자가 절반 이하로 줄고, 파싱 실패라는
   /// 실패 모드 자체가 없어진다.
+  /// 💬 [말투 문맥] 도착 언어에 존댓말·경어 구분이 있을 때만 번역에 붙인다.
+  ///
+  /// 문장 하나만 보내면 모델이 앞 대화의 말투를 모른다. 2026-11-07 실기기
+  /// A/B(영→한 20턴 중 6턴이 반말로 섞임 → 문맥 6줄을 붙이자 10턴 모두 존댓말,
+  /// 번역 지연 차이는 오차 범위)에서 확인했다. 영어처럼 구분이 없는 도착
+  /// 언어는 효과가 없어 붙이지 않는다 — 입력만 늘기 때문이다.
+  /// 일본어는 시험하지 않았다. 같은 문제가 있을 것으로 보고 넣었다.
+  static const Set<String> _kRegisterLangs = <String>{'Korean', 'Japanese'};
+  static const int _kContextLines = 6;
+  static final List<String> _contextLines = <String>[];
+
+  /// 방금 오간 한 줄을 기억한다. [who]는 'Me'(내가 한 말) 또는 'Partner'.
+  /// 메모리에만 두고 로그·저장은 하지 않는다.
+  static void rememberContextLine(String who, String line) {
+    final String clean = line.trim();
+    if (clean.isEmpty) return;
+    _contextLines.add('$who: $clean');
+    while (_contextLines.length > _kContextLines) {
+      _contextLines.removeAt(0);
+    }
+  }
+
+  static void clearContext() => _contextLines.clear();
+
+  /// 시스템 프롬프트 뒤에 붙일 블록. 붙일 이유가 없으면 빈 문자열.
+  @foundation.visibleForTesting
+  static String contextBlock(String toLang) {
+    if (!_kRegisterLangs.contains(toLang) || _contextLines.isEmpty) return '';
+    return "\n\nRECENT CONVERSATION (reference only — use it to resolve what "
+        "pronouns and short replies refer to, and keep the same politeness "
+        "level the speakers already use. Do NOT translate, answer, or repeat "
+        "these lines. Translate ONLY the utterance in the user message):\n"
+        "${_contextLines.join("\n")}";
+  }
+
   static Future<String?> translateForSpeech({
     required String key,
     required String text,
@@ -9313,7 +9354,8 @@ Return strict JSON only:
             "Return an empty response ONLY if the input contains no words "
             "at all.\n"
             "Return ONLY the translated sentence — no quotes, no label, no "
-            "explanation.";
+            "explanation."
+            "${contextBlock(toLang)}";
         final res = await client
             .post(uri,
                 headers: {
@@ -9408,7 +9450,8 @@ Return strict JSON only:
         "Return an empty response ONLY if the input contains no words "
         "at all.\n"
         "Return ONLY the translated sentence — no quotes, no label, no "
-        "explanation.";
+        "explanation."
+        "${contextBlock(toLang)}";
 
     final request = http.Request(
       'POST',
