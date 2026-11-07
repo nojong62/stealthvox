@@ -230,7 +230,7 @@
     "cannotEditAfter": "[\"완료 후에는 대화를 수정할 수 없습니다.\"]",
     "noLinesToFinalize": "[\"남은 대사가 없어 확정할 수 없습니다.\"]",
     "finalizeTitle": "[\"이 대화를 최종 확정할까요?\"]",
-    "finalizeBody": "[\"확정 후에는 Original 대사를 수정할 수 없습니다.\"]",
+    "finalizeBody": "[\"확정 후에는 대사를 수정할 수 없습니다.\"]",
     "practiceTitle": "[\"Practice를 시작할까요?\"]",
     "practiceBody": "[\"최종 확정하시면 더 이상 내용 수정을 할 수 없습니다.\\n고칠 대사가 남았다면 먼저 대사를 수정해 주세요.\"]",
     "editLines": "[\"대사 수정하기\"]",

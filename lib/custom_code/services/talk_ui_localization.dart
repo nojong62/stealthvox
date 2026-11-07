@@ -760,7 +760,7 @@ class TalkUiCopy {
       'cannotEditAfter': 'You cannot edit this conversation after finishing.',
       'noLinesToFinalize': 'There are no remaining lines to finalize.',
       'finalizeTitle': 'Finalize this conversation?',
-      'finalizeBody': 'You cannot edit the Original lines after finalizing.',
+      'finalizeBody': 'You can’t edit the lines after finalizing.',
       'practiceTitle': 'Start Practice?',
       'practiceBody':
           'After finalizing, you can no longer edit the content.\nEdit any remaining lines first.',
@@ -798,7 +798,7 @@ class TalkUiCopy {
       'cannotEditAfter': '완료 후에는 대화를 수정할 수 없습니다.',
       'noLinesToFinalize': '남은 대사가 없어 확정할 수 없습니다.',
       'finalizeTitle': '이 대화를 최종 확정할까요?',
-      'finalizeBody': '확정 후에는 Original 대사를 수정할 수 없습니다.',
+      'finalizeBody': '확정 후에는 대사를 수정할 수 없습니다.',
       'practiceTitle': 'Practice를 시작할까요?',
       'practiceBody':
           '최종 확정하시면 더 이상 내용 수정을 할 수 없습니다.\n고칠 대사가 남았다면 먼저 대사를 수정해 주세요.',
@@ -836,7 +836,7 @@ class TalkUiCopy {
       'cannotEditAfter': '完了後はこの会話を編集できません。',
       'noLinesToFinalize': '確定するセリフが残っていません。',
       'finalizeTitle': 'この会話を最終確定しますか？',
-      'finalizeBody': '確定後はOriginalのセリフを編集できません。',
+      'finalizeBody': '確定後はセリフを編集できません。',
       'practiceTitle': 'Practiceを始めますか？',
       'practiceBody': '最終確定後は内容を編集できません。\n修正するセリフがあれば先に編集してください。',
       'editLines': 'セリフを編集',
@@ -873,7 +873,7 @@ class TalkUiCopy {
       'cannotEditAfter': '完成后将无法修改此对话。',
       'noLinesToFinalize': '没有可确认的剩余台词。',
       'finalizeTitle': '要最终确认此对话吗？',
-      'finalizeBody': '确认后将无法修改Original台词。',
+      'finalizeBody': '确认后将无法修改台词。',
       'practiceTitle': '开始Practice吗？',
       'practiceBody': '最终确认后将无法修改内容。\n如有台词需要修改，请先完成修改。',
       'editLines': '修改台词',
@@ -912,7 +912,7 @@ class TalkUiCopy {
       'cannotEditAfter': 'No podrás editar esta conversación después.',
       'noLinesToFinalize': 'No quedan líneas por confirmar.',
       'finalizeTitle': '¿Confirmar definitivamente esta conversación?',
-      'finalizeBody': 'Después no podrás editar las líneas Original.',
+      'finalizeBody': 'Después de confirmar, no podrás editar las líneas.',
       'practiceTitle': '¿Iniciar Practice?',
       'practiceBody':
           'Después de confirmar no podrás editar el contenido.\nEdita primero las líneas pendientes.',
@@ -953,7 +953,7 @@ class TalkUiCopy {
       'noLinesToFinalize': 'Aucune réplique restante à valider.',
       'finalizeTitle': 'Valider définitivement cette conversation ?',
       'finalizeBody':
-          'Après validation, les répliques Original ne seront plus modifiables.',
+          'Après validation, les répliques ne pourront plus être modifiées.',
       'practiceTitle': 'Commencer Practice ?',
       'practiceBody':
           'Après validation, le contenu ne sera plus modifiable.\nModifiez d’abord les répliques restantes.',
@@ -995,7 +995,7 @@ class TalkUiCopy {
       'noLinesToFinalize': 'Keine verbleibenden Zeilen zum Bestätigen.',
       'finalizeTitle': 'Dieses Gespräch endgültig bestätigen?',
       'finalizeBody':
-          'Danach können die Original-Zeilen nicht mehr bearbeitet werden.',
+          'Nach der Bestätigung können die Zeilen nicht mehr bearbeitet werden.',
       'practiceTitle': 'Practice starten?',
       'practiceBody':
           'Nach der Bestätigung kann der Inhalt nicht mehr bearbeitet werden.\nBearbeite zuerst offene Zeilen.',
@@ -1035,7 +1035,7 @@ class TalkUiCopy {
       'cannotEditAfter': 'इसके बाद आप यह बातचीत संपादित नहीं कर सकेंगे।',
       'noLinesToFinalize': 'पुष्टि करने के लिए कोई पंक्ति शेष नहीं है।',
       'finalizeTitle': 'इस बातचीत को अंतिम रूप दें?',
-      'finalizeBody': 'इसके बाद Original पंक्तियाँ संपादित नहीं की जा सकेंगी।',
+      'finalizeBody': 'पुष्टि के बाद पंक्तियों को संपादित नहीं किया जा सकेगा।',
       'practiceTitle': 'Practice शुरू करें?',
       'practiceBody':
           'अंतिम रूप देने के बाद सामग्री संपादित नहीं होगी।\nपहले बची हुई पंक्तियाँ सुधारें।',
@@ -1075,8 +1075,7 @@ class TalkUiCopy {
       'cannotEditAfter': 'После этого разговор нельзя будет изменить.',
       'noLinesToFinalize': 'Нет оставшихся реплик для подтверждения.',
       'finalizeTitle': 'Окончательно подтвердить этот разговор?',
-      'finalizeBody':
-          'После подтверждения реплики Original нельзя будет изменить.',
+      'finalizeBody': 'После подтверждения реплики нельзя будет изменить.',
       'practiceTitle': 'Начать Practice?',
       'practiceBody':
           'После подтверждения содержимое нельзя будет изменить.\nСначала исправьте оставшиеся реплики.',
@@ -1116,7 +1115,7 @@ class TalkUiCopy {
       'cannotEditAfter': 'Você não poderá editar esta conversa depois.',
       'noLinesToFinalize': 'Não há falas restantes para confirmar.',
       'finalizeTitle': 'Confirmar esta conversa definitivamente?',
-      'finalizeBody': 'Depois, as falas Original não poderão ser editadas.',
+      'finalizeBody': 'Após confirmar, não será possível editar as falas.',
       'practiceTitle': 'Iniciar Practice?',
       'practiceBody':
           'Após confirmar, o conteúdo não poderá ser editado.\nEdite primeiro as falas restantes.',
@@ -1156,7 +1155,7 @@ class TalkUiCopy {
       'cannotEditAfter': 'Dopo non potrai modificare questa conversazione.',
       'noLinesToFinalize': 'Non restano battute da confermare.',
       'finalizeTitle': 'Confermare definitivamente questa conversazione?',
-      'finalizeBody': 'Dopo non potrai modificare le battute Original.',
+      'finalizeBody': 'Dopo la conferma, non potrai modificare le battute.',
       'practiceTitle': 'Avviare Practice?',
       'practiceBody':
           'Dopo la conferma il contenuto non sarà modificabile.\nModifica prima le battute rimanenti.',
@@ -1196,7 +1195,7 @@ class TalkUiCopy {
       'cannotEditAfter': 'Hierna kun je dit gesprek niet meer bewerken.',
       'noLinesToFinalize': 'Er zijn geen regels meer om te bevestigen.',
       'finalizeTitle': 'Dit gesprek definitief bevestigen?',
-      'finalizeBody': 'Hierna kun je de Original-regels niet meer bewerken.',
+      'finalizeBody': 'Na bevestiging kun je de regels niet meer bewerken.',
       'practiceTitle': 'Practice starten?',
       'practiceBody':
           'Na bevestiging kun je de inhoud niet meer bewerken.\nBewerk eerst de resterende regels.',
