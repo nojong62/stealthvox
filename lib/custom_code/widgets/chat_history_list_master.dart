@@ -506,7 +506,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
 
   bool _isCircleTalkRoom(String roomName) => roomName.contains("Circle Talk");
 
+  /// 🎞️ 쇼츠 링크로 만든 방. room_name은 시나리오톡과 같으므로(공부방 화면이
+  ///   그 이름으로 모드를 가른다) `source`로 가른다. Shorts 칩에만 모이고
+  ///   Scenario 칩에서는 빠진다(11-07 실장님).
+  bool _isShortsRoom(Map<String, dynamic> data) => data['source'] == 'shorts';
+
   IconData _getIconForRoom(String roomName) {
+    if (roomName.contains("Shorts")) return Icons.smart_display_outlined;
     if (roomName.contains("Duo")) return Icons.people;
     if (roomName.contains("Clone")) return Icons.face;
     if (roomName.contains("Scenario Talk")) return Icons.smart_toy;
@@ -517,6 +523,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   }
 
   Color _getColorForRoom(String roomName) {
+    if (roomName.contains("Shorts")) return const Color(0xFFDC2626);
     if (roomName.contains("Duo")) return const Color(0xFF2563EB);
     if (roomName.contains("Clone")) return const Color(0xFF9333EA);
     if (roomName.contains("Scenario Talk")) return const Color(0xFF16A34A);
@@ -742,9 +749,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
           if (data['last_message'] == null) return false;
           if (_selectedFilter == 'All') return true;
+          if (_selectedFilter == 'Shorts') return _isShortsRoom(data);
           if (data['room_name'] == null) return false;
           final rn = data['room_name'].toString();
           if (_selectedFilter == 'Circle') return _isCircleTalkRoom(rn);
+          if (_selectedFilter == 'Scenario' && _isShortsRoom(data)) {
+            return false;
+          }
           return rn.contains(_selectedFilter);
         }).toList();
 
@@ -996,6 +1007,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           child: Row(
             children: _selectedFilter == 'All' || _selectedFilter == 'Keepers'
                 ? [
+                    _buildFilterChip(
+                        'Shorts', 'Shorts', Icons.smart_display_outlined),
                     _buildFilterChip('Duo', 'Duo', Icons.people),
                     _buildFilterChip('Circle', 'Circle', Icons.forum),
                     _buildFilterChip('Scenario', 'Scenario', Icons.smart_toy),
@@ -1260,7 +1273,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
     String title = "";
     bool isPinned = data['is_pinned'] ?? false;
-    String roomName = data['room_name'] ?? 'Stealth Mode';
+    // 쇼츠 방은 아이콘·색만 Shorts로 보인다(저장된 room_name은 그대로).
+    String roomName = _isShortsRoom(data)
+        ? 'Shorts'
+        : (data['room_name'] ?? 'Stealth Mode');
 
     if (data['custom_title'] != null &&
         data['custom_title'].toString().isNotEmpty) {

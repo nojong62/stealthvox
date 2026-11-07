@@ -95,10 +95,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   final TextEditingController _aiRoleController = TextEditingController();
   final TextEditingController _userRoleController = TextEditingController();
 
-  // 🎞️ 쇼츠 링크로 만든 시나리오의 핵심 표현(위 Target, 아래 작은 Origin).
-  //   추천을 다시 받으면 비운다 — 다른 장면의 표현이 남으면 안 된다.
-  bool _isReadingShorts = false;
-  bool _scenarioFromShorts = false;
+  // 🎞️ 쇼츠 링크 — 모드 선택 화면 맨 위 아이콘에서 팝업으로 연다(11-07).
+  //   예전에는 시나리오톡 설정 안에 있었다.
   final TextEditingController _shortsUrlController = TextEditingController();
 
   /// 설정 화면과 추천 결과는 로비 Chat Lang 하나만 따른다.
@@ -516,163 +514,121 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     }
   }
 
-  /// 쇼츠 칸으로 바꾼다. 클립보드에 유튜브 링크가 있으면 미리 넣어 둔다.
-  Future<void> _selectShortsSource() async {
-    setState(() => _scenarioFromShorts = true);
-    if (_shortsUrlController.text.trim().isNotEmpty) return;
-    try {
-      final clip = (await Clipboard.getData(Clipboard.kTextPlain))?.text ?? '';
-      if (mounted && looksLikeYoutubeLink(clip)) {
-        setState(() => _shortsUrlController.text = clip.trim());
-      }
-    } catch (_) {}
-  }
-
-  void _submitShortsLink() {
-    final url = _shortsUrlController.text.trim();
-    if (url.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(_setupCopy['shortsError_notYoutube']),
-      ));
-      return;
+  /// 🎞️ 쇼츠 링크 팝업 — 링크 칸과 '쇼츠 대화 생성' 버튼. 만들면 공부방을
+  /// 새로 만들고 바로 그 방(검수 단계, 최종 수정 완료 버튼이 있는 화면)으로
+  /// 들어간다. 대화방은 거치지 않는다.
+  ///
+  /// 예전 팝업(AlertDialog)은 자판에 밀려 깨졌다(11-05 실기기). 내용 전체를
+  /// 스크롤 안에 넣어 자판이 떠도 넘치지 않게 한다. 실패는 팝업 안에 적는다
+  /// — 팝업 뒤 스낵바는 가려 보이지 않는다.
+  Future<void> _openShortsDialog() async {
+    if (_shortsUrlController.text.trim().isEmpty) {
+      try {
+        final clip =
+            (await Clipboard.getData(Clipboard.kTextPlain))?.text ?? '';
+        if (looksLikeYoutubeLink(clip)) {
+          _shortsUrlController.text = clip.trim();
+        }
+      } catch (_) {}
     }
-    FocusScope.of(context).unfocus();
-    _readShortsLink(url);
-  }
-
-  /// 링크 칸 아래 만들기 버튼. 쇼츠는 바로 공부방으로 가므로 Free Talk 선택이 없다.
-  List<Widget> _buildShortsChoiceAndGo(Color accent) {
+    if (!mounted) return;
+    const accent = Color(0xFFDC2626);
     final copy = _setupCopy;
-    return [
-      const SizedBox(height: 16),
-      FilledButton(
-        onPressed: _isReadingShorts ? null : _submitShortsLink,
-        style: FilledButton.styleFrom(
-          backgroundColor: accent,
-          foregroundColor: Colors.white,
-          minimumSize: const Size.fromHeight(56),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        ),
-        child: _isReadingShorts
-            ? const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2.2, color: Colors.white),
-              )
-            : Text(
-                copy['shortsLinkGo'],
-                style:
-                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-      ),
-    ];
-  }
+    final roomRef = await showDialog<DocumentReference>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        var busy = false;
+        String? errorText;
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            Future<void> create() async {
+              final url = _shortsUrlController.text.trim();
+              if (!looksLikeYoutubeLink(url)) {
+                setDialogState(
+                    () => errorText = copy['shortsError_notYoutube']);
+                return;
+              }
+              FocusScope.of(dialogContext).unfocus();
+              setDialogState(() {
+                busy = true;
+                errorText = null;
+              });
+              try {
+                final target = FFAppState().targetLang.trim();
+                final room = await ShortsScenarioService.createStudyRoom(
+                  url: url,
+                  originLanguage: _chatLanguage,
+                  targetLanguage: target.isEmpty ? 'English' : target,
+                );
+                // 서버가 링크 한 번에 시간을 뺐다면 로비·과금 시계의 남은
+                // 시간을 그 값에 맞춘다.
+                final left = room.remainingSeconds;
+                if (left != null) {
+                  FFAppState().remainingTime = left;
+                  BillingTicker.instance.remainingSecondsNotifier.value = left;
+                }
+                _shortsUrlController.clear();
+                if (dialogContext.mounted) {
+                  Navigator.of(dialogContext).pop(room.ref);
+                }
+              } on ShortsScenarioException catch (error) {
+                if (dialogContext.mounted) {
+                  setDialogState(() {
+                    busy = false;
+                    errorText = copy['shortsError_${error.code}'];
+                  });
+                }
+              }
+            }
 
-  /// 상황 추천 | 쇼츠 링크 — 둘 중 하나를 고르는 막대. 쇼츠를 고르면 그 자리에
-  /// 링크 칸이 펼쳐진다(팝업은 자판에 밀려 깨졌다, 11-05 실기기).
-  Widget _buildScenarioSourcePicker(Color accent) {
-    final copy = _setupCopy;
-    final busy = _isRecommendingScenario || _isReadingShorts;
-    Widget segment({
-      required bool selected,
-      required IconData icon,
-      required String label,
-      required bool loading,
-      required VoidCallback onTap,
-    }) {
-      return Expanded(
-        child: GestureDetector(
-          onTap: busy ? null : onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            height: 44,
-            decoration: BoxDecoration(
-              color: selected ? accent : Colors.transparent,
-              borderRadius: BorderRadius.circular(22),
-            ),
-            alignment: Alignment.center,
-            child: loading
-                ? SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: selected ? Colors.white : accent,
-                    ),
-                  )
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(icon,
-                          size: 17,
-                          color: selected ? Colors.white : Colors.white60),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          label,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: selected ? Colors.white : Colors.white60,
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-          ),
-        ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(4),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A1A1A),
-            borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: const Color(0x1FFFFFFF)),
-          ),
-          child: Row(
-            children: [
-              segment(
-                selected: !_scenarioFromShorts,
-                icon: Icons.auto_awesome,
-                label: copy['scenarioRecommend'],
-                loading: _isRecommendingScenario,
-                onTap: () {
-                  setState(() => _scenarioFromShorts = false);
-                  _recommendScenario();
-                },
-              ),
-              segment(
-                selected: _scenarioFromShorts,
-                icon: Icons.smart_display_outlined,
-                label: copy['shortsLink'],
-                loading: false,
-                onTap: _selectShortsSource,
-              ),
-            ],
-          ),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 200),
-          alignment: Alignment.topCenter,
-          child: !_scenarioFromShorts
-              ? const SizedBox(width: double.infinity)
-              : Padding(
-                  padding: const EdgeInsets.only(top: 12),
+            return PopScope(
+              canPop: !busy,
+              child: Dialog(
+                backgroundColor: const Color(0xFF1E1E1E),
+                insetPadding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20)),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.smart_display,
+                              color: accent, size: 22),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              copy['shortsLink'],
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: busy
+                                ? null
+                                : () => Navigator.of(dialogContext).pop(),
+                            icon: const Icon(Icons.close,
+                                color: Colors.white54),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
                       TextField(
                         controller: _shortsUrlController,
+                        enabled: !busy,
                         keyboardType: TextInputType.url,
                         textInputAction: TextInputAction.go,
-                        onSubmitted: (_) => _submitShortsLink(),
+                        onSubmitted: (_) {
+                          if (!busy) create();
+                        },
                         style:
                             const TextStyle(color: Colors.white, fontSize: 14),
                         decoration: InputDecoration(
@@ -680,24 +636,65 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                           hintStyle: const TextStyle(
                               color: Colors.white30, fontSize: 14),
                           filled: true,
-                          fillColor: const Color(0xFF1A1A1A),
+                          fillColor: const Color(0xFF121212),
                           contentPadding:
-                              const EdgeInsets.fromLTRB(18, 16, 6, 16),
+                              const EdgeInsets.fromLTRB(16, 16, 8, 16),
                           enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide:
+                                const BorderSide(color: Color(0x1FFFFFFF)),
+                          ),
+                          disabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
                             borderSide:
                                 const BorderSide(color: Color(0x1FFFFFFF)),
                           ),
                           focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: accent, width: 1.5),
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide:
+                                const BorderSide(color: accent, width: 1.5),
                           ),
                         ),
                       ),
-                      ..._buildShortsChoiceAndGo(accent),
+                      if (errorText != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          errorText!,
+                          style: const TextStyle(
+                              color: Color(0xFFF87171),
+                              fontSize: 13,
+                              height: 1.4),
+                        ),
+                      ],
+                      const SizedBox(height: 14),
+                      FilledButton(
+                        onPressed: busy ? null : create,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: accent,
+                          disabledBackgroundColor:
+                              accent.withValues(alpha: 0.5),
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size.fromHeight(54),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16)),
+                        ),
+                        child: busy
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2.2, color: Colors.white),
+                              )
+                            : Text(
+                                copy['shortsCreate'],
+                                style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                      ),
                       // 유의 사항 — 만 18세 이상, 공개 영상, 개인 연습용(Gemini API 약관).
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(6, 10, 6, 0),
+                        padding: const EdgeInsets.fromLTRB(4, 12, 4, 0),
                         child: Text(
                           copy['shortsLinkNotice'],
                           style: const TextStyle(
@@ -709,48 +706,57 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                     ],
                   ),
                 ),
-        ),
-      ],
+              ),
+            );
+          },
+        );
+      },
+    );
+    if (roomRef == null || !mounted) return;
+    // 공부방 안은 과금 구간이다(목록 첫 페이지만 무과금).
+    if (!guardBillingEntry(context)) return;
+    context.pushNamed(
+      'ChatDetail',
+      queryParameters: {
+        'historyRef': serializeParam(roomRef, ParamType.DocumentReference),
+      }.withoutNulls,
     );
   }
 
-  /// 쇼츠 링크 → 공부방을 새로 만들고 바로 그 방으로 들어간다. 대화방은 거치지
-  /// 않는다(11-05 실장님: 정리한 대화로 공부방에서 연습한다).
-  Future<void> _readShortsLink(String url) async {
-    if (_isReadingShorts) return;
-    setState(() => _isReadingShorts = true);
-    try {
-      final target = FFAppState().targetLang.trim();
-      final room = await ShortsScenarioService.createStudyRoom(
-        url: url,
-        originLanguage: _chatLanguage,
-        targetLanguage: target.isEmpty ? 'English' : target,
-      );
-      final roomRef = room.ref;
-      // 서버가 링크 한 번에 시간을 뺐다면 로비·과금 시계의 남은 시간을 그 값에 맞춘다.
-      final left = room.remainingSeconds;
-      if (left != null) {
-        FFAppState().remainingTime = left;
-        BillingTicker.instance.remainingSecondsNotifier.value = left;
-      }
-      if (!mounted) return;
-      _shortsUrlController.clear();
-      // 공부방 안은 과금 구간이다(목록 첫 페이지만 무과금).
-      if (!guardBillingEntry(context)) return;
-      context.pushNamed(
-        'ChatDetail',
-        queryParameters: {
-          'historyRef': serializeParam(roomRef, ParamType.DocumentReference),
-        }.withoutNulls,
-      );
-    } on ShortsScenarioException catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(_setupCopy['shortsError_${error.code}']),
-      ));
-    } finally {
-      if (mounted) setState(() => _isReadingShorts = false);
-    }
+  /// 모드 선택 제목 위 쇼츠 링크 아이콘.
+  Widget _buildShortsLinkEntry() {
+    const accent = Color(0xFFDC2626);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Material(
+        color: accent.withValues(alpha: 0.14),
+        shape: StadiumBorder(
+          side: BorderSide(color: accent.withValues(alpha: 0.55)),
+        ),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: _openShortsDialog,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.smart_display, color: accent, size: 20),
+                const SizedBox(width: 6),
+                Text(
+                  _setupCopy['shortsLink'],
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _enterScenarioTalk() async {
@@ -1294,6 +1300,8 @@ Return ONLY valid JSON: {"name":"..."}.
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  _buildShortsLinkEntry(),
+                  const SizedBox(height: 16),
                   Text(
                     _setupCopy['modesTitle'],
                     style: TextStyle(
@@ -1756,24 +1764,18 @@ Return ONLY valid JSON: {"name":"..."}.
       recommendLabel: copy['scenarioRecommend'],
       recommending: _isRecommendingScenario,
       onRecommend: _recommendScenario,
-      actionArea: _buildScenarioSourcePicker(accent),
-      // 쇼츠 링크는 상황·역할을 영상에서 뽑으므로 입력칸을 보여주지 않는다.
-      fields: _scenarioFromShorts
-          ? const <Widget>[]
-          : [
-              _setupField(_situationController, accent, copy['situation'],
-                  copy['situationHint']),
-              const SizedBox(height: 18),
-              _setupField(_aiRoleController, accent, copy['aiRole'],
-                  copy['aiRoleHint']),
-              const SizedBox(height: 18),
-              _setupField(_userRoleController, accent, copy['userRole'],
-                  copy['userRoleHint']),
-            ],
+      fields: [
+        _setupField(_situationController, accent, copy['situation'],
+            copy['situationHint']),
+        const SizedBox(height: 18),
+        _setupField(
+            _aiRoleController, accent, copy['aiRole'], copy['aiRoleHint']),
+        const SizedBox(height: 18),
+        _setupField(_userRoleController, accent, copy['userRole'],
+            copy['userRoleHint']),
+      ],
       startLabel: copy['scenarioStart'],
       onStart: _enterScenarioTalk,
-      // 쇼츠 링크는 링크 칸 아래 '만들기'가 결론이라 시작 버튼을 두지 않는다.
-      showStart: !_scenarioFromShorts,
     );
   }
 
