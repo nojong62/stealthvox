@@ -585,11 +585,14 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
             return PopScope(
               canPop: !busy,
               child: Dialog(
-                backgroundColor: const Color(0xFF1E1E1E),
+                // 로비의 쇼츠 알약과 같은 짙은 빨강 바탕 + 빨간 테두리.
+                backgroundColor: const Color(0xFF2A1414),
                 insetPadding:
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20)),
+                  borderRadius: BorderRadius.circular(20),
+                  side: BorderSide(color: accent.withValues(alpha: 0.55)),
+                ),
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
                   child: Column(
@@ -636,18 +639,18 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                           hintStyle: const TextStyle(
                               color: Colors.white30, fontSize: 14),
                           filled: true,
-                          fillColor: const Color(0xFF121212),
+                          fillColor: const Color(0xFF1A0C0C),
                           contentPadding:
                               const EdgeInsets.fromLTRB(16, 16, 8, 16),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
-                            borderSide:
-                                const BorderSide(color: Color(0x1FFFFFFF)),
+                            borderSide: BorderSide(
+                                color: accent.withValues(alpha: 0.35)),
                           ),
                           disabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
-                            borderSide:
-                                const BorderSide(color: Color(0x1FFFFFFF)),
+                            borderSide: BorderSide(
+                                color: accent.withValues(alpha: 0.2)),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
