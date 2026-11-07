@@ -267,7 +267,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   /// 표시명은 Free Talk → Anyone → Circle Talk, Roleplay → Scenario Talk으로
   /// 바뀌어 왔는데 저장된 이름은 그대로라, 옛 방을 열면 옛 이름이 떴다.
   /// "Anyone · 회사 동료"처럼 뒤에 붙은 설명은 살린다.
+  /// 🎞️ 쇼츠 링크로 만든 방. room_name은 시나리오톡과 같아(모드 분기가 그
+  ///   이름을 본다) `source`로 가른다. 목록의 Shorts 칩과 같은 기준이다.
+  bool get _isShortsRoom => _cachedRoomData?['source'] == 'shorts';
+
   String _displayRoomTitle(String raw) {
+    if (_isShortsRoom) return 'Shorts';
     final name = raw.trim();
     if (name.isEmpty) return name;
 
@@ -4581,7 +4586,11 @@ RULES — follow exactly:
                 Icon(Icons.topic_outlined, color: accent, size: 15),
                 const SizedBox(width: 6),
                 Text(
-                  isScenario ? copy['scenarioTopic'] : copy['circleTopic'],
+                  _isShortsRoom
+                      ? copy['shortsTopic']
+                      : isScenario
+                          ? copy['scenarioTopic']
+                          : copy['circleTopic'],
                   style: TextStyle(
                     color: accent,
                     fontSize: 11 * _fontScale,
