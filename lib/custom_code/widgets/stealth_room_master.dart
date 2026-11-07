@@ -601,9 +601,17 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.smart_display,
-                              color: accent, size: 22),
-                          const SizedBox(width: 8),
+                          Container(
+                            width: 30,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFF0000),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Icon(Icons.play_arrow,
+                                color: Colors.white, size: 18),
+                          ),
+                          const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               copy['shortsLink'],
@@ -732,25 +740,35 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     return Align(
       alignment: Alignment.centerRight,
       child: Material(
-        color: accent.withValues(alpha: 0.1),
+        color: const Color(0xFF2A1010),
         shape: StadiumBorder(
-          side: BorderSide(color: accent.withValues(alpha: 0.4)),
+          side: BorderSide(color: accent.withValues(alpha: 0.6)),
         ),
         child: InkWell(
           customBorder: const StadiumBorder(),
           onTap: _openShortsDialog,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.smart_display, color: accent, size: 18),
-                const SizedBox(width: 6),
+                // 유튜브 모양 — 빨간 둥근 사각형 안에 흰 재생 삼각형.
+                Container(
+                  width: 28,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF0000),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Icon(Icons.play_arrow,
+                      color: Colors.white, size: 16),
+                ),
+                const SizedBox(width: 8),
                 Text(
                   _setupCopy['shortsLink'],
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 12.5,
+                    fontSize: 15,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -1319,7 +1337,7 @@ Return ONLY valid JSON: {"name":"..."}.
                     1,
                     "Duo Call",
                     _setupCopy['duoMenuSubtitle'],
-                    Icons.people,
+                    Icons.person,
                     const Color(0xFF3B82F6),
                   ),
                   _buildMenuCard(
@@ -1333,7 +1351,7 @@ Return ONLY valid JSON: {"name":"..."}.
                     3,
                     "Scenario Talk",
                     _setupCopy['scenarioMenuSubtitle'],
-                    Icons.smart_toy,
+                    Icons.chat,
                     const Color(0xFF22C55E),
                   ),
                 ],
@@ -1999,7 +2017,7 @@ Return ONLY valid JSON: {"name":"..."}.
     Color color,
   ) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         color: const Color(0xFF16181D),
         borderRadius: BorderRadius.circular(20),
@@ -2011,7 +2029,7 @@ Return ONLY valid JSON: {"name":"..."}.
         child: InkWell(
           onTap: () => _switchMode(mode),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
+            padding: const EdgeInsets.fromLTRB(18, 18, 14, 18),
             // 🧭 아이콘은 왼쪽, 제목과 설명은 그 오른쪽에 위아래로 놓는다.
             //   예전에는 아이콘이 제목 위에 얹혀 카드 하나가 세로로 길었고,
             //   세 모드를 한 화면에서 나란히 견주기가 어려웠다.
@@ -2019,14 +2037,14 @@ Return ONLY valid JSON: {"name":"..."}.
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Container(
-                  width: 56,
-                  height: 56,
+                  width: 50,
+                  height: 50,
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.16),
                     shape: BoxShape.circle,
                     border: Border.all(color: color.withValues(alpha: 0.45)),
                   ),
-                  child: Icon(icon, color: color, size: 26),
+                  child: Icon(icon, color: color, size: 23),
                 ),
                 const SizedBox(width: 16),
                 // 남는 폭을 전부 글에 준다. 안 그러면 두 줄짜리 설명이
@@ -2040,22 +2058,24 @@ Return ONLY valid JSON: {"name":"..."}.
                         title,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 20,
+                          fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Text(
                         desc,
                         style: const TextStyle(
                           color: Color(0xFF8C93A1),
-                          fontSize: 14,
-                          height: 1.5,
+                          fontSize: 13,
+                          height: 1.4,
                         ),
                       ),
                     ],
                   ),
                 ),
+                const Icon(Icons.chevron_right,
+                    color: Color(0xFF8C93A1), size: 26),
               ],
             ),
           ),
