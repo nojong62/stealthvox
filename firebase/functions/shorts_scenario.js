@@ -44,6 +44,7 @@ const geminiApiKey = defineSecret("GEMINI_API_KEY");
 const LANGUAGES = [
   "English", "Korean", "Japanese", "Chinese", "Spanish", "French",
   "German", "Hindi", "Russian", "Portuguese", "Italian", "Dutch",
+  "Vietnamese", "Indonesian",
 ];
 
 /** 유튜브 URL에서 영상 ID(11자)를 꺼낸다. 유튜브가 아니면 null. */

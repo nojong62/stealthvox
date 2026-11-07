@@ -109,6 +109,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     'Portuguese',
     'Italian',
     'Dutch',
+    'Vietnamese',
+    'Indonesian',
   ];
 
   OriginSurfaceCopy get _surfaceCopy => OriginSurfaceCopy.forSystemLocale();

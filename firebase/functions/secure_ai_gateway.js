@@ -42,6 +42,8 @@ const CHIRP_LOCALES = new Map([
   ["pt", "pt-BR"], ["portuguese", "pt-BR"],
   ["it", "it-IT"], ["italian", "it-IT"],
   ["nl", "nl-NL"], ["dutch", "nl-NL"],
+  ["vi", "vi-VN"], ["vietnamese", "vi-VN"],
+  ["id", "id-ID"], ["indonesian", "id-ID"],
 ]);
 const MALE_VOICE_IDS = new Set([
   "male", "google-male", "google-ko-male",

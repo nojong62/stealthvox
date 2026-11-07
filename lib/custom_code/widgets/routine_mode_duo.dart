@@ -1140,7 +1140,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     'Russian',
     'Portuguese',
     'Italian',
-    'Dutch'
+    'Dutch',
+    'Vietnamese',
+    'Indonesian'
   ];
 
   /// 폰 시스템 언어를 못 읽거나 목록 밖일 때 쓰는 ORIGIN.
@@ -1164,6 +1166,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     'pt': 'Portuguese',
     'it': 'Italian',
     'nl': 'Dutch',
+    'vi': 'Vietnamese',
+    'id': 'Indonesian',
   };
 
   /// 이 폰의 시스템 언어. 목록 밖이면 [_kGuestDefaultNativeLang].
@@ -2458,6 +2462,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         return 'hi';
       case 'dutch':
         return 'nl';
+      case 'vietnamese':
+        return 'vi';
+      case 'indonesian':
+        return 'id';
       default:
         return 'en';
     }

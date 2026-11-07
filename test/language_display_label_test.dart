@@ -24,7 +24,7 @@ void main() {
 
   // ==========================================================================
   group('① 표시명 표는 한 곳뿐이다', () {
-    test('로비 12개가 모두 한국어 이름을 갖는다', () {
+    test('로비 14개가 모두 한국어 이름을 갖는다', () {
       const Map<String, String> expected = <String, String>{
         'Korean': '한국어',
         'English': '영어',
@@ -38,6 +38,8 @@ void main() {
         'Portuguese': '포르투갈어',
         'Italian': '이탈리아어',
         'Dutch': '네덜란드어',
+        'Vietnamese': '베트남어',
+        'Indonesian': '인도네시아어',
       };
       for (final String lang in kOriginLanguageOptions) {
         expect(expected.containsKey(lang), isTrue,

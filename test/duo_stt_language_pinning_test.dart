@@ -263,13 +263,20 @@ void main() {
       }
     });
 
-    test('⚠️ Duo 표에는 서클톡이 아는 언어 넷이 빠져 있다', () {
+    test('Duo도 베트남어·인도네시아어를 안다(11-07 대화 언어 추가)', () {
+      for (final String lang in <String>['vietnamese', 'indonesian']) {
+        expect(deepgramLanguageCode(lang), isNot('en'));
+        expect(duo.contains("case '$lang':"), isTrue,
+            reason: '$lang 이 Duo 언어 표에 없다 → 조용히 en으로 전사된다');
+      }
+    });
+
+    test('⚠️ Duo 표에는 서클톡이 아는 언어 둘이 빠져 있다', () {
       // 서클톡(deepgramLanguageCode)은 알지만 Duo는 모르는 언어.
       // Duo에서 이 언어를 쓰면 default 갈래로 떨어져 'en'이 박힌다.
+      // 로비 목록에 없는 언어라 실제로 고를 수는 없다.
       for (final String lang in <String>[
-        'vietnamese',
         'thai',
-        'indonesian',
         'arabic',
       ]) {
         expect(deepgramLanguageCode(lang), isNot('en'),

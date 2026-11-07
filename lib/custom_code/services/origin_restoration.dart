@@ -431,6 +431,8 @@ const Map<String, String> _kRestorationLanguageCodes = <String, String>{
   'russian': 'ru',
   'hindi': 'hi',
   'dutch': 'nl',
+  'vietnamese': 'vi',
+  'indonesian': 'id',
 };
 
 /// 소리와 문맥을 합쳐 최종 등급을 낸다.

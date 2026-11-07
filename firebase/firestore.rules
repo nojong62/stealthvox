@@ -294,7 +294,8 @@ service cloud.firestore {
       function isResolvableDuoOrigin(value) {
         return value in [
           'English', 'Japanese', 'Chinese', 'Spanish', 'French', 'German',
-          'Korean', 'Hindi', 'Russian', 'Portuguese', 'Italian', 'Dutch'
+          'Korean', 'Hindi', 'Russian', 'Portuguese', 'Italian', 'Dutch',
+          'Vietnamese', 'Indonesian'
         ];
       }
 

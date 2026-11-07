@@ -31,13 +31,21 @@ class OriginSurfaceCopy {
   /// 끼워 넣는 용도라 격변화가 없는 주격이다(러시아어 틀이 "на языке: X").
   /// 12개 밖의 값은 그대로 돌려준다.
   String languageName(String language) {
-    final column = _languages.indexOf(language.trim());
+    final column = _nameColumns.indexOf(language.trim());
     if (column < 0) return language.trim();
     final row = _languages.indexOf(_language);
     return _languageNames[row < 0 ? 0 : row][column];
   }
 
-  /// 행 = 화면 언어, 열 = 이름을 적을 언어. 둘 다 [_languages] 순서다.
+  /// 이름을 적을 수 있는 언어(열). 화면 언어 12개 + 대화 언어로만 쓰는 2개.
+  /// 베트남어·인도네시아어는 대화·학습 언어로만 열었다(화면 문구는 영어로 뜬다).
+  static const _nameColumns = <String>[
+    ..._languages,
+    'Vietnamese',
+    'Indonesian',
+  ];
+
+  /// 행 = 화면 언어([_languages] 순서), 열 = 이름을 적을 언어([_nameColumns] 순서).
   static const List<List<String>> _languageNames = [
     [
       'English',
@@ -51,7 +59,9 @@ class OriginSurfaceCopy {
       'Russian',
       'Portuguese',
       'Italian',
-      'Dutch'
+      'Dutch',
+      'Vietnamese',
+      'Indonesian'
     ],
     [
       '영어',
@@ -65,7 +75,9 @@ class OriginSurfaceCopy {
       '러시아어',
       '포르투갈어',
       '이탈리아어',
-      '네덜란드어'
+      '네덜란드어',
+      '베트남어',
+      '인도네시아어'
     ],
     [
       '英語',
@@ -79,7 +91,9 @@ class OriginSurfaceCopy {
       'ロシア語',
       'ポルトガル語',
       'イタリア語',
-      'オランダ語'
+      'オランダ語',
+      'ベトナム語',
+      'インドネシア語'
     ],
     [
       '英语',
@@ -93,7 +107,9 @@ class OriginSurfaceCopy {
       '俄语',
       '葡萄牙语',
       '意大利语',
-      '荷兰语'
+      '荷兰语',
+      '越南语',
+      '印尼语'
     ],
     [
       'inglés',
@@ -107,7 +123,9 @@ class OriginSurfaceCopy {
       'ruso',
       'portugués',
       'italiano',
-      'neerlandés'
+      'neerlandés',
+      'vietnamita',
+      'indonesio'
     ],
     [
       'anglais',
@@ -121,7 +139,9 @@ class OriginSurfaceCopy {
       'russe',
       'portugais',
       'italien',
-      'néerlandais'
+      'néerlandais',
+      'vietnamien',
+      'indonésien'
     ],
     [
       'Englisch',
@@ -135,7 +155,9 @@ class OriginSurfaceCopy {
       'Russisch',
       'Portugiesisch',
       'Italienisch',
-      'Niederländisch'
+      'Niederländisch',
+      'Vietnamesisch',
+      'Indonesisch'
     ],
     [
       'अंग्रेज़ी',
@@ -149,7 +171,9 @@ class OriginSurfaceCopy {
       'रूसी',
       'पुर्तगाली',
       'इतालवी',
-      'डच'
+      'डच',
+      'वियतनामी',
+      'इंडोनेशियाई'
     ],
     [
       'английский',
@@ -163,7 +187,9 @@ class OriginSurfaceCopy {
       'русский',
       'португальский',
       'итальянский',
-      'нидерландский'
+      'нидерландский',
+      'вьетнамский',
+      'индонезийский'
     ],
     [
       'inglês',
@@ -177,7 +203,9 @@ class OriginSurfaceCopy {
       'russo',
       'português',
       'italiano',
-      'neerlandês'
+      'neerlandês',
+      'vietnamita',
+      'indonésio'
     ],
     [
       'inglese',
@@ -191,7 +219,9 @@ class OriginSurfaceCopy {
       'russo',
       'portoghese',
       'italiano',
-      'olandese'
+      'olandese',
+      'vietnamita',
+      'indonesiano'
     ],
     [
       'Engels',
@@ -205,7 +235,9 @@ class OriginSurfaceCopy {
       'Russisch',
       'Portugees',
       'Italiaans',
-      'Nederlands'
+      'Nederlands',
+      'Vietnamees',
+      'Indonesisch'
     ],
   ];
 

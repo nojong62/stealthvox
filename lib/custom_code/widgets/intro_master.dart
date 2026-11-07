@@ -69,6 +69,8 @@ class _IntroMasterState extends State<IntroMaster>
     '🇵🇹',
     '🇮🇹',
     '🇳🇱',
+    '🇻🇳',
+    '🇮🇩',
   ];
   static const List<String> _introLanguageNames = [
     'English',
@@ -83,6 +85,8 @@ class _IntroMasterState extends State<IntroMaster>
     'Portuguese',
     'Italian',
     'Dutch',
+    'Vietnamese',
+    'Indonesian',
   ];
   static const String _termsEnglishUrl =
       'https://docs.google.com/document/d/1vs2n7kF0GzlejNaZOa1ZnfKbuwuOzOCr7Q5ZvYqmbVs/edit';
@@ -1563,20 +1567,24 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
-  /// 앱이 지원하는 열두 언어. 첫 화면의 메시지를 먼저 읽을 수 있도록
+  /// 앱이 지원하는 대화 언어(14개, 2줄). 첫 화면의 메시지를 먼저 읽을 수 있도록
   /// 주요 행동 버튼 아래, 페이지 안내 바로 위에 둔다.
   Widget _buildLanguageFlagCluster() {
     return Semantics(
-      label: 'Twelve supported languages',
+      label: 'Supported languages',
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: List.generate(2, (row) {
+          final perRow = (_introLanguageFlags.length + 1) ~/ 2;
+          final count = row == 0
+              ? perRow
+              : _introLanguageFlags.length - perRow;
           return Padding(
             padding: EdgeInsets.only(bottom: row == 0 ? 4 : 0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(6, (column) {
-                final index = row * 6 + column;
+              children: List.generate(count, (column) {
+                final index = row * perRow + column;
                 return Padding(
                   padding: EdgeInsets.only(left: column == 0 ? 0 : 5),
                   child: Tooltip(

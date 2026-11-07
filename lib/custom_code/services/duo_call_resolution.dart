@@ -36,6 +36,8 @@ const Set<String> kDuoResolvableOriginLanguages = <String>{
   'Portuguese',
   'Italian',
   'Dutch',
+  'Vietnamese',
+  'Indonesian',
 };
 
 const Map<String, String> _duoOriginLanguageAbbreviations = <String, String>{
@@ -51,6 +53,8 @@ const Map<String, String> _duoOriginLanguageAbbreviations = <String, String>{
   'Portuguese': 'Pt',
   'Italian': 'It',
   'Dutch': 'Nl',
+  'Vietnamese': 'Vi',
+  'Indonesian': 'Id',
 };
 
 /// Duo 게시판에서 Origin(Chat Lang)을 짧게 표시하는 영문 2자 약자.

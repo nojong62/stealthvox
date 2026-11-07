@@ -46,7 +46,7 @@ The first line is an internal control signal. Put the complete user-facing quest
 }
 
 /// 모델 결과를 쓸 수 없는 오류 경로용 짧은 재시도 문장.
-/// 로비가 제공하는 12개 ORIGIN만 관리하며 알 수 없는 값은 English로 안전 폴백한다.
+/// 로비가 제공하는 14개 ORIGIN만 관리하며 알 수 없는 값은 English로 안전 폴백한다.
 String originRetryLine(String originLanguage) {
   switch (resolveNativeLanguageName(originLanguage).toLowerCase()) {
     case 'korean':
@@ -71,6 +71,10 @@ String originRetryLine(String originLanguage) {
       return 'Forse ho capito male. Per favore, ripeta.';
     case 'dutch':
       return 'Misschien heb ik u verkeerd verstaan. Zeg het alstublieft nog eens.';
+    case 'vietnamese':
+      return 'Có lẽ tôi đã nghe nhầm. Bạn vui lòng nói lại nhé.';
+    case 'indonesian':
+      return 'Sepertinya saya salah dengar. Tolong ulangi lagi.';
     case 'english':
     default:
       return 'I may have misheard you. Please say that again.';
@@ -164,6 +168,10 @@ String unheardBubbleHintLine(String originLanguage) {
       return 'Ho sentito così — ripeta, per favore';
     case 'dutch':
       return 'Dit hoorde ik — zeg het alstublieft nog eens';
+    case 'vietnamese':
+      return 'Tôi nghe được như thế này — bạn nói lại giúp tôi nhé';
+    case 'indonesian':
+      return 'Ini yang saya dengar — tolong ucapkan lagi';
     case 'english':
     default:
       return 'This is what I heard — please say it again';
@@ -196,6 +204,10 @@ String localizedSeedGuidanceLine(String language) {
       return 'Quale momento specifico vorrebbe descrivere?';
     case 'dutch':
       return 'Welk specifiek moment wilt u beschrijven?';
+    case 'vietnamese':
+      return 'Bạn muốn kể về khoảnh khắc cụ thể nào?';
+    case 'indonesian':
+      return 'Momen spesifik apa yang ingin Anda ceritakan?';
     case 'english':
     default:
       return 'What specific moment would you like to describe?';
@@ -239,6 +251,10 @@ String originLanguageCheckPromptLine(String detectedLanguage) {
       return 'Stai parlando italiano. Controlla la selezione della lingua.';
     case 'dutch':
       return 'U spreekt Nederlands. Controleer uw taalkeuze.';
+    case 'vietnamese':
+      return 'Bạn đang nói tiếng Việt. Vui lòng kiểm tra lựa chọn ngôn ngữ.';
+    case 'indonesian':
+      return 'Anda sedang berbicara bahasa Indonesia. Silakan periksa pilihan bahasa Anda.';
     case 'english':
     default:
       return "You're speaking English. Please check your language selection.";
@@ -277,6 +293,10 @@ String originLanguageResetHintLine(String detectedLanguage) {
       return 'Puoi reimpostare la tua lingua. La conversazione continua.';
     case 'dutch':
       return 'U kunt uw taal opnieuw instellen. Het gesprek gaat door.';
+    case 'vietnamese':
+      return 'Bạn có thể đặt lại ngôn ngữ. Cuộc trò chuyện vẫn tiếp tục.';
+    case 'indonesian':
+      return 'Anda bisa mengatur ulang bahasa. Percakapan tetap berlanjut.';
     case 'english':
     default:
       return 'You can re-set your language. The conversation continues.';
@@ -309,6 +329,10 @@ String originLanguageApplyLabel(String detectedLanguage) {
       return 'Applica';
     case 'dutch':
       return 'Toepassen';
+    case 'vietnamese':
+      return 'Áp dụng';
+    case 'indonesian':
+      return 'Terapkan';
     case 'english':
     default:
       return 'Apply';
@@ -340,6 +364,10 @@ String originLanguageKeepLabel(String detectedLanguage) {
       return 'Mantieni';
     case 'dutch':
       return 'Houden';
+    case 'vietnamese':
+      return 'Giữ nguyên';
+    case 'indonesian':
+      return 'Tetap seperti ini';
     case 'english':
     default:
       return 'Keep current';

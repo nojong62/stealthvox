@@ -3373,7 +3373,9 @@ $finalLanguageRule''';
         'Russian': 'Пожалуйста, повторите.',
         'Portuguese': 'Por favor, diga novamente.',
         'Italian': 'Per favore, ripeti.',
-        'Dutch': 'Zeg dat alstublieft nog een keer.'
+        'Dutch': 'Zeg dat alstublieft nog een keer.',
+        'Vietnamese': 'Bạn vui lòng nói lại nhé.',
+        'Indonesian': 'Tolong ulangi lagi.'
       },
       'misheard': {
         'English': 'Sorry, I misheard you. Please say that again.',
@@ -3388,7 +3390,9 @@ $finalLanguageRule''';
         'Russian': 'Извините, я неправильно расслышал. Пожалуйста, повторите.',
         'Portuguese': 'Desculpe, ouvi errado. Por favor, diga novamente.',
         'Italian': 'Scusa, ho capito male. Per favore, ripeti.',
-        'Dutch': 'Sorry, ik heb je verkeerd verstaan. Zeg het nog eens.'
+        'Dutch': 'Sorry, ik heb je verkeerd verstaan. Zeg het nog eens.',
+        'Vietnamese': 'Xin lỗi, tôi nghe nhầm. Bạn vui lòng nói lại nhé.',
+        'Indonesian': 'Maaf, saya salah dengar. Tolong ulangi lagi.'
       },
       'regenerate': {
         'English': 'Let me answer again.',
@@ -3402,7 +3406,9 @@ $finalLanguageRule''';
         'Russian': 'Тогда я отвечу ещё раз.',
         'Portuguese': 'Vou responder novamente.',
         'Italian': 'Allora rispondo di nuovo.',
-        'Dutch': 'Dan antwoord ik opnieuw.'
+        'Dutch': 'Dan antwoord ik opnieuw.',
+        'Vietnamese': 'Vậy tôi sẽ trả lời lại.',
+        'Indonesian': 'Kalau begitu, saya jawab lagi.'
       },
     };
     final selected = phrases[kind] ?? phrases['retry']!;

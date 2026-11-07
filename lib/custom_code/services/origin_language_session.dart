@@ -40,7 +40,7 @@ import 'history_text_model.dart';
 ///
 /// 여기 없는 언어로 갈아 끼우면 `originRetryLine`·`localizedSeedGuidanceLine`
 /// 같은 고정 문구표가 전부 영어로 떨어져, 되묻기만 영어로 나오는 잡탕이 된다.
-/// 표와 목록을 같은 12개로 묶어 둔다.
+/// 표와 목록을 같은 14개로 묶어 둔다.
 const List<String> kOriginLanguageOptions = <String>[
   'English',
   'Japanese',
@@ -54,6 +54,8 @@ const List<String> kOriginLanguageOptions = <String>[
   'Portuguese',
   'Italian',
   'Dutch',
+  'Vietnamese',
+  'Indonesian',
 ];
 
 /// 🏷️ [LANG-LABEL] 저장값(영문 언어명) → 화면에 적을 한국어 이름.
@@ -93,6 +95,10 @@ String koreanLanguageDisplayName(String language) {
       return '이탈리아어';
     case 'dutch':
       return '네덜란드어';
+    case 'vietnamese':
+      return '베트남어';
+    case 'indonesian':
+      return '인도네시아어';
     default:
       return language.trim();
   }
@@ -107,6 +113,8 @@ const Set<String> _kLatinScriptOrigins = <String>{
   'Portuguese',
   'Italian',
   'Dutch',
+  'Vietnamese',
+  'Indonesian',
 };
 
 /// 문자 판정을 시도할 최소 길이(문자·라틴 제외).
@@ -181,7 +189,9 @@ OriginScriptVerdict detectOriginScript(String text) {
       devanagari++;
     } else if ((rune >= 0x41 && rune <= 0x5A) ||
         (rune >= 0x61 && rune <= 0x7A) ||
-        (rune >= 0xC0 && rune <= 0x24F)) {
+        (rune >= 0xC0 && rune <= 0x24F) ||
+        // 베트남어 성조 글자(ạ·ế·ữ…)는 Latin Extended Additional에 있다.
+        (rune >= 0x1E00 && rune <= 0x1EFF)) {
       latin++;
     } else {
       matched = false;

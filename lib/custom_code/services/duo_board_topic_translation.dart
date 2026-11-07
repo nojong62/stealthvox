@@ -16,6 +16,8 @@ const Map<String, TranslateLanguage> _translateLanguages = {
   'Portuguese': TranslateLanguage.portuguese,
   'Italian': TranslateLanguage.italian,
   'Dutch': TranslateLanguage.dutch,
+  'Vietnamese': TranslateLanguage.vietnamese,
+  'Indonesian': TranslateLanguage.indonesian,
 };
 
 /// The invitation board is public UI and is also available before Origin is
