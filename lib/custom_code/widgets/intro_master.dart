@@ -2096,10 +2096,11 @@ class _IntroMasterState extends State<IntroMaster>
                             copy['signupBonus']!,
                             textAlign: TextAlign.center,
                             textScaler: _cappedScaler(context, 1.15),
+                            // 튀지 않게 여린 청록(실장님 지시, 2026-11-08).
                             style: const TextStyle(
-                              color: Color(0xFF43CCBD),
+                              color: Color(0xFF9CCFC8),
                               fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
+                              fontWeight: FontWeight.w500,
                               height: 1.4,
                             ),
                           ),
