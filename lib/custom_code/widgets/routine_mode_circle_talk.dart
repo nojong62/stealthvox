@@ -1625,15 +1625,21 @@ Do not ask what they said and never output [HEARD_CONFIRM]. Respond normally.'''
 The user's latest line is speech-recognition output, not typed text. Judge damage
 to the transcript, never whether the content is surprising or new.
 
-Do not answer the line and do not silently smooth it into plausible meaning when:
-- A core word makes the sentence conflict with the immediate conversation and the
-  intended word cannot be recovered with high confidence.
+FIRST decide whether the damage can be restored. If exactly one sound-alike or
+nearby word is clearly supported by the sentence and the recent conversation,
+restore it with [USER_FIX] (see the USER_FIX rule below) and reply normally.
+Do NOT ask back in that case — a single well-supported candidate is a fix, not
+a question.
+
+Ask back only when restoring is not safe:
+- A core word makes the sentence conflict with the immediate conversation and
+  there are two or more plausible candidates, or none you can trust.
 - The line does not hold together in ${_nativeLangName()} or breaks off mid-thought.
 
-If one specific sound-alike or nearby word is strongly supported by the sentence
-and recent conversation, ask a short confirmation such as "Did you mean X?".
-If no reliable candidate exists, ask the natural ${_nativeLangName()} equivalent
-of "What did you just say?" or "Could you say that again?".
+If two or more candidates are plausible, ask a short confirmation such as
+"Did you mean X or Y?". If no reliable candidate exists, ask the natural
+${_nativeLangName()} equivalent of "What did you just say?" or "Could you say
+that again?". Never guess silently without [USER_FIX].
 
 In either case, output exactly this internal control format:
 ${buildHeardConfirmOutputRule(_nativeLangName())}
