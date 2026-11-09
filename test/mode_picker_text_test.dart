@@ -34,6 +34,7 @@ void main() {
     'directDesc',
     'interpTitle',
     'interpDesc',
+    'interpPayNote',
     'note',
     'cancel',
     'invite',

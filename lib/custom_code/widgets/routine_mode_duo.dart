@@ -102,6 +102,7 @@ import '/custom_code/services/duo_invite_localization.dart';
 import '/custom_code/services/duo_buddy_localization.dart';
 import '/custom_code/services/study_access.dart' show DuoPartnerPays;
 import '/custom_code/services/system_ui_language.dart';
+import '../services/voice_tier.dart';
 
 // ============================================================================
 // 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다. **통신 로직 자체가 다르다** —
@@ -431,6 +432,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': '서로의 실제 목소리로 통화합니다.',
     'interpTitle': '통화 통역',
     'interpDesc': '상대의 말을 통역 음성으로 들려줍니다.',
+    'interpPayNote': '통역 통화는 초대한 분이 상대방 통역 비용까지 함께 냅니다.',
     'note': '상대방도 선택한 방식으로 초대됩니다.',
     'cancel': '취소',
     'invite': '초대하기',
@@ -452,6 +454,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': 'Talk with your real voices.',
     'interpTitle': 'Interpretation Call',
     'interpDesc': 'Hear their words in your language.',
+    'interpPayNote':
+        'For interpreted calls, the inviter also covers the other person\'s interpretation fee.',
     'note': 'The guest will join in this mode.',
     'cancel': 'Cancel',
     'invite': 'Invite',
@@ -474,6 +478,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': 'お互いの実際の声で通話します。',
     'interpTitle': '通訳通話',
     'interpDesc': '相手の話を通訳音声で聞きます。',
+    'interpPayNote': '通訳通話では、招待した方が相手の通訳料金もあわせて支払います。',
     'note': '相手も選んだ方法で招待されます。',
     'cancel': 'キャンセル',
     'invite': '招待する',
@@ -495,6 +500,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': '用彼此真实的声音通话。',
     'interpTitle': '翻译通话',
     'interpDesc': '对方的话会以翻译语音播放。',
+    'interpPayNote': '翻译通话中，邀请人也会支付对方的翻译费用。',
     'note': '对方也会以所选方式收到邀请。',
     'cancel': '取消',
     'invite': '邀请',
@@ -516,6 +522,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': 'Hablarán con sus propias voces reales.',
     'interpTitle': 'Llamada con intérprete',
     'interpDesc': 'Oirás a la otra persona con voz interpretada.',
+    'interpPayNote':
+        'En una llamada con interpretación, quien invita también paga el servicio de interpretación de la otra persona.',
     'note': 'La persona invitada entra con el mismo tipo de llamada.',
     'cancel': 'Cancelar',
     'invite': 'Invitar',
@@ -538,6 +546,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': 'Vous vous parlez avec vos vraies voix.',
     'interpTitle': 'Appel avec interprète',
     'interpDesc': "Vous entendez l'autre personne en voix interprétée.",
+    'interpPayNote':
+        'Lors d’un appel avec interprétation, la personne qui invite paie aussi les frais d’interprétation de l’autre personne.',
     'note': 'La personne invitée rejoint avec le même type d\'appel.',
     'cancel': 'Annuler',
     'invite': 'Inviter',
@@ -560,6 +570,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': 'Ihr sprecht mit euren echten Stimmen.',
     'interpTitle': 'Gedolmetschter Anruf',
     'interpDesc': 'Du hörst die andere Person als gedolmetschte Stimme.',
+    'interpPayNote':
+        'Bei einem Dolmetschanruf übernimmt die einladende Person auch die Dolmetschkosten der anderen Person.',
     'note': 'Die eingeladene Person nimmt mit derselben Gesprächsart teil.',
     'cancel': 'Abbrechen',
     'invite': 'Einladen',
@@ -582,6 +594,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': 'आप दोनों अपनी असली आवाज़ में बात करेंगे।',
     'interpTitle': 'अनुवाद कॉल',
     'interpDesc': 'सामने वाले की बात अनुवाद की आवाज़ में सुनाई देगी।',
+    'interpPayNote':
+        'अनुवाद वाली कॉल में, आमंत्रित करने वाला व्यक्ति सामने वाले के अनुवाद का खर्च भी उठाता है।',
     'note': 'न्योता पाने वाला भी इसी तरीके से जुड़ेगा।',
     'cancel': 'रद्द करें',
     'invite': 'न्योता भेजें',
@@ -603,6 +617,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': 'Вы говорите своими настоящими голосами.',
     'interpTitle': 'Звонок с переводом',
     'interpDesc': 'Собеседника вы услышите переведённым голосом.',
+    'interpPayNote':
+        'Во время звонка с переводом приглашающий также оплачивает перевод для собеседника.',
     'note': 'Приглашённый присоединится с тем же типом звонка.',
     'cancel': 'Отмена',
     'invite': 'Пригласить',
@@ -625,6 +641,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': 'Vocês falam com as próprias vozes reais.',
     'interpTitle': 'Chamada com intérprete',
     'interpDesc': 'Você ouve a outra pessoa com voz interpretada.',
+    'interpPayNote':
+        'Na chamada com interpretação, quem convida também paga pela interpretação da outra pessoa.',
     'note': 'A pessoa convidada entra com o mesmo tipo de chamada.',
     'cancel': 'Cancelar',
     'invite': 'Convidar',
@@ -647,6 +665,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': 'Parlate con le vostre voci reali.',
     'interpTitle': 'Chiamata con interprete',
     'interpDesc': "Senti l'altra persona con voce tradotta.",
+    'interpPayNote':
+        'Durante una chiamata con interpretazione, chi invita paga anche le spese di interpretazione dell\'altra persona.',
     'note': 'La persona invitata entra con lo stesso tipo di chiamata.',
     'cancel': 'Annulla',
     'invite': 'Invita',
@@ -668,6 +688,8 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': 'Jullie praten met je eigen echte stem.',
     'interpTitle': 'Gesprek met tolk',
     'interpDesc': 'Je hoort de ander als getolkte stem.',
+    'interpPayNote':
+        'Bij een gesprek met tolk betaalt degene die uitnodigt ook de tolkkosten voor de ander.',
     'note': 'De uitgenodigde persoon doet mee met hetzelfde gesprekstype.',
     'cancel': 'Annuleren',
     'invite': 'Uitnodigen',
@@ -1241,6 +1263,28 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   bool _partnerPaysCall = false;
   String? _talkHostRepostRoomId;
 
+  /// 🎙️ [VOICE-TIER] 내가 초대자일 때 쓸 등급. 비회원(홍보 통화)은 기본 음성.
+  VoiceTier get _hostVoiceTier =>
+      FirebaseAuth.instance.currentUser?.isAnonymous == true
+          ? VoiceTier.basic
+          : lobbyVoiceTier;
+
+  /// 통역 음성 등급은 초대자가 정해 세션 문서 `voice_tier`에 둔다. 양쪽 폰이
+  /// 모두 그 등급으로 듣는다. 값이 없는 옛 방은 진입 때 값(프리미엄)을 둔다.
+  void _applyDuoVoiceTier(Map<String, dynamic>? data, String reason) {
+    final raw = data?['voice_tier'];
+    if (raw == null) return;
+    final tier = parseVoiceTier(raw);
+    if (tier != VoiceTierSession.active) {
+      VoiceTierSession.activate(tier, reason: reason);
+    }
+  }
+
+  /// 직접통화 = 1/2(음성 합성 없음). 통역 = 초대자가 양쪽 몫(등급 × 2).
+  BillingRate get _duoBillingRate => _isDirectMode
+      ? BillingRate.direct
+      : billingRateFor(VoiceTierSession.active, interp: true);
+
   void _startDuoBilling() {
     // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금.
     //   예외 하나: Duo 버디 방의 회원 게스트는 자기가 낸다.
@@ -1253,7 +1297,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       sessionDocId: _myHistoryRef?.id,
       roomId: _duoSessionRef?.id ?? widget.roomId,
     );
-    BillingTicker.instance.setRate(BillingRate.full);
+    BillingTicker.instance.setRate(_duoBillingRate);
     BillingTicker.instance.start();
     // 💰 [BILLING-IDLE] 통화가 1분간 조용하면 정지, 다시 말하면 재개.
     //   예전에는 Duo만 유휴 타이머가 없어 켜 둔 채 잊으면 계속 차감됐다.
@@ -2059,6 +2103,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _invitePulse.repeat(reverse: true);
     }
     _lgDuo('[DUO-SESSION]', 'started role=$_myRole');
+    VoiceTierSession.activate(
+      _amIHost ? _hostVoiceTier : VoiceTier.premium,
+      reason: _amIHost ? 'duo_host' : 'duo_guest_until_room',
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if ((widget.hostRoomId ?? '').isNotEmpty) {
@@ -6690,6 +6738,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           'isDuoEnabled': false,
           'isPartnerJoined': false,
           'mode': chosenMode,
+          // 🎙️ [VOICE-TIER] 통역 음성 등급. 게스트 폰도 이 값을 따른다.
+          'voice_tier': VoiceTierSession.active.name,
           // This field is present from the room's first write, so a joined
           // partner can distinguish a protocol-aware host from an old app.
           // Callable rollout is disabled in this release.
@@ -6993,6 +7043,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       if (sessionMode != _duoMode) {
         _lgDuo('[MODE]', 'guest_sync $_duoMode → $sessionMode');
       }
+      _applyDuoVoiceTier(data, 'duo_guest_join');
       _duoMode = sessionMode;
 
       // Claim the guest seat atomically. A direct invite can be opened on
@@ -7237,6 +7288,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
     _resolvedDuoMode = resolution.mode;
     _duoResolutionReason = resolution.reason;
+    // 💰 같은 ORIGIN이면 통역 초대가 직접통화로 잠긴다 — 배율도 따라간다.
+    if (_billingStarted) BillingTicker.instance.setRate(_duoBillingRate);
     final protocol = resolution.interpreterProtocol;
     if (resolution.mode == kDuoModeInterpreter && protocol != null) {
       if (!_adoptInterpreterProtocol(protocol, reason)) return false;
@@ -7466,6 +7519,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //    방식은 초대를 만들 때 한 번 정해지고, 바꾸려면 방을 나가 새 초대를
       //    만들어야 한다. 그래도 문서가 밖에서(콘솔·다른 기기·이상 동작)
       //    바뀌면 문서 값을 따르고 직전 모드의 오디오 경로를 즉시 끊는다.
+      _applyDuoVoiceTier(data, 'duo_session_sync');
       final String sessionMode = _normalizeDuoMode(data['mode']);
       if (sessionMode != _duoMode) {
         _lgDuo('[MODE]',
@@ -7839,6 +7893,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         'isDuoEnabled': false,
         'isPartnerJoined': false,
         'mode': kDuoModeInterpreter,
+        'voice_tier': _hostVoiceTier.name,
         kDuoHostCallablePcV2Field: duoInterpreterCallableCapability(
           remoteCandidate: _interpTransportRaw,
         ),
@@ -8278,6 +8333,18 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                             height: 1.45,
                           ),
                         ),
+                        // 💰 통역은 초대자가 양쪽 몫을 낸다(2026-11-09). 작은 글씨.
+                        if (!isDirect && t['interpPayNote'] != null) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            t['interpPayNote']!,
+                            style: const TextStyle(
+                              color: Color(0xFF8E9AB0),
+                              fontSize: 11,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
