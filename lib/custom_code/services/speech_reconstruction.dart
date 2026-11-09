@@ -163,6 +163,98 @@ Never condense it, never drop material to make it simpler, and never trade conte
 
 ''';
 
+/// 🗣️ [MY-STORY-LENGTH] 연습 음성이 **30초 안에** 만들어지는 분량.
+///
+/// 2026-11-09 실측: 영어 1953자(말하면 약 100초)가 음성 요청 30초를 넘겼다.
+/// 합성 시간은 로그에 없어 읽기 속도로 정했다 — 영어 약 100단어(600자 안팎),
+/// 한국어 약 150자. 실제 합성 시간은 `[P3-TIMING]`로 재서 이 값을 맞춘다.
+/// 글자 수가 아니라 **글을 만드는 순간에** 줄인다. 음성 단계에서 자르지 않는다.
+class MySpeechLength {
+  const MySpeechLength({
+    required this.target,
+    required this.hardLimit,
+    required this.byChars,
+    required this.lines,
+  });
+
+  /// 프롬프트에 적는 목표 분량.
+  final int target;
+
+  /// 이 값을 넘으면 한 번 더 짧게 다시 쓰게 한다.
+  final int hardLimit;
+
+  /// 띄어쓰기 없는 언어는 글자 수, 나머지는 단어 수.
+  final bool byChars;
+  final String lines;
+}
+
+/// 같은 날 실측(`[P3-TIMING]`): 679자 → 쉐도잉 음성 12.7초, Snap Echoing은 문장
+/// 나누기 8.5초 + 음성 11.1초 = 19.6초. 30초 안에 들어오는 상한은 영어 약 1000자
+/// (150단어)다. 목표는 그 80%인 120단어로 잡는다.
+MySpeechLength mySpeechLengthFor(String language) {
+  final lower = language.trim().toLowerCase();
+  if (lower.startsWith('korean')) {
+    return const MySpeechLength(
+        target: 180, hardLimit: 260, byChars: true, lines: '9 to 12');
+  }
+  if (lower.startsWith('japanese')) {
+    return const MySpeechLength(
+        target: 200, hardLimit: 290, byChars: true, lines: '9 to 12');
+  }
+  if (lower.startsWith('chinese')) {
+    return const MySpeechLength(
+        target: 155, hardLimit: 220, byChars: true, lines: '9 to 12');
+  }
+  return const MySpeechLength(
+      target: 120, hardLimit: 150, byChars: false, lines: '9 to 12');
+}
+
+/// 영어 글이 **보고서 말투**인가("We talked about…", "At the end,…").
+///
+/// 2026-11-09 실측: 대화체 규칙을 넣어도 "At the end, I asked their name"이
+/// 나왔다. 프롬프트만 믿지 않고 이 표현이 보이면 한 번 다시 쓰게 한다.
+/// 영어에만 적용한다 — 다른 언어는 표현 목록이 없다.
+bool mySpeechSoundsLikeReport(String text, String language) {
+  if (!language.trim().toLowerCase().startsWith('english')) return false;
+  return RegExp(
+    r"\b(we (talked|spoke|chatted|discussed) about|then we (talked|discussed)|"
+    r"at the end|in the end|in conclusion|to sum up|overall,|first,|finally,)",
+    caseSensitive: false,
+  ).hasMatch(text);
+}
+
+/// 문장이 끝맺음 부호로 끝났는가. 아니면 모델이 중간에서 멈춘 글이다.
+bool mySpeechEndsCleanly(String text) {
+  final t = text.trimRight();
+  if (t.isEmpty) return false;
+  return RegExp(r'[.!?。！？…”’")\]]$').hasMatch(t);
+}
+
+/// 끝맺지 못한 글에서 마지막 **온전한 문장**까지만 남긴다. 다시 써도 안 될 때만
+/// 쓰는 마지막 방어선이다 — 줄 중간이 아니라 문장 끝에서 자른다.
+String mySpeechTrimToLastSentence(String text) {
+  final t = text.trimRight();
+  final matches = RegExp(r'[.!?。！？…][”’")\]]*').allMatches(t).toList();
+  if (matches.isEmpty) return t;
+  return t.substring(0, matches.last.end).trimRight();
+}
+
+String mySpeechLengthInstruction(String language) {
+  final len = mySpeechLengthFor(language);
+  final unit = len.byChars ? 'characters' : 'words';
+  return 'Write about ${len.target} $unit in total, in ${len.lines} lines '
+      '(about 30 seconds when spoken). Never go over ${len.hardLimit} $unit.';
+}
+
+/// 글이 한도를 넘었는가. 띄어쓰기 없는 언어는 공백을 뺀 글자 수로 센다.
+bool mySpeechIsTooLong(String text, String language) {
+  final len = mySpeechLengthFor(language);
+  final int size = len.byChars
+      ? text.replaceAll(RegExp(r'\s+'), '').length
+      : text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+  return size > len.hardLimit;
+}
+
 /// 🗣️ [MY-STORY] 언어마다 친구 사이에 쓰는 말투 한 줄.
 ///
 /// 한국어·일본어는 **해요체·です체**다(실장님 지시, 2026-11-08) — 반말·タメ口가
@@ -246,9 +338,22 @@ If the user's lines are broken or mistranscribed, write what they clearly meant 
 What the other speaker said may appear only as part of the user's own experience (for example, what I was asked or what I found out), told in the user's voice and only when the user engaged with it.
 You may add plain connecting words so the thoughts flow, but a "because" or "so" must reflect a link the conversation itself made.
 
-[LENGTH FOLLOWS THE CONVERSATION]
-Cover the topics the user actually discussed, in a natural order.
-A short conversation gives a short story; a long conversation gives a longer one. Never pad it, and never drop a topic the user really talked about.
+[LENGTH — ABOUT 30 SECONDS OF SPEECH]
+${mySpeechLengthInstruction(language)}
+However long the conversation was, this story is short: it is read aloud and practised line by line.
+Pick the 3 or 4 moments that mattered most to the USER and tell them in a natural order; leave out minor side topics.
+A short conversation gives an even shorter story. Never pad it.
+
+[FINISH THE STORY]
+Plan the whole story first so that it fits, then write it. It must end with a complete closing sentence that wraps it up naturally.
+Never stop in the middle of a sentence, and never leave the last line unfinished.
+
+[SHORT, BUT STILL SPOKEN — NOT A SUMMARY]
+Being short does not mean writing a report. Do not list topics with report phrases such as "We talked about…", "Then we discussed…", "At the end, I asked…", "In the end…", "First… Next… Finally…".
+Tell it like a friend over coffee: say what happened, what you said or asked, and how it felt, with contractions and small natural reactions — but only reactions the conversation supports.
+BAD (report): "Then we talked about the weather and whether it would rain."
+GOOD (spoken): "So I asked if it was going to rain, and honestly, she had no idea either."
+Every line should sound like something a person would really say out loud, not something written down.
 
 [HARD LIMITS]
 Never contradict the conversation.
@@ -308,7 +413,14 @@ class MySpeechBuilder {
       situation: situation,
     );
     try {
-      final response = await http
+      final messages = <Map<String, String>>[
+        <String, String>{'role': 'system', 'content': sysPrompt},
+        <String, String>{
+          'role': 'user',
+          'content': 'Conversation:\n$transcript\n\nMy Story:',
+        },
+      ];
+      Future<http.Response> post(List<Map<String, String>> msgs) => http
           .post(
             SecureAiGateway.openAiUri('/v1/chat/completions'),
             headers: <String, String>{
@@ -319,25 +431,69 @@ class MySpeechBuilder {
               'model': model,
               'reasoning_effort': kHistoryTextReasoningEffort,
               'max_completion_tokens': 1500,
-              'messages': <Map<String, String>>[
-                <String, String>{'role': 'system', 'content': sysPrompt},
-                <String, String>{
-                  'role': 'user',
-                  'content': 'Conversation:\n$transcript\n\nMy Story:',
-                },
-              ],
+              'messages': msgs,
             }),
           )
           .timeout(timeout);
+
+      final response = await post(messages);
       if (response.statusCode != 200) {
         onLog?.call('🗣️ [MY-ENGLISH]', 'status=${response.statusCode}');
         return const SpeechBuildResult.failed(SpeechBuildFailure.httpError);
       }
       final raw = utf8.decode(response.bodyBytes);
       logCompletionBudgetRaw('[MY-ENGLISH]', raw);
-      final text = parseResponse(raw);
+      var text = parseResponse(raw);
       if (text.isEmpty) {
         return const SpeechBuildResult.failed(SpeechBuildFailure.emptyReply);
+      }
+      // 📏 너무 길거나 문장이 중간에서 끊긴 글은 한 번만 다시 쓰게 한다.
+      //   2026-11-09 실측: 분량을 줄이라고만 하자 글이 "…and found out she was"에서
+      //   끝났다. 다시 써도 안 되면 **마지막 온전한 문장까지만** 남긴다.
+      bool needsFix(String t) =>
+          mySpeechIsTooLong(t, targetLang) ||
+          !mySpeechEndsCleanly(t) ||
+          mySpeechSoundsLikeReport(t, targetLang);
+      if (needsFix(text)) {
+        final len = mySpeechLengthFor(targetLang);
+        final bool unfinished = !mySpeechEndsCleanly(text);
+        final bool report = mySpeechSoundsLikeReport(text, targetLang);
+        onLog?.call('🗣️ [MY-ENGLISH]',
+            'rewrite len=${text.length} unfinished=$unfinished report=$report');
+        try {
+          final retry = await post(<Map<String, String>>[
+            ...messages,
+            <String, String>{'role': 'assistant', 'content': text},
+            <String, String>{
+              'role': 'user',
+              'content': '${unfinished ? 'That stopped in the middle of a sentence. ' : report ? 'That sounds like a written report, not someone talking. Do not use "We talked about", "At the end", "In the end", "First/Finally". ' : 'That is too long. '}'
+                  'Rewrite the WHOLE story so it is complete and ends with a '
+                  'finished closing sentence, in about ${len.target} '
+                  '${len.byChars ? 'characters' : 'words'} '
+                  '(never over ${len.hardLimit}), ${len.lines} lines. '
+                  'Keep the 3 or 4 moments that mattered most, drop minor topics, '
+                  'and keep it spoken like a friend talking, one line per breath. '
+                  'Output only My Story.',
+            },
+          ]);
+          if (retry.statusCode == 200) {
+            final again = parseResponse(utf8.decode(retry.bodyBytes));
+            // 길이·끝맺음만 지키면 다시 쓴 글을 쓴다. 말투는 더 나아졌으면 족하다.
+            final bool againOk = again.isNotEmpty &&
+                !mySpeechIsTooLong(again, targetLang) &&
+                mySpeechEndsCleanly(again);
+            if (againOk) text = again;
+          }
+        } on Exception catch (error) {
+          onLog?.call(
+              '🗣️ [MY-ENGLISH]', 'rewrite_failed reason=${error.runtimeType}');
+        }
+      }
+      if (!mySpeechEndsCleanly(text)) {
+        final trimmed = mySpeechTrimToLastSentence(text);
+        if (trimmed.isNotEmpty) text = trimmed;
+        onLog?.call(
+            '🗣️ [MY-ENGLISH]', 'trimmed_to_last_sentence len=${text.length}');
       }
       onLog?.call('🗣️ [MY-ENGLISH]', 'ok len=${text.length}');
       return SpeechBuildResult.ok(text);

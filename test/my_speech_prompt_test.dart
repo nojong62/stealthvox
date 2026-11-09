@@ -41,12 +41,61 @@ void main() {
       expect(prompt, isNot(contains('[YOU MAY ADD]')));
     });
 
-    test('길이는 대화를 따른다 — 늘리지도 빼지도 않는다', () {
-      expect(prompt, contains('[LENGTH FOLLOWS THE CONVERSATION]'));
+    test('길이는 약 30초 분량으로 줄인다 — 대화가 길어도 짧다', () {
+      expect(prompt, contains('[LENGTH — ABOUT 30 SECONDS OF SPEECH]'));
+      expect(prompt, contains('Write about 120 words in total'));
+      expect(prompt, contains('Never go over 150 words'));
+      expect(prompt, contains('Never pad it.'));
+    });
+
+    test('중간에서 끊지 않고 요약체로 쓰지 않는다', () {
+      expect(prompt, contains('[FINISH THE STORY]'));
+      expect(prompt, contains('Never stop in the middle of a sentence'));
+      expect(prompt, contains('[SHORT, BUT STILL SPOKEN — NOT A SUMMARY]'));
+      expect(prompt, contains('We talked about'));
+    });
+
+    test('한국어는 글자 수로 센다', () {
+      final ko = buildMySpeechInstructions(targetLang: 'Korean');
+      expect(ko, contains('Write about 180 characters in total'));
+      expect(mySpeechIsTooLong('가' * 261, 'Korean'), isTrue);
+      expect(mySpeechIsTooLong('가' * 180, 'Korean'), isFalse);
+    });
+
+    test('한도를 넘은 영어 글은 길다고 본다', () {
+      final long = List.filled(151, 'word').join(' ');
+      expect(mySpeechIsTooLong(long, 'English'), isTrue);
+      expect(mySpeechIsTooLong('I quit my job today.', 'English'), isFalse);
+    });
+
+    test('영어 보고서 말투를 가려낸다', () {
       expect(
-        prompt,
-        contains(
-            'Never pad it, and never drop a topic the user really talked about.'),
+          mySpeechSoundsLikeReport(
+              'At the end, I asked their name.', 'English'),
+          isTrue);
+      expect(
+          mySpeechSoundsLikeReport('We talked about her teacher.', 'English'),
+          isTrue);
+      expect(
+          mySpeechSoundsLikeReport(
+              'So I asked her name, and honestly she laughed.', 'English'),
+          isFalse);
+      expect(mySpeechSoundsLikeReport('At the end, 그랬어요.', 'Korean'),
+          isFalse);
+    });
+
+    test('문장이 끝맺음 없이 끊긴 글을 가려낸다', () {
+      expect(mySpeechEndsCleanly('I asked her name\nand found out she was'),
+          isFalse);
+      expect(mySpeechEndsCleanly('I asked her name.\nShe was Jiyeon.'), isTrue);
+      expect(mySpeechEndsCleanly('그렇게 말했어요.'), isTrue);
+    });
+
+    test('끊긴 글은 마지막 온전한 문장까지만 남긴다', () {
+      expect(
+        mySpeechTrimToLastSentence(
+            'I asked her name.\nShe laughed.\nThen I found out she was'),
+        'I asked her name.\nShe laughed.',
       );
     });
   });

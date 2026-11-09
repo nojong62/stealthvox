@@ -3340,8 +3340,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                 }),
             ),
           )
-          // PCM은 mp3보다 응답이 커서 10초로는 모자랄 수 있다.
-          .timeout(Duration(seconds: responseFormat == 'pcm' ? 30 : 10));
+          // PCM은 mp3보다 응답이 커서 10초로는 모자랄 수 있다. 연습 음성(PCM)은
+          // 길이가 길면 30초를 넘겼다(2026-11-09 실측) — 글을 30초 분량으로
+          // 줄였지만 합성이 느린 날을 위해 60초까지 기다린다.
+          .timeout(Duration(seconds: responseFormat == 'pcm' ? 60 : 10));
       debugPrint(
           '[HISTORY-TTS] model=$model voice=$voice instruction=${instructionTag ?? 'none'} status=${response.statusCode} chars=${text.trim().length}');
       return response.statusCode == 200 ? response.bodyBytes : null;
@@ -5678,10 +5680,12 @@ RULES — follow exactly:
               ] else if (body.isNotEmpty && previewScrollable) ...[
                 const SizedBox(height: 10),
                 // 📖 글 전체를 카드 안에서 굴려 본다. 카드가 화면을 다 먹지
-                //    않도록 높이에 천장을 둔다.
+                //    않도록 높이에 천장을 둔다. 0.45는 PRACTICE 카드와 합치면
+                //    화면보다 커서 글 끝과 ▶ 시작이 바깥 스크롤 밑에 가려졌다
+                //    (2026-11-09 실기기: 마지막 문장이 잘린 것처럼 보임).
                 ConstrainedBox(
                   constraints: BoxConstraints(
-                      maxHeight: MediaQuery.of(context).size.height * 0.45),
+                      maxHeight: MediaQuery.of(context).size.height * 0.32),
                   child: Scrollbar(
                     thumbVisibility: true,
                     child: SingleChildScrollView(
@@ -6909,6 +6913,7 @@ RULES — follow exactly:
       // ⚡ Snap Echoing은 문장 구조로 나눈 단위 사이마다 쉰다. 나누기에
       //   실패하면 쉐도잉과 같은 문장부호 쉼으로 돌아간다.
       String markup = chirpPauseMarkup(text, pause);
+      final timing = Stopwatch()..start();
       if (!shadowing && !text.contains('[') && !text.contains(']')) {
         final chunks = await SnapEchoChunker.chunk(
           apiKey: _apiKey,
@@ -6920,17 +6925,28 @@ RULES — follow exactly:
             'chunks=${chunks?.length ?? 0} size=${size.name}');
         if (chunks != null) markup = SnapEchoChunker.markup(chunks, pause);
       }
+      final chunkMs = timing.elapsedMilliseconds;
       // 낭독 지시(instructions)는 보내지 않는다 — 지시가 붙으면 Gateway가
       // 표현형으로 보고 Chirp 3 HD가 아닌 OpenAI로 넘긴다.
-      final raw = await _fetchOpenAITTSInternal(
-        text,
-        speed,
-        voice,
-        model: _historyPracticeTtsModel,
-        instructionTag: '${style.id}_p3',
-        responseFormat: 'pcm',
-        markup: markup,
-      );
+      Future<Uint8List?> synth() => _fetchOpenAITTSInternal(
+            text,
+            speed,
+            voice,
+            model: _historyPracticeTtsModel,
+            instructionTag: '${style.id}_p3',
+            responseFormat: 'pcm',
+            markup: markup,
+          );
+      var raw = await synth();
+      // "음성을 못 불러왔습니다"를 바로 띄우지 않는다. 한 번은 조용히 다시 받는다.
+      if (raw == null || raw.isEmpty) {
+        debugPrint('[P3-TIMING] retry chars=${text.length} '
+            'firstMs=${timing.elapsedMilliseconds - chunkMs}');
+        raw = await synth();
+      }
+      debugPrint('[P3-TIMING] chars=${text.length} chunkMs=$chunkMs '
+          'ttsMs=${timing.elapsedMilliseconds - chunkMs} '
+          'ok=${raw != null && raw.isNotEmpty} mode=${_p3PracticeMode.name}');
       if (raw == null || raw.isEmpty) return null;
       final wav = pcm16ToWav(raw, sampleRate: kStealthVoxSttSampleRate);
       await TtsCache.put(text, ns, wav);
@@ -7505,7 +7521,9 @@ RULES — follow exactly:
     //   전체 문장 단계부터 보여 준다.
     final bool hideText = _p3PracticeMode == P3PracticeMode.echoing &&
         (inBreathEcho || _p3Stage == P3Stage.preparing);
-    final int safeTotal = _p3BreathTotal.clamp(0, 24);
+    // 호흡 수는 글 길이에 따라 24를 넘는다(2026-11-09 실측 35). 24로 묶으면
+    // 24번째에서 표시가 멈춘 채 연습만 계속 돈다.
+    final int safeTotal = _p3BreathTotal < 0 ? 0 : _p3BreathTotal;
     final int safeIndex =
         safeTotal == 0 ? 0 : _p3BreathIndex.clamp(0, safeTotal - 1);
 
@@ -8407,7 +8425,13 @@ RULES — follow exactly:
   /// 대화 안에서만, 유저 1인칭으로 쓴다(2026-10-15).
   /// `my_story_v1`부터는 친구에게 말하듯 그 나라 일상 말투, 한 줄 = 한
   /// 호흡이다(2026-11-08). 옛 ESSAY는 방을 열 때 새로 만든다.
-  static const String _kSpeechSchemaVersion = 'my_story_v1';
+  /// `my_story_v2`부터는 약 30초 분량으로 줄여 쓴다(2026-11-09). 긴 글은 연습
+  /// 음성이 30초 안에 안 만들어졌다. 옛 긴 글은 방을 열 때 새로 만든다.
+  /// `my_story_v3`: v2는 분량을 줄이라는 말만 듣고 문장을 중간에서 끝냈고
+  /// 요약체였다(2026-11-09). 끝맺음·대화체 규칙을 넣어 다시 만든다.
+  /// `my_story_v4`: v3도 "At the end, …" 같은 보고서 말투가 남아, 그런 글은 한
+  /// 번 다시 쓰게 했다(2026-11-09).
+  static const String _kSpeechSchemaVersion = 'my_story_v4';
   static const String _kNativeEnglishSchemaVersion = 'natural_sharp_trevor_v1';
 
   /// 저장된 MY ENGLISH를 그대로 써도 되는가.
