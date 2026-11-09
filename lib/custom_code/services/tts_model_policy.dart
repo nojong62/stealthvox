@@ -2,6 +2,7 @@ import 'package:firebase_remote_config/firebase_remote_config.dart';
 
 import '/app_state.dart';
 import 'ai_style.dart';
+import 'voice_tier.dart';
 
 /// TTS 용도별 모델 계약.
 ///
@@ -46,6 +47,8 @@ class TtsModelProfile {
       'voice': voice,
       // Gateway 전용 칸. OpenAI로 넘길 때는 Gateway가 지운다.
       if (trimmedLanguage.isNotEmpty) 'language': trimmedLanguage,
+      // Gateway 전용 칸. 기본 음성일 때만 싣는다 — 없으면 Chirp 3 HD.
+      if (VoiceTierSession.active == VoiceTier.basic) 'voice_tier': 'basic',
       if (responseFormat != null && responseFormat.isNotEmpty)
         'response_format': responseFormat,
       if (optionMode == TtsOptionMode.speed) 'speed': speed,
@@ -141,7 +144,10 @@ class TtsModelPolicy {
     // bytes must not be replayed. British style reads English in en-GB, so its
     // bytes get their own slot rather than replaying the en-US ones.
     final accent = ttsLanguageFor('English') == 'en-GB' ? '_en-GB' : '';
-    return '${profile.model}_${profile.cacheVersion}_tts-route-v3$accent'
+    // 기본 음성(WaveNet)은 다른 소리다. 프리미엄 캐시를 재생하면 안 된다.
+    final tier =
+        VoiceTierSession.active == VoiceTier.basic ? '_wavenet' : '';
+    return '${profile.model}_${profile.cacheVersion}_tts-route-v3$accent$tier'
         '_$namespace';
   }
 

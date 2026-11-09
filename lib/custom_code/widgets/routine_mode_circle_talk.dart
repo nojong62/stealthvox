@@ -81,6 +81,7 @@ import '/custom_code/services/circle_correction_intent.dart'
 import 'deepgram_confidence_probe.dart';
 import 'first_utterance_context_judge.dart';
 import 'origin_language_recheck_dialog.dart';
+import '../services/voice_tier.dart';
 
 /// speech_stopped 뒤 최종 전사가 이 시간 안에 안 오면 턴을 놓아준다.
 /// 없으면 `_turnInFlight`가 켜진 채 굳어 10분 롤오버까지 막힌다.
@@ -1236,6 +1237,8 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   @override
   void initState() {
     super.initState();
+    // 🎙️ [VOICE-TIER] 로비에서 고른 등급을 이 방에 묶는다. TTS 요청·캐시·배율이 읽는다.
+    VoiceTierSession.activate(lobbyVoiceTier, reason: 'circle_talk');
     // 🌐 [ORIGIN-RESOLVE] 이 방의 ORIGIN 판정을 처음 상태로 되돌린다.
     //   전환은 **세션 한정**이다 — prefs에는 쓰지 않으므로 방을 나가면
     //   로비값 그대로다. 여기서 비워야 다음 입장이 새로 판정한다.
@@ -1310,7 +1313,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     _initPermissions();
     _fetchKeys();
     BillingTicker.instance.setSessionIdentifiers();
-    BillingTicker.instance.setRate(BillingRate.full);
+    BillingTicker.instance.setRate(billingRateFor(VoiceTierSession.active));
     BillingTicker.instance.resume();
     BillingTicker.instance.logMode('circle_talk');
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -5724,6 +5727,8 @@ $userFixPolicy$finalLanguageRule''';
         // 📚 [STUDY-ROOM] 방을 닫기 전에 공부방을 그 위에 연다. 닫힌 뒤에는
         //   이 context가 없다. 공부방 진입은 과금 지점이라 목록과 같은 문을 지난다.
         if (openStudyRoomRef != null && guardBillingEntry(context)) {
+          // 🎙️ [VOICE-TIER] 바로 넘어가는 공부방은 이 대화의 등급을 잇는다.
+          VoiceTierSession.handOffToStudy(openStudyRoomRef.path);
           context.pushNamed(
             'ChatDetail',
             queryParameters: {

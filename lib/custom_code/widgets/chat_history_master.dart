@@ -61,6 +61,7 @@ import '/custom_code/services/duo_study_state.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/talk_ui_localization.dart';
 import '/custom_code/services/origin_surface_localization.dart';
+import '/custom_code/services/voice_tier.dart';
 import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/duo_final_transcription.dart';
 import '/custom_code/services/duo_final_transcription_runner.dart';
@@ -610,6 +611,19 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   void initState() {
     super.initState();
     _historyId = widget.historyDoc.id;
+    // 🎙️ [VOICE-TIER] 대화 직후 바로 넘어왔으면 그 대화의 등급을 잇는다.
+    //   History 목록 등 다른 길이면 로비 등급으로 열고, 연습 첫 Start에서
+    //   팝업으로 다시 묻는다. 체험·게스트 미리보기는 무료라 묻지 않는다.
+    final carriedTier = VoiceTierSession.takeHandoff(widget.historyDoc.path);
+    if (widget.studyTrial || widget.allowDuoGuestStudyPreview) {
+      VoiceTierSession.activate(VoiceTier.premium, reason: 'study_free');
+      _voiceTierChosen = true;
+    } else if (carriedTier) {
+      _voiceTierChosen = true;
+      debugPrint('[VOICE-TIER] study carried=${VoiceTierSession.active.name}');
+    } else {
+      VoiceTierSession.activate(lobbyVoiceTier, reason: 'study_from_list');
+    }
     debugPrint('[HISTORY-LIFECYCLE] init instance=$_instanceId '
         'history=$_historyId');
     _blinkController = AnimationController(
@@ -641,7 +655,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     //   startBillingRoom()이 안에서 resetBillingIdle()을 부르므로,
     //   여기서 따로 부르던 것도 같이 정리한다.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) startBillingRoom();
+      if (mounted) {
+        startBillingRoom(rate: billingRateFor(VoiceTierSession.active));
+      }
     });
 
     _playerStateSub = audioPlayer.onPlayerStateChanged.listen((state) {
@@ -2826,7 +2842,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   void _exitShadowing() {
     _deleteUserRecordings(); // 🆕 Practice 임시 녹음 파일 정리
-    BillingTicker.instance.setRate(BillingRate.full);
+    BillingTicker.instance.setRate(billingRateFor(VoiceTierSession.active));
     _stopTutorPlayback();
     _stopAutoVADRecording();
     _utteranceSafetyTimer?.cancel();
@@ -3433,7 +3449,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       _isPlayingAppAudio = false;
     });
     _generateAppText(baseText);
-    BillingTicker.instance.setRate(BillingRate.full); // 튜터링 구간 full rate
+    BillingTicker.instance.setRate(billingRateFor(VoiceTierSession.active)); // 튜터링 구간 full rate
 
     showModalBottomSheet(
       context: context,
@@ -3462,7 +3478,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       ),
     ).whenComplete(() {
       BillingTicker.instance
-          .setRate(BillingRate.full); // 튜터링 종료 (배율은 하나뿐이라 그대로)
+          .setRate(billingRateFor(VoiceTierSession.active)); // 튜터링 종료 (배율은 하나뿐이라 그대로)
       _dialogSetState = null;
       if (_appIsRecording) {
         appAudioRecorder.stop().ignore();
@@ -6798,6 +6814,17 @@ RULES — follow exactly:
   /// 도드라진 상태로 익히면 안 된다.
   Future<void> _startP3Speaking() async {
     if (!_guardPaidStudy()) return;
+    if (!_voiceTierChosen) {
+      final tier = await _askPracticeVoiceTier();
+      if (tier == null || !mounted) return;
+      _voiceTierChosen = true;
+      if (tier != VoiceTierSession.active) {
+        VoiceTierSession.activate(tier, reason: 'study_popup');
+        BillingTicker.instance.setRate(billingRateFor(tier));
+        _p3FullPcm = null;
+        _p3Segments = const <BreathSegment>[];
+      }
+    }
     final text = _p3TargetSentence;
     if (text.isEmpty) {
       _showRoomEntryToast(_surfaceCopy['p3NoSentence']);
@@ -7692,6 +7719,41 @@ RULES — follow exactly:
   //   이미 있는 것은 건너뛰므로 몇 번을 눌러도 같은 결과다. 소리는 폰에
   //   있어도 다시 올린다 — 규칙 배포 전에 만든 소리를 배포 뒤에 올리려고.
   bool _isTrialAuthor = false;
+
+  /// 🎙️ [VOICE-TIER] 이번 방문에서 등급이 정해졌는가. false면 연습 첫 Start가
+  /// 팝업으로 묻는다.
+  bool _voiceTierChosen = false;
+
+  /// 연습 음성 등급을 묻는다. 닫으면 null(Start 취소).
+  Future<VoiceTier?> _askPracticeVoiceTier() {
+    final copy = _surfaceCopy;
+    Widget option(VoiceTier tier, String title, String note) => ListTile(
+          leading: Icon(
+            tier == VoiceTier.premium
+                ? Icons.graphic_eq_rounded
+                : Icons.record_voice_over_rounded,
+          ),
+          title: Text(title),
+          subtitle: Text(note),
+          trailing: tier == lobbyVoiceTier
+              ? const Icon(Icons.check_rounded, size: 18)
+              : null,
+          onTap: () =>
+              Navigator.of(context, rootNavigator: true).pop(tier),
+        );
+    return showDialog<VoiceTier>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text(copy['voiceTierTitle']),
+        children: [
+          option(VoiceTier.premium, copy['voiceTierPremium'],
+              copy['voiceTierPremiumNote']),
+          option(VoiceTier.basic, copy['voiceTierBasic'],
+              copy['voiceTierBasicNote']),
+        ],
+      ),
+    );
+  }
   bool _preparingTrial = false;
   String _trialPrepStatus = '';
 

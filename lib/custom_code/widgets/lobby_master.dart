@@ -45,6 +45,7 @@ import 'package:flutter/gestures.dart' show LongPressGestureRecognizer;
 
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'dart:io' show Platform;
+import '../services/voice_tier.dart';
 
 // ============================================================================
 // 🎨 [Lobby 색] 화면 전체가 쓰는 색을 한곳에 모은다. 예전에는 같은 파랑이
@@ -703,6 +704,15 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 10),
           FittedBox(fit: BoxFit.scaleDown, child: value),
+          if (lobbyVoiceTier == VoiceTier.basic) ...[
+            const SizedBox(height: 6),
+            Text(
+              _surfaceCopy['timeLeftBasicNote'],
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: _kLobbyTextMid, fontSize: 11),
+            ),
+          ],
         ],
       ),
     );
@@ -982,6 +992,24 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     );
   }
 
+  /// 🎙️ [VOICE-TIER] 기본 / 프리미엄. 다음에 들어가는 방부터 적용된다.
+  Widget _buildVoiceTierSelector() {
+    Widget pill(VoiceTier tier, String label) => Expanded(
+          child: _buildPill(
+            label,
+            lobbyVoiceTier == tier,
+            () => setState(() => lobbyVoiceTier = tier),
+          ),
+        );
+    return Row(
+      children: [
+        pill(VoiceTier.premium, _surfaceCopy['voiceTierPremium']),
+        const SizedBox(width: 10),
+        pill(VoiceTier.basic, _surfaceCopy['voiceTierBasic']),
+      ],
+    );
+  }
+
   /// AI STYLE 배치.
   ///
   /// **선택지는 언제나 [_kAiStyles] 넷이다**(영어에서만 보이는 설정이라
@@ -1202,7 +1230,11 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     var appState = FFAppState();
-    final int _lobbyTotalSec = appState.remainingTime.toInt().clamp(0, 999999);
+    // 🎙️ [VOICE-TIER] 잔액은 프리미엄 기준 초다. 기본 음성을 골랐으면 그
+    //   등급으로 쓸 수 있는 시간(3배)을 보여 준다.
+    final int _lobbyTotalSec = secondsUsableAt(
+            appState.remainingTime.toInt().clamp(0, 999999), lobbyVoiceTier)
+        .clamp(0, 9999999);
     final int _lobbyH = _lobbyTotalSec ~/ 3600;
     final int _lobbyM = (_lobbyTotalSec % 3600) ~/ 60;
     final String displayTime =
@@ -1443,6 +1475,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                         //   복원한다.
                         (val) => setState(() => appState.targetLang = val!),
                       ),
+                      const SizedBox(height: 14),
+                      _buildSectionLabel(_surfaceCopy['voiceSection']),
+                      const SizedBox(height: 4),
+                      _buildVoiceTierSelector(),
                     ],
                   ),
                 ),

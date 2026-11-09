@@ -31,6 +31,9 @@ class FFAppState extends ChangeNotifier {
       _aiStyle = prefs.getString('ff_aiStyle') ?? _aiStyle;
     });
     _safeInit(() {
+      _voiceTier = prefs.getString('ff_voiceTier') ?? _voiceTier;
+    });
+    _safeInit(() {
       _aiVoice = prefs.getString('ff_aiVoice') ?? _aiVoice;
     });
     _safeInit(() {
@@ -157,6 +160,14 @@ class FFAppState extends ChangeNotifier {
   set aiStyle(String value) {
     _aiStyle = value;
     prefs.setString('ff_aiStyle', value);
+  }
+
+  /// 로비에서 고른 음성 등급(`premium` / `basic`). `voice_tier.dart`가 읽는다.
+  String _voiceTier = 'premium';
+  String get voiceTier => _voiceTier;
+  set voiceTier(String value) {
+    _voiceTier = value;
+    prefs.setString('ff_voiceTier', value);
   }
 
   /// 남은 시간 (초)
