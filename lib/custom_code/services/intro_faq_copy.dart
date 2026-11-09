@@ -33,11 +33,11 @@ class IntroFaqCopy {
       ],
       [
         'I can’t speak the language at all. Is that OK?',
-        'Yes. After signing in, set Origin to your native language and Target to the language you want to learn. Speak in your own language and the AI replies in it too; the Study Room then turns that conversation into sentences in the language you are learning. Switch to Step 2 during a talk and only the AI speaks the target language — listening practice.',
+        'Yes. After signing in, choose your native language as the language you speak and the language you want to learn as the language you’re learning. Speak comfortably in your native language and the AI will talk with you in it too. That conversation is then turned into sentences in the language you’re learning in the Study Room. Switch to Step 2 during a conversation and only the AI will speak the language you’re learning, giving you listening practice.',
       ],
       [
-        'I can hold a conversation in the language, too.',
-        'Every time you enter Circle Talk or Scenario Talk, you choose whether to use Free Talk. With Free Talk you talk in your lobby Target language from the start; without it, you talk with your lobby settings as they are.',
+        'I can also chat in a foreign language.',
+        'Each time you enter Circle Talk or Scenario Talk, you choose whether to use Free Talk. With Free Talk, you start chatting in the language you’re learning in the lobby; otherwise, you chat using your lobby settings as they are.',
       ],
       [
         'I have no one to talk to.',
@@ -45,7 +45,7 @@ class IntroFaqCopy {
       ],
       [
         'Can I talk with a friend who speaks another language?',
-        'Invite them with Duo. Each of you speaks your own language and the AI interprets. If both Origin settings match, Duo switches to a direct call where you hear each other’s voices. Only the member who sent the invitation is billed.',
+        'Invite them with Duo. Each of you speaks your own language and the AI interprets. If you use the same language, Duo switches to a direct call where you hear each other’s voices. If you’re both members, you each pay your own fees. If your friend isn’t a member, the inviting member pays for both.',
       ],
       [
         'Build your own everyday language with Duo direct calls.',
@@ -71,11 +71,11 @@ class IntroFaqCopy {
       ],
       [
         '외국어를 전혀 못 해도 되나요?',
-        '네. 로그인한 뒤 Origin에 모국어를, Target에 배우고 싶은 언어를 고르세요. 모국어로 편하게 말하면 AI도 모국어로 대화하고, 그 대화가 공부방에서 배우는 언어의 문장으로 바뀝니다. 대화 중 Step 2로 바꾸면 AI만 배우는 언어로 말해 듣기 연습이 됩니다.',
+        '네. 로그인한 뒤 사용 언어에 모국어를, 배울 언어에 배우고 싶은 언어를 고르세요. 모국어로 편하게 말하면 AI도 모국어로 대화하고, 그 대화가 공부방에서 배우는 언어의 문장으로 바뀝니다. 대화 중 Step 2로 바꾸면 AI만 배우는 언어로 말해 듣기 연습이 됩니다.',
       ],
       [
         '외국어로 대화할 수도 있어요.',
-        '서클톡이나 시나리오톡에 들어갈 때마다 Free Talk으로 할지 고릅니다. Free Talk을 고르면 로비의 Target 언어로 처음부터 대화하고, 고르지 않으면 로비 설정 그대로 대화합니다.',
+        '서클톡이나 시나리오톡에 들어갈 때마다 Free Talk으로 할지 고릅니다. Free Talk을 고르면 로비의 배울 언어로 처음부터 대화하고, 고르지 않으면 로비 설정 그대로 대화합니다.',
       ],
       [
         '말할 상대가 없어요.',
@@ -83,7 +83,7 @@ class IntroFaqCopy {
       ],
       [
         '다른 언어를 쓰는 친구와도 대화할 수 있나요?',
-        'Duo로 친구를 초대하면 각자 자기 언어로 말하고 AI가 통역합니다. 두 사람의 Origin이 같으면 서로의 목소리를 직접 듣는 직접 통화로 바뀝니다. 과금은 초대한 회원에게만 됩니다.',
+        'Duo로 친구를 초대하면 각자 자기 언어로 말하고 AI가 통역합니다. 두 사람의 사용 언어가 같으면 서로의 목소리를 직접 듣는 직접 통화로 바뀝니다. 요금은 회원끼리면 각자 내고, 상대가 비회원이면 초대한 회원이 함께 냅니다.',
       ],
       [
         'Duo 직접 통화로 나만의 생활 외국어 기초를 만드세요.',
@@ -108,20 +108,20 @@ class IntroFaqCopy {
         '自分の言葉で練習する外国語の練習場です。外国語がまったく話せなくても母語で会話しながら学べ、すでに会話できる人は Free Talk で学ぶ言語のまますぐに話せます。違う言語を話す友だちとも、それぞれ母語で通話しながら相手の言語を学べます。',
       ],
       [
-        '外国語がまったく話せなくても大丈夫?',
-        'はい。ログイン後、Origin に母語、Target に学びたい言語を選んでください。母語で気軽に話すと AI も母語で会話し、その会話が学習ルームで学ぶ言語の文に変わります。会話中に Step 2 に切り替えると AI だけが学ぶ言語で話し、リスニング練習になります。',
+        '外国語がまったく話せなくても大丈夫？',
+        'はい。ログイン後、話す言語に母語、学ぶ言語に学びたい言語を選んでください。母語で気軽に話すと、AIも母語で会話します。その会話は学習ルームで、学ぶ言語の文に変わります。会話中に Step 2 に切り替えると、AIだけが学ぶ言語で話すので、リスニング練習になります。',
       ],
       [
         '外国語で会話することもできます。',
-        'サークルトークやシナリオトークに入るたびに、Free Talk にするかを選びます。Free Talk を選ぶとロビーの Target 言語で最初から会話し、選ばなければロビーの設定のまま会話します。',
+        'Circle TalkやScenario Talkに入るたびに、Free Talkを使うかどうかを選びます。Free Talkを選ぶと、ロビーで学習中の言語で最初から会話し、選ばなければロビーの設定のまま会話します。',
       ],
       [
         '話し相手がいません。',
         '大丈夫です。サークルトークでは複数の AI の友だちと好きなテーマで話し、シナリオトークでは空港やレストランのような実際の場面を AI と役を分けて練習します。',
       ],
       [
-        '違う言語を話す友だちとも会話できますか?',
-        'Duo で友だちを招待すると、それぞれ自分の言語で話し AI が通訳します。二人の Origin が同じなら、お互いの声を直接聞く直接通話に切り替わります。課金されるのは招待した会員だけです。',
+        '違う言語を話す友だちとも会話できますか？',
+        'Duo で友だちを招待すると、それぞれ自分の言語で話し、AI が通訳します。二人の使用言語が同じなら、お互いの声を直接聞ける通話に切り替わります。二人とも会員なら、それぞれ自分の分を支払います。相手が非会員なら、招待した会員が二人分を支払います。',
       ],
       [
         'Duo の直接通話で、自分だけの生活外国語の土台を作りましょう。',
@@ -146,20 +146,20 @@ class IntroFaqCopy {
         '用自己的话练习外语的练习场。一句外语都不会说,也能用母语对话来学习;已经能对话的人,可以用 Free Talk 直接用所学语言交谈。还能和说另一种语言的朋友各自用母语通话,学习对方的语言。',
       ],
       [
-        '完全不会说外语也可以吗?',
-        '可以。登录后,在 Origin 选择母语,在 Target 选择想学的语言。用母语轻松地说,AI 也用母语对话,这段对话会在学习室里变成所学语言的句子。对话中切换到 Step 2,只有 AI 用所学语言说话,成为听力练习。',
+        '完全不会说外语也可以吗？',
+        '可以。登录后，在使用语言中选择母语，在学习语言中选择想学的语言。用母语轻松地说，AI 也会用母语和你对话，这段对话会在学习室里变成所学语言的句子。对话中切换到 Step 2 后，只有 AI 会用所学语言说话，可以练习听力。',
       ],
       [
-        '我也能用外语对话。',
-        '每次进入社群对话或情景对话时,都可以选择是否使用 Free Talk。选择 Free Talk 就从一开始用大厅的 Target 语言对话;不选择则按大厅设置对话。',
+        '我也可以用外语聊天。',
+        '每次进入 Circle Talk 或 Scenario Talk 时，都可以选择是否使用 Free Talk。选择 Free Talk 后，会从一开始就用大厅中正在学习的语言聊天；不选择则按大厅设置聊天。',
       ],
       [
         '我没有说话的对象。',
         '没关系。在社群对话里,你可以和多位 AI 朋友聊喜欢的话题;在情景对话里,可以和 AI 分角色练习机场、餐厅等真实场景。',
       ],
       [
-        '能和说其他语言的朋友对话吗?',
-        '用 Duo 邀请朋友,各自说自己的语言,由 AI 口译。两人的 Origin 相同时,会切换为能直接听到彼此声音的直接通话。只向发出邀请的会员计费。',
+        '能和说其他语言的朋友对话吗？',
+        '用 Duo 邀请朋友后，你们可以各自说自己的语言，由 AI 口译。如果两人使用的语言相同，就会切换为能直接听到彼此声音的通话。如果两人都是会员，各自支付自己的费用；如果对方不是会员，则由邀请方会员支付两人费用。',
       ],
       [
         '用 Duo 直接通话,打下属于你的生活外语基础。',
@@ -185,11 +185,11 @@ class IntroFaqCopy {
       ],
       [
         'No hablo nada del idioma. ¿Puedo usarla?',
-        'Sí. Después de iniciar sesión, elige tu idioma nativo en Origin y el que quieres aprender en Target. Habla tranquilo en tu idioma y la IA también te responde en él; luego la sala de estudio convierte esa conversación en frases del idioma que aprendes. Si cambias a Step 2 durante la charla, solo la IA habla el idioma que aprendes: práctica de escucha.',
+        'Sí. Después de iniciar sesión, elige tu idioma nativo como idioma para hablar y el que quieres aprender como idioma de aprendizaje. Habla con tranquilidad en tu idioma y la IA también conversará contigo en él. Después, la sala de estudio convierte esa conversación en frases del idioma que estás aprendiendo. Si cambias a Step 2 durante la charla, solo la IA hablará en ese idioma: así practicas la comprensión auditiva.',
       ],
       [
-        'También puedo conversar en el idioma.',
-        'Cada vez que entras en Conversación de círculo o Conversación de escenario, eliges si usar Free Talk. Con Free Talk hablas desde el principio en tu idioma Target del lobby; sin él, hablas con la configuración del lobby tal cual.',
+        'También puedo conversar en un idioma extranjero.',
+        'Cada vez que entras en Circle Talk o Scenario Talk, eliges si usar Free Talk. Con Free Talk, empiezas a conversar en el idioma que estás aprendiendo en el lobby; si no, conversas con la configuración del lobby tal cual.',
       ],
       [
         'No tengo con quién hablar.',
@@ -197,7 +197,7 @@ class IntroFaqCopy {
       ],
       [
         '¿Puedo hablar con un amigo que habla otro idioma?',
-        'Invítalo con Duo. Cada uno habla su idioma y la IA interpreta. Si los dos tienen el mismo Origin, Duo cambia a una llamada directa en la que os oís la voz. Solo se cobra al miembro que envió la invitación.',
+        'Invítalo con Duo. Cada uno habla su idioma y la IA interpreta. Si usáis el mismo idioma, Duo cambia a una llamada directa en la que podéis oíros. Si ambos sois miembros, cada uno paga lo suyo. Si tu amigo no es miembro, el miembro que lo invitó paga por los dos.',
       ],
       [
         'Construye la base de tu idioma cotidiano con las llamadas directas de Duo.',
@@ -223,11 +223,11 @@ class IntroFaqCopy {
       ],
       [
         'Je ne parle pas du tout la langue. Est-ce possible ?',
-        'Oui. Une fois connecté, choisissez votre langue maternelle dans Origin et la langue à apprendre dans Target. Parlez tranquillement dans votre langue et l’IA vous répond dans la même ; la salle d’étude transforme ensuite cette conversation en phrases dans la langue apprise. Passez en Step 2 pendant la conversation et seule l’IA parle la langue apprise : un entraînement à l’écoute.',
+        'Oui. Une fois connecté, choisissez votre langue maternelle comme langue parlée et la langue que vous souhaitez apprendre comme langue d’apprentissage. Parlez tranquillement dans votre langue maternelle : l’IA vous répondra aussi dans cette langue. La salle d’étude transforme ensuite cette conversation en phrases dans la langue que vous apprenez. Passez en Step 2 pendant la conversation et seule l’IA parlera cette langue : vous pourrez ainsi vous entraîner à la compréhension orale.',
       ],
       [
-        'Je peux aussi converser dans la langue.',
-        'À chaque entrée dans Dialogue de groupe ou Dialogue de scénario, vous choisissez d’utiliser ou non Free Talk. Avec Free Talk, vous parlez dès le début dans votre langue Target de l’accueil ; sans, vous parlez avec les réglages de l’accueil tels quels.',
+        'Je peux aussi converser dans une langue étrangère.',
+        'À chaque entrée dans Circle Talk ou Scenario Talk, vous choisissez d’utiliser ou non Free Talk. Avec Free Talk, vous commencez à parler dans la langue que vous apprenez dans le lobby ; sinon, vous gardez les réglages du lobby.',
       ],
       [
         'Je n’ai personne avec qui parler.',
@@ -235,7 +235,7 @@ class IntroFaqCopy {
       ],
       [
         'Puis-je parler avec un ami qui parle une autre langue ?',
-        'Invitez-le avec Duo. Chacun parle sa langue et l’IA interprète. Si vos deux Origin sont identiques, Duo passe en appel direct où vous entendez vos voix. Seul le membre qui a envoyé l’invitation est facturé.',
+        'Invitez-le avec Duo. Chacun parle sa langue et l’IA interprète. Si vous utilisez la même langue, Duo passe à un appel direct où vous pouvez vous entendre. Si vous êtes tous les deux membres, chacun paie sa part. Si votre ami n’est pas membre, le membre qui l’a invité paie pour vous deux.',
       ],
       [
         'Posez les bases de votre langue du quotidien avec les appels directs Duo.',
@@ -261,11 +261,11 @@ class IntroFaqCopy {
       ],
       [
         'Ich spreche die Sprache gar nicht. Geht das?',
-        'Ja. Wähle nach dem Anmelden bei Origin deine Muttersprache und bei Target die Sprache, die du lernen willst. Sprich entspannt in deiner Sprache, die KI antwortet ebenfalls darin; der Lernraum macht aus dem Gespräch danach Sätze in der Lernsprache. Wechselst du im Gespräch zu Step 2, spricht nur die KI die Lernsprache – Hörtraining.',
+        'Ja. Wähle nach dem Anmelden deine Muttersprache als Sprache zum Sprechen und die Sprache, die du lernen möchtest, als Lernsprache aus. Sprich ganz entspannt in deiner Muttersprache, und die KI unterhält sich ebenfalls mit dir darin. Im Lernraum wird das Gespräch dann in Sätze in der Sprache umgewandelt, die du lernst. Wechselst du während des Gesprächs zu Step 2, spricht nur die KI in der Lernsprache – so kannst du das Hörverstehen üben.',
       ],
       [
-        'Ich kann mich auch in der Sprache unterhalten.',
-        'Jedes Mal, wenn du Gruppengespräch oder Szenario-Gespräch betrittst, wählst du, ob du Free Talk nutzt. Mit Free Talk sprichst du von Anfang an in deiner Target-Sprache aus der Lobby; ohne sprichst du mit den Lobby-Einstellungen, wie sie sind.',
+        'Ich kann mich auch in einer Fremdsprache unterhalten.',
+        'Jedes Mal, wenn du Circle Talk oder Scenario Talk betrittst, wählst du, ob du Free Talk nutzt. Mit Free Talk sprichst du von Anfang an in der Sprache, die du in der Lobby lernst; andernfalls gelten die Lobby-Einstellungen.',
       ],
       [
         'Ich habe niemanden zum Reden.',
@@ -273,7 +273,7 @@ class IntroFaqCopy {
       ],
       [
         'Kann ich mit einem Freund sprechen, der eine andere Sprache spricht?',
-        'Lade ihn mit Duo ein. Jeder spricht seine eigene Sprache, die KI dolmetscht. Haben beide dieselbe Origin, wechselt Duo zu einem Direktanruf, bei dem ihr eure Stimmen hört. Berechnet wird nur das Mitglied, das eingeladen hat.',
+        'Lade ihn mit Duo ein. Jeder spricht seine eigene Sprache, die KI dolmetscht. Verwendet ihr dieselbe Sprache, wechselt Duo zu einem Direktanruf, bei dem ihr euch gegenseitig hört. Seid ihr beide Mitglieder, zahlt jeder selbst. Ist dein Freund kein Mitglied, zahlt das einladende Mitglied für euch beide.',
       ],
       [
         'Leg mit Duo-Direktanrufen die Grundlage für deine eigene Alltagssprache.',
@@ -299,11 +299,11 @@ class IntroFaqCopy {
       ],
       [
         'मुझे वह भाषा बिल्कुल नहीं आती। क्या चलेगा?',
-        'हाँ। लॉग इन करने के बाद Origin में अपनी मातृभाषा और Target में सीखने वाली भाषा चुनें। अपनी भाषा में आराम से बोलें, AI भी उसी में जवाब देगा; फिर अध्ययन कक्ष उस बातचीत को सीखी जा रही भाषा के वाक्यों में बदल देता है। बातचीत के बीच Step 2 चुनें तो सिर्फ़ AI सीखी जा रही भाषा में बोलेगा — सुनने का अभ्यास।',
+        'हाँ। लॉग इन करने के बाद, बोलने की भाषा के रूप में अपनी मातृभाषा और सीखने की भाषा के रूप में वह भाषा चुनें जिसे आप सीखना चाहते हैं। अपनी मातृभाषा में आराम से बोलें; AI भी आपसे उसी भाषा में बात करेगा। फिर अध्ययन कक्ष उस बातचीत को सीखी जा रही भाषा के वाक्यों में बदल देगा। बातचीत के बीच Step 2 चुनें, तो सिर्फ़ AI सीखी जा रही भाषा में बोलेगा और आप सुनने का अभ्यास कर सकेंगे।',
       ],
       [
-        'मैं उस भाषा में बात भी कर सकता/सकती हूँ।',
-        'हर बार समूह वार्ता या परिदृश्य वार्ता में जाते समय आप चुनते हैं कि Free Talk इस्तेमाल करना है या नहीं। Free Talk चुनने पर आप शुरू से लॉबी की Target भाषा में बात करते हैं; न चुनने पर लॉबी की सेटिंग जैसी है वैसी रहती है।',
+        'मैं किसी विदेशी भाषा में बातचीत भी कर सकता/सकती हूँ।',
+        'हर बार Circle Talk या Scenario Talk में जाने पर आप चुनते हैं कि Free Talk इस्तेमाल करना है या नहीं। Free Talk चुनने पर आप शुरू से ही लॉबी में सीखी जा रही भाषा में बात करते हैं; नहीं चुनने पर लॉबी की सेटिंग के अनुसार बात करते हैं।',
       ],
       [
         'मेरे पास बात करने के लिए कोई नहीं है।',
@@ -311,7 +311,7 @@ class IntroFaqCopy {
       ],
       [
         'क्या दूसरी भाषा बोलने वाले दोस्त से बात कर सकते हैं?',
-        'Duo से दोस्त को आमंत्रित करें। हर कोई अपनी भाषा में बोलता है और AI अनुवाद करता है। दोनों का Origin एक जैसा हो तो Duo सीधी कॉल में बदल जाता है, जिसमें आप एक-दूसरे की आवाज़ सुनते हैं। शुल्क सिर्फ़ आमंत्रण भेजने वाले सदस्य से लिया जाता है।',
+        'Duo से दोस्त को आमंत्रित करें। हर कोई अपनी भाषा में बोलता है और AI अनुवाद करता है। अगर आप दोनों एक ही भाषा इस्तेमाल करते हैं, तो Duo सीधे कॉल में बदल जाता है, जिसमें आप एक-दूसरे की आवाज़ सुन सकते हैं। अगर आप दोनों सदस्य हैं, तो हर कोई अपना शुल्क देता है। अगर आपका दोस्त सदस्य नहीं है, तो आमंत्रित करने वाला सदस्य दोनों का शुल्क देता है।',
       ],
       [
         'Duo सीधी कॉल से अपनी रोज़मर्रा की भाषा की नींव बनाइए।',
@@ -337,11 +337,11 @@ class IntroFaqCopy {
       ],
       [
         'Я совсем не говорю на этом языке. Можно?',
-        'Да. После входа выберите в Origin родной язык, а в Target — язык, который хотите учить. Говорите спокойно на своём языке, и ИИ тоже отвечает на нём; затем учебная комната превращает этот разговор в фразы на изучаемом языке. Переключитесь на Step 2 во время разговора — и на изучаемом языке будет говорить только ИИ: тренировка восприятия на слух.',
+        'Да. После входа выберите родной язык в качестве языка для общения, а язык, который хотите изучать, — в качестве изучаемого языка. Говорите спокойно на родном языке, и ИИ будет общаться с вами на нём. Затем учебная комната превратит этот разговор в фразы на изучаемом языке. Переключитесь на Step 2 во время разговора — и только ИИ будет говорить на изучаемом языке, чтобы вы могли потренировать аудирование.',
       ],
       [
-        'Я могу и разговаривать на этом языке.',
-        'Каждый раз, входя в Групповой или Сценарный разговор, вы выбираете, использовать ли Free Talk. С Free Talk вы с самого начала говорите на языке Target из лобби; без него — с настройками лобби как есть.',
+        'Я могу общаться и на иностранном языке.',
+        'Каждый раз, заходя в Circle Talk или Scenario Talk, вы выбираете, использовать ли Free Talk. С Free Talk вы с самого начала общаетесь на языке, который изучаете в лобби; без него — согласно настройкам лобби.',
       ],
       [
         'Мне не с кем поговорить.',
@@ -349,7 +349,7 @@ class IntroFaqCopy {
       ],
       [
         'Можно ли говорить с другом, который говорит на другом языке?',
-        'Пригласите его через Duo. Каждый говорит на своём языке, ИИ переводит. Если у обоих одинаковый Origin, Duo переключается на прямой звонок, где вы слышите голоса друг друга. Списание идёт только у участника, отправившего приглашение.',
+        'Пригласите его через Duo. Каждый говорит на своём языке, а ИИ переводит. Если вы используете один и тот же язык, Duo переключается на прямой звонок, где вы слышите голоса друг друга. Если вы оба участники, каждый платит за себя. Если друг не участник, пригласивший его участник платит за двоих.',
       ],
       [
         'Заложите основу своего повседневного языка с прямыми звонками Duo.',
@@ -375,11 +375,11 @@ class IntroFaqCopy {
       ],
       [
         'Não falo nada do idioma. Tudo bem?',
-        'Sim. Depois de entrar, escolha seu idioma nativo em Origin e o idioma que quer aprender em Target. Fale à vontade no seu idioma e a IA também responde nele; depois a sala de estudo transforma essa conversa em frases no idioma que você aprende. Mude para Step 2 durante a conversa e só a IA fala o idioma que você aprende: treino de escuta.',
+        'Sim. Depois de entrar, escolha seu idioma nativo como idioma para conversar e o idioma que quer aprender como idioma de estudo. Fale à vontade no seu idioma, e a IA também vai conversar com você nele. Depois, a sala de estudo transforma essa conversa em frases no idioma que você está aprendendo. Mude para Step 2 durante a conversa e só a IA falará no idioma que você está aprendendo, para você praticar a compreensão oral.',
       ],
       [
-        'Também consigo conversar no idioma.',
-        'Toda vez que entra na Conversa em grupo ou na Conversa de cenário, você escolhe se vai usar o Free Talk. Com o Free Talk, você conversa desde o início no seu idioma Target do lobby; sem ele, conversa com as configurações do lobby como estão.',
+        'Também consigo conversar em um idioma estrangeiro.',
+        'Toda vez que entra no Circle Talk ou no Scenario Talk, você escolhe se vai usar o Free Talk. Com o Free Talk, você começa a conversar no idioma que está aprendendo no lobby; sem ele, conversa de acordo com as configurações do lobby.',
       ],
       [
         'Não tenho com quem conversar.',
@@ -387,7 +387,7 @@ class IntroFaqCopy {
       ],
       [
         'Posso conversar com um amigo que fala outro idioma?',
-        'Convide-o pelo Duo. Cada um fala o próprio idioma e a IA interpreta. Se os dois tiverem o mesmo Origin, o Duo muda para uma chamada direta em que vocês ouvem a voz um do outro. Só o membro que enviou o convite é cobrado.',
+        'Convide-o pelo Duo. Cada um fala o próprio idioma e a IA interpreta. Se vocês usam o mesmo idioma, o Duo muda para uma chamada direta em que ouvem a voz um do outro. Se ambos forem membros, cada um paga o próprio uso. Se a outra pessoa não for membro, o membro que a convidou paga pelos dois.',
       ],
       [
         'Crie a base do seu idioma do dia a dia com as chamadas diretas do Duo.',
@@ -413,11 +413,11 @@ class IntroFaqCopy {
       ],
       [
         'Non parlo affatto la lingua. Va bene lo stesso?',
-        'Sì. Dopo l’accesso scegli la tua lingua madre in Origin e la lingua da imparare in Target. Parla tranquillo nella tua lingua e anche l’IA ti risponde in quella; poi la sala studio trasforma la conversazione in frasi nella lingua che stai imparando. Passa a Step 2 durante la conversazione e solo l’IA parla la lingua da imparare: allenamento all’ascolto.',
+        'Sì. Dopo l’accesso, scegli la tua lingua madre come lingua per parlare e la lingua che vuoi imparare come lingua di studio. Parla tranquillamente nella tua lingua e anche l’IA converserà con te in quella lingua. Poi la sala studio trasformerà la conversazione in frasi nella lingua che stai imparando. Passa a Step 2 durante la conversazione e solo l’IA parlerà nella lingua che stai imparando, così potrai allenare l’ascolto.',
       ],
       [
-        'So anche conversare nella lingua.',
-        'Ogni volta che entri in Dialogo di gruppo o Dialogo di scenario, scegli se usare Free Talk. Con Free Talk parli fin dall’inizio nella lingua Target della lobby; senza, parli con le impostazioni della lobby così come sono.',
+        'Posso anche conversare in una lingua straniera.',
+        'Ogni volta che entri in Circle Talk o Scenario Talk, scegli se usare Free Talk. Con Free Talk inizi a conversare nella lingua che stai imparando nella lobby; altrimenti, conversi secondo le impostazioni della lobby.',
       ],
       [
         'Non ho nessuno con cui parlare.',
@@ -425,7 +425,7 @@ class IntroFaqCopy {
       ],
       [
         'Posso parlare con un amico che parla un’altra lingua?',
-        'Invitalo con Duo. Ognuno parla la propria lingua e l’IA fa da interprete. Se entrambi avete lo stesso Origin, Duo passa a una chiamata diretta in cui sentite le vostre voci. Paga solo il membro che ha inviato l’invito.',
+        'Invitalo con Duo. Ognuno parla la propria lingua e l’IA fa da interprete. Se usate la stessa lingua, Duo passa a una chiamata diretta in cui potete sentirvi. Se siete entrambi membri, ognuno paga per sé. Se l’altra persona non è membro, il membro che l’ha invitata paga per entrambi.',
       ],
       [
         'Costruisci le basi della tua lingua di tutti i giorni con le chiamate dirette Duo.',
@@ -451,11 +451,11 @@ class IntroFaqCopy {
       ],
       [
         'Ik spreek de taal helemaal niet. Kan dat?',
-        'Ja. Kies na het inloggen je moedertaal bij Origin en de taal die je wilt leren bij Target. Praat ontspannen in je eigen taal en de AI antwoordt ook in die taal; daarna maakt de leerruimte van dat gesprek zinnen in de taal die je leert. Schakel tijdens het gesprek naar Step 2 en alleen de AI spreekt de leertaal: luistertraining.',
+        'Ja. Kies na het inloggen je moedertaal als spreektaal en de taal die je wilt leren als leertaal. Praat ontspannen in je eigen taal; de AI praat dan ook met je in die taal. Daarna zet de leerruimte het gesprek om in zinnen in de taal die je leert. Schakel tijdens het gesprek over naar Step 2 en alleen de AI spreekt de leertaal, zodat je kunt oefenen met luisteren.',
       ],
       [
-        'Ik kan ook een gesprek voeren in de taal.',
-        'Elke keer dat je Groepsgesprek of Scenariogesprek binnengaat, kies je of je Free Talk gebruikt. Met Free Talk praat je vanaf het begin in je Target-taal uit de lobby; zonder praat je met de lobby-instellingen zoals ze zijn.',
+        'Ik kan ook in een vreemde taal praten.',
+        'Elke keer dat je Circle Talk of Scenario Talk binnengaat, kies je of je Free Talk gebruikt. Met Free Talk begin je meteen te praten in de taal die je in de lobby leert; zonder Free Talk houd je de lobby-instellingen aan.',
       ],
       [
         'Ik heb niemand om mee te praten.',
@@ -463,7 +463,7 @@ class IntroFaqCopy {
       ],
       [
         'Kan ik praten met een vriend die een andere taal spreekt?',
-        'Nodig die uit met Duo. Ieder spreekt de eigen taal en de AI tolkt. Hebben jullie allebei dezelfde Origin, dan schakelt Duo over op een direct gesprek waarin je elkaars stem hoort. Alleen het lid dat de uitnodiging stuurde, betaalt.',
+        'Nodig die uit met Duo. Ieder spreekt de eigen taal en de AI tolkt. Gebruiken jullie dezelfde taal, dan schakelt Duo over op een direct gesprek waarin je elkaars stem hoort. Zijn jullie allebei lid, dan betaalt ieder voor zichzelf. Is de ander geen lid, dan betaalt het uitnodigende lid voor jullie allebei.',
       ],
       [
         'Leg met directe Duo-gesprekken de basis voor je eigen dagelijkse taal.',
