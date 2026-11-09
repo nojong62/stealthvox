@@ -36,6 +36,9 @@ enum IntroScreen { welcome, auth, accountDiscovery }
 
 enum _AgeCheck { passed, cancelled, underAge }
 
+/// 인트로 AD 배지 표시 여부. 숨김(2026-11-10).
+const bool kShowIntroAdBadge = false;
+
 class IntroMaster extends StatefulWidget {
   const IntroMaster({
     super.key,
@@ -1555,13 +1558,16 @@ class _IntroMasterState extends State<IntroMaster>
               ],
             ),
           ),
-          Positioned(
-            // 배지는 그대로 보이지만 터치 박스가 166×59로 커졌다. 중심점이
-            // 예전 126×27 배지와 같도록 위치를 절반 차이만큼 보정한다.
-            right: -37,
-            top: -13,
-            child: _buildAnimatedDuoSnapshotBadge(),
-          ),
+          // 📣 [AD] 인트로 AD 배지는 숨긴다(2026-11-10 실장님). 되살리려면
+          //   아래 값을 true로 둔다 — 배지 코드는 그대로 남아 있다.
+          if (kShowIntroAdBadge)
+            Positioned(
+              // 배지는 그대로 보이지만 터치 박스가 166×59로 커졌다. 중심점이
+              // 예전 126×27 배지와 같도록 위치를 절반 차이만큼 보정한다.
+              right: -37,
+              top: -13,
+              child: _buildAnimatedDuoSnapshotBadge(),
+            ),
         ],
       ),
     );
