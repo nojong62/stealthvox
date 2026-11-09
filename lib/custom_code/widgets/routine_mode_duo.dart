@@ -103,6 +103,7 @@ import '/custom_code/services/duo_buddy_localization.dart';
 import '/custom_code/services/study_access.dart' show DuoPartnerPays;
 import '/custom_code/services/system_ui_language.dart';
 import '../services/voice_tier.dart';
+import '../services/duo_billing_policy.dart';
 
 // ============================================================================
 // 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다. **통신 로직 자체가 다르다** —
@@ -432,7 +433,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': '서로의 실제 목소리로 통화합니다.',
     'interpTitle': '통화 통역',
     'interpDesc': '상대의 말을 통역 음성으로 들려줍니다.',
-    'interpPayNote': '통역 통화는 초대한 분이 상대방 통역 비용까지 함께 냅니다.',
+    'interpPayNote': '상대가 비회원이면 초대한 분이 통역 비용을 함께 냅니다.',
     'note': '상대방도 선택한 방식으로 초대됩니다.',
     'cancel': '취소',
     'invite': '초대하기',
@@ -455,7 +456,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'interpTitle': 'Interpretation Call',
     'interpDesc': 'Hear their words in your language.',
     'interpPayNote':
-        'For interpreted calls, the inviter also covers the other person\'s interpretation fee.',
+        'If the other person isn\'t a member, the inviter also pays for their interpretation.',
     'note': 'The guest will join in this mode.',
     'cancel': 'Cancel',
     'invite': 'Invite',
@@ -478,7 +479,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': 'お互いの実際の声で通話します。',
     'interpTitle': '通訳通話',
     'interpDesc': '相手の話を通訳音声で聞きます。',
-    'interpPayNote': '通訳通話では、招待した方が相手の通訳料金もあわせて支払います。',
+    'interpPayNote': '相手が会員でない場合、招待した方が相手の通訳料金もあわせて支払います。',
     'note': '相手も選んだ方法で招待されます。',
     'cancel': 'キャンセル',
     'invite': '招待する',
@@ -500,7 +501,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'directDesc': '用彼此真实的声音通话。',
     'interpTitle': '翻译通话',
     'interpDesc': '对方的话会以翻译语音播放。',
-    'interpPayNote': '翻译通话中，邀请人也会支付对方的翻译费用。',
+    'interpPayNote': '如果对方不是会员，邀请人也会支付对方的翻译费用。',
     'note': '对方也会以所选方式收到邀请。',
     'cancel': '取消',
     'invite': '邀请',
@@ -523,7 +524,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'interpTitle': 'Llamada con intérprete',
     'interpDesc': 'Oirás a la otra persona con voz interpretada.',
     'interpPayNote':
-        'En una llamada con interpretación, quien invita también paga el servicio de interpretación de la otra persona.',
+        'Si la otra persona no es miembro, quien invita también paga su servicio de interpretación.',
     'note': 'La persona invitada entra con el mismo tipo de llamada.',
     'cancel': 'Cancelar',
     'invite': 'Invitar',
@@ -547,7 +548,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'interpTitle': 'Appel avec interprète',
     'interpDesc': "Vous entendez l'autre personne en voix interprétée.",
     'interpPayNote':
-        'Lors d’un appel avec interprétation, la personne qui invite paie aussi les frais d’interprétation de l’autre personne.',
+        'Si l’autre personne n’est pas membre, la personne qui invite paie aussi ses frais d’interprétation.',
     'note': 'La personne invitée rejoint avec le même type d\'appel.',
     'cancel': 'Annuler',
     'invite': 'Inviter',
@@ -571,7 +572,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'interpTitle': 'Gedolmetschter Anruf',
     'interpDesc': 'Du hörst die andere Person als gedolmetschte Stimme.',
     'interpPayNote':
-        'Bei einem Dolmetschanruf übernimmt die einladende Person auch die Dolmetschkosten der anderen Person.',
+        'Wenn die andere Person kein Mitglied ist, übernimmt die einladende Person auch deren Dolmetschkosten.',
     'note': 'Die eingeladene Person nimmt mit derselben Gesprächsart teil.',
     'cancel': 'Abbrechen',
     'invite': 'Einladen',
@@ -595,7 +596,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'interpTitle': 'अनुवाद कॉल',
     'interpDesc': 'सामने वाले की बात अनुवाद की आवाज़ में सुनाई देगी।',
     'interpPayNote':
-        'अनुवाद वाली कॉल में, आमंत्रित करने वाला व्यक्ति सामने वाले के अनुवाद का खर्च भी उठाता है।',
+        'अगर सामने वाला व्यक्ति सदस्य नहीं है, तो आमंत्रित करने वाला व्यक्ति उसके अनुवाद का खर्च भी उठाता है।',
     'note': 'न्योता पाने वाला भी इसी तरीके से जुड़ेगा।',
     'cancel': 'रद्द करें',
     'invite': 'न्योता भेजें',
@@ -618,7 +619,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'interpTitle': 'Звонок с переводом',
     'interpDesc': 'Собеседника вы услышите переведённым голосом.',
     'interpPayNote':
-        'Во время звонка с переводом приглашающий также оплачивает перевод для собеседника.',
+        'Если собеседник не состоит в клубе, приглашающий также оплачивает его перевод.',
     'note': 'Приглашённый присоединится с тем же типом звонка.',
     'cancel': 'Отмена',
     'invite': 'Пригласить',
@@ -642,7 +643,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'interpTitle': 'Chamada com intérprete',
     'interpDesc': 'Você ouve a outra pessoa com voz interpretada.',
     'interpPayNote':
-        'Na chamada com interpretação, quem convida também paga pela interpretação da outra pessoa.',
+        'Se a outra pessoa não for membro, quem convida também paga pela interpretação dela.',
     'note': 'A pessoa convidada entra com o mesmo tipo de chamada.',
     'cancel': 'Cancelar',
     'invite': 'Convidar',
@@ -666,7 +667,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'interpTitle': 'Chiamata con interprete',
     'interpDesc': "Senti l'altra persona con voce tradotta.",
     'interpPayNote':
-        'Durante una chiamata con interpretazione, chi invita paga anche le spese di interpretazione dell\'altra persona.',
+        'Se l\'altra persona non è iscritta, chi invita paga anche le sue spese di interpretazione.',
     'note': 'La persona invitata entra con lo stesso tipo di chiamata.',
     'cancel': 'Annulla',
     'invite': 'Invita',
@@ -689,7 +690,7 @@ const Map<String, Map<String, String>> kModePickerText = {
     'interpTitle': 'Gesprek met tolk',
     'interpDesc': 'Je hoort de ander als getolkte stem.',
     'interpPayNote':
-        'Bij een gesprek met tolk betaalt degene die uitnodigt ook de tolkkosten voor de ander.',
+        'Als de ander geen lid is, betaalt degene die uitnodigt ook de tolkkosten voor die persoon.',
     'note': 'De uitgenodigde persoon doet mee met hetzelfde gesprekstype.',
     'cancel': 'Annuleren',
     'invite': 'Uitnodigen',
@@ -1269,10 +1270,34 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           ? VoiceTier.basic
           : lobbyVoiceTier;
 
-  /// 통역 음성 등급은 초대자가 정해 세션 문서 `voice_tier`에 둔다. 양쪽 폰이
-  /// 모두 그 등급으로 듣는다. 값이 없는 옛 방은 진입 때 값(프리미엄)을 둔다.
+  bool get _iAmMember =>
+      FirebaseAuth.instance.currentUser?.isAnonymous == false;
+
+  // ── 💰 [DUO-PAY] 누가 내는가 (2026-11-10, duo_billing_policy.dart) ──────
+  /// 상대가 회원인가. null = 상대 앱이 이 칸을 모른다(옛 앱) → 초대자가 낸다.
+  bool? _partnerIsMember;
+
+  /// 상대 회원의 잔액이 없어 초대자가 대신 내기로 했는가(방 문서).
+  bool _hostCoversPartner = false;
+
+  /// 게스트인 내가 지금 내 잔액으로 내고 있는가.
+  bool _guestBilling = false;
+  bool _partnerEmptyReported = false;
+  bool _partnerEmptyPromptShown = false;
+
+  /// 🎙️ [VOICE-TIER] 회원은 자기 로비 등급으로 듣는다. 비회원은 돈을 내는
+  ///   회원 상대의 등급을 따른다 — 초대자 쪽은 `voice_tier`, 게스트 쪽은
+  ///   `partnerVoiceTier`. 초대자가 대신 내게 된 회원 게스트도 초대자 등급.
   void _applyDuoVoiceTier(Map<String, dynamic>? data, String reason) {
-    final raw = data?['voice_tier'];
+    if (data == null) return;
+    Object? raw;
+    if (!_iAmMember) {
+      raw = _amIHost
+          ? (data['partnerIsMember'] == true ? data['partnerVoiceTier'] : null)
+          : data['voice_tier'];
+    } else if (!_amIHost && data['hostCoversPartner'] == true) {
+      raw = data['voice_tier'];
+    }
     if (raw == null) return;
     final tier = parseVoiceTier(raw);
     if (tier != VoiceTierSession.active) {
@@ -1280,24 +1305,47 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
   }
 
-  /// 직접통화 = 1/2(음성 합성 없음). 통역 = 초대자가 양쪽 몫(등급 × 2).
-  BillingRate get _duoBillingRate => _isDirectMode
-      ? BillingRate.direct
-      : billingRateFor(VoiceTierSession.active, interp: true);
+  DuoPayShare get _myPayShare {
+    // 🤝 [DUO BUDDY] 버디 방은 예전 규칙 그대로: 버디는 안 내고 회원 게스트가 낸다.
+    if (_talkHostRoom && _amIHost) return DuoPayShare.none;
+    if (_partnerPaysCall) return DuoPayShare.own;
+    return duoPayShareFor(
+      iAmMember: _iAmMember,
+      iAmHost: _amIHost,
+      partnerIsMember: _partnerIsMember,
+      hostCoversPartner: _hostCoversPartner,
+    );
+  }
 
+  BillingRate? get _duoBillingRate => duoBillingRateFor(
+        _myPayShare,
+        direct: _isDirectMode,
+        tier: VoiceTierSession.active,
+      );
+
+  /// 몫이 바뀔 때마다 다시 불러도 된다(배율만 갈아 끼운다).
   void _startDuoBilling() {
-    // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금.
-    //   예외 하나: Duo 버디 방의 회원 게스트는 자기가 낸다.
-    if (!_amIHost && !_partnerPaysCall) return;
-    if (_amIHost && _talkHostRoom) return;
-    // 📣 [PROMO] 비회원 호스트의 통화는 홍보 비용(서버 부담)이다. 차감할
-    //   잔액도 없다. 대신 방 문서의 3분 상한이 통화를 끊는다.
-    if (FirebaseAuth.instance.currentUser?.isAnonymous == true) return;
+    final rate = _duoBillingRate;
+    _lgDuo(
+      '[DUO-PAY]',
+      'share=${_myPayShare.name} rate=${rate?.name ?? 'none'} host=$_amIHost '
+          'member=$_iAmMember partnerMember=$_partnerIsMember '
+          'covers=$_hostCoversPartner direct=$_isDirectMode',
+    );
+    if (rate == null) {
+      if (_billingStarted) _stopDuoBilling();
+      return;
+    }
+    if (!_amIHost) {
+      // 게스트 차감은 기본으로 막혀 있다(무료 Duo 게스트). 내가 낼 때만 연다.
+      _guestBilling = true;
+      DuoPartnerPays.active = true;
+    }
     BillingTicker.instance.setSessionIdentifiers(
       sessionDocId: _myHistoryRef?.id,
       roomId: _duoSessionRef?.id ?? widget.roomId,
     );
-    BillingTicker.instance.setRate(_duoBillingRate);
+    BillingTicker.instance.setRate(rate);
     BillingTicker.instance.start();
     // 💰 [BILLING-IDLE] 통화가 1분간 조용하면 정지, 다시 말하면 재개.
     //   예전에는 Duo만 유휴 타이머가 없어 켜 둔 채 잊으면 계속 차감됐다.
@@ -1312,10 +1360,92 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   }
 
   void _stopDuoBilling() {
-    if (!_amIHost && !_partnerPaysCall) return;
+    if (!_amIHost && !_partnerPaysCall && !_guestBilling) return;
     _billingStarted = false;
     clearBillingIdle();
     BillingTicker.instance.pause();
+  }
+
+  /// 게스트인 내가 내던 것을 멈춘다(초대자가 대신 내기로 했거나 나갈 때).
+  void _releaseGuestBilling() {
+    if (!_guestBilling) return;
+    _stopDuoBilling();
+    _guestBilling = false;
+    DuoPartnerPays.active = false;
+    _lgDuo('[DUO-PAY]', 'guest_billing=false');
+  }
+
+  /// 게스트 회원의 잔액이 0이 됐다 — 초대자(회원)에게 알린다.
+  Future<void> _reportPartnerBalanceEmpty(String reason) async {
+    if (_partnerEmptyReported) return;
+    _partnerEmptyReported = true;
+    _lgDuo('[DUO-PAY]', 'partner_balance_empty reason=$reason');
+    try {
+      await _duoSessionRef?.update({'partnerBalanceEmpty': true});
+    } catch (e) {
+      _lgDuo('[DUO-PAY]', 'report_failed(${e.runtimeType})');
+    }
+  }
+
+  void _onGuestBalanceGrace() {
+    if (_amIHost || !_guestBilling || _partnerIsMember != true) return;
+    if (!BillingTicker.instance.balanceGraceActive.value) return;
+    unawaited(_reportPartnerBalanceEmpty('grace'));
+  }
+
+  /// 게스트가 듣는 방 문서. 초대자가 대신 내기로 하면 내 차감을 멈춘다.
+  void _onGuestSessionDoc(Map<String, dynamic> data) {
+    if (_amIHost) return;
+    if (data['hostCoversPartner'] == true && !_hostCoversPartner) {
+      _hostCoversPartner = true;
+      _lgDuo('[DUO-PAY]', 'host_covers_partner');
+      _applyDuoVoiceTier(data, 'duo_host_covers');
+      _releaseGuestBilling();
+    }
+  }
+
+  /// 초대자(회원)에게: 상대 회원 잔액이 없다. 대신 내면 계속, 아니면 종료.
+  Future<void> _askCoverPartner() async {
+    final copy = DuoInviteCopy.forSystemLocale();
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C2430),
+        title: Text(
+          copy['coverPartnerTitle'],
+          style: const TextStyle(
+              color: Colors.white, fontWeight: FontWeight.w800),
+        ),
+        content: Text(
+          copy['coverPartnerBody'],
+          style: const TextStyle(color: Color(0xFFBCC7D9), height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(copy['coverPartnerNo']),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(copy['coverPartnerYes']),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || _isExiting) return;
+    _lgDuo('[DUO-PAY]', 'cover_partner answer=$ok');
+    if (ok == true) {
+      _hostCoversPartner = true;
+      try {
+        await _duoSessionRef?.update({'hostCoversPartner': true});
+      } catch (e) {
+        _lgDuo('[DUO-PAY]', 'cover_write_failed(${e.runtimeType})');
+      }
+      if (_billingStarted) _startDuoBilling();
+    } else {
+      unawaited(_handleAutoSaveAndExit('partner_balance_declined'));
+    }
   }
 
   // ── 📣 [PROMO] 비회원 초대 통화 상한 ──────────────────────────────
@@ -2103,10 +2233,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _invitePulse.repeat(reverse: true);
     }
     _lgDuo('[DUO-SESSION]', 'started role=$_myRole');
+    // 🎙️ 회원은 자기 로비 등급, 비회원은 기본 음성으로 시작한다(상대 회원이
+    //   들어오면 [_applyDuoVoiceTier]가 그 회원 등급으로 바꾼다).
     VoiceTierSession.activate(
-      _amIHost ? _hostVoiceTier : VoiceTier.premium,
-      reason: _amIHost ? 'duo_host' : 'duo_guest_until_room',
+      _iAmMember ? lobbyVoiceTier : VoiceTier.basic,
+      reason: _amIHost ? 'duo_host' : 'duo_guest',
     );
+    BillingTicker.instance.balanceGraceActive.addListener(_onGuestBalanceGrace);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if ((widget.hostRoomId ?? '').isNotEmpty) {
@@ -2215,6 +2348,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   화면은 이미 없으므로 기다리지 않는다.
     unawaited(_finalizeDuoSession('dispose'));
     _releasePartnerPays();
+    BillingTicker.instance.balanceGraceActive
+        .removeListener(_onGuestBalanceGrace);
     WidgetsBinding.instance.removeObserver(this);
     _promoCallTicker?.cancel();
     _promoRemaining.dispose();
@@ -6740,6 +6875,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           'mode': chosenMode,
           // 🎙️ [VOICE-TIER] 통역 음성 등급. 게스트 폰도 이 값을 따른다.
           'voice_tier': VoiceTierSession.active.name,
+          // 💰 [DUO-PAY] 회원끼리면 각자, 한쪽만 회원이면 그 회원이 낸다.
+          'hostIsMember': _iAmMember,
           // This field is present from the room's first write, so a joined
           // partner can distinguish a protocol-aware host from an old app.
           // Callable rollout is disabled in this release.
@@ -7082,6 +7219,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             kDuoPartnerSameOriginDirectV1Field: duoSameOriginDirectCapability(),
           'partnerJoinedAt': FieldValue.serverTimestamp(),
           'partnerLang': _myNative(),
+          // 💰 [DUO-PAY] 초대자가 내 몫까지 낼지 정하는 값. 비회원 초대자는
+          //   내 등급을 따라 듣는다.
+          'partnerIsMember': _iAmMember,
+          'partnerVoiceTier': VoiceTierSession.active.name,
         });
       });
       // 호스트 언어는 방 문서에 이미 있다(옛 방에는 없을 수 있다 — 그때는
@@ -7169,6 +7310,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         _lgDuo('[BUDDY]', 'partner_pays=true');
         _startDuoBilling();
       }
+      // 💰 [DUO-PAY] 초대자가 회원인지 본다(옛 앱 방이면 모른다 → 안 낸다).
+      _partnerIsMember = data.containsKey('hostIsMember')
+          ? data['hostIsMember'] == true
+          : null;
+      _hostCoversPartner = data['hostCoversPartner'] == true;
+      if (!_partnerPaysCall) {
+        // 회원끼리인데 내 잔액이 이미 0이면 차감을 열지 않고 초대자에게 묻는다.
+        // 열면 곧바로 소진으로 방이 닫힌다.
+        if (_myPayShare == DuoPayShare.own &&
+            FFAppState().hasConfirmedZeroTime) {
+          unawaited(_reportPartnerBalanceEmpty('join_zero_balance'));
+        } else {
+          _startDuoBilling();
+        }
+      }
       // 🔵 [INTERP-LIVE] 만능 통역도 여기서 자동으로 붙는다. 예전에는 소켓만
       //   미리 열고 마이크는 버튼을 기다렸다.
       _maybeAutoStartInterpreter('guest_joined');
@@ -7216,6 +7372,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       if (data == null) return;
       // 게스트에게 상대는 호스트다. 호스트의 ORIGIN은 `hostLang`에 있다.
       _notePartnerChatLang(data['hostLang']?.toString(), 'session_doc');
+      _onGuestSessionDoc(data);
     });
   }
 
@@ -7245,6 +7402,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         unawaited(_handleAutoSaveAndExit('host_session_gone'));
         return;
       }
+      _onGuestSessionDoc(data);
       if (data[kDuoEndedAtField] == null) return;
       _lgDuo('[DIRECT-LIVE]', 'host_left reason=ended_at');
       unawaited(_handleAutoSaveAndExit('host_ended'));
@@ -7289,7 +7447,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _resolvedDuoMode = resolution.mode;
     _duoResolutionReason = resolution.reason;
     // 💰 같은 ORIGIN이면 통역 초대가 직접통화로 잠긴다 — 배율도 따라간다.
-    if (_billingStarted) BillingTicker.instance.setRate(_duoBillingRate);
+    if (_billingStarted) _startDuoBilling();
     final protocol = resolution.interpreterProtocol;
     if (resolution.mode == kDuoModeInterpreter && protocol != null) {
       if (!_adoptInterpreterProtocol(protocol, reason)) return false;
@@ -7514,6 +7672,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       final bool partnerJoined = data['isPartnerJoined'] == true;
       // 게스트가 입장하며 자기 대화 언어를 남긴다. 호스트는 여기서 받는다.
       _notePartnerChatLang(data['partnerLang']?.toString(), 'session_doc');
+      // 💰 [DUO-PAY] 게스트가 입장하며 남긴 회원 여부(옛 앱 게스트면 없다).
+      _partnerIsMember = data.containsKey('partnerIsMember')
+          ? data['partnerIsMember'] == true
+          : null;
+      _hostCoversPartner = data['hostCoversPartner'] == true;
 
       // 🛡️ [방어 전용] 정상 UX에서는 세션 도중 mode가 바뀌지 않는다 —
       //    방식은 초대를 만들 때 한 번 정해지고, 바꾸려면 방을 나가 새 초대를
@@ -7553,6 +7716,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         if (partnerJoined) {
           _talkHostRoom = data['talkHostRoom'] == true;
           _startDuoBilling();
+          // 💰 [DUO-PAY] 상대 회원 잔액이 없다 — 대신 낼지 한 번 묻는다.
+          if (_iAmMember &&
+              data['partnerBalanceEmpty'] == true &&
+              !_hostCoversPartner &&
+              !_partnerEmptyPromptShown) {
+            _partnerEmptyPromptShown = true;
+            unawaited(_askCoverPartner());
+          }
           _armPromoCallLimit(data['callLimitSeconds']);
           if (!_activeCallNetworkProbed) {
             _activeCallNetworkProbed = true;
@@ -7812,6 +7983,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   }
 
   void _releasePartnerPays() {
+    _releaseGuestBilling();
     if (!_partnerPaysCall) return;
     _stopDuoBilling();
     _partnerPaysCall = false;
@@ -7894,6 +8066,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         'isPartnerJoined': false,
         'mode': kDuoModeInterpreter,
         'voice_tier': _hostVoiceTier.name,
+        'hostIsMember': true,
         kDuoHostCallablePcV2Field: duoInterpreterCallableCapability(
           remoteCandidate: _interpTransportRaw,
         ),
