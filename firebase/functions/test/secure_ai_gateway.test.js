@@ -18,7 +18,51 @@ const {
   chirpMarkupForRequest,
   chirpInputWithCommaPauses,
   realtimeClientSecret,
+  voiceTierForRequest,
+  wavenetVoiceForRequest,
+  wavenetSsmlFromMarkup,
 } = require("../secure_ai_gateway");
+
+test("voice tier: only an explicit basic leaves Chirp", () => {
+  assert.equal(voiceTierForRequest({ voice_tier: "basic" }), "basic");
+  assert.equal(voiceTierForRequest({ voice_tier: " BASIC " }), "basic");
+  assert.equal(voiceTierForRequest({ voice_tier: "premium" }), "premium");
+  assert.equal(voiceTierForRequest({}), "premium");
+  assert.equal(voiceTierForRequest(null), "premium");
+});
+
+test("WaveNet voice keeps the requested gender in every app locale", () => {
+  const locales = ["ko-KR", "en-US", "en-GB", "ja-JP", "cmn-CN", "es-ES", "fr-FR",
+    "de-DE", "hi-IN", "ru-RU", "pt-BR", "it-IT", "nl-NL", "vi-VN", "id-ID"];
+  for (const locale of locales) {
+    const female = wavenetVoiceForRequest({ voice: "shimmer" }, locale);
+    const male = wavenetVoiceForRequest({ voice: "echo" }, locale);
+    assert.match(female, new RegExp("^" + locale + "-Wavenet-[A-Z]$"));
+    assert.match(male, new RegExp("^" + locale + "-Wavenet-[A-Z]$"));
+    assert.notEqual(female, male);
+  }
+  assert.equal(wavenetVoiceForRequest({ voice: "shimmer" }, "ko-KR"), "ko-KR-Wavenet-A");
+  assert.equal(wavenetVoiceForRequest({ voice: "google-male" }, "ko-KR"), "ko-KR-Wavenet-C");
+  assert.equal(wavenetVoiceForRequest({ voice: "shimmer" }, "xx-XX"), null);
+});
+
+test("WaveNet SSML turns Chirp pause tags into breaks and escapes text", () => {
+  assert.equal(
+    wavenetSsmlFromMarkup("Yes, [pause short] Mom [pause] I'm home [pause long] ok"),
+    "<speak>Yes, <break time=\"250ms\"/> Mom <break time=\"600ms\"/> I&apos;m home " +
+      "<break time=\"1000ms\"/> ok</speak>");
+  assert.equal(
+    wavenetSsmlFromMarkup("a < b & c"),
+    "<speak>a &lt; b &amp; c</speak>");
+  assert.equal(wavenetSsmlFromMarkup(""), null);
+  assert.equal(wavenetSsmlFromMarkup(null), null);
+  assert.equal(wavenetSsmlFromMarkup("가".repeat(1700)), null);
+});
+
+test("OpenAI fallback body drops voice_tier", () => {
+  const sanitized = openAiSpeechBody({ input: "hi", voice: "shimmer", voice_tier: "basic" });
+  assert.equal("voice_tier" in sanitized, false);
+});
 
 test("realtime client secret reads the GA shape and the retired beta shape", () => {
   assert.deepEqual(

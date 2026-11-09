@@ -45,6 +45,33 @@ const CHIRP_LOCALES = new Map([
   ["vi", "vi-VN"], ["vietnamese", "vi-VN"],
   ["id", "id-ID"], ["indonesian", "id-ID"],
 ]);
+// Basic voice tier (2026-11-09): WaveNet at about 1/7 of Chirp 3 HD's price.
+// One female and one male voice per locale, taken from the live voices:list
+// on 2026-11-09. Value = the voice letter in `<locale>-Wavenet-<letter>`.
+const WAVENET_VOICES = new Map([
+  ["en-US", { female: "C", male: "D" }],
+  ["en-GB", { female: "A", male: "B" }],
+  ["ja-JP", { female: "A", male: "C" }],
+  ["cmn-CN", { female: "A", male: "B" }],
+  ["es-ES", { female: "F", male: "E" }],
+  ["fr-FR", { female: "F", male: "G" }],
+  ["de-DE", { female: "G", male: "H" }],
+  ["ko-KR", { female: "A", male: "C" }],
+  ["hi-IN", { female: "A", male: "B" }],
+  ["ru-RU", { female: "A", male: "B" }],
+  ["pt-BR", { female: "A", male: "B" }],
+  ["it-IT", { female: "E", male: "F" }],
+  ["nl-NL", { female: "F", male: "G" }],
+  ["vi-VN", { female: "A", male: "B" }],
+  ["id-ID", { female: "A", male: "B" }],
+]);
+// Chirp pause tags as SSML breaks for WaveNet. Lengths follow the Chirp
+// measurements below ([pause short] 150–280 ms, [pause] 410–830 ms).
+const WAVENET_BREAKS = new Map([
+  ["[pause short]", "250ms"],
+  ["[pause]", "600ms"],
+  ["[pause long]", "1000ms"],
+]);
 const MALE_VOICE_IDS = new Set([
   "male", "google-male", "google-ko-male",
   "ash", "ballad", "cedar", "echo", "fable", "onyx", "verse",
@@ -202,6 +229,43 @@ function chirpVoiceForRequest(body, locale) {
     : CHIRP_FEMALE_VOICE);
 }
 
+// "basic" is the only non-default tier. Anything else, including a missing
+// field from an older app, stays on Chirp 3 HD.
+function voiceTierForRequest(body) {
+  const tier = String(body && body.voice_tier || "").trim().toLowerCase();
+  return tier === "basic" ? "basic" : "premium";
+}
+
+// null when the locale has no WaveNet pair; the caller then uses Chirp.
+function wavenetVoiceForRequest(body, locale) {
+  const pair = WAVENET_VOICES.get(locale);
+  if (!pair) return null;
+  return locale + "-Wavenet-" + pair[chirpGenderForRequest(body)];
+}
+
+function escapeSsml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+// The app's Chirp pause markup as WaveNet SSML. Text is escaped first so a
+// `<` in a sentence cannot open a tag; only the three known pause tags turn
+// into breaks. null when the SSML would exceed Google's input cap.
+function wavenetSsmlFromMarkup(markup) {
+  const source = String(markup || "").trim();
+  if (!source) return null;
+  const parts = source.split(/(\[pause short\]|\[pause long\]|\[pause\])/);
+  const body = parts.map(part => WAVENET_BREAKS.has(part)
+    ? "<break time=\"" + WAVENET_BREAKS.get(part) + "\"/>"
+    : escapeSsml(part)).join("");
+  const ssml = "<speak>" + body + "</speak>";
+  return utf8Bytes(ssml) <= MAX_GOOGLE_TTS_INPUT_BYTES ? ssml : null;
+}
+
 // Chirp has no equivalent of `instructions`, so expressive requests keep the
 // OpenAI model that honors them.
 function shouldUseChirp(body) {
@@ -226,6 +290,7 @@ function openAiSpeechBody(body) {
   const sanitized = { ...body };
   delete sanitized.language;
   delete sanitized.markup;
+  delete sanitized.voice_tier;
   const voice = String(sanitized.voice || "").trim().toLowerCase();
   if (OPENAI_VOICE_FOR_GENDER_ID.has(voice)) {
     sanitized.voice = OPENAI_VOICE_FOR_GENDER_ID.get(voice);
@@ -373,18 +438,69 @@ async function synthesizeChirp(body, locale) {
   return { format, voiceName, audio: Buffer.concat(audio) };
 }
 
+// Basic tier. WaveNet reads commas with a natural pause on its own, so plain
+// text is sent as-is; only the app's explicit pause markup becomes SSML.
+async function synthesizeWavenet(body, locale, voiceName) {
+  const input = String(body && body.input || "").trim();
+  if (!input || input.length > MAX_TTS_INPUT_CHARS) {
+    const error = new Error("Invalid TTS input.");
+    error.statusCode = 400;
+    throw error;
+  }
+  const format = requestedAudioFormat(body);
+  if (!format) return null;
+  const audioConfig = chirpAudioConfig(body, format);
+  const client = await googleAuth.getClient();
+  const ssml = wavenetSsmlFromMarkup(chirpMarkupForRequest(body));
+  if (ssml) {
+    const audio = await synthesizeChirpPiece(
+      client, { ssml }, locale, voiceName, audioConfig, format);
+    return { format, voiceName, audio };
+  }
+  const audio = [];
+  for (const piece of splitForGoogleTts(input)) {
+    audio.push(await synthesizeChirpPiece(
+      client, { text: piece }, locale, voiceName, audioConfig, format));
+  }
+  return { format, voiceName, audio: Buffer.concat(audio) };
+}
+
+// Basic first when asked for; any WaveNet failure falls back to Chirp so the
+// user still hears the line.
+async function synthesizeForTier(body, locale) {
+  const wavenetVoice = voiceTierForRequest(body) === "basic"
+    ? wavenetVoiceForRequest(body, locale)
+    : null;
+  if (wavenetVoice) {
+    try {
+      const synthesized = await synthesizeWavenet(body, locale, wavenetVoice);
+      if (synthesized && synthesized.audio.length > 0) {
+        return { ...synthesized, provider: "google-wavenet-" };
+      }
+    } catch (error) {
+      if (Number(error && error.statusCode) === 400) throw error;
+      functions.logger.warn("Google WaveNet TTS failed; using Chirp", {
+        locale,
+        message: error && error.message,
+      });
+    }
+  }
+  const synthesized = await synthesizeChirp(body, locale);
+  return synthesized ? { ...synthesized, provider: "google-chirp3-hd-" } : null;
+}
+
 async function tryProxyChirpSpeech(req, res) {
   const body = req.body && typeof req.body === "object" ? req.body : null;
   if (!shouldUseChirp(body)) return false;
   const locale = chirpLocaleForRequest(body);
   try {
-    const synthesized = await synthesizeChirp(body, locale);
+    const synthesized = await synthesizeForTier(body, locale);
     if (!synthesized || synthesized.audio.length === 0) return false;
     res.status(200);
     res.setHeader("cache-control", "no-store");
     res.setHeader(
       "x-stealthvox-tts-provider",
-      "google-chirp3-hd-" + locale.toLowerCase() + "-" +
+      synthesized.provider + locale.toLowerCase() + "-" +
         synthesized.voiceName.split("-").pop().toLowerCase()
     );
     res.setHeader(
@@ -612,6 +728,9 @@ module.exports = {
   chirpAudioConfig,
   chirpMarkupForRequest,
   chirpInputWithCommaPauses,
+  voiceTierForRequest,
+  wavenetVoiceForRequest,
+  wavenetSsmlFromMarkup,
   mintAiGatewaySession,
   mintDeepgramToken,
   mintOpenAiRealtimeToken,
