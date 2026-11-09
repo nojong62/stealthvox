@@ -133,7 +133,7 @@ class IntroFaqCopy {
       ],
       [
         '料金はどうなりますか？',
-        '使った時間分だけ残り時間から差し引かれます。初めて登録すると1時間が自動でチャージされます（端末1台につき1回）。その後は Store で時間をチャージできます。時間はプレミアム音声を基準にしています。ロビーで基本音声を選ぶと、同じ時間で3倍長く使えます。',
+        '使った時間分だけ残り時間から差し引かれます。初めて登録すると1時間が自動でチャージされます（端末1台につき1回）。その後は Store で時間をチャージできます。時間はプレミアム音声を基準にしています。ロビーでベーシック音声を選ぶと、同じ時間で3倍長く使えます。',
       ],
       [
         '英会話のショート動画を使って、自分でも練習できますか？',
@@ -247,7 +247,7 @@ class IntroFaqCopy {
       ],
       [
         'Comment est-ce facturé ?',
-        'Seul le temps utilisé est déduit de votre temps restant. Lors de votre première inscription, 1 heure est ajoutée automatiquement (une fois par téléphone). Vous pouvez ensuite recharger du temps dans le Store. Le temps est calculé sur la base de la voix premium ; choisissez la voix standard dans le lobby pour en profiter 3 fois plus longtemps avec le même crédit.',
+        'Seul le temps utilisé est déduit de votre temps restant. Lors de votre première inscription, 1 heure est ajoutée automatiquement (une fois par téléphone). Vous pouvez ensuite recharger du temps dans le Store. Le temps est calculé sur la base de la voix premium ; choisissez la voix de base dans le lobby pour en profiter 3 fois plus longtemps avec le même crédit.',
       ],
       [
         'Puis-je m’entraîner moi-même avec des Shorts de conversation en anglais ?',
@@ -285,7 +285,7 @@ class IntroFaqCopy {
       ],
       [
         'Wie wird abgerechnet?',
-        'Es wird nur die tatsächlich genutzte Zeit von deiner Restzeit abgezogen. Bei deiner ersten Registrierung wird automatisch 1 Stunde gutgeschrieben (einmal pro Telefon). Weitere Zeit kannst du im Store aufladen. Die Zeitangaben basieren auf der Premium-Stimme. Wählst du in der Lobby die Standardstimme, kannst du dein Guthaben dreimal so lange nutzen.',
+        'Es wird nur die tatsächlich genutzte Zeit von deiner Restzeit abgezogen. Bei deiner ersten Registrierung wird automatisch 1 Stunde gutgeschrieben (einmal pro Telefon). Weitere Zeit kannst du im Store aufladen. Die Zeitangaben basieren auf der Premium-Stimme. Wählst du in der Lobby die Basis-Stimme, kannst du dein Guthaben dreimal so lange nutzen.',
       ],
       [
         'Kann ich mit englischen Gesprächs-Shorts selbst üben?',
@@ -323,7 +323,7 @@ class IntroFaqCopy {
       ],
       [
         'शुल्क कैसे लगता है?',
-        'आपके बचे हुए समय में से सिर्फ़ इस्तेमाल किया गया समय घटता है। पहली बार साइन अप करने पर 1 घंटा अपने आप जुड़ जाता है (हर फ़ोन पर एक बार)। इसके बाद Store में समय रिचार्ज करें। समय की गणना प्रीमियम वॉइस के आधार पर होती है। लॉबी में बेसिक वॉइस चुनने पर उतने ही समय में 3 गुना ज़्यादा देर तक इस्तेमाल कर सकते हैं।',
+        'आपके बचे हुए समय में से सिर्फ़ इस्तेमाल किया गया समय घटता है। पहली बार साइन अप करने पर 1 घंटा अपने आप जुड़ जाता है (हर फ़ोन पर एक बार)। इसके बाद Store में समय रिचार्ज करें। समय की गणना प्रीमियम वॉइस के आधार पर होती है। लॉबी में बेसिक आवाज़ चुनने पर उतने ही समय में 3 गुना ज़्यादा देर तक इस्तेमाल कर सकते हैं।',
       ],
       [
         'क्या मैं अंग्रेज़ी बातचीत वाले Shorts से खुद अभ्यास कर सकता/सकती हूँ?',
