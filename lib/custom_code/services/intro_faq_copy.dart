@@ -33,7 +33,7 @@ class IntroFaqCopy {
       ],
       [
         'I can’t speak the language at all. Is that OK?',
-        'Yes. After signing in, choose your native language as the language you speak and the language you want to learn as the language you’re learning. Speak comfortably in your native language and the AI will talk with you in it too. That conversation is then turned into sentences in the language you’re learning in the Study Room. Switch to Step 2 during a conversation and only the AI will speak the language you’re learning, giving you listening practice.',
+        'Yes. After signing in, choose your native language as the conversation language and the language you want to learn as the language you’re learning. Speak comfortably in your native language and the AI will talk with you in it too. That conversation is then turned into sentences in the language you’re learning in the Study Room. Switch to Step 2 during a conversation and only the AI will speak the language you’re learning, giving you listening practice.',
       ],
       [
         'I can also chat in a foreign language.',
@@ -45,7 +45,7 @@ class IntroFaqCopy {
       ],
       [
         'Can I talk with a friend who speaks another language?',
-        'Invite them with Duo. Each of you speaks your own language and the AI interprets. If you use the same language, Duo switches to a direct call where you hear each other’s voices. If you’re both members, you each pay your own fees. If your friend isn’t a member, the inviting member pays for both.',
+        'Invite them with Duo. Each of you speaks your own language and the AI interprets. If you both speak the same language, Duo switches to a direct call where you hear each other’s voices. If you’re both members, you each pay your own fees. If your friend isn’t a member, the inviting member pays for both.',
       ],
       [
         'Build your own everyday language with Duo direct calls.',
@@ -71,7 +71,7 @@ class IntroFaqCopy {
       ],
       [
         '외국어를 전혀 못 해도 되나요?',
-        '네. 로그인한 뒤 사용 언어에 모국어를, 배울 언어에 배우고 싶은 언어를 고르세요. 모국어로 편하게 말하면 AI도 모국어로 대화하고, 그 대화가 공부방에서 배우는 언어의 문장으로 바뀝니다. 대화 중 Step 2로 바꾸면 AI만 배우는 언어로 말해 듣기 연습이 됩니다.',
+        '네. 로그인한 뒤 대화 언어에 모국어를, 배울 언어에 배우고 싶은 언어를 고르세요. 모국어로 편하게 말하면 AI도 모국어로 대화하고, 그 대화가 공부방에서 배우는 언어의 문장으로 바뀝니다. 대화 중 Step 2로 바꾸면 AI만 배우는 언어로 말해 듣기 연습이 됩니다.',
       ],
       [
         '외국어로 대화할 수도 있어요.',
@@ -83,7 +83,7 @@ class IntroFaqCopy {
       ],
       [
         '다른 언어를 쓰는 친구와도 대화할 수 있나요?',
-        'Duo로 친구를 초대하면 각자 자기 언어로 말하고 AI가 통역합니다. 두 사람의 사용 언어가 같으면 서로의 목소리를 직접 듣는 직접 통화로 바뀝니다. 요금은 회원끼리면 각자 내고, 상대가 비회원이면 초대한 회원이 함께 냅니다.',
+        'Duo로 친구를 초대하면 각자 자기 언어로 말하고 AI가 통역합니다. 두 사람의 대화 언어가 같으면 서로의 목소리를 직접 듣는 직접 통화로 바뀝니다. 요금은 회원끼리면 각자 내고, 상대가 비회원이면 초대한 회원이 함께 냅니다.',
       ],
       [
         'Duo 직접 통화로 나만의 생활 외국어 기초를 만드세요.',
@@ -109,7 +109,7 @@ class IntroFaqCopy {
       ],
       [
         '外国語がまったく話せなくても大丈夫？',
-        'はい。ログイン後、話す言語に母語、学ぶ言語に学びたい言語を選んでください。母語で気軽に話すと、AIも母語で会話します。その会話は学習ルームで、学ぶ言語の文に変わります。会話中に Step 2 に切り替えると、AIだけが学ぶ言語で話すので、リスニング練習になります。',
+        'はい。ログイン後、会話する言語に母語、学ぶ言語に学びたい言語を選んでください。母語で気軽に話すと、AIも母語で会話します。その会話は学習ルームで、学ぶ言語の文に変わります。会話中に Step 2 に切り替えると、AIだけが学ぶ言語で話すので、リスニング練習になります。',
       ],
       [
         '外国語で会話することもできます。',
@@ -121,7 +121,7 @@ class IntroFaqCopy {
       ],
       [
         '違う言語を話す友だちとも会話できますか？',
-        'Duo で友だちを招待すると、それぞれ自分の言語で話し、AI が通訳します。二人の使用言語が同じなら、お互いの声を直接聞ける通話に切り替わります。二人とも会員なら、それぞれ自分の分を支払います。相手が非会員なら、招待した会員が二人分を支払います。',
+        'Duo で友だちを招待すると、それぞれ自分の言語で話し、AI が通訳します。二人の会話言語が同じなら、お互いの声を直接聞ける通話に切り替わります。二人とも会員なら、それぞれ自分の分を支払います。相手が非会員なら、招待した会員が二人分を支払います。',
       ],
       [
         'Duo の直接通話で、自分だけの生活外国語の土台を作りましょう。',
@@ -147,7 +147,7 @@ class IntroFaqCopy {
       ],
       [
         '完全不会说外语也可以吗？',
-        '可以。登录后，在使用语言中选择母语，在学习语言中选择想学的语言。用母语轻松地说，AI 也会用母语和你对话，这段对话会在学习室里变成所学语言的句子。对话中切换到 Step 2 后，只有 AI 会用所学语言说话，可以练习听力。',
+        '可以。登录后，在对话语言中选择母语，在学习语言中选择想学的语言。用母语轻松地说，AI 也会用母语和你对话，这段对话会在学习室里变成所学语言的句子。对话中切换到 Step 2 后，只有 AI 会用所学语言说话，可以练习听力。',
       ],
       [
         '我也可以用外语聊天。',
@@ -159,7 +159,7 @@ class IntroFaqCopy {
       ],
       [
         '能和说其他语言的朋友对话吗？',
-        '用 Duo 邀请朋友后，你们可以各自说自己的语言，由 AI 口译。如果两人使用的语言相同，就会切换为能直接听到彼此声音的通话。如果两人都是会员，各自支付自己的费用；如果对方不是会员，则由邀请方会员支付两人费用。',
+        '用 Duo 邀请朋友后，你们可以各自说自己的语言，由 AI 口译。如果两人交谈时使用的语言相同，就会切换为能直接听到彼此声音的通话。如果两人都是会员，各自支付自己的费用；如果对方不是会员，则由邀请方会员支付两人费用。',
       ],
       [
         '用 Duo 直接通话,打下属于你的生活外语基础。',
@@ -185,7 +185,7 @@ class IntroFaqCopy {
       ],
       [
         'No hablo nada del idioma. ¿Puedo usarla?',
-        'Sí. Después de iniciar sesión, elige tu idioma nativo como idioma para hablar y el que quieres aprender como idioma de aprendizaje. Habla con tranquilidad en tu idioma y la IA también conversará contigo en él. Después, la sala de estudio convierte esa conversación en frases del idioma que estás aprendiendo. Si cambias a Step 2 durante la charla, solo la IA hablará en ese idioma: así practicas la comprensión auditiva.',
+        'Sí. Después de iniciar sesión, elige tu idioma nativo como idioma de conversación y el que quieres aprender como idioma de aprendizaje. Habla con tranquilidad en tu idioma y la IA también conversará contigo en él. Después, la sala de estudio convierte esa conversación en frases del idioma que estás aprendiendo. Si cambias a Step 2 durante la charla, solo la IA hablará en ese idioma: así practicas la comprensión auditiva.',
       ],
       [
         'También puedo conversar en un idioma extranjero.',
@@ -197,7 +197,7 @@ class IntroFaqCopy {
       ],
       [
         '¿Puedo hablar con un amigo que habla otro idioma?',
-        'Invítalo con Duo. Cada uno habla su idioma y la IA interpreta. Si usáis el mismo idioma, Duo cambia a una llamada directa en la que podéis oíros. Si ambos sois miembros, cada uno paga lo suyo. Si tu amigo no es miembro, el miembro que lo invitó paga por los dos.',
+        'Invítalo con Duo. Cada uno habla su idioma y la IA interpreta. Si habláis el mismo idioma, Duo cambia a una llamada directa en la que podéis oíros. Si ambos sois miembros, cada uno paga lo suyo. Si tu amigo no es miembro, el miembro que lo invitó paga por los dos.',
       ],
       [
         'Construye la base de tu idioma cotidiano con las llamadas directas de Duo.',
@@ -223,7 +223,7 @@ class IntroFaqCopy {
       ],
       [
         'Je ne parle pas du tout la langue. Est-ce possible ?',
-        'Oui. Une fois connecté, choisissez votre langue maternelle comme langue parlée et la langue que vous souhaitez apprendre comme langue d’apprentissage. Parlez tranquillement dans votre langue maternelle : l’IA vous répondra aussi dans cette langue. La salle d’étude transforme ensuite cette conversation en phrases dans la langue que vous apprenez. Passez en Step 2 pendant la conversation et seule l’IA parlera cette langue : vous pourrez ainsi vous entraîner à la compréhension orale.',
+        'Oui. Une fois connecté, choisissez votre langue maternelle comme langue de conversation et la langue que vous souhaitez apprendre comme langue d’apprentissage. Parlez tranquillement dans votre langue maternelle : l’IA vous répondra aussi dans cette langue. La salle d’étude transforme ensuite cette conversation en phrases dans la langue que vous apprenez. Passez en Step 2 pendant la conversation et seule l’IA parlera cette langue : vous pourrez ainsi vous entraîner à la compréhension orale.',
       ],
       [
         'Je peux aussi converser dans une langue étrangère.',
@@ -235,7 +235,7 @@ class IntroFaqCopy {
       ],
       [
         'Puis-je parler avec un ami qui parle une autre langue ?',
-        'Invitez-le avec Duo. Chacun parle sa langue et l’IA interprète. Si vous utilisez la même langue, Duo passe à un appel direct où vous pouvez vous entendre. Si vous êtes tous les deux membres, chacun paie sa part. Si votre ami n’est pas membre, le membre qui l’a invité paie pour vous deux.',
+        'Invitez-le avec Duo. Chacun parle sa langue et l’IA interprète. Si vous parlez la même langue, Duo passe à un appel direct où vous pouvez vous entendre. Si vous êtes tous les deux membres, chacun paie sa part. Si votre ami n’est pas membre, le membre qui l’a invité paie pour vous deux.',
       ],
       [
         'Posez les bases de votre langue du quotidien avec les appels directs Duo.',
@@ -261,7 +261,7 @@ class IntroFaqCopy {
       ],
       [
         'Ich spreche die Sprache gar nicht. Geht das?',
-        'Ja. Wähle nach dem Anmelden deine Muttersprache als Sprache zum Sprechen und die Sprache, die du lernen möchtest, als Lernsprache aus. Sprich ganz entspannt in deiner Muttersprache, und die KI unterhält sich ebenfalls mit dir darin. Im Lernraum wird das Gespräch dann in Sätze in der Sprache umgewandelt, die du lernst. Wechselst du während des Gesprächs zu Step 2, spricht nur die KI in der Lernsprache – so kannst du das Hörverstehen üben.',
+        'Ja. Wähle nach dem Anmelden deine Muttersprache als Gesprächssprache und die Sprache, die du lernen möchtest, als Lernsprache aus. Sprich ganz entspannt in deiner Muttersprache, und die KI unterhält sich ebenfalls mit dir darin. Im Lernraum wird das Gespräch dann in Sätze in der Sprache umgewandelt, die du lernst. Wechselst du während des Gesprächs zu Step 2, spricht nur die KI in der Lernsprache – so kannst du das Hörverstehen üben.',
       ],
       [
         'Ich kann mich auch in einer Fremdsprache unterhalten.',
@@ -273,7 +273,7 @@ class IntroFaqCopy {
       ],
       [
         'Kann ich mit einem Freund sprechen, der eine andere Sprache spricht?',
-        'Lade ihn mit Duo ein. Jeder spricht seine eigene Sprache, die KI dolmetscht. Verwendet ihr dieselbe Sprache, wechselt Duo zu einem Direktanruf, bei dem ihr euch gegenseitig hört. Seid ihr beide Mitglieder, zahlt jeder selbst. Ist dein Freund kein Mitglied, zahlt das einladende Mitglied für euch beide.',
+        'Lade ihn mit Duo ein. Jeder spricht seine eigene Sprache, die KI dolmetscht. Sprecht ihr dieselbe Sprache, wechselt Duo zu einem Direktanruf, bei dem ihr euch gegenseitig hört. Seid ihr beide Mitglieder, zahlt jeder selbst. Ist dein Freund kein Mitglied, zahlt das einladende Mitglied für euch beide.',
       ],
       [
         'Leg mit Duo-Direktanrufen die Grundlage für deine eigene Alltagssprache.',
@@ -299,7 +299,7 @@ class IntroFaqCopy {
       ],
       [
         'मुझे वह भाषा बिल्कुल नहीं आती। क्या चलेगा?',
-        'हाँ। लॉग इन करने के बाद, बोलने की भाषा के रूप में अपनी मातृभाषा और सीखने की भाषा के रूप में वह भाषा चुनें जिसे आप सीखना चाहते हैं। अपनी मातृभाषा में आराम से बोलें; AI भी आपसे उसी भाषा में बात करेगा। फिर अध्ययन कक्ष उस बातचीत को सीखी जा रही भाषा के वाक्यों में बदल देगा। बातचीत के बीच Step 2 चुनें, तो सिर्फ़ AI सीखी जा रही भाषा में बोलेगा और आप सुनने का अभ्यास कर सकेंगे।',
+        'हाँ। लॉग इन करने के बाद, बातचीत की भाषा के रूप में अपनी मातृभाषा और सीखने की भाषा के रूप में वह भाषा चुनें जिसे आप सीखना चाहते हैं। अपनी मातृभाषा में आराम से बोलें; AI भी आपसे उसी भाषा में बात करेगा। फिर अध्ययन कक्ष उस बातचीत को सीखी जा रही भाषा के वाक्यों में बदल देगा। बातचीत के बीच Step 2 चुनें, तो सिर्फ़ AI सीखी जा रही भाषा में बोलेगा और आप सुनने का अभ्यास कर सकेंगे।',
       ],
       [
         'मैं किसी विदेशी भाषा में बातचीत भी कर सकता/सकती हूँ।',
@@ -311,7 +311,7 @@ class IntroFaqCopy {
       ],
       [
         'क्या दूसरी भाषा बोलने वाले दोस्त से बात कर सकते हैं?',
-        'Duo से दोस्त को आमंत्रित करें। हर कोई अपनी भाषा में बोलता है और AI अनुवाद करता है। अगर आप दोनों एक ही भाषा इस्तेमाल करते हैं, तो Duo सीधे कॉल में बदल जाता है, जिसमें आप एक-दूसरे की आवाज़ सुन सकते हैं। अगर आप दोनों सदस्य हैं, तो हर कोई अपना शुल्क देता है। अगर आपका दोस्त सदस्य नहीं है, तो आमंत्रित करने वाला सदस्य दोनों का शुल्क देता है।',
+        'Duo से दोस्त को आमंत्रित करें। हर कोई अपनी भाषा में बोलता है और AI अनुवाद करता है। अगर आप दोनों बातचीत में एक ही भाषा बोलते हैं, तो Duo सीधे कॉल में बदल जाता है, जिसमें आप एक-दूसरे की आवाज़ सुन सकते हैं। अगर आप दोनों सदस्य हैं, तो हर कोई अपना शुल्क देता है। अगर आपका दोस्त सदस्य नहीं है, तो आमंत्रित करने वाला सदस्य दोनों का शुल्क देता है।',
       ],
       [
         'Duo सीधी कॉल से अपनी रोज़मर्रा की भाषा की नींव बनाइए।',
@@ -337,7 +337,7 @@ class IntroFaqCopy {
       ],
       [
         'Я совсем не говорю на этом языке. Можно?',
-        'Да. После входа выберите родной язык в качестве языка для общения, а язык, который хотите изучать, — в качестве изучаемого языка. Говорите спокойно на родном языке, и ИИ будет общаться с вами на нём. Затем учебная комната превратит этот разговор в фразы на изучаемом языке. Переключитесь на Step 2 во время разговора — и только ИИ будет говорить на изучаемом языке, чтобы вы могли потренировать аудирование.',
+        'Да. После входа выберите родной язык в качестве языка общения, а язык, который хотите изучать, — в качестве изучаемого языка. Говорите спокойно на родном языке, и ИИ будет общаться с вами на нём. Затем учебная комната превратит этот разговор в фразы на изучаемом языке. Переключитесь на Step 2 во время разговора — и только ИИ будет говорить на изучаемом языке, чтобы вы могли потренировать аудирование.',
       ],
       [
         'Я могу общаться и на иностранном языке.',
@@ -349,7 +349,7 @@ class IntroFaqCopy {
       ],
       [
         'Можно ли говорить с другом, который говорит на другом языке?',
-        'Пригласите его через Duo. Каждый говорит на своём языке, а ИИ переводит. Если вы используете один и тот же язык, Duo переключается на прямой звонок, где вы слышите голоса друг друга. Если вы оба участники, каждый платит за себя. Если друг не участник, пригласивший его участник платит за двоих.',
+        'Пригласите его через Duo. Каждый говорит на своём языке, а ИИ переводит. Если вы оба говорите на одном языке, Duo переключается на прямой звонок, где вы слышите голоса друг друга. Если вы оба участники, каждый платит за себя. Если друг не участник, пригласивший его участник платит за двоих.',
       ],
       [
         'Заложите основу своего повседневного языка с прямыми звонками Duo.',
@@ -375,7 +375,7 @@ class IntroFaqCopy {
       ],
       [
         'Não falo nada do idioma. Tudo bem?',
-        'Sim. Depois de entrar, escolha seu idioma nativo como idioma para conversar e o idioma que quer aprender como idioma de estudo. Fale à vontade no seu idioma, e a IA também vai conversar com você nele. Depois, a sala de estudo transforma essa conversa em frases no idioma que você está aprendendo. Mude para Step 2 durante a conversa e só a IA falará no idioma que você está aprendendo, para você praticar a compreensão oral.',
+        'Sim. Depois de entrar, escolha seu idioma nativo como idioma da conversa e o idioma que quer aprender como idioma de estudo. Fale à vontade no seu idioma, e a IA também vai conversar com você nele. Depois, a sala de estudo transforma essa conversa em frases no idioma que você está aprendendo. Mude para Step 2 durante a conversa e só a IA falará no idioma que você está aprendendo, para você praticar a compreensão oral.',
       ],
       [
         'Também consigo conversar em um idioma estrangeiro.',
@@ -387,7 +387,7 @@ class IntroFaqCopy {
       ],
       [
         'Posso conversar com um amigo que fala outro idioma?',
-        'Convide-o pelo Duo. Cada um fala o próprio idioma e a IA interpreta. Se vocês usam o mesmo idioma, o Duo muda para uma chamada direta em que ouvem a voz um do outro. Se ambos forem membros, cada um paga o próprio uso. Se a outra pessoa não for membro, o membro que a convidou paga pelos dois.',
+        'Convide-o pelo Duo. Cada um fala o próprio idioma e a IA interpreta. Se vocês falam o mesmo idioma, o Duo muda para uma chamada direta em que ouvem a voz um do outro. Se ambos forem membros, cada um paga o próprio uso. Se a outra pessoa não for membro, o membro que a convidou paga pelos dois.',
       ],
       [
         'Crie a base do seu idioma do dia a dia com as chamadas diretas do Duo.',
@@ -413,7 +413,7 @@ class IntroFaqCopy {
       ],
       [
         'Non parlo affatto la lingua. Va bene lo stesso?',
-        'Sì. Dopo l’accesso, scegli la tua lingua madre come lingua per parlare e la lingua che vuoi imparare come lingua di studio. Parla tranquillamente nella tua lingua e anche l’IA converserà con te in quella lingua. Poi la sala studio trasformerà la conversazione in frasi nella lingua che stai imparando. Passa a Step 2 durante la conversazione e solo l’IA parlerà nella lingua che stai imparando, così potrai allenare l’ascolto.',
+        'Sì. Dopo l’accesso, scegli la tua lingua madre come lingua della conversazione e la lingua che vuoi imparare come lingua di studio. Parla tranquillamente nella tua lingua e anche l’IA converserà con te in quella lingua. Poi la sala studio trasformerà la conversazione in frasi nella lingua che stai imparando. Passa a Step 2 durante la conversazione e solo l’IA parlerà nella lingua che stai imparando, così potrai allenare l’ascolto.',
       ],
       [
         'Posso anche conversare in una lingua straniera.',
@@ -425,7 +425,7 @@ class IntroFaqCopy {
       ],
       [
         'Posso parlare con un amico che parla un’altra lingua?',
-        'Invitalo con Duo. Ognuno parla la propria lingua e l’IA fa da interprete. Se usate la stessa lingua, Duo passa a una chiamata diretta in cui potete sentirvi. Se siete entrambi membri, ognuno paga per sé. Se l’altra persona non è membro, il membro che l’ha invitata paga per entrambi.',
+        'Invitalo con Duo. Ognuno parla la propria lingua e l’IA fa da interprete. Se parlate la stessa lingua, Duo passa a una chiamata diretta in cui potete sentirvi. Se siete entrambi membri, ognuno paga per sé. Se l’altra persona non è membro, il membro che l’ha invitata paga per entrambi.',
       ],
       [
         'Costruisci le basi della tua lingua di tutti i giorni con le chiamate dirette Duo.',
@@ -451,7 +451,7 @@ class IntroFaqCopy {
       ],
       [
         'Ik spreek de taal helemaal niet. Kan dat?',
-        'Ja. Kies na het inloggen je moedertaal als spreektaal en de taal die je wilt leren als leertaal. Praat ontspannen in je eigen taal; de AI praat dan ook met je in die taal. Daarna zet de leerruimte het gesprek om in zinnen in de taal die je leert. Schakel tijdens het gesprek over naar Step 2 en alleen de AI spreekt de leertaal, zodat je kunt oefenen met luisteren.',
+        'Ja. Kies na het inloggen je moedertaal als gesprekstaal en de taal die je wilt leren als leertaal. Praat ontspannen in je eigen taal; de AI praat dan ook met je in die taal. Daarna zet de leerruimte het gesprek om in zinnen in de taal die je leert. Schakel tijdens het gesprek over naar Step 2 en alleen de AI spreekt de leertaal, zodat je kunt oefenen met luisteren.',
       ],
       [
         'Ik kan ook in een vreemde taal praten.',
@@ -463,7 +463,7 @@ class IntroFaqCopy {
       ],
       [
         'Kan ik praten met een vriend die een andere taal spreekt?',
-        'Nodig die uit met Duo. Ieder spreekt de eigen taal en de AI tolkt. Gebruiken jullie dezelfde taal, dan schakelt Duo over op een direct gesprek waarin je elkaars stem hoort. Zijn jullie allebei lid, dan betaalt ieder voor zichzelf. Is de ander geen lid, dan betaalt het uitnodigende lid voor jullie allebei.',
+        'Nodig die uit met Duo. Ieder spreekt de eigen taal en de AI tolkt. Spreken jullie tijdens het gesprek dezelfde taal, dan schakelt Duo over op een direct gesprek waarin je elkaars stem hoort. Zijn jullie allebei lid, dan betaalt ieder voor zichzelf. Is de ander geen lid, dan betaalt het uitnodigende lid voor jullie allebei.',
       ],
       [
         'Leg met directe Duo-gesprekken de basis voor je eigen dagelijkse taal.',
