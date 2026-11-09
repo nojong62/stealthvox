@@ -654,7 +654,18 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     //   (실기기 로그, 2026-08-27). 한 프레임(≈16ms) 늦어질 뿐이다.
     //   startBillingRoom()이 안에서 resetBillingIdle()을 부르므로,
     //   여기서 따로 부르던 것도 같이 정리한다.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      // 🎙️ [VOICE-TIER] 대화에서 바로 넘어온 게 아니면 입장할 때 한 번 묻는다.
+      //   역할 교환·MY STORY가 같은 등급으로 가야 하므로 방 단위로 정한다.
+      if (!_voiceTierChosen) {
+        final tier = await _askPracticeVoiceTier();
+        if (!mounted) return;
+        _voiceTierChosen = true;
+        if (tier != null && tier != VoiceTierSession.active) {
+          VoiceTierSession.activate(tier, reason: 'study_entry_popup');
+        }
+      }
       if (mounted) {
         startBillingRoom(rate: billingRateFor(VoiceTierSession.active));
       }
@@ -6814,17 +6825,6 @@ RULES — follow exactly:
   /// 도드라진 상태로 익히면 안 된다.
   Future<void> _startP3Speaking() async {
     if (!_guardPaidStudy()) return;
-    if (!_voiceTierChosen) {
-      final tier = await _askPracticeVoiceTier();
-      if (tier == null || !mounted) return;
-      _voiceTierChosen = true;
-      if (tier != VoiceTierSession.active) {
-        VoiceTierSession.activate(tier, reason: 'study_popup');
-        BillingTicker.instance.setRate(billingRateFor(tier));
-        _p3FullPcm = null;
-        _p3Segments = const <BreathSegment>[];
-      }
-    }
     final text = _p3TargetSentence;
     if (text.isEmpty) {
       _showRoomEntryToast(_surfaceCopy['p3NoSentence']);
@@ -7743,6 +7743,7 @@ RULES — follow exactly:
         );
     return showDialog<VoiceTier>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => SimpleDialog(
         title: Text(copy['voiceTierTitle']),
         children: [
