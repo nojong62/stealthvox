@@ -2761,7 +2761,7 @@ class OriginSurfaceCopy {
       'HD voice',
       'HD 음성',
       'HD音声',
-      '高清语音',
+      'HD语音',
       'Voz HD',
       'Voix HD',
       'HD-Stimme',
