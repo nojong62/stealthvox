@@ -1292,6 +1292,19 @@ class _StoreMasterState extends State<StoreMaster> {
                           ),
                           const SizedBox(height: 16),
 
+                          // 🎙️ [VOICE-TIER] 가격·시간은 프리미엄 음성 기준이다.
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Text(
+                              _copy['storeVoiceNote'],
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white60,
+                                fontSize: 12,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
                           // 2. 상품 리스트
                           ListView.separated(
                             shrinkWrap: true,
