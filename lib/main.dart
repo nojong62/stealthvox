@@ -20,6 +20,7 @@ import 'flutter_flow/nav/nav.dart';
 import 'index.dart';
 import 'flutter_flow/revenue_cat_util.dart' as revenue_cat;
 import '/custom_code/services/app_update_policy.dart';
+import '/custom_code/services/crash_reporting.dart';
 import '/custom_code/widgets/app_update_gate.dart';
 import '/custom_code/services/duo_board_push_service.dart';
 import '/custom_code/services/duo_board_host_presence.dart';
@@ -127,6 +128,8 @@ void main() async {
   usePathUrlStrategy();
 
   await initFirebase();
+  // 🧯 [CRASH] 사용자 폰의 오류를 Crashlytics로 보낸다(디버그 빌드는 제외).
+  await installCrashReporting();
   await FirebaseAppCheck.instance.activate(
     providerAndroid: kDebugMode
         ? const AndroidDebugProvider()
