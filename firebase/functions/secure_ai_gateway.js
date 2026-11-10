@@ -212,6 +212,10 @@ function chirpLocaleForRequest(body) {
   if (/^en[-_]gb$/.test(language)) return "en-GB";
   const requested = language.split(/[-_]/)[0];
   if (CHIRP_LOCALES.has(requested)) return CHIRP_LOCALES.get(requested);
+  // A bare ISO code outside the table ("uk", "bg", "mr") names the language
+  // outright. Guessing from the script would read Ukrainian with the Russian
+  // voice and Marathi with the Hindi one; the dynamic lookup handles these.
+  if (/^[a-z]{2,3}$/.test(language)) return null;
   if (/[぀-ヿ]/u.test(input)) return "ja-JP";
   if (/[ऀ-ॿ]/u.test(input)) return "hi-IN";
   if (/[Ѐ-ӿ]/u.test(input)) return "ru-RU";

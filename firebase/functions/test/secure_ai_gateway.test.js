@@ -188,6 +188,10 @@ test("Chirp locale: Hangul first, then the app's language, then single-language 
   assert.equal(chirpLocaleForRequest({ input: "Hello" }), null);
   assert.equal(chirpLocaleForRequest({ input: "你好" }), null);
   assert.equal(chirpLocaleForRequest({ input: "Hello", language: "xx" }), null);
+  // A named language outside the table is never guessed from its script.
+  assert.equal(chirpLocaleForRequest({ input: "Привіт", language: "uk" }), null);
+  assert.equal(chirpLocaleForRequest({ input: "नमस्कार", language: "mr" }), null);
+  assert.equal(chirpLocaleForRequest({ input: "Привет", language: "ru" }), "ru-RU");
 });
 
 test("expressive requests stay on OpenAI", () => {
