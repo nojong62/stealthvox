@@ -127,6 +127,13 @@ const healthCheck = require("./health_check");
 exports.dailyHealthCheck = healthCheck.dailyHealthCheck;
 exports.runHealthCheckNow = healthCheck.runHealthCheckNow;
 
+// Crashlytics 알림 메일 — 새 치명 오류·ANR·재발·급증. firebase/functions/crash_alert.js
+const crashAlert = require("./crash_alert");
+exports.crashAlertNewFatal = crashAlert.crashAlertNewFatal;
+exports.crashAlertNewAnr = crashAlert.crashAlertNewAnr;
+exports.crashAlertRegression = crashAlert.crashAlertRegression;
+exports.crashAlertVelocity = crashAlert.crashAlertVelocity;
+
 
 async function verifyGoogleOAuthIdToken(idToken) {
   if (!idToken || typeof idToken !== "string") {
