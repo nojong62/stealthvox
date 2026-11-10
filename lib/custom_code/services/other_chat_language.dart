@@ -137,6 +137,39 @@ If you cannot tell, reply {"name": "", "code": ""}.''',
   }
 }
 
+/// 이보다 짧은 말("OK", "네")로는 언어를 가리지 않는다.
+const int kOtherLangDetectMinChars = 10;
+
+bool _otherLangDetecting = false;
+
+/// 기타 언어의 실제 언어를 판정해 저장한다. 저장했으면 true.
+///
+/// false면 아직 정해지지 않은 것이다 — 말이 너무 짧았거나 판정이 실패했다.
+/// 부르는 쪽은 그 방의 판정을 닫지 말고 다음 발화에서 다시 부른다.
+Future<bool> settleOtherChatLanguage({
+  required String apiKey,
+  required String transcript,
+  void Function(String tag, String msg)? onLog,
+}) async {
+  if (transcript.trim().length < kOtherLangDetectMinChars) return false;
+  if (_otherLangDetecting) return false;
+  _otherLangDetecting = true;
+  try {
+    final found = await detectSpokenLanguage(
+      apiKey: apiKey,
+      transcript: transcript,
+      onLog: onLog,
+    );
+    onLog?.call('🌍 [OTHER-LANG]',
+        'detected=${found?.name ?? 'none'} code=${found?.code ?? ''}');
+    if (found == null) return false;
+    rememberOtherChatLanguage(found);
+    return true;
+  } finally {
+    _otherLangDetecting = false;
+  }
+}
+
 /// 판정 결과를 저장한다. 다음 대화도 이 언어로 시작한다.
 void rememberOtherChatLanguage(({String name, String code}) detected) {
   FFAppState().otherChatLang = detected.name;

@@ -382,15 +382,14 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
     // 🌍 [OTHER-LANG] 기타 언어: 확인 창 없이 실제 언어를 판정해 저장한다.
     //   다음 턴부터 프롬프트·음성이 그 언어로 간다. 전사는 계속 자동 감지.
     if (isOtherChatLanguageSelected && !_freeTalk) {
-      session.adopt(null);
-      final found = await detectSpokenLanguage(
+      //   짧은 말이거나 판정이 실패하면 닫지 않고 다음 발화에서 다시 본다.
+      if (await settleOtherChatLanguage(
         apiKey: _openAiKey,
         transcript: transcript,
         onLog: _log,
-      );
-      _log('🌍 [OTHER-LANG]',
-          'detected=${found?.name ?? 'none'} code=${found?.code ?? ''}');
-      if (found != null) rememberOtherChatLanguage(found);
+      )) {
+        session.adopt(null);
+      }
       return;
     }
     final lobbyOrigin = resolveNativeLanguageName(_lobbySpokenLang());
