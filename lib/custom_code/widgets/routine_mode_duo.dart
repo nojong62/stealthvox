@@ -407,6 +407,10 @@ const String kDuoInterpTransportRemoteConfigKey = 'DuoInterpreterTransport';
 ///   같은 함수를 쓰고, 그쪽은 선언값이라는 대안이 없어 지금 문턱이 맞다.
 const int kDuoSrcLangOverrideMinChars = 12;
 
+/// 💰 [DUO-PAY] "상대 몫을 대신 내시겠습니까?" 창이 답을 기다리는 시간.
+/// 지나면 거절로 보고 통화를 끝낸다.
+const Duration kCoverPartnerAnswerWindow = Duration(seconds: 3);
+
 /// 종료 직전 마지막 전사문의 History·채널 저장을 기다리는 상한.
 /// Firestore 쓰기가 걸려도 통화 종료가 무한정 늘어지면 안 된다.
 const Duration kDuoDirectSaveTimeout = Duration(seconds: 3);
@@ -1298,6 +1302,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           : data['voice_tier'];
     } else if (!_amIHost && data['hostCoversPartner'] == true) {
       raw = data['voice_tier'];
+    } else if (!_amIHost && data['hostIsMember'] == false) {
+      // 비회원이 연 방에 회원이 들어왔다. 회원이 양쪽 몫을 내되 기본 음성으로
+      // 간다(2026-11-10 실장님) — 입장 안내 문구와 같은 요금이다.
+      raw = VoiceTier.basic.name;
     }
     if (raw == null) return;
     final tier = parseVoiceTier(raw);
@@ -1405,35 +1413,83 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
   }
 
+  /// 비회원이 연 방에 들어온 회원에게 한 번 알린다 — 내가 양쪽 몫을 낸다.
+  bool _nonMemberHostNoticeShown = false;
+  void _notifyNonMemberHostPay() {
+    if (_nonMemberHostNoticeShown || !mounted) return;
+    _nonMemberHostNoticeShown = true;
+    final copy = DuoInviteCopy.forSystemLocale();
+    _lgDuo('[DUO-PAY]', 'non_member_host_notice direct=$_isDirectMode');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _isExiting) return;
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1C2430),
+          title: Text(
+            copy['nonMemberHostTitle'],
+            style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.w800),
+          ),
+          content: Text(
+            copy[_isDirectMode ? 'nonMemberHostDirect' : 'nonMemberHostInterp'],
+            style: const TextStyle(color: Color(0xFFBCC7D9), height: 1.45),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(MaterialLocalizations.of(ctx).okButtonLabel),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
   /// 초대자(회원)에게: 상대 회원 잔액이 없다. 대신 내면 계속, 아니면 종료.
   Future<void> _askCoverPartner() async {
     final copy = DuoInviteCopy.forSystemLocale();
+    // ⏱️ 답이 없으면 거절로 본다(2026-11-10 실장님). 창을 띄워 둔 채 통화를
+    //   이어가면 상대 몫을 아무도 내지 않기 때문이다.
+    BuildContext? dialogContext;
+    bool answered = false;
+    final autoDecline = Timer(kCoverPartnerAnswerWindow, () {
+      final ctx = dialogContext;
+      if (answered || ctx == null || !ctx.mounted) return;
+      _lgDuo('[DUO-PAY]', 'cover_partner timeout → declined');
+      Navigator.pop(ctx, false);
+    });
     final ok = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1C2430),
-        title: Text(
-          copy['coverPartnerTitle'],
-          style: const TextStyle(
-              color: Colors.white, fontWeight: FontWeight.w800),
-        ),
-        content: Text(
-          copy['coverPartnerBody'],
-          style: const TextStyle(color: Color(0xFFBCC7D9), height: 1.45),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(copy['coverPartnerNo']),
+      builder: (ctx) {
+        dialogContext = ctx;
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1C2430),
+          title: Text(
+            copy['coverPartnerTitle'],
+            style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.w800),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(copy['coverPartnerYes']),
+          content: Text(
+            copy['coverPartnerBody'],
+            style: const TextStyle(color: Color(0xFFBCC7D9), height: 1.45),
           ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(copy['coverPartnerNo']),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(copy['coverPartnerYes']),
+            ),
+          ],
+        );
+      },
     );
+    answered = true;
+    autoDecline.cancel();
     if (!mounted || _isExiting) return;
     _lgDuo('[DUO-PAY]', 'cover_partner answer=$ok');
     if (ok == true) {
@@ -1457,6 +1513,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   int _promoCallLimitSeconds = 0;
   DateTime? _promoCallStartedAt;
   Timer? _promoCallTicker;
+
   /// 상대가 붙기 전에는 기본 3분을 보인다. 붙으면 방 문서 값으로 센다.
   final ValueNotifier<int> _promoRemaining = ValueNotifier<int>(180);
   bool _promoWarned = false;
@@ -1491,8 +1548,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _promoCallTicker?.cancel();
       return;
     }
-    final left = _promoCallLimitSeconds -
-        DateTime.now().difference(startedAt).inSeconds;
+    final left =
+        _promoCallLimitSeconds - DateTime.now().difference(startedAt).inSeconds;
     _promoRemaining.value = left < 0 ? 0 : left;
     if (!_promoWarned && left > 0 && left <= 30) {
       _promoWarned = true;
@@ -5299,16 +5356,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
     // 🌍 [OTHER-LANG] 기타 언어: 확인 창 없이 실제 언어를 판정해 저장한다.
     if (isOtherChatLanguageSelected) {
-      if (transcript.trim().length < kDuoSrcLangOverrideMinChars) return;
-      session.adopt(null);
-      final found = await detectSpokenLanguage(
+      //   짧은 말이거나 판정이 실패하면 닫지 않고 다음 발화에서 다시 본다.
+      if (await settleOtherChatLanguage(
         apiKey: _openAiKey,
         transcript: transcript,
         onLog: (tag, msg) => _lgDuo(tag, msg),
-      );
-      _lgDuo('[OTHER-LANG]',
-          'detected=${found?.name ?? 'none'} code=${found?.code ?? ''}');
-      if (found != null) rememberOtherChatLanguage(found);
+      )) {
+        session.adopt(null);
+      }
       return;
     }
 
@@ -6854,8 +6909,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 비회원은 로비에서 언어를 고른 적이 없을 수 있다. 게스트와 같은 규칙으로
     // 폰 언어를 대화 언어로 잡는다.
     _normalizeGuestLangs();
-    final posted =
-        await _shareInviteCode(forcedMode: kDuoModeInterpreter, guestBoard: true);
+    final posted = await _shareInviteCode(
+        forcedMode: kDuoModeInterpreter, guestBoard: true);
     if (!mounted) return;
     if (posted) {
       // 올린 뒤에는 방에서 기다리지 않는다. 방과 글은 그대로 두고(게시 중인
@@ -6995,8 +7050,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             title: inviteCopy['guestPostedTitle'],
             // 푸시를 골랐으면 앱을 닫아도 된다는 안내로 바꾼다.
             detail: duoBoardLastPostedPushHours > 0
-                ? DuoBuddyCopy.forSystemLocale().fill('guestPostedPush',
-                    {'n': '$duoBoardLastPostedPushHours'})
+                ? DuoBuddyCopy.forSystemLocale().fill(
+                    'guestPostedPush', {'n': '$duoBoardLastPostedPushHours'})
                 : inviteCopy['guestPostedDetail'],
           );
         }
@@ -7038,8 +7093,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                       style: const TextStyle(
                           color: Colors.white, fontWeight: FontWeight.w700)),
                   subtitle: Text(inviteCopy['postToBoardDetail'],
-                      style: const TextStyle(
-                          color: Colors.white54, fontSize: 12)),
+                      style:
+                          const TextStyle(color: Colors.white54, fontSize: 12)),
                   onTap: () => Navigator.pop(sheetContext, 'board'),
                 ),
             ]),
@@ -7344,6 +7399,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           ? data['hostIsMember'] == true
           : null;
       _hostCoversPartner = data['hostCoversPartner'] == true;
+      if (_iAmMember && _partnerIsMember == false && !_partnerPaysCall) {
+        _notifyNonMemberHostPay();
+      }
       if (!_partnerPaysCall) {
         // 회원끼리인데 내 잔액이 이미 0이면 차감을 열지 않고 초대자에게 묻는다.
         // 열면 곧바로 소진으로 방이 닫힌다.
@@ -8130,7 +8188,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             .ensureOnline()
             .timeout(const Duration(seconds: 5));
       } catch (presenceError) {
-        _lgDuo('[BUDDY]', 'repost_presence_pending(${presenceError.runtimeType})');
+        _lgDuo(
+            '[BUDDY]', 'repost_presence_pending(${presenceError.runtimeType})');
       }
       await DuoBoardService.publishPost(
         roomId: roomRef.id,
@@ -8189,8 +8248,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         fullTime: promoEnded,
         offerStudyTrial: hasLines,
       );
-      _lgDuo('[PROMO]', 'end_card choice=$choice anonymous=$anonymousNow '
-          'fullTime=$promoEnded lines=$_historyMessageCount');
+      _lgDuo(
+          '[PROMO]',
+          'end_card choice=$choice anonymous=$anonymousNow '
+              'fullTime=$promoEnded lines=$_historyMessageCount');
       if (!mounted) return;
       if (anonymousNow) {
         FFAppState().inviterUid = '';

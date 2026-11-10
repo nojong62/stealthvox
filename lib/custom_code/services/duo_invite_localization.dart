@@ -40,6 +40,11 @@ class DuoInviteCopy {
         'Your partner is out of time. Would you like to cover their share and keep talking? Otherwise, the call will end.',
     'coverPartnerYes': 'Cover it',
     'coverPartnerNo': 'End call',
+    'nonMemberHostTitle': 'Call cost details',
+    'nonMemberHostInterp':
+        'The other person isn\'t a member, so you also pay for their interpretation at the basic voice rate.',
+    'nonMemberHostDirect':
+        'The other person isn\'t a member, so you also share the cost of the call.',
     'promoThirtyTitle': '30 seconds left',
     'promoThirtyDetail': 'Guest invitation calls last up to 3 minutes.',
     'promoEndTitle': 'Your 3-minute call has ended',
@@ -143,6 +148,9 @@ class DuoInviteCopy {
       'coverPartnerBody': '상대 회원의 남은 시간이 없어요. 회원님이 대신 부담하고 통화를 계속할까요? 아니면 통화가 끝납니다.',
       'coverPartnerYes': '대신 부담하기',
       'coverPartnerNo': '통화 끝내기',
+      'nonMemberHostTitle': '통화 비용 안내',
+      'nonMemberHostInterp': '상대가 비회원이라 회원님이 기본 음성 통역 비용을 함께 냅니다.',
+      'nonMemberHostDirect': '상대가 비회원이라 회원님이 통화 비용을 함께 냅니다.',
       'promoThirtyTitle': '30초 남았어요',
       'promoThirtyDetail': '비회원 초대 대화는 3분까지예요.',
       'promoEndTitle': '3분 대화가 끝났어요',
@@ -239,6 +247,9 @@ class DuoInviteCopy {
       'coverPartnerTitle': '相手の利用時間がありません',
       'coverPartnerBody': '相手の残り時間がなくなりました。代わりに負担して通話を続けますか？それとも通話を終了しますか？',
       'coverPartnerNo': '通話を終了',
+      'nonMemberHostDirect': '相手が非会員のため、通話料金を一緒に負担します。',
+      'nonMemberHostInterp': '相手が会員ではないため、相手の分の通訳料金も基本の音声料金でお支払いいただきます。',
+      'nonMemberHostTitle': '通話料金について',
       'coverPartnerYes': '代わりに負担する',
       'promoThirtyTitle': '残り30秒',
       'promoThirtyDetail': 'ゲスト招待の会話は3分までです。',
@@ -335,6 +346,9 @@ class DuoInviteCopy {
       'coverPartnerTitle': '对方没有可用时长',
       'coverPartnerBody': '对方的剩余时间已用完。要由你代为承担并继续通话吗？否则通话将结束。',
       'coverPartnerNo': '结束通话',
+      'nonMemberHostDirect': '对方不是会员，您也需要分担通话费用。',
+      'nonMemberHostInterp': '对方不是会员，因此对方的基础语音口译费用也由您一并支付。',
+      'nonMemberHostTitle': '通话费用说明',
       'promoThirtyTitle': '还剩30秒',
       'promoThirtyDetail': '访客邀请通话最长3分钟。',
       'promoEndTitle': '3分钟对话已结束',
@@ -430,6 +444,11 @@ class DuoInviteCopy {
           'Tu compañero se ha quedado sin tiempo. ¿Quieres cubrir su parte y seguir hablando? Si no, la llamada terminará.',
       'coverPartnerYes': 'Hacerse cargo',
       'coverPartnerNo': 'Finalizar llamada',
+      'nonMemberHostDirect':
+          'Como la otra persona no es miembro, también pagas parte del costo de la llamada.',
+      'nonMemberHostInterp':
+          'La otra persona no es miembro, así que también pagas su interpretación a la tarifa básica de voz.',
+      'nonMemberHostTitle': 'Información sobre el costo de la llamada',
       'coverPartnerTitle': 'Tu compañero se quedó sin tiempo',
       'promoThirtyTitle': 'Quedan 30 segundos',
       'promoThirtyDetail': 'Las llamadas de invitados duran hasta 3 minutos.',
@@ -534,6 +553,11 @@ class DuoInviteCopy {
       'coverPartnerBody':
           'Votre partenaire n’a plus de temps. Voulez-vous prendre sa part à votre charge pour continuer l’appel ? Sinon, l’appel prendra fin.',
       'coverPartnerNo': 'Terminer l’appel',
+      'nonMemberHostDirect':
+          'L’autre personne n’est pas membre, vous partagez donc les frais d’appel.',
+      'nonMemberHostInterp':
+          'L’autre personne n’est pas membre, vous payez donc aussi son interprétation au tarif vocal de base.',
+      'nonMemberHostTitle': 'Informations sur le coût de l’appel',
       'promoThirtyTitle': 'Plus que 30 secondes',
       'promoThirtyDetail': 'Les appels invités durent 3 minutes maximum.',
       'promoEndTitle': 'Votre appel de 3 minutes est terminé',
@@ -638,6 +662,11 @@ class DuoInviteCopy {
       'coverPartnerBody':
           'Dein Gesprächspartner hat keine Zeit mehr. Möchtest du für ihn einspringen und das Gespräch fortsetzen? Andernfalls wird der Anruf beendet.',
       'coverPartnerNo': 'Anruf beenden',
+      'nonMemberHostDirect':
+          'Da die andere Person kein Mitglied ist, übernimmst du auch einen Teil der Gesprächskosten.',
+      'nonMemberHostInterp':
+          'Die andere Person ist kein Mitglied, daher zahlst du auch für ihre Verdolmetschung zum einfachen Sprachtarif.',
+      'nonMemberHostTitle': 'Informationen zu den Anrufkosten',
       'promoThirtyTitle': 'Noch 30 Sekunden',
       'promoThirtyDetail': 'Gastgespräche dauern höchstens 3 Minuten.',
       'promoEndTitle': 'Dein 3-Minuten-Gespräch ist beendet',
@@ -738,6 +767,11 @@ class DuoInviteCopy {
       'dailyGuestLimit': 'आज की अतिथि कॉल समाप्त हो गई हैं। कल फिर आएँ या सदस्य के रूप में जुड़ें।',
       'boardSuspended': 'रिपोर्ट के कारण आप कुछ समय के लिए बोर्ड का उपयोग नहीं कर सकते।',
       'coverPartnerNo': 'कॉल समाप्त करें',
+      'nonMemberHostDirect':
+          'दूसरा व्यक्ति सदस्य नहीं है, इसलिए आप भी कॉल का खर्च साझा करते हैं।',
+      'nonMemberHostInterp':
+          'दूसरा व्यक्ति सदस्य नहीं है, इसलिए उनके अनुवाद का मूल वॉइस शुल्क भी आपको देना होगा।',
+      'nonMemberHostTitle': 'कॉल शुल्क की जानकारी',
       'coverPartnerTitle': 'आपके साथी का समय खत्म हो गया है',
       'coverPartnerYes': 'खर्च उठाना',
       'coverPartnerBody':
@@ -841,6 +875,11 @@ class DuoInviteCopy {
       'boardSuspended': 'Из-за жалоб вы временно не можете пользоваться доской.',
       'coverPartnerYes': 'Взять на себя',
       'coverPartnerNo': 'Завершить звонок',
+      'nonMemberHostDirect':
+          'Поскольку собеседник не является участником, вы тоже оплачиваете часть стоимости звонка.',
+      'nonMemberHostInterp':
+          'Другой человек не состоит в клубе, поэтому вы также оплачиваете его перевод по базовому тарифу голосового перевода.',
+      'nonMemberHostTitle': 'Информация о стоимости звонка',
       'coverPartnerBody':
           'У вашего собеседника закончилось время. Хотите взять его расходы на себя и продолжить разговор? Иначе звонок завершится.',
       'coverPartnerTitle': 'У вашего собеседника закончилось время',
@@ -945,6 +984,11 @@ class DuoInviteCopy {
           'A outra pessoa ficou sem tempo. Quer cobrir a parte dela e continuar a conversa? Caso contrário, a chamada será encerrada.',
       'coverPartnerTitle': 'Seu parceiro está sem tempo',
       'coverPartnerNo': 'Encerrar chamada',
+      'nonMemberHostDirect':
+          'Como a outra pessoa não é membro, você também divide o custo da chamada.',
+      'nonMemberHostInterp':
+          'A outra pessoa não é membro, então você também paga pela interpretação dela na tarifa básica de voz.',
+      'nonMemberHostTitle': 'Informações sobre o custo da chamada',
       'coverPartnerYes': 'Assumir o custo',
       'promoThirtyTitle': 'Faltam 30 segundos',
       'promoThirtyDetail': 'Chamadas de convidados duram até 3 minutos.',
@@ -1049,6 +1093,11 @@ class DuoInviteCopy {
           'Il tuo interlocutore ha esaurito il tempo. Vuoi coprire la sua parte e continuare la chiamata? Altrimenti, la chiamata terminerà.',
       'coverPartnerTitle': 'Il tuo partner ha esaurito il tempo',
       'coverPartnerNo': 'Termina chiamata',
+      'nonMemberHostDirect':
+          'Dato che l’altra persona non è iscritta, contribuisci anche tu al costo della chiamata.',
+      'nonMemberHostInterp':
+          'L’altra persona non è membro, quindi paghi anche la sua interpretazione alla tariffa vocale base.',
+      'nonMemberHostTitle': 'Informazioni sui costi della chiamata',
       'promoThirtyTitle': 'Mancano 30 secondi',
       'promoThirtyDetail': 'Le chiamate ospite durano al massimo 3 minuti.',
       'promoEndTitle': 'La tua chiamata di 3 minuti è terminata',
@@ -1149,6 +1198,11 @@ class DuoInviteCopy {
       'dailyGuestLimit': 'De gastgesprekken van vandaag zijn op. Kom morgen terug of doe mee als lid.',
       'boardSuspended': 'Door meldingen kun je het bord tijdelijk niet gebruiken.',
       'coverPartnerNo': 'Gesprek beëindigen',
+      'nonMemberHostDirect':
+          'Omdat de ander geen lid is, deel jij ook in de kosten van het gesprek.',
+      'nonMemberHostInterp':
+          'De ander is geen lid, dus betaal je ook voor diens interpretatie tegen het basistarief voor spraak.',
+      'nonMemberHostTitle': 'Informatie over de gesprekskosten',
       'coverPartnerYes': 'Voor de ander betalen',
       'coverPartnerTitle': 'Je partner heeft geen tijd meer',
       'coverPartnerBody':
