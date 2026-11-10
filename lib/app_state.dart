@@ -4,6 +4,7 @@ import '/backend/schema/structs/index.dart';
 import '/backend/api_requests/api_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'flutter_flow/flutter_flow_util.dart';
+import '/custom_code/services/other_chat_language.dart';
 
 class FFAppState extends ChangeNotifier {
   static FFAppState _instance = FFAppState._internal();
@@ -32,6 +33,10 @@ class FFAppState extends ChangeNotifier {
     });
     _safeInit(() {
       _voiceTier = prefs.getString('ff_voiceTier') ?? _voiceTier;
+    });
+    _safeInit(() {
+      _otherChatLang = prefs.getString('ff_otherChatLang') ?? '';
+      _otherChatLangCode = prefs.getString('ff_otherChatLangCode') ?? '';
     });
     _safeInit(() {
       _aiVoice = prefs.getString('ff_aiVoice') ?? _aiVoice;
@@ -217,10 +222,40 @@ class FFAppState extends ChangeNotifier {
   /// 않은 상태이다.
   /// 로비 진입 전에는 Select로 보이고, 사용자가 고른 값은 보존된다.
   String _chatLang = '';
-  String get chatLang => _chatLang;
+
+  /// 실제로 말하는 언어 이름. 로비에서 "기타 언어"(`'Other'`)를 골랐으면
+  /// 첫 마디에서 판정해 둔 언어(없으면 폰 시스템 언어로 짐작)를 돌려준다
+  /// — 프롬프트·히스토리·음성은 'Thai' 같은 진짜 이름을 받아야 한다.
+  /// 로비 목록처럼 저장값 자체가 필요한 곳은 [chatLangRaw]를 쓴다.
+  String get chatLang {
+    if (_chatLang != kOtherChatLanguage) return _chatLang;
+    return _otherChatLang.isNotEmpty
+        ? _otherChatLang
+        : otherLanguageDeviceGuess().name;
+  }
+
+  /// 로비에 저장된 값 그대로(`'Other'` 포함).
+  String get chatLangRaw => _chatLang;
   set chatLang(String value) {
     _chatLang = value;
     prefs.setString('ff_chatLang', value);
+  }
+
+  /// 🌍 [OTHER-LANG] "기타 언어"로 판정된 실제 언어(영문 이름·ISO 코드).
+  String _otherChatLang = '';
+  String get otherChatLang => _otherChatLang;
+  set otherChatLang(String value) {
+    _otherChatLang = value;
+    prefs.setString('ff_otherChatLang', value);
+  }
+
+  String _otherChatLangCode = '';
+  String get otherChatLangCode => _otherChatLangCode.isNotEmpty
+      ? _otherChatLangCode
+      : otherLanguageDeviceGuess().code;
+  set otherChatLangCode(String value) {
+    _otherChatLangCode = value;
+    prefs.setString('ff_otherChatLangCode', value);
   }
 
   String _aiLevel = 'Ⅰ';

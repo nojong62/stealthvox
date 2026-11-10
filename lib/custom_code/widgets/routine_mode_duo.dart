@@ -104,6 +104,7 @@ import '/custom_code/services/study_access.dart' show DuoPartnerPays;
 import '/custom_code/services/system_ui_language.dart';
 import '../services/voice_tier.dart';
 import '../services/duo_billing_policy.dart';
+import '../services/other_chat_language.dart';
 
 // ============================================================================
 // 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다. **통신 로직 자체가 다르다** —
@@ -2182,6 +2183,19 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   String _myNative() =>
       FFAppState().chatLang.isNotEmpty ? FFAppState().chatLang : 'English';
 
+  /// 🌍 [OTHER-LANG] 기타 언어면 전사는 늘 자동 감지다(빈 값).
+  String _mySttLangCode() =>
+      isOtherChatLanguageSelected ? '' : _mapLanguageToCode(_myNative());
+
+  /// 방 문서에 적는 내 대화 언어. 기타면 `'Other'` — 직접통화 판정 목록에
+  /// 없으므로 통화 통역이 직접통화로 절대 넘어가지 않는다.
+  String _myRoomLang() =>
+      isOtherChatLanguageSelected ? kOtherChatLanguage : _myNative();
+
+  /// 상대 말을 들을 언어. 기타면 내 **배울 언어**로 듣는다(2026-11-10).
+  String _myListenLang() =>
+      isOtherChatLanguageSelected ? _myTarget() : _myNative();
+
   // ──────────────────────────────────────────────────────────────────────────
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -3345,7 +3359,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
     // 스트리밍 소켓과 진단기가 **같은 언어 값**을 봐야 한다. 두 번 계산하면
     // 나중에 한쪽만 바뀌어 비교가 조용히 망가진다.
-    final String sttLanguageCode = _mapLanguageToCode(_myNative());
+    final String sttLanguageCode = _mySttLangCode();
     // 📡 [DUO-ENDPOINT] 경계는 Deepgram이, 글자는 gpt-transcribe가 맡는다.
     //   Server VAD가 하던 두 일(경계 판정 + 전사)을 갈라 놓은 것이 이 줄이다.
     final session = DuoSttPipeline(
@@ -3889,7 +3903,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         //   갈래는 원래 원문 PCM을 앱에 안 남겼는데(서버가 잘라 간 덩이라),
         //   `DuoSocketPcmCapture`가 서버 경계에 맞춰 그 덩이를 만든다. 그래서
         //   Deepgram 갈래와 같은 규칙으로 판정이 돈다.
-        languageCode: _mapLanguageToCode(_myNative()),
+        languageCode: _mySttLangCode(),
         onLog: (tag, msg) => _lgDuo('[INTERP-STT]$tag', msg),
       );
       _lgDuo(
@@ -3937,7 +3951,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             // 글자는 아직 없다. 창고는 소리만 본다.
             text: '',
             utterance: spoken,
-            languageCode: _mapLanguageToCode(_myNative()),
+            languageCode: _mySttLangCode(),
             elapsedMs: 0,
             usedContext: false,
           ));
@@ -4038,7 +4052,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //
       //   ⚠️ 직접 대화(`_startDirectStt`)도 같은 규칙이다 — 두 모드가 이제
       //   한 가지로 움직인다.
-      originLanguageCode: () => _mapLanguageToCode(_myNative()),
+      originLanguageCode: () => _mySttLangCode(),
       onLog: (tag, msg) => _lgDuo('[INTERP-STT]$tag', msg),
     )..roleLabel = _myRole;
     _lgDuo('[INTERP-STT-KIND]', 'kind=deepgram declared=${_myNative()}');
@@ -4991,7 +5005,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       speakerType: TtsSpeakerType.system,
       turnId: 'duo-partner-${++_interpTtsTurnSeq}',
       generationId: _interpGeneration,
-      language: _myNative(),
+      language: _myListenLang(),
       playbackCategory: 'duo_partner',
       // 🎚️ [INTERP-PREROLL] 0.75초 → 0.5초. 모든 턴에 붙는 고정 비용이라
       //   여기를 줄이는 것이 체감에 가장 곧다. 값은 새로 지어낸 것이 아니라
@@ -5282,6 +5296,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (_isDirectMode) return; // 직접 대화는 이번 범위가 아니다
     final session = OriginLanguageSession.instance;
     if (session.settled) return;
+
+    // 🌍 [OTHER-LANG] 기타 언어: 확인 창 없이 실제 언어를 판정해 저장한다.
+    if (isOtherChatLanguageSelected) {
+      if (transcript.trim().length < kDuoSrcLangOverrideMinChars) return;
+      session.adopt(null);
+      final found = await detectSpokenLanguage(
+        apiKey: _openAiKey,
+        transcript: transcript,
+        onLog: (tag, msg) => _lgDuo(tag, msg),
+      );
+      _lgDuo('[OTHER-LANG]',
+          'detected=${found?.name ?? 'none'} code=${found?.code ?? ''}');
+      if (found != null) rememberOtherChatLanguage(found);
+      return;
+    }
 
     final String lobbyOrigin = _myNative();
     final String pinned = transcript.trim();
@@ -6203,7 +6232,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   구간으로만 좁히기 위해서다.
     _setInterpPartnerPhase(InterpPartnerPhase.translating);
 
-    final String myNative = _myNative();
+    final String myNative = _myListenLang();
     ++_duoConversationTurnCounter;
 
     // 대화 중에는 **내 대화 언어**로 듣는다. 배울 언어는 공부방이 맡는다.
@@ -6888,7 +6917,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             kDuoHostSameOriginDirectV1Field: duoSameOriginDirectCapability(),
           // 상대 화면의 언어쌍 표시용. 첫 메시지 전에도 알아야 하므로
           // 세션 문서로 주고받는다.
-          'hostLang': _myNative(),
+          'hostLang': _myRoomLang(),
         });
       } else {
         // 같은 방에 다시 초대: 저장된 모드를 그대로 따른다(덮어쓰지 않는다).
@@ -7218,7 +7247,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           if (sessionMode == kDuoModeInterpreter)
             kDuoPartnerSameOriginDirectV1Field: duoSameOriginDirectCapability(),
           'partnerJoinedAt': FieldValue.serverTimestamp(),
-          'partnerLang': _myNative(),
+          'partnerLang': _myRoomLang(),
           // 💰 [DUO-PAY] 초대자가 내 몫까지 낼지 정하는 값. 비회원 초대자는
           //   내 등급을 따라 듣는다.
           'partnerIsMember': _iAmMember,
@@ -8071,7 +8100,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           remoteCandidate: _interpTransportRaw,
         ),
         kDuoHostSameOriginDirectV1Field: duoSameOriginDirectCapability(),
-        'hostLang': _myNative(),
+        'hostLang': _myRoomLang(),
       });
       await roomRef.update({
         'isDuoEnabled': true,

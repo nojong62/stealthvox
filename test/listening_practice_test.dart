@@ -255,7 +255,8 @@ void main() {
 
       test('$name: STT 언어 결정에 Step이 끼지 않는다', () {
         expect(source,
-            contains('String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());'));
+            contains('String _nativeLangCode() => isOtherChatLanguageSelected && !_freeTalk'));
+        expect(source, contains(': deepgramLanguageCode(_nativeLangName());'));
         for (final line in source.split('\n')) {
           if (!line.contains('_listeningStep') && !line.contains('step2')) {
             continue;

@@ -3,6 +3,7 @@ import 'package:firebase_remote_config/firebase_remote_config.dart';
 import '/app_state.dart';
 import 'ai_style.dart';
 import 'voice_tier.dart';
+import 'other_chat_language.dart';
 
 /// TTS 용도별 모델 계약.
 ///
@@ -64,6 +65,13 @@ class TtsModelProfile {
 /// Gateway는 'English'를 en-US로 읽는다. British는 말투만 바꾸고 소리는
 /// 미국식이었다(2026-10-29 실장님 지시로 변경). 영어가 아닌 언어는 그대로다.
 String ttsLanguageFor(String language, {String? style}) {
+  // 🌍 [OTHER-LANG] 기타 언어는 Gateway가 이름을 모른다. ISO 코드로 보내면
+  //   구글 음성 목록에서 그 언어를 찾는다.
+  if (isOtherChatLanguageSelected &&
+      language.trim().isNotEmpty &&
+      language.trim() == FFAppState().chatLang) {
+    return FFAppState().otherChatLangCode;
+  }
   if (!isAiStyleTargetLanguage(language)) return language;
   return normalizeAiStyle(style ?? FFAppState().aiStyle) == 'British'
       ? 'en-GB'

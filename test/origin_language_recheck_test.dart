@@ -256,7 +256,7 @@ void main() {
       // 박는 자리가 옮겨졌다. 예전에는 판정이 끝난 뒤 `switchLanguage`로
       // 갈아 끼웠지만, 이제 **첫 발화부터** 확정 ORIGIN으로 열린다.
       // 규칙 자체는 그대로다 — 소켓에 박는 값은 언제나 로비 ORIGIN이다.
-      expect(duo, contains('originLanguageCode: () => _mapLanguageToCode(_myNative())'));
+      expect(duo, contains('originLanguageCode: () => _mySttLangCode()'));
       final String region = _region(duo,
           'Future<void> _settleInterpreterOrigin(', 'Future<void> _applyOriginChange(');
       expect(region, isNot(contains('switchLanguage(detected')),
@@ -264,7 +264,7 @@ void main() {
       expect(region, isNot(contains('detected ?? lobbyOrigin')),
           reason: '감지값이 통역의 전사 언어를 갈아 끼우고 있다');
       // 같은 언어로 소켓을 끊었다 다시 여는 헛돌이가 되살아나면 안 된다.
-      expect(region, isNot(contains('switchLanguage(_mapLanguageToCode(_myNative()))')),
+      expect(region, isNot(contains('switchLanguage(_mySttLangCode())')),
           reason: '이미 그 언어로 열려 있는 소켓을 다시 연다');
     });
 

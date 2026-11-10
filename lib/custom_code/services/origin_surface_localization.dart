@@ -1089,6 +1089,20 @@ class OriginSurfaceCopy {
       'Lingua della conversazione',
       'Gesprekstaal'
     ],
+    'otherLanguage': [
+      'Other language',
+      '기타 언어',
+      'その他の言語',
+      '其他语言',
+      'Otro idioma',
+      'Autre langue',
+      'Andere Sprache',
+      'अन्य भाषा',
+      'Другой язык',
+      'Outro idioma',
+      'Altra lingua',
+      'Andere taal',
+    ],
     'languageLabelLearning': [
       'Learn Lang',
       '배울 언어',

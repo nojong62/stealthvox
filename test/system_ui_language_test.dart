@@ -26,7 +26,7 @@ void main() {
         File('lib/custom_code/widgets/lobby_master.dart').readAsStringSync();
     expect(
       source,
-      contains("if (!languages.contains(FFAppState().chatLang))"),
+      contains("if (!languages.contains(FFAppState().chatLangRaw) &&"),
     );
     expect(
       source,

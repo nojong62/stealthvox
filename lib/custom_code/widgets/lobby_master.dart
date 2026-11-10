@@ -46,6 +46,7 @@ import 'package:flutter/gestures.dart' show LongPressGestureRecognizer;
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'dart:io' show Platform;
 import '../services/voice_tier.dart';
+import '../services/other_chat_language.dart';
 
 // ============================================================================
 // 🎨 [Lobby 색] 화면 전체가 쓰는 색을 한곳에 모은다. 예전에는 같은 파랑이
@@ -197,7 +198,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     // 유지한다. 처음이거나 저장값이 깨진 경우에만 폰 시스템 언어를 기본값으로
     // 잡는다. 시스템 언어가 지원 12개 밖이면 systemUiLanguageName()이
     // English를 돌려준다. 이후에는 사용자가 풀다운에서 언제든 바꿀 수 있다.
-    if (!languages.contains(FFAppState().chatLang)) {
+    if (!languages.contains(FFAppState().chatLangRaw) &&
+        FFAppState().chatLangRaw != kOtherChatLanguage) {
       setState(() => FFAppState().chatLang = systemUiLanguageName());
       unawaited(DuoBoardPushService.refreshChatLanguageForCurrentMember());
     }
@@ -299,7 +301,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     try {
       FocusScope.of(context).unfocus();
       final missingLanguages = <String>[
-        if (!languages.contains(FFAppState().chatLang))
+        if (!languages.contains(FFAppState().chatLangRaw) &&
+            FFAppState().chatLangRaw != kOtherChatLanguage)
           _surfaceCopy['languageLabelOrigin'],
         if (!languages.contains(FFAppState().targetLang))
           _surfaceCopy['languageLabelLearning'],
@@ -733,8 +736,18 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     String label,
     String placeholder,
     String value,
-    ValueChanged<String?> onChanged,
-  ) {
+    ValueChanged<String?> onChanged, {
+    bool includeOther = false,
+  }) {
+    // 🌍 [OTHER-LANG] 대화 언어에만 "기타 언어"가 붙는다. 배울 언어는 14개뿐.
+    final List<String> options =
+        includeOther ? [...languages, kOtherChatLanguage] : languages;
+    String display(String lang) {
+      if (lang != kOtherChatLanguage) return lang;
+      final found = FFAppState().otherChatLang;
+      final base = _surfaceCopy['otherLanguage'];
+      return found.isEmpty ? base : '$base ($found)';
+    }
     Widget labelRow() => Text(
           label,
           maxLines: 1,
@@ -754,7 +767,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: languages.contains(value) ? value : null,
+          value: options.contains(value) ? value : null,
           dropdownColor: _kLobbySurfaceHi,
           isExpanded: true,
           hint: Padding(
@@ -781,7 +794,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           ),
           // 닫혀 있을 때 상자 안에 그릴 것 — 라벨과 고른 언어를 함께 둔다.
           // 이 위젯이 곧 버튼의 크기라, 라벨까지 누르는 자리가 된다.
-          selectedItemBuilder: (context) => languages
+          selectedItemBuilder: (context) => options
               .map(
                 (String lang) => Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
@@ -793,7 +806,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                       labelRow(),
                       const SizedBox(height: 2),
                       Text(
-                        lang,
+                        display(lang),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -829,7 +842,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           //   손가락이 짚을 수 있게 아래 minHeight로 따로 받쳐 준다.
           itemHeight: null,
           borderRadius: BorderRadius.circular(16),
-          items: languages
+          items: options
               .map(
                 (String lang) => DropdownMenuItem<String>(
                   value: lang,
@@ -837,7 +850,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                     constraints: const BoxConstraints(minHeight: 48),
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      lang,
+                      display(lang),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1450,12 +1463,13 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                       _buildLangField(
                         _surfaceCopy['languageLabelOrigin'],
                         'Select',
-                        appState.chatLang,
+                        appState.chatLangRaw,
                         (val) {
                           setState(() => appState.chatLang = val!);
                           unawaited(DuoBoardPushService
                               .refreshChatLanguageForCurrentMember());
                         },
+                        includeOther: true,
                       ),
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 6),

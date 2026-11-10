@@ -53,7 +53,9 @@ void main() {
       // 한 번 거친다. 그 변수의 출처가 로비값이라는 것이 여기서 지킬 사실이다.
       final region = directSttRegion();
       expect(region,
-          contains('final String sttLanguageCode = _mapLanguageToCode(_myNative());'));
+          contains('final String sttLanguageCode = _mySttLangCode();'));
+      // 기타 언어만 빈 값(자동 감지), 나머지는 로비값 그대로다.
+      expect(duo, contains("isOtherChatLanguageSelected ? '' : _mapLanguageToCode(_myNative());"));
       // 옛 경로는 소켓을 열 때 한 번 굳혔다. 새 경로는 발화마다 읽지만
       // **돌려주는 값은 언제나 그 지역변수**다 — 직접 대화는 로비값 고정이다.
       expect(region, contains('originLanguageCode: () => sttLanguageCode'));
@@ -140,11 +142,11 @@ void main() {
 
       // ① Deepgram 갈래 — DuoSttPipeline
       expect(flat,
-          contains('originLanguageCode: () => _mapLanguageToCode(_myNative())'),
+          contains('originLanguageCode: () => _mySttLangCode()'),
           reason: 'Deepgram 갈래에 로비 언어가 안 박힌다');
 
       // ② 소켓 갈래 — OpenAiStreamingTranscribeSession (기본값)
-      expect(flat, contains('languageCode: _mapLanguageToCode(_myNative())'),
+      expect(flat, contains('languageCode: _mySttLangCode()'),
           reason: '소켓 갈래에 로비 언어가 안 박힌다');
 
       // ③ 판정 상태로 언어를 가르던 조건이 **어느 갈래에도** 남으면 안 된다.
@@ -152,7 +154,7 @@ void main() {
       expect(
           flat,
           isNot(contains(
-              "OriginLanguageSession.instance.settled) ? _mapLanguageToCode(_myNative()) : ''")),
+              "OriginLanguageSession.instance.settled) ? _mySttLangCode() : ''")),
           reason: '첫 발화가 다시 자동 감지로 나가는 갈래가 남아 있다');
     });
 

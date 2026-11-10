@@ -82,6 +82,7 @@ import 'deepgram_confidence_probe.dart';
 import 'first_utterance_context_judge.dart';
 import 'origin_language_recheck_dialog.dart';
 import '../services/voice_tier.dart';
+import '../services/other_chat_language.dart';
 
 /// speech_stopped 뒤 최종 전사가 이 시간 안에 안 오면 턴을 놓아준다.
 /// 없으면 `_turnInFlight`가 켜진 채 굳어 10분 롤오버까지 막힌다.
@@ -1079,7 +1080,10 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
 
   /// 전사기에 넘길 ORIGIN 언어 코드. 예열(`stealth_room_master`)이 쓰는 것과
   /// **같은 함수**라야 `take()`가 예열 세션을 채택한다.
-  String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
+  // 🌍 [OTHER-LANG] 기타 언어는 언어를 박지 않는다(늘 자동 감지).
+  String _nativeLangCode() => isOtherChatLanguageSelected && !_freeTalk
+      ? ''
+      : deepgramLanguageCode(_nativeLangName());
   TalkUiCopy get _uiCopy => TalkUiCopy.forSystemLocale();
 
   /// 첫 발화 전사에 넘길 언어 코드. 판정 전에는 **빈 문자열 = 자동 감지**다.
@@ -1108,6 +1112,20 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   Future<void> _settleOriginLanguage(String transcript) async {
     final session = OriginLanguageSession.instance;
     if (session.settled) return;
+    // 🌍 [OTHER-LANG] 기타 언어: 확인 창 없이 실제 언어를 판정해 저장한다.
+    //   다음 턴부터 프롬프트·음성이 그 언어로 간다. 전사는 계속 자동 감지.
+    if (isOtherChatLanguageSelected && !_freeTalk) {
+      session.adopt(null);
+      final found = await detectSpokenLanguage(
+        apiKey: _openAiKey,
+        transcript: transcript,
+        onLog: _log,
+      );
+      _log('🌍 [OTHER-LANG]',
+          'detected=${found?.name ?? 'none'} code=${found?.code ?? ''}');
+      if (found != null) rememberOtherChatLanguage(found);
+      return;
+    }
     final lobbyOrigin = resolveNativeLanguageName(_lobbySpokenLang());
     final detected = await resolveOriginFromFirstUtterance(
       apiKey: _openAiKey,

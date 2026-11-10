@@ -93,6 +93,7 @@ import '/custom_code/services/short_reply_gate.dart';
 import 'first_utterance_context_judge.dart'; // 3모드 공통 응답 길이 규칙
 import 'origin_language_recheck_dialog.dart'; // 🌐 [ORIGIN-RECHECK] 언어 확인 창
 import '../services/voice_tier.dart';
+import '../services/other_chat_language.dart';
 
 // ====================================================================
 // 🛡️ [v4] 시나리오 재진입 보존용 static 홀더 (App State 대체)
@@ -329,7 +330,10 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   String _nativeLangName() => resolveNativeLanguageName(
       OriginLanguageSession.instance.resolve(_lobbySpokenLang()));
 
-  String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
+  // 🌍 [OTHER-LANG] 기타 언어는 언어를 박지 않는다(늘 자동 감지).
+  String _nativeLangCode() => isOtherChatLanguageSelected && !_freeTalk
+      ? ''
+      : deepgramLanguageCode(_nativeLangName());
   TalkUiCopy get _uiCopy => TalkUiCopy.forSystemLocale();
 
   /// 🎯 [LANG] 이 방의 배울 언어(LearnLang = 로비 Target). 비어 있으면 English다.
@@ -375,6 +379,20 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   Future<void> _settleOriginLanguage(String transcript) async {
     final session = OriginLanguageSession.instance;
     if (session.settled) return;
+    // 🌍 [OTHER-LANG] 기타 언어: 확인 창 없이 실제 언어를 판정해 저장한다.
+    //   다음 턴부터 프롬프트·음성이 그 언어로 간다. 전사는 계속 자동 감지.
+    if (isOtherChatLanguageSelected && !_freeTalk) {
+      session.adopt(null);
+      final found = await detectSpokenLanguage(
+        apiKey: _openAiKey,
+        transcript: transcript,
+        onLog: _log,
+      );
+      _log('🌍 [OTHER-LANG]',
+          'detected=${found?.name ?? 'none'} code=${found?.code ?? ''}');
+      if (found != null) rememberOtherChatLanguage(found);
+      return;
+    }
     final lobbyOrigin = resolveNativeLanguageName(_lobbySpokenLang());
     final detected = await resolveOriginFromFirstUtterance(
       apiKey: _openAiKey,
