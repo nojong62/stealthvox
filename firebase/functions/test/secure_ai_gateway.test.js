@@ -21,7 +21,41 @@ const {
   voiceTierForRequest,
   wavenetVoiceForRequest,
   wavenetSsmlFromMarkup,
+  dynamicLanguageCode,
+  pickGoogleVoice,
 } = require("../secure_ai_gateway");
+
+const FAKE_VOICES = [
+  { name: "th-TH-Chirp3-HD-Charon", languageCodes: ["th-TH"], ssmlGender: "MALE" },
+  { name: "th-TH-Chirp3-HD-Leda", languageCodes: ["th-TH"], ssmlGender: "FEMALE" },
+  { name: "th-TH-Standard-A", languageCodes: ["th-TH"], ssmlGender: "FEMALE" },
+  { name: "fil-PH-Wavenet-A", languageCodes: ["fil-PH"], ssmlGender: "FEMALE" },
+  { name: "fil-PH-Wavenet-C", languageCodes: ["fil-PH"], ssmlGender: "MALE" },
+  { name: "tr-TR-Chirp3-HD-Leda", languageCodes: ["tr-TR"], ssmlGender: "FEMALE" },
+  { name: "tr-TR-Wavenet-A", languageCodes: ["tr-TR"], ssmlGender: "FEMALE" },
+  { name: "tr-TR-Wavenet-B", languageCodes: ["tr-TR"], ssmlGender: "MALE" },
+];
+
+test("dynamic language: only bare codes outside the fixed table", () => {
+  assert.equal(dynamicLanguageCode({ input: "x", language: "th" }), "th");
+  assert.equal(dynamicLanguageCode({ input: "x", language: "FIL" }), "fil");
+  assert.equal(dynamicLanguageCode({ input: "x", language: "ko" }), null);
+  assert.equal(dynamicLanguageCode({ input: "x", language: "Korean" }), null);
+  assert.equal(dynamicLanguageCode({ input: "x", language: "th", instructions: "warm" }), null);
+  assert.equal(dynamicLanguageCode({ input: "x", language: "th", response_format: "opus" }), null);
+  assert.equal(dynamicLanguageCode(null), null);
+});
+
+test("dynamic voice: premium prefers Chirp HD, basic prefers WaveNet, gender kept", () => {
+  assert.equal(pickGoogleVoice(FAKE_VOICES, "th", "premium", "female").name, "th-TH-Chirp3-HD-Leda");
+  assert.equal(pickGoogleVoice(FAKE_VOICES, "th", "premium", "male").name, "th-TH-Chirp3-HD-Charon");
+  // Thai has no WaveNet: basic falls to Standard.
+  assert.equal(pickGoogleVoice(FAKE_VOICES, "th", "basic", "female").name, "th-TH-Standard-A");
+  assert.equal(pickGoogleVoice(FAKE_VOICES, "tr", "basic", "male").name, "tr-TR-Wavenet-B");
+  // Filipino has no Chirp HD: premium falls to WaveNet.
+  assert.equal(pickGoogleVoice(FAKE_VOICES, "fil", "premium", "male").name, "fil-PH-Wavenet-C");
+  assert.equal(pickGoogleVoice(FAKE_VOICES, "km", "premium", "female"), null);
+});
 
 test("voice tier: only an explicit basic leaves Chirp", () => {
   assert.equal(voiceTierForRequest({ voice_tier: "basic" }), "basic");

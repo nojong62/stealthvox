@@ -74,9 +74,13 @@ function sourceUrlFor(videoId) {
   return "https://www.youtube.com/shorts/" + videoId;
 }
 
+// 🌍 [OTHER-LANG] 대화 언어가 "기타"면 앱은 판정된 실제 이름(Thai 등)을
+//   보낸다. 목록 밖이어도 글자만으로 된 짧은 언어 이름이면 받는다 — 프롬프트에
+//   들어가는 값이라 문장·기호는 막는다.
 function languageOr(value, fallback) {
   const lang = typeof value === "string" ? value.trim() : "";
-  return LANGUAGES.includes(lang) ? lang : fallback;
+  if (LANGUAGES.includes(lang)) return lang;
+  return /^[A-Z][A-Za-z]{1,19}( [A-Z][A-Za-z]{1,19})?$/.test(lang) ? lang : fallback;
 }
 
 function buildPrompt({originLanguage, targetLanguage}) {

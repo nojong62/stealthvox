@@ -409,7 +409,7 @@ async function synthesizeChirpPiece(client, input, locale, voiceName, audioConfi
   return format === "pcm" ? stripWavContainer(audio) : audio;
 }
 
-async function synthesizeChirp(body, locale) {
+async function synthesizeChirp(body, locale, voiceNameOverride = null) {
   const input = String(body && body.input || "").trim();
   if (!input || input.length > MAX_TTS_INPUT_CHARS) {
     const error = new Error("Invalid TTS input.");
@@ -418,7 +418,7 @@ async function synthesizeChirp(body, locale) {
   }
   const format = requestedAudioFormat(body);
   if (!format) return null;
-  const voiceName = chirpVoiceForRequest(body, locale);
+  const voiceName = voiceNameOverride || chirpVoiceForRequest(body, locale);
   const audioConfig = chirpAudioConfig(body, format);
   const client = await googleAuth.getClient();
   const markup = chirpMarkupForRequest(body);
@@ -489,9 +489,122 @@ async function synthesizeForTier(body, locale) {
   return synthesized ? { ...synthesized, provider: "google-chirp3-hd-" } : null;
 }
 
+// ── 🌍 [OTHER-LANG] Languages outside the fixed table (2026-11-10) ─────────
+// The app sends an ISO code (e.g. "th", "tr", "fil") for a "Other" chat
+// language. The voice is looked up in Google's live voice list, so a language
+// Google adds later works without a gateway change. Only when Google has no
+// voice for it does the request fall through to the OpenAI route.
+const GOOGLE_VOICES_ENDPOINT = "https://texttospeech.googleapis.com/v1/voices";
+const GOOGLE_VOICE_LIST_TTL_MS = 24 * 60 * 60 * 1000;
+const voiceListCache = { at: 0, voices: null, pending: null };
+
+async function googleVoiceList() {
+  const now = Date.now();
+  if (voiceListCache.voices && now - voiceListCache.at < GOOGLE_VOICE_LIST_TTL_MS) {
+    return voiceListCache.voices;
+  }
+  if (!voiceListCache.pending) {
+    voiceListCache.pending = (async () => {
+      const client = await googleAuth.getClient();
+      const response = await client.request({ url: GOOGLE_VOICES_ENDPOINT, method: "GET" });
+      const voices = (response && response.data && response.data.voices) || [];
+      voiceListCache.voices = voices;
+      voiceListCache.at = Date.now();
+      return voices;
+    })().finally(() => { voiceListCache.pending = null; });
+  }
+  return voiceListCache.pending;
+}
+
+// A bare ISO code that the fixed table does not cover. null otherwise.
+function dynamicLanguageCode(body) {
+  if (!body || typeof body !== "object") return null;
+  if (String(body.instructions || "").trim()) return null;
+  if (!requestedAudioFormat(body)) return null;
+  const code = String(body.language || "").trim().toLowerCase();
+  if (!/^[a-z]{2,3}$/.test(code)) return null;
+  if (CHIRP_LOCALES.has(code)) return null;
+  return code;
+}
+
+function voiceFamily(name) {
+  if (name.includes("-Chirp3-HD-")) return "chirp";
+  if (name.includes("-Wavenet-")) return "wavenet";
+  if (name.includes("-Neural2-")) return "neural2";
+  if (name.includes("-Standard-")) return "standard";
+  return null;
+}
+
+// Picks one Google voice for [code]. Premium prefers Chirp 3 HD, basic prefers
+// WaveNet; each falls back to whatever the language has. Gender follows the
+// app's voice id, the same as the fixed table.
+function pickGoogleVoice(voices, code, tier, gender) {
+  const order = tier === "basic"
+    ? ["wavenet", "standard", "neural2", "chirp"]
+    : ["chirp", "wavenet", "neural2", "standard"];
+  const wanted = gender === "male" ? "MALE" : "FEMALE";
+  const matches = (voices || []).map(v => {
+    const locale = (v.languageCodes || []).find(lc =>
+      lc.toLowerCase() === code || lc.toLowerCase().startsWith(code + "-"));
+    const family = voiceFamily(String(v.name || ""));
+    return locale && family ? { locale, name: v.name, family, gender: v.ssmlGender } : null;
+  }).filter(Boolean);
+  for (const family of order) {
+    const pool = matches.filter(m => m.family === family)
+      .sort((a, b) => a.locale.localeCompare(b.locale) || a.name.localeCompare(b.name));
+    if (pool.length === 0) continue;
+    const locale = pool[0].locale;
+    const sameLocale = pool.filter(m => m.locale === locale);
+    if (family === "chirp") {
+      const preferred = locale + "-Chirp3-HD-" +
+        (gender === "male" ? CHIRP_MALE_VOICE : CHIRP_FEMALE_VOICE);
+      const exact = sameLocale.find(m => m.name === preferred);
+      if (exact) return exact;
+    }
+    return sameLocale.find(m => m.gender === wanted) || sameLocale[0];
+  }
+  return null;
+}
+
+async function tryProxyDynamicGoogleSpeech(req, res, body, code) {
+  try {
+    const voices = await googleVoiceList();
+    const picked = pickGoogleVoice(
+      voices, code, voiceTierForRequest(body), chirpGenderForRequest(body));
+    if (!picked) {
+      functions.logger.info("Google TTS has no voice; using OpenAI", { code });
+      return false;
+    }
+    const synthesized = picked.family === "chirp"
+      ? await synthesizeChirp(body, picked.locale, picked.name)
+      : await synthesizeWavenet(body, picked.locale, picked.name);
+    if (!synthesized || synthesized.audio.length === 0) return false;
+    res.status(200);
+    res.setHeader("cache-control", "no-store");
+    res.setHeader("x-stealthvox-tts-provider",
+      "google-" + picked.family + "-" + picked.locale.toLowerCase() + "-" +
+        picked.name.split("-").pop().toLowerCase());
+    res.setHeader("content-type", synthesized.format === "pcm"
+      ? "audio/L16; rate=24000; channels=1"
+      : "audio/mpeg");
+    res.send(synthesized.audio);
+    return true;
+  } catch (error) {
+    functions.logger.error("Google dynamic TTS failed; using OpenAI", {
+      code,
+      status: Number(error && error.statusCode) || 0,
+      message: error && error.message,
+    });
+    return false;
+  }
+}
+
 async function tryProxyChirpSpeech(req, res) {
   const body = req.body && typeof req.body === "object" ? req.body : null;
-  if (!shouldUseChirp(body)) return false;
+  if (!shouldUseChirp(body)) {
+    const code = dynamicLanguageCode(body);
+    return code ? tryProxyDynamicGoogleSpeech(req, res, body, code) : false;
+  }
   const locale = chirpLocaleForRequest(body);
   try {
     const synthesized = await synthesizeForTier(body, locale);
@@ -730,6 +843,8 @@ module.exports = {
   chirpInputWithCommaPauses,
   voiceTierForRequest,
   wavenetVoiceForRequest,
+  dynamicLanguageCode,
+  pickGoogleVoice,
   wavenetSsmlFromMarkup,
   mintAiGatewaySession,
   mintDeepgramToken,
