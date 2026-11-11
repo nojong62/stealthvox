@@ -30,3 +30,6 @@
 - [Speak vs StealthVox (Korean)](https://stealthvox-app.web.app/vs/speak/): curriculum-based drills vs learning from your own words and calls with friends
 - [StealthVox vs HelloTalk (English)](https://stealthvox-app.web.app/en/vs/hellotalk/): language-exchange community vs AI speaking practice and AI-interpreted calls with friends you know
 - [StealthVox vs HelloTalk (Japanese)](https://stealthvox-app.web.app/ja/vs/hellotalk/)
+
+## Pages in other languages
+- [English](https://stealthvox-app.web.app/en/) · [日本語](https://stealthvox-app.web.app/ja/) · [简体中文](https://stealthvox-app.web.app/zh/) · [Español](https://stealthvox-app.web.app/es/) · [Français](https://stealthvox-app.web.app/fr/) · [Deutsch](https://stealthvox-app.web.app/de/) · [हिन्दी](https://stealthvox-app.web.app/hi/) · [Русский](https://stealthvox-app.web.app/ru/) · [Português](https://stealthvox-app.web.app/pt/) · [Italiano](https://stealthvox-app.web.app/it/) · [Nederlands](https://stealthvox-app.web.app/nl/)
