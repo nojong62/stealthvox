@@ -29,6 +29,7 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 // 이름이 겹쳐 `kDebugMode`가 그냥은 안 잡히므로 접두사로 가져온다.
 import 'package:flutter/foundation.dart' as foundation;
 import '/custom_code/services/transcript_text_clean.dart';
+import '/custom_code/services/debug_stt_inject.dart';
 import '/custom_code/services/completion_budget.dart';
 import '/custom_code/services/duo_direct_audio.dart';
 import '/custom_code/services/duo_partner_echo.dart';
@@ -948,6 +949,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 통화 세대값. 방을 나가거나 재입장하면 올라가고, 이전 세대의 늦은
   /// 콜백(전사 완료·릴레이 프레임)은 전부 무시된다.
   int _directGeneration = 0;
+
+  // 🧪 [STT-INJECT] 디버그 빌드에서만 산다. 릴리스면 null.
+  Timer? _debugSttInject;
   bool _directCallActive = false;
   bool _relayConnected = false;
   bool _partnerRelayConnected = false;
@@ -2268,6 +2272,23 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 게스트는 과금 대상이 아니라 소진 신호 자체가 뜨지 않는다).
     StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
     WidgetsBinding.instance.addObserver(this);
+    // 🧪 [STT-INJECT] 직접통화 홍보 녹화용(테스트 브랜치 전용, 디버그 빌드만).
+    //   주입된 한 줄은 실제 전사문과 같은 저장 함수로 들어간다 — History·상대
+    //   채널·통화 후 정리가 진짜 발화와 똑같이 처리한다. 소리가 없으므로
+    //   통화 후 재전사는 이 줄을 건너뛴다(skippedNoPcm).
+    _debugSttInject = startDebugSttInject((text) {
+      final int generation = _directGeneration;
+      if (!_canSaveDirectTranscript(generation)) {
+        _lgDuo('🧪 [STT-INJECT]', 'skipped=no_direct_call');
+        return;
+      }
+      _lgDuo('🧪 [STT-INJECT]', 'direct len=${text.length}');
+      _directSpeechStartedAt = DateTime.now();
+      final save = _handleDirectTranscript(generation, text,
+          'inject-${DateTime.now().microsecondsSinceEpoch}');
+      _directSaves.add(save);
+      unawaited(save.whenComplete(() => _directSaves.remove(save)));
+    });
     // 이전 통화의 말투 문맥이 이번 통화에 섞이지 않게 비운다.
     DuoBrain.clearContext();
     unawaited(_probeDuoNetwork('session_start'));
@@ -2406,6 +2427,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   @override
   void dispose() {
+    _debugSttInject?.cancel();
     DuoBrain.clearContext();
     if (StealthRoomMaster.saveAndExitCurrentMode == _handleAutoSaveAndExit) {
       StealthRoomMaster.saveAndExitCurrentMode = null;
@@ -3605,6 +3627,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                 '(rmsDbfs=${rmsDbfs.toStringAsFixed(1)} '
                 'threshold=${kDuoMinUtteranceRmsDbfs.toStringAsFixed(1)})',
             finalText: '');
+        return;
+      }
+      // 🧪 [STT-INJECT] 홍보 녹화 브랜치: 방 안의 실제 소리(잡담·소음)는
+      //   기록에 넣지 않는다. 대본은 주입으로만 들어간다.
+      if (kDebugSttInjectAvailable) {
+        _lgDuo('🧪 [STT-INJECT]', 'live_transcript_ignored item=$itemId');
         return;
       }
       // 종료 대기가 이 future를 기다린다 — unawaited로 흘려보내면 안 된다.
