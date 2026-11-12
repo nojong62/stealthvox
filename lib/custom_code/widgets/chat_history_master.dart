@@ -611,18 +611,25 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   void initState() {
     super.initState();
     _historyId = widget.historyDoc.id;
-    // 🎙️ [VOICE-TIER] 대화 직후 바로 넘어왔으면 그 대화의 등급을 잇는다.
-    //   History 목록 등 다른 길이면 로비 등급으로 열고, 연습 첫 Start에서
-    //   팝업으로 다시 묻는다. 체험·게스트 미리보기는 무료라 묻지 않는다.
+    // 🎙️ [VOICE-TIER] 등급은 방(대화)마다 한 번 정해 방 문서 `voice_tier`에
+    //   남긴다. 대화 직후 바로 넘어왔으면 그 대화의 등급을 그대로 저장한다.
+    //   목록에서 들어오면 저장된 등급을 쓰고, 없으면 소리가 처음 필요한
+    //   PRACTICE·MY STORY 연습 입구에서 한 번만 묻는다
+    //   ([_ensureStudyVoiceTier]). 고르기 전 글만 보는 동안은 기본 배율이다.
+    //   체험·게스트 미리보기는 무료라 묻지도 저장하지도 않는다.
     final carriedTier = VoiceTierSession.takeHandoff(widget.historyDoc.path);
     if (widget.studyTrial || widget.allowDuoGuestStudyPreview) {
       VoiceTierSession.activate(VoiceTier.premium, reason: 'study_free');
       _voiceTierChosen = true;
+      _roomVoiceTierLoad = Future<void>.value();
     } else if (carriedTier) {
       _voiceTierChosen = true;
+      _roomVoiceTierLoad = Future<void>.value();
+      _saveRoomVoiceTier(VoiceTierSession.active);
       debugPrint('[VOICE-TIER] study carried=${VoiceTierSession.active.name}');
     } else {
-      VoiceTierSession.activate(lobbyVoiceTier, reason: 'study_from_list');
+      VoiceTierSession.activate(VoiceTier.basic, reason: 'study_unchosen');
+      _roomVoiceTierLoad = _loadRoomVoiceTier();
     }
     debugPrint('[HISTORY-LIFECYCLE] init instance=$_instanceId '
         'history=$_historyId');
@@ -656,16 +663,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     //   여기서 따로 부르던 것도 같이 정리한다.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      // 🎙️ [VOICE-TIER] 대화에서 바로 넘어온 게 아니면 입장할 때 한 번 묻는다.
-      //   역할 교환·MY STORY가 같은 등급으로 가야 하므로 방 단위로 정한다.
-      if (!_voiceTierChosen) {
-        final tier = await _askPracticeVoiceTier();
-        if (!mounted) return;
-        _voiceTierChosen = true;
-        if (tier != null && tier != VoiceTierSession.active) {
-          VoiceTierSession.activate(tier, reason: 'study_entry_popup');
-        }
-      }
+      // 🎙️ [VOICE-TIER] 입장 때는 묻지 않는다. 저장된 등급을 읽은 뒤 그
+      //   배율로 시작한다(없으면 기본 배율, 고르는 순간 바뀐다).
+      await _roomVoiceTierLoad;
       if (mounted) {
         startBillingRoom(rate: billingRateFor(VoiceTierSession.active));
       }
@@ -7724,6 +7724,49 @@ RULES — follow exactly:
   /// 팝업으로 묻는다.
   bool _voiceTierChosen = false;
 
+  /// 방 문서에 남긴 등급을 읽는 작업. 입장 과금 시작과 첫 소리 입구가
+  /// 이것을 기다린다 — 읽기 전에 눌러도 다시 묻지 않게.
+  Future<void> _roomVoiceTierLoad = Future<void>.value();
+
+  /// 방 문서의 `voice_tier`가 있으면 그 등급으로 연다.
+  Future<void> _loadRoomVoiceTier() async {
+    try {
+      final snap = await widget.historyDoc.get();
+      final raw = (snap.data() as Map<String, dynamic>?)?['voice_tier'];
+      if (raw is String && raw.isNotEmpty) {
+        final tier = parseVoiceTier(raw);
+        VoiceTierSession.activate(tier, reason: 'study_saved');
+        _voiceTierChosen = true;
+        debugPrint('[VOICE-TIER] study saved=${tier.name}');
+      }
+    } catch (e) {
+      debugPrint('[VOICE-TIER] load $e');
+    }
+  }
+
+  /// 이 방(대화)의 등급을 남긴다. 한 번 정하면 다시 묻지 않는다.
+  void _saveRoomVoiceTier(VoiceTier tier) {
+    unawaited(widget.historyDoc
+        .update(<String, dynamic>{'voice_tier': tier.name}).catchError(
+            (Object e) => debugPrint('[VOICE-TIER] save $e')));
+  }
+
+  /// 🎙️ 소리가 처음 필요한 입구(PRACTICE·MY STORY 연습)에서 부른다.
+  /// 이미 정해졌으면 그대로 true. 아니면 한 번 묻고, 고른 등급을 방에
+  /// 남기고 과금 배율도 그 등급으로 바꾼다.
+  Future<bool> _ensureStudyVoiceTier() async {
+    await _roomVoiceTierLoad;
+    if (_voiceTierChosen) return true;
+    if (!mounted) return false;
+    final tier = await _askPracticeVoiceTier();
+    if (tier == null || !mounted) return false;
+    _voiceTierChosen = true;
+    VoiceTierSession.activate(tier, reason: 'study_first_sound');
+    _saveRoomVoiceTier(tier);
+    BillingTicker.instance.setRate(billingRateFor(tier));
+    return true;
+  }
+
   /// 연습 음성 등급을 묻는다. 닫으면 null(Start 취소).
   Future<VoiceTier?> _askPracticeVoiceTier() {
     final copy = _surfaceCopy;
@@ -8601,12 +8644,14 @@ RULES — follow exactly:
   // ══════════════════════════════════════════════════════════════════
 
   /// 🔄 PRACTICE — 역할 교환 대화 연습. 재료는 진입할 때 이미 실려 있다.
-  void _openPracticeStudy() {
+  Future<void> _openPracticeStudy() async {
     if (!_guardPaidStudy()) return;
     if (_tutorLines.isEmpty) {
       _showRoomEntryToast('연습할 대화가 없습니다');
       return;
     }
+    // 🎙️ 소리가 처음 필요한 자리 — 등급이 아직이면 여기서 한 번 묻는다.
+    if (!await _ensureStudyVoiceTier()) return;
     _resumeHistoryFromUserAction();
     // 다시 들어올 때마다 새 회차다. 지난 회차의 녹음을 들고 시작하면 방금
     // 말한 것처럼 보인다. 재료(`_tutorLines`)는 그대로 두고 흔적만 지운다.
@@ -8643,6 +8688,9 @@ RULES — follow exactly:
       await _ensureMySpeech();
       return;
     }
+    if (!mounted) return;
+    // 🎙️ 글은 소리가 없다. 연습(에코잉·쉐도잉)으로 들어가는 이때 묻는다.
+    if (!await _ensureStudyVoiceTier()) return;
     if (!mounted) return;
     _openSpeechStage(SentenceVariant.mySpeech);
   }
