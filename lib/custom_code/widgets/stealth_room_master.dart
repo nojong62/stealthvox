@@ -371,10 +371,17 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   ///   새로 정하고, 모드 위젯 인자로 넘긴다(`free_talk.dart`).
   bool _freeTalkRoom = false;
 
-  Future<void> _enterCircleTalk(String description) async {
+  /// 🗣️ "내가 할 말이 있어"로 들어간 방인가. 서클 얘기 대신 유저가 먼저
+  ///   말을 꺼내고 AI는 들어 주는 친구가 된다(AI 첫 마디 없음).
+  bool _circleUserOpens = false;
+
+  Future<void> _enterCircleTalk(String description,
+      {bool userOpens = false}) async {
     // 설정 화면을 열어 둔 사이에 시간이 바닥날 수 있다(다른 기기에서 소진 등).
     // 실제로 과금이 시작되는 이 문에서 한 번 더 본다.
     if (!guardBillingEntry(context)) return;
+    // 서클 이름 없이 들어간다. 방 이름·요약 문맥에는 버튼 글자가 서클 자리에 선다.
+    if (userOpens) description = _setupCopy['circleMyTalk'];
     final clean = description.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (clean.isEmpty) {
       ScaffoldMessenger.of(
@@ -390,6 +397,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       '[FIRST-SPEECH] event=MIC_INPUT at=${_circleMicInputAt!.toIso8601String()} deltaMs=0',
     );
     setState(() {
+      _circleUserOpens = userOpens;
       _selectedCircleDescription =
           clean.length > 200 ? clean.substring(0, 200) : clean;
       _circleSetupOpen = false;
@@ -1262,6 +1270,7 @@ Return ONLY valid JSON: {"name":"..."}.
         micInputAt: _circleMicInputAt,
         circleDescription: _selectedCircleDescription ?? '편안한 일상 대화 커뮤니티',
         freeTalk: _freeTalkRoom,
+        userOpens: _circleUserOpens,
       );
     }
     if (_currentMode == 1) {
@@ -1767,6 +1776,38 @@ Return ONLY valid JSON: {"name":"..."}.
     );
   }
 
+  /// 설정 화면의 알약 버튼. 기본 추천 알약과 같은 모양이다.
+  Widget _setupPillButton({
+    required Color accent,
+    required String label,
+    required VoidCallback? onPressed,
+    bool loading = false,
+  }) {
+    return OutlinedButton(
+      onPressed: loading ? null : onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: accent,
+        side: BorderSide(color: accent, width: 1.4),
+        shape: const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
+      ),
+      child: loading
+          ? SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: accent),
+            )
+          : Text(
+              label,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.4,
+              ),
+            ),
+    );
+  }
+
   Widget _buildScenarioSetup() {
     const accent = Color(0xFF16A34A);
     final copy = _setupCopy;
@@ -1808,6 +1849,25 @@ Return ONLY valid JSON: {"name":"..."}.
       recommendLabel: copy['circleRecommend'],
       recommending: _isRecommendingCircle,
       onRecommend: _recommendCircle,
+      // 서클 추천 옆에 "내가 할 말이 있어"를 나란히 둔다. 누르면 서클 없이
+      // 바로 들어가 유저가 먼저 말한다.
+      actionArea: Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        children: [
+          _setupPillButton(
+            accent: accent,
+            label: copy['circleRecommend'],
+            loading: _isRecommendingCircle,
+            onPressed: _recommendCircle,
+          ),
+          _setupPillButton(
+            accent: accent,
+            label: copy['circleMyTalk'],
+            onPressed: () => _enterCircleTalk('', userOpens: true),
+          ),
+        ],
+      ),
       fields: [
         _setupField(
             _circleController, accent, copy['circle'], copy['circleHint']),

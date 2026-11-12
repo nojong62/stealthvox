@@ -211,6 +211,8 @@
     "circleStart": "[\"서클 대화 시작\"]",
     "circleRecommendError": "[\"서클을 추천하지 못했습니다. 다시 눌러 주세요.\"]",
     "circleRequired": "[\"참여할 서클을 입력해 주세요.\"]",
+    "circleMyTalk": "[\"내가 할 말이 있어\"]",
+    "circleMyTalkHint": "[\"먼저 말씀해 주세요. 제가 듣고 있을게요.\"]",
     "scenarioTopic": "[\"시나리오 주제\"]",
     "shortsTopic": "[\"쇼츠 주제\"]",
     "circleTopic": "[\"서클 주제\"]",
