@@ -67,6 +67,7 @@ import '/custom_code/services/duo_final_transcription.dart';
 import '/custom_code/services/duo_final_transcription_runner.dart';
 import '/custom_code/services/duo_canonical.dart';
 import '/custom_code/services/study_access.dart';
+import '/custom_code/services/debug_audio_inject.dart'; // 🧪 테스트 브랜치 전용
 import 'package:url_launcher/url_launcher.dart'; // 쇼츠 방 출처 링크
 import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate, pcm16DurationMs, pcm16ToWav;
@@ -363,6 +364,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   int _autoVadElapsedTicks = 0;
   bool _autoVadPollBusy = false;
   bool _hasSpoken = false;
+  String? _debugInjectedPath; // 🧪 [AUDIO-INJECT]
+  int _debugInjectTicksLeft = 0; // 🧪 주입 소리가 "말하는 중"인 틱 수
 
   // The phone mic is used when Bluetooth SCO management is disabled. The old
   // -25 dBFS threshold could miss normal speech when the phone was farther away.
@@ -2564,8 +2567,20 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           }
 
           _autoVadElapsedTicks++;
+          // 🧪 [AUDIO-INJECT] 주입 WAV가 오면 그 길이만큼 말한 것으로 친다.
+          if (kDebugAudioInjectAvailable &&
+              _debugInjectedPath == null &&
+              _autoVadElapsedTicks % 3 == 0) {
+            final injected = await takeDebugInjectedAudio();
+            if (injected != null) {
+              _debugInjectedPath = injected.path;
+              _debugInjectTicksLeft = (injected.durationMs / 100).ceil();
+            }
+          }
+          final injecting = _debugInjectTicksLeft > 0;
+          if (injecting) _debugInjectTicksLeft--;
           final amp = await appAudioRecorder.getAmplitude();
-          if (amp.current > _turnPracticeSpeechDbfs) {
+          if (injecting || amp.current > _turnPracticeSpeechDbfs) {
             _hasSpoken = true;
             _silenceCounter = 0;
           } else {
@@ -2605,6 +2620,11 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       path = await appAudioRecorder.stop();
     } catch (e) {
       debugPrint('[turnPracticeVAD] stop failed: $e');
+    }
+    if (_debugInjectedPath != null) {
+      path = _debugInjectedPath; // 🧪 녹음 대신 주입 소리를 전사로
+      _debugInjectedPath = null;
+      _debugInjectTicksLeft = 0;
     }
     BillingTicker.instance.resumeFromActivity('history_practice_stt_result');
     if (mounted)
