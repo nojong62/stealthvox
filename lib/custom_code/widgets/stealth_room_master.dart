@@ -350,9 +350,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     // 다 채워 넣은 뒤에 되돌려보내는 일이 없게 한다.
     if (!guardBillingEntry(context)) return;
     if (newMode == 2) {
-      setState(() => _circleSetupOpen = true);
-      // 비어 있으면 첫 제안을 미리 받아 둔다. (Scenario Talk과 같은 규칙)
-      if (_circleController.text.trim().isEmpty) _recommendCircle();
+      unawaited(_chooseCircleStart());
       return;
     }
     if (newMode == 3) {
@@ -365,6 +363,77 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     setState(() {
       _currentMode = newMode;
     });
+  }
+
+  /// 🗣️ 서클톡 카드를 누르면 먼저 시작 방식을 고른다.
+  ///   · 서클 추천 → 지금까지의 설정 화면(추천 + 시작 버튼)
+  ///   · 내가 할 말이 있어 → 서클 없이 바로 대화방, 유저가 먼저 말한다
+  ///   창을 닫으면 대화 모드 화면에 그대로 남는다.
+  Future<void> _chooseCircleStart() async {
+    const accent = Color(0xFF9333EA);
+    final copy = _setupCopy;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF17171A),
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                copy['circleStartChoiceTitle'],
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _buildFreeTalkChoice(
+                accent: accent,
+                highlighted: true,
+                title: copy['circleRecommend'],
+                desc: copy['circleRecommendDesc'],
+                onTap: () => Navigator.pop(sheetContext, 'recommend'),
+              ),
+              const SizedBox(height: 10),
+              _buildFreeTalkChoice(
+                accent: accent,
+                highlighted: true,
+                title: copy['circleMyTalk'],
+                desc: copy['circleMyTalkDesc'],
+                onTap: () => Navigator.pop(sheetContext, 'my_talk'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'my_talk') {
+      await _enterCircleTalk('', userOpens: true);
+      return;
+    }
+    setState(() => _circleSetupOpen = true);
+    // 비어 있으면 첫 제안을 미리 받아 둔다. (Scenario Talk과 같은 규칙)
+    if (_circleController.text.trim().isEmpty) _recommendCircle();
   }
 
   /// 🗣️ 지금 들어가는 방이 Free Talk인가. 들어갈 때마다 [_askFreeTalk]로
@@ -1776,38 +1845,6 @@ Return ONLY valid JSON: {"name":"..."}.
     );
   }
 
-  /// 설정 화면의 알약 버튼. 기본 추천 알약과 같은 모양이다.
-  Widget _setupPillButton({
-    required Color accent,
-    required String label,
-    required VoidCallback? onPressed,
-    bool loading = false,
-  }) {
-    return OutlinedButton(
-      onPressed: loading ? null : onPressed,
-      style: OutlinedButton.styleFrom(
-        foregroundColor: accent,
-        side: BorderSide(color: accent, width: 1.4),
-        shape: const StadiumBorder(),
-        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
-      ),
-      child: loading
-          ? SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2, color: accent),
-            )
-          : Text(
-              label,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.4,
-              ),
-            ),
-    );
-  }
-
   Widget _buildScenarioSetup() {
     const accent = Color(0xFF16A34A);
     final copy = _setupCopy;
@@ -1849,25 +1886,6 @@ Return ONLY valid JSON: {"name":"..."}.
       recommendLabel: copy['circleRecommend'],
       recommending: _isRecommendingCircle,
       onRecommend: _recommendCircle,
-      // 서클 추천 옆에 "내가 할 말이 있어"를 나란히 둔다. 누르면 서클 없이
-      // 바로 들어가 유저가 먼저 말한다.
-      actionArea: Wrap(
-        spacing: 10,
-        runSpacing: 10,
-        children: [
-          _setupPillButton(
-            accent: accent,
-            label: copy['circleRecommend'],
-            loading: _isRecommendingCircle,
-            onPressed: _recommendCircle,
-          ),
-          _setupPillButton(
-            accent: accent,
-            label: copy['circleMyTalk'],
-            onPressed: () => _enterCircleTalk('', userOpens: true),
-          ),
-        ],
-      ),
       fields: [
         _setupField(
             _circleController, accent, copy['circle'], copy['circleHint']),
