@@ -9,8 +9,10 @@
 //       cp /data/local/tmp/stt_inject.wav app_flutter/stt_inject.wav
 //
 // 릴리스에는 없다 — 판정은 [kDebugAudioInjectAvailable] 한 곳이다.
+import 'dart:async';
 import 'dart:io';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -43,9 +45,23 @@ Future<DebugInjectedAudio?> takeDebugInjectedAudio() async {
     final dst = '${tmp.path}/inject_${DateTime.now().millisecondsSinceEpoch}.wav';
     await File(dst).writeAsBytes(bytes);
     debugPrint('🧪 [AUDIO-INJECT] taken ${ms}ms ($sampleRate Hz)');
+    // 영상용: 전사로 보내는 것과 같은 소리를 폰 스피커로도 낸다(화면 녹화에 담긴다).
+    unawaited(_playThroughSpeaker(dst));
     return DebugInjectedAudio(dst, ms);
   } catch (error) {
     debugPrint('🧪 [AUDIO-INJECT] read failed: $error');
     return null;
+  }
+}
+
+Future<void> _playThroughSpeaker(String path) async {
+  final player = AudioPlayer();
+  try {
+    player.onPlayerComplete.listen((_) => player.dispose());
+    await player.play(DeviceFileSource(path));
+    debugPrint('🧪 [AUDIO-INJECT] speaker playback started');
+  } catch (error) {
+    debugPrint('🧪 [AUDIO-INJECT] speaker playback failed: $error');
+    await player.dispose();
   }
 }
