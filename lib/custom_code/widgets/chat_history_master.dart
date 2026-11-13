@@ -7122,6 +7122,8 @@ RULES — follow exactly:
       return;
     }
     _setP3Stage(P3Stage.fullShadowRecord);
+    // 🧪 [AUDIO-INJECT] AI와 동시에 내 목소리 WAV를 낸다(영상용).
+    final debugInjected = await takeDebugInjectedAudio();
     await _playP3Pcm(pcm, generation);
     if (!_p3Alive(generation)) {
       await _stopP3Recording();
@@ -7132,7 +7134,8 @@ RULES — follow exactly:
       await _stopP3Recording();
       return;
     }
-    final recorded = await _stopP3Recording();
+    var recorded = await _stopP3Recording();
+    if (debugInjected != null) recorded = debugInjected.path;
     if (!_p3Alive(generation)) return;
     final old = _p3ShadowPath;
     if (old != null && old != (recorded ?? path)) _deleteP3File(old);
@@ -7279,6 +7282,8 @@ RULES — follow exactly:
     int elapsedTicks = 0;
     final int silentLimit = silenceMs ~/ 100;
     final int giveUpLimit = noSpeechMs ~/ 100;
+    String? debugInjectedPath; // 🧪 [AUDIO-INJECT]
+    int debugInjectTicks = 0;
     _p3SilenceTimer?.cancel();
     _p3SilenceTimer =
         Timer.periodic(const Duration(milliseconds: 100), (timer) async {
@@ -7292,8 +7297,20 @@ RULES — follow exactly:
           return;
         }
         elapsedTicks++;
+        // 🧪 [AUDIO-INJECT] 주입 WAV가 오면 그 길이만큼 말한 것으로 친다.
+        if (kDebugAudioInjectAvailable &&
+            debugInjectedPath == null &&
+            elapsedTicks % 3 == 0) {
+          final injected = await takeDebugInjectedAudio();
+          if (injected != null) {
+            debugInjectedPath = injected.path;
+            debugInjectTicks = (injected.durationMs / 100).ceil();
+          }
+        }
+        final bool injecting = debugInjectTicks > 0;
+        if (injecting) debugInjectTicks--;
         final amp = await appAudioRecorder.getAmplitude();
-        if (amp.current > -25.0) {
+        if (injecting || amp.current > -25.0) {
           spoke = true;
           silentTicks = 0;
         } else {
@@ -7303,7 +7320,8 @@ RULES — follow exactly:
             spoke ? silentTicks >= silentLimit : elapsedTicks >= giveUpLimit;
         if (done) {
           timer.cancel();
-          final path = await _stopP3Recording();
+          var path = await _stopP3Recording();
+          if (debugInjectedPath != null) path = debugInjectedPath;
           if (!_p3Alive(generation)) return;
           onDone(path, spoke);
         }
