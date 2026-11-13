@@ -73,7 +73,11 @@ void playDebugInjectedAudio(String path) {
 }
 
 /// WAV(PCM16)를 읽어 24kHz 모노 PCM16 바이트로 바꾼다. 통역 마이크 경로가 이 형식이다.
-Future<Uint8List?> readDebugWavAsPcm24k(String path) async {
+Future<Uint8List?> readDebugWavAsPcm24k(String path) =>
+    readDebugWavAsPcm(path, 24000);
+
+/// WAV(PCM16)를 읽어 [outRate] 모노 PCM16 바이트로 바꾼다.
+Future<Uint8List?> readDebugWavAsPcm(String path, int outRate) async {
   if (!kDebugAudioInjectAvailable) return null;
   try {
     final bytes = await File(path).readAsBytes();
@@ -88,7 +92,6 @@ Future<Uint8List?> readDebugWavAsPcm24k(String path) async {
     for (var i = 0; i < frames; i++) {
       src[i] = h.getInt16(44 + i * 2 * channels, Endian.little).toDouble();
     }
-    const outRate = 24000;
     final outLen = (frames * outRate / rate).floor();
     final out = Uint8List(outLen * 2);
     final ob = ByteData.sublistView(out);
@@ -104,5 +107,35 @@ Future<Uint8List?> readDebugWavAsPcm24k(String path) async {
   } catch (error) {
     debugPrint('🧪 [AUDIO-INJECT] wav->pcm24k failed: $error');
     return null;
+  }
+}
+
+/// PCM을 100ms 조각으로 실시간 속도로 [sink]에 흘린다. 끝에 [tailMs] 무음을 붙인다
+/// (서버 VAD가 발화 끝을 알아야 한다). [stillAlive]가 false가 되면 멈춘다.
+Future<void> feedDebugPcm(
+  Uint8List pcm,
+  int sampleRate,
+  void Function(Uint8List chunk) sink, {
+  bool Function()? stillAlive,
+  int tailMs = 2000,
+}) async {
+  if (!kDebugAudioInjectAvailable) return;
+  final int chunkBytes = (sampleRate * 2 / 10).round(); // 100ms
+  final int tailChunks = (tailMs / 100).ceil();
+  final clock = Stopwatch()..start();
+  var sent = 0;
+  for (var o = 0; o < pcm.length + tailChunks * chunkBytes; o += chunkBytes) {
+    if (stillAlive != null && !stillAlive()) break;
+    final Uint8List chunk;
+    if (o < pcm.length) {
+      final end = o + chunkBytes < pcm.length ? o + chunkBytes : pcm.length;
+      chunk = Uint8List.sublistView(pcm, o, end);
+    } else {
+      chunk = Uint8List(chunkBytes);
+    }
+    sink(chunk);
+    sent++;
+    final waitMs = sent * 100 - clock.elapsedMilliseconds;
+    if (waitMs > 0) await Future.delayed(Duration(milliseconds: waitMs));
   }
 }

@@ -20,6 +20,7 @@ import 'package:record/record.dart';
 import 'mic_record_config.dart';
 
 import 'audio_silence_analyzer.dart';
+import 'debug_audio_inject.dart'; // 🧪 테스트 브랜치 전용
 import 'breath_segment.dart';
 
 enum BreathEchoPhase {
@@ -168,6 +169,7 @@ class BreathEchoingEngine {
   AudioPlayer? _player;
   StreamSubscription<Uint8List>? _micSub;
   Timer? _pollTimer;
+  Timer? _debugTimer; // 🧪 [AUDIO-INJECT]
   Completer<void>? _captureDone;
 
   bool get isRunning => _running;
@@ -326,17 +328,47 @@ class BreathEchoingEngine {
       // 기기에 따라 1초 넘게 조용할 수 있는데, 그걸 정지로 읽으면 첫 호흡을
       // 통째로 건너뛴다.
       bool gotAnyChunk = false;
+      // 🧪 [AUDIO-INJECT] 주입 중에는 실제 마이크 조각을 버린다.
+      bool debugInjecting = false;
+      void handleMic(Uint8List data) {
+        gotAnyChunk = true;
+        lastChunkAt = DateTime.now();
+        capture.add(data);
+        meter.add(data);
+        if (meter.hasSpoken && !announcedSpeaking) {
+          announcedSpeaking = true;
+          onPhase(BreathEchoPhase.userSpeaking, _index, _segments.length);
+        }
+      }
+
+      if (kDebugAudioInjectAvailable) {
+        _debugTimer?.cancel();
+        _debugTimer =
+            Timer.periodic(const Duration(milliseconds: 300), (_) async {
+          if (debugInjecting || !_alive(generation)) return;
+          final injected = await takeDebugInjectedAudio(playNow: false);
+          if (injected == null) return;
+          final pcm = await readDebugWavAsPcm(
+              injected.path, analysisConfig.sampleRate);
+          if (pcm == null || pcm.isEmpty) return;
+          debugInjecting = true;
+          debugPrint('[BREATH-ECHO] 🧪 inject breath=$_index '
+              'ms=${injected.durationMs}');
+          playDebugInjectedAudio(injected.path);
+          try {
+            await feedDebugPcm(pcm, analysisConfig.sampleRate, (c) {
+              if (_alive(generation)) handleMic(c);
+            }, stillAlive: () => _alive(generation), tailMs: 1800);
+          } finally {
+            debugInjecting = false;
+          }
+        });
+      }
       _micSub = stream.listen(
         (data) {
           if (!_alive(generation)) return;
-          gotAnyChunk = true;
-          lastChunkAt = DateTime.now();
-          capture.add(data);
-          meter.add(data);
-          if (meter.hasSpoken && !announcedSpeaking) {
-            announcedSpeaking = true;
-            onPhase(BreathEchoPhase.userSpeaking, _index, _segments.length);
-          }
+          if (kDebugAudioInjectAvailable && debugInjecting) return;
+          handleMic(data);
         },
         onError: (Object e) {
           debugPrint('[BREATH-ECHO] mic $e');
@@ -413,6 +445,8 @@ class BreathEchoingEngine {
   }
 
   Future<void> _stopCapture() async {
+    _debugTimer?.cancel();
+    _debugTimer = null;
     _pollTimer?.cancel();
     _pollTimer = null;
     await _micSub?.cancel();

@@ -1,5 +1,6 @@
 import '/custom_code/services/secure_ai_gateway.dart';
 // Automatic FlutterFlow imports
+import '../services/debug_audio_inject.dart'; // 🧪 테스트 브랜치 전용
 import '/backend/backend.dart';
 import '/backend/schema/structs/index.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -6439,6 +6440,7 @@ class PreparedAudioCapture {
   final StreamSubscription<Uint8List> _sourceSubscription;
   final StreamController<Uint8List> _controller;
   bool _stopped = false;
+  Timer? _debugTimer; // 🧪 [AUDIO-INJECT]
 
   /// [echoCancel] / [noiseSuppress]는 **기본이 꺼짐**이다. Circle Talk은
   /// 이대로여야 한다 — echoCancel을 켜면 AI 목소리가 스피커로 나가는 동안
@@ -6471,9 +6473,36 @@ class PreparedAudioCapture {
     final controller = StreamController<Uint8List>.broadcast(sync: true);
     bool firstFrameSeen = false;
     late final StreamSubscription<Uint8List> sourceSubscription;
+    // 🧪 [AUDIO-INJECT] 주입 중에는 실제 마이크 조각을 버린다(소리가 섞이지 않게).
+    bool debugInjecting = false;
+    Timer? debugTimer;
+    if (kDebugAudioInjectAvailable) {
+      debugTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+        if (debugInjecting || controller.isClosed || !controller.hasListener) {
+          return;
+        }
+        final injected = await takeDebugInjectedAudio(playNow: false);
+        if (injected == null) return;
+        final pcm =
+            await readDebugWavAsPcm(injected.path, kStealthVoxSttSampleRate);
+        if (pcm == null || pcm.isEmpty) return;
+        debugInjecting = true;
+        debugPrint('🧪 [AUDIO-INJECT] circle_start ms=${injected.durationMs}');
+        playDebugInjectedAudio(injected.path);
+        try {
+          await feedDebugPcm(pcm, kStealthVoxSttSampleRate, (c) {
+            if (!controller.isClosed) controller.add(c);
+          }, stillAlive: () => !controller.isClosed);
+        } finally {
+          debugInjecting = false;
+          debugPrint('🧪 [AUDIO-INJECT] circle_done');
+        }
+      });
+    }
     sourceSubscription = source.listen(
       (data) {
         if (data.isEmpty || controller.isClosed) return;
+        if (kDebugAudioInjectAvailable && debugInjecting) return;
         final bytes = data;
         if (!firstFrameSeen) {
           firstFrameSeen = true;
@@ -6486,17 +6515,20 @@ class PreparedAudioCapture {
         if (!controller.isClosed) unawaited(controller.close());
       },
     );
-    return PreparedAudioCapture._(
+    final prepared = PreparedAudioCapture._(
       recorder: recorder,
       stream: controller.stream,
       sourceSubscription: sourceSubscription,
       controller: controller,
     );
+    prepared._debugTimer = debugTimer;
+    return prepared;
   }
 
   Future<void> stop() async {
     if (_stopped) return;
     _stopped = true;
+    _debugTimer?.cancel();
     await _sourceSubscription.cancel();
     if (!_controller.isClosed) unawaited(_controller.close());
     try {
