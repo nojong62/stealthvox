@@ -105,6 +105,7 @@ import '/custom_code/services/system_ui_language.dart';
 import '../services/voice_tier.dart';
 import '../services/duo_billing_policy.dart';
 import '../services/other_chat_language.dart';
+import '../services/debug_audio_inject.dart'; // 🧪 테스트 브랜치 전용
 
 // ============================================================================
 // 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다. **통신 로직 자체가 다르다** —
@@ -1081,6 +1082,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   /// 게이트를 다시 열 예정인 타이머. 재생이 연달아 오면 앞선 예약은 버린다.
   Timer? _interpGateReopenTimer;
+  Timer? _debugAudioInjectTimer; // 🧪 [AUDIO-INJECT]
+  bool _debugInjecting = false; // 🧪 주입 중에는 실제 마이크 조각을 버린다
 
   /// 내 발화 일련번호와 발화 시작 시각. History 순서 복원용이다
   /// (직접 대화의 `_directSeq`/`_directSpeechStartedAt`과 같은 목적).
@@ -2268,6 +2271,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 게스트는 과금 대상이 아니라 소진 신호 자체가 뜨지 않는다).
     StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
     WidgetsBinding.instance.addObserver(this);
+    _startDebugAudioInjectTimer(); // 🧪 디버그 빌드 전용, 릴리스에서는 아무것도 안 한다
     // 이전 통화의 말투 문맥이 이번 통화에 섞이지 않게 비운다.
     DuoBrain.clearContext();
     unawaited(_probeDuoNetwork('session_start'));
@@ -2444,6 +2448,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _interpTts = null;
     _interpPulse.dispose();
     _invitePulse.dispose();
+    _debugAudioInjectTimer?.cancel();
     _cancelInterpRetry('dispose');
     _clearInterpPendingSends('dispose');
     _cancelAudio();
@@ -4721,13 +4726,67 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _enqueueIncoming(payload);
   }
 
+  /// 🧪 [AUDIO-INJECT] 마이크 없이 "소리"를 통역 마이크 경로에 넣는 개발 전용 통로.
+  /// 0.5초마다 `stt_inject.wav`를 본다. 통역이 켜져 있고 게이트가 열려 있을 때만
+  /// 가져가서, 24kHz PCM을 100ms 조각씩 실시간 속도로 [_feedInterpreterPcm]에 넣는다.
+  void _startDebugAudioInjectTimer() {
+    if (!kDebugAudioInjectAvailable) return;
+    _debugAudioInjectTimer =
+        Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      if (_debugInjecting || _isDirectMode || _isExiting || !mounted) return;
+      if (!_interpCaptureLive) return;
+      if (_interpStt?.audioGateOpen != true) return;
+      final injected = await takeDebugInjectedAudio(playNow: false);
+      if (injected == null) return;
+      unawaited(_runDebugAudioInject(injected));
+    });
+  }
+
+  Future<void> _runDebugAudioInject(DebugInjectedAudio injected) async {
+    final pcm = await readDebugWavAsPcm24k(injected.path);
+    if (pcm == null || pcm.isEmpty) return;
+    final generation = _interpGeneration;
+    _debugInjecting = true;
+    _lgDuo('🧪 [AUDIO-INJECT]',
+        'duo_start ms=${injected.durationMs} gen=$generation');
+    playDebugInjectedAudio(injected.path);
+    const int chunkBytes = 4800; // 24kHz mono PCM16 = 100ms
+    const int tailChunks = 20; // 끝에 무음 2초 — 서버가 발화 끝을 알아야 한다
+    final clock = Stopwatch()..start();
+    var sent = 0;
+    try {
+      for (var o = 0; o < pcm.length + tailChunks * chunkBytes; o += chunkBytes) {
+        if (!mounted || _isExiting || generation != _interpGeneration) break;
+        final Uint8List chunk;
+        if (o < pcm.length) {
+          final end = o + chunkBytes < pcm.length ? o + chunkBytes : pcm.length;
+          chunk = Uint8List.sublistView(pcm, o, end);
+        } else {
+          chunk = Uint8List(chunkBytes);
+        }
+        _feedInterpreterPcm(chunk, generation, injected: true);
+        sent++;
+        final waitMs = sent * 100 - clock.elapsedMilliseconds;
+        if (waitMs > 0) await Future.delayed(Duration(milliseconds: waitMs));
+      }
+      // 스피커로 나간 소리의 꼬리가 마이크로 돌아오는 것을 잠깐 더 막는다.
+      await Future.delayed(const Duration(milliseconds: 400));
+    } finally {
+      _debugInjecting = false;
+      _lgDuo('🧪 [AUDIO-INJECT]', 'duo_done chunks=$sent');
+    }
+  }
+
   /// 🎙️ 마이크 조각 하나를 전사 갈래로 흘린다.
   ///
   /// **두 마이크 경로가 공유한다** — `record`(기존)든 WebRTC 탭(새것)이든
   /// 조각이 도착한 뒤의 처리는 한 글자도 달라선 안 된다. 그래야 실기기에서
   /// 견줄 때 "마이크만 바뀌었다"가 참이 된다.
-  void _feedInterpreterPcm(Uint8List bytes, int generation) {
+  void _feedInterpreterPcm(Uint8List bytes, int generation,
+      {bool injected = false}) {
     if (bytes.isEmpty || generation != _interpGeneration) return;
+    // 🧪 [AUDIO-INJECT] 주입 중에는 실제 마이크 조각을 버린다(소리가 섞이지 않게).
+    if (kDebugAudioInjectAvailable && _debugInjecting && !injected) return;
     final stt = _interpStt;
     // 🎙️ [SOCKET-PCM] **문보다 앞에 선다.** 소켓 갈래는 PCM을 앱에 안 남기므로
     //   여기서 담지 않으면 그 발화의 소리가 어디에도 없다. 문이 닫혀 있어도

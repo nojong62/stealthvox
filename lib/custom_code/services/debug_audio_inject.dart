@@ -25,7 +25,7 @@ class DebugInjectedAudio {
 }
 
 /// 주입 WAV가 있으면 임시 폴더로 옮겨 돌려준다. 없으면 null. 릴리스면 항상 null.
-Future<DebugInjectedAudio?> takeDebugInjectedAudio() async {
+Future<DebugInjectedAudio?> takeDebugInjectedAudio({bool playNow = true}) async {
   if (!kDebugAudioInjectAvailable) return null;
   try {
     final docs = await getApplicationDocumentsDirectory();
@@ -46,7 +46,7 @@ Future<DebugInjectedAudio?> takeDebugInjectedAudio() async {
     await File(dst).writeAsBytes(bytes);
     debugPrint('🧪 [AUDIO-INJECT] taken ${ms}ms ($sampleRate Hz)');
     // 영상용: 전사로 보내는 것과 같은 소리를 폰 스피커로도 낸다(화면 녹화에 담긴다).
-    unawaited(_playThroughSpeaker(dst));
+    if (playNow) unawaited(_playThroughSpeaker(dst));
     return DebugInjectedAudio(dst, ms);
   } catch (error) {
     debugPrint('🧪 [AUDIO-INJECT] read failed: $error');
@@ -63,5 +63,46 @@ Future<void> _playThroughSpeaker(String path) async {
   } catch (error) {
     debugPrint('🧪 [AUDIO-INJECT] speaker playback failed: $error');
     await player.dispose();
+  }
+}
+
+/// 주입한 소리를 스피커로 낸다(영상 녹화에 담긴다).
+void playDebugInjectedAudio(String path) {
+  if (!kDebugAudioInjectAvailable) return;
+  unawaited(_playThroughSpeaker(path));
+}
+
+/// WAV(PCM16)를 읽어 24kHz 모노 PCM16 바이트로 바꾼다. 통역 마이크 경로가 이 형식이다.
+Future<Uint8List?> readDebugWavAsPcm24k(String path) async {
+  if (!kDebugAudioInjectAvailable) return null;
+  try {
+    final bytes = await File(path).readAsBytes();
+    if (bytes.length < 44) return null;
+    final h = ByteData.sublistView(bytes);
+    final channels = h.getUint16(22, Endian.little);
+    final rate = h.getUint32(24, Endian.little);
+    final bits = h.getUint16(34, Endian.little);
+    if (bits != 16 || channels < 1 || rate <= 0) return null;
+    final frames = (bytes.length - 44) ~/ (2 * channels);
+    final src = List<double>.filled(frames, 0);
+    for (var i = 0; i < frames; i++) {
+      src[i] = h.getInt16(44 + i * 2 * channels, Endian.little).toDouble();
+    }
+    const outRate = 24000;
+    final outLen = (frames * outRate / rate).floor();
+    final out = Uint8List(outLen * 2);
+    final ob = ByteData.sublistView(out);
+    for (var i = 0; i < outLen; i++) {
+      final pos = i * rate / outRate;
+      final i0 = pos.floor();
+      final i1 = i0 + 1 < frames ? i0 + 1 : i0;
+      final f = pos - i0;
+      final v = (src[i0] * (1 - f) + src[i1] * f).round().clamp(-32768, 32767);
+      ob.setInt16(i * 2, v, Endian.little);
+    }
+    return out;
+  } catch (error) {
+    debugPrint('🧪 [AUDIO-INJECT] wav->pcm24k failed: $error');
+    return null;
   }
 }
