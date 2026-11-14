@@ -29,6 +29,8 @@ const GOOGLE_TTS_ENDPOINT = "https://texttospeech.googleapis.com/v1/text:synthes
 // (male), and History practice sends `google-female` / `google-male`.
 const CHIRP_FEMALE_VOICE = "Leda";
 const CHIRP_MALE_VOICE = "Charon";
+const KO_CHIRP_FEMALE_VOICE = "Achernar";
+const KO_CHIRP_MALE_VOICE = "Puck";
 const CHIRP_LOCALES = new Map([
   ["ko", "ko-KR"], ["korean", "ko-KR"],
   ["en", "en-US"], ["english", "en-US"],
@@ -228,9 +230,12 @@ function chirpGenderForRequest(body) {
 }
 
 function chirpVoiceForRequest(body, locale) {
-  return locale + "-Chirp3-HD-" + (chirpGenderForRequest(body) === "male"
-    ? CHIRP_MALE_VOICE
-    : CHIRP_FEMALE_VOICE);
+  const male = chirpGenderForRequest(body) === "male";
+  // Korean uses its own pair (2026-11-15): Achernar (female) / Puck (male).
+  if (locale === "ko-KR") {
+    return "ko-KR-Chirp3-HD-" + (male ? KO_CHIRP_MALE_VOICE : KO_CHIRP_FEMALE_VOICE);
+  }
+  return locale + "-Chirp3-HD-" + (male ? CHIRP_MALE_VOICE : CHIRP_FEMALE_VOICE);
 }
 
 // "basic" is the only non-default tier. Anything else, including a missing
