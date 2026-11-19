@@ -1,4 +1,5 @@
 import '/custom_code/services/secure_ai_gateway.dart';
+import '/custom_code/services/practice_match.dart';
 // Automatic FlutterFlow imports
 import '/backend/backend.dart';
 import '/backend/schema/structs/index.dart';
@@ -2671,75 +2672,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       });
   }
 
-  String _normalizePracticeMatchText(String text) {
-    var normalized = text
-        .toLowerCase()
-        .replaceAll(RegExp(r"[’`´]"), "'")
-        .replaceAll(RegExp(r"\bi'm\b"), "i am")
-        .replaceAll(RegExp(r"\byou're\b"), "you are")
-        .replaceAll(RegExp(r"\bwe're\b"), "we are")
-        .replaceAll(RegExp(r"\bthey're\b"), "they are")
-        .replaceAll(RegExp(r"\bhe's\b"), "he is")
-        .replaceAll(RegExp(r"\bshe's\b"), "she is")
-        .replaceAll(RegExp(r"\bit's\b"), "it is")
-        .replaceAll(RegExp(r"\bdon't\b"), "do not")
-        .replaceAll(RegExp(r"\bdoesn't\b"), "does not")
-        .replaceAll(RegExp(r"\bdidn't\b"), "did not")
-        .replaceAll(RegExp(r"\bcan't\b"), "cannot")
-        .replaceAll(RegExp(r"\bcannot\b"), "can not")
-        .replaceAll(RegExp(r"\bwon't\b"), "will not")
-        .replaceAll(RegExp(r"\bwouldn't\b"), "would not")
-        .replaceAll(RegExp(r"\bcouldn't\b"), "could not")
-        .replaceAll(RegExp(r"\bshouldn't\b"), "should not")
-        .replaceAll(RegExp(r"\bisn't\b"), "is not")
-        .replaceAll(RegExp(r"\baren't\b"), "are not")
-        .replaceAll(RegExp(r"\bwasn't\b"), "was not")
-        .replaceAll(RegExp(r"\bweren't\b"), "were not")
-        .replaceAll(RegExp(r"\bi've\b"), "i have")
-        .replaceAll(RegExp(r"\byou've\b"), "you have")
-        .replaceAll(RegExp(r"\bi'll\b"), "i will")
-        .replaceAll(RegExp(r"\byou'll\b"), "you will")
-        .replaceAll(RegExp(r"\bi'd\b"), "i would")
-        .replaceAll(RegExp(r"\byou'd\b"), "you would");
-    normalized = normalized.replaceAll(RegExp(r"[^a-z0-9\s]"), " ");
-    return normalized.replaceAll(RegExp(r"\s+"), " ").trim();
-  }
-
-  Set<String> _practiceMatchWords(String text) {
-    const weakWords = {'a', 'the', 'to', 'of', 'in', 'on'};
-    return _normalizePracticeMatchText(text)
-        .split(' ')
-        .where((word) => word.length > 1 && !weakWords.contains(word))
-        .toSet();
-  }
-
-  String _practicePhoneticKey(String word) {
-    return word
-        .replaceAll('th', 't')
-        .replaceAll(RegExp(r'[rl]'), 'l')
-        .replaceAll(RegExp(r'[bv]'), 'b')
-        .replaceAll(RegExp(r'[pf]'), 'p')
-        .replaceAll(RegExp(r'[tds]'), 't')
-        .replaceAll(RegExp(r'[zj]'), 'j');
-  }
-
-  bool _practiceWordsMatch(String target, String spoken) {
-    if (target == spoken) return true;
-    if ((target.length - spoken.length).abs() > 2) return false;
-    return _practicePhoneticKey(target) == _practicePhoneticKey(spoken);
-  }
-
-  double _practiceSimilarity(Set<String> targetWords, Set<String> spokenWords) {
-    if (targetWords.isEmpty || spokenWords.isEmpty) return 0.0;
-    var matched = 0;
-    for (final target in targetWords) {
-      if (spokenWords.any((spoken) => _practiceWordsMatch(target, spoken))) {
-        matched++;
-      }
-    }
-    return matched / targetWords.length;
-  }
-
   Future<void> _playRetryPrompt() async {
     const prompt = '끝까지 다시 읽어 주세요';
     try {
@@ -2780,7 +2712,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       // whisper-1은 2027-02-26 종료 예정이며, 이 호출은 JSON의 text만
       // 소비하므로 gpt-transcribe로 응답 계약을 바꾸지 않고 이전할 수 있다.
       request.fields['model'] = OpenAiTranscribeService.model;
-      request.fields['language'] = 'en';
+      // 역할교환은 배울 언어로 읽는다. 'en' 고정이면 한국어를 영어로 알아들으려 한다.
+      request.fields['language'] = deepgramLanguageCode(_sessionTargetLangName());
       request.fields['prompt'] = targetText;
       request.files.add(await http.MultipartFile.fromPath('file', path));
       final streamed =
@@ -2791,19 +2724,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         final transcript = (jsonDecode(body)['text'] as String? ?? '').trim();
         BillingTicker.instance
             .resumeFromActivity('history_practice_stt_result');
-        final tWords = _practiceMatchWords(targetText);
-        final sWords = _practiceMatchWords(transcript);
-        final similarity = _practiceSimilarity(tWords, sWords);
-        // [READ-THROUGH] 전체를 끝까지 읽었는지 판정
-        // 8단어 미만: 음성 인식되면 통과
-        // 8단어 이상: 60% 이상 매칭 필요
-        final bool pass;
-        if (tWords.length < 8) {
-          pass = transcript.isNotEmpty && sWords.isNotEmpty;
-        } else {
-          pass =
-              transcript.isNotEmpty && sWords.isNotEmpty && similarity >= 0.6;
-        }
+        // [READ-THROUGH] 전체를 끝까지 읽었는지 판정 (글자 체계별 규칙은 practice_match.dart)
+        final bool pass = practiceReadThroughPass(
+            targetText: targetText, transcript: transcript);
         if (pass) {
           _turnPracticeRetryCount = 0;
           // 🆕 [BOX-34] 유저 녹음 경로 캐시
