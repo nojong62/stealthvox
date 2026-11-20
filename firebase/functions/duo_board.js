@@ -401,6 +401,9 @@ exports.claimDuoBoardPost = functions.https.onCall(async (data, context) => {
     }
     const ownerUid = post.get('ownerUid');
     if (ownerUid === uid) throw new functions.https.HttpsError('failed-precondition', '본인 글에는 참여할 수 없습니다.');
+    if (post.get('ownerIsMember') === false && isAnonymousAuth(context)) {
+      throw new functions.https.HttpsError('permission-denied', '비회원 글은 회원만 참여할 수 있습니다.');
+    }
     const previousExpiry = runtime.get('claimExpiresAt');
     if (runtime.get('claimUid') && previousExpiry && previousExpiry.toMillis() > now.toMillis()) {
       throw new functions.https.HttpsError('already-exists', '다른 사용자가 먼저 선택했습니다.');
@@ -482,6 +485,11 @@ exports.requestDuoBoardPost = functions.https.onCall(async (data, context) => {
       throw new functions.https.HttpsError('failed-precondition', '요청을 받을 수 없는 글입니다.');
     }
     if (post.get('ownerIsMember') === false) {
+      // 비회원 글은 회원만 받는다. 비회원끼리는 통화하지 않는다.
+      if (requesterAnonymous) {
+        throw new functions.https.HttpsError('permission-denied',
+            '비회원 글은 회원만 참여할 수 있습니다.', {reason: 'guest_post_members_only'});
+      }
       // 홍보가 끝나면 비회원 글로는 더 연결하지 않는다(이미 올라간 글 포함).
       if (!promo.guestPostsEnabled) throw promoClosedError();
       if (requesterAnonymous) {
@@ -603,6 +611,10 @@ exports.openDuoBoardRequest = functions.https.onCall(async (data, context) => {
       }
       // 수락 순간에 한 번 더 본다(요청 뒤 상한이 찼을 수 있다). 세는 것은
       // 게스트가 실제로 들어온 뒤 `completeDuoBoardPostOnJoin`이 한다.
+      if (room.get('promoGuestRoom') === true && post.get('ownerIsMember') === false &&
+          request.get('requesterAnonymous') === true) {
+        throw new functions.https.HttpsError('failed-precondition', '비회원끼리는 통화할 수 없습니다.');
+      }
       if (room.get('promoGuestRoom') === true) {
         const promo = await readPromoConfig();
         if (!promo.guestPostsEnabled) throw promoClosedError();

@@ -691,6 +691,12 @@ class _DuoBoardSheetState extends State<DuoBoardSheet> {
                   final mine = data['ownerUid'] == uid;
                   final available = data['discoverable'] == true;
                   final isOpenInvitation = data['state'] != 'reserved';
+                  if (!mine &&
+                      !duoBoardPostOwnerIsMember(data) &&
+                      (FirebaseAuth.instance.currentUser?.isAnonymous ?? true)) {
+                    // 비회원 글은 회원만 본다. 비회원끼리는 통화하지 않는다.
+                    return false;
+                  }
                   if (!mine && !duoBoardPostOwnerIsMember(data)) {
                     // 비회원 글은 지금 받을 수 있을 때만 보인다. 꺼진 비회원
                     // 글은 대부분 주인이 떠났거나(기존 계정 로그인 등) 홍보가
