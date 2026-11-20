@@ -37,7 +37,7 @@ class DuoBoardIntroNoticeCopy {
       cancel: '취소',
       openBoard: '게시판 보기',
       promoTitle: '📣 홍보 기간 특별 오픈',
-      promoBody: '지금은 가입하지 않은 비회원끼리도 통화할 수 있습니다. 게시판 아래 \'비회원 초대글 쓰기\'로 누구나 초대글을 올리고, 전 세계 누구나 눌러서 참여할 수 있습니다.\n• 비회원이 올린 초대 대화는 3분까지입니다. 끝나기 30초 전에 알려 드립니다.\n• 초대글은 폰 하나에 하나만 올릴 수 있고, 통화가 끝나면 사라집니다. 다시 올리면 됩니다.\n• 인사와 짧은 자기소개로 시작하고, 상대가 말할 때는 끝까지 기다려 주세요. 통역은 한 사람씩 전합니다.\n• 욕설, 성적인 말, 연락처·SNS 같은 개인정보 요구는 금지입니다. 불쾌한 상대는 통화 중 깃발 버튼으로 신고하세요. 바로 끝나고 다시 연결되지 않습니다.\n• 대화를 공부방에 저장해 연습하려면 통화가 끝난 뒤 회원으로 가입하세요.',
+      promoBody: '지금은 가입하지 않아도 초대글을 올릴 수 있습니다. 게시판 아래 \'비회원 초대글 쓰기\'로 올린 글은 회원에게만 보이고, 회원만 눌러서 참여할 수 있습니다. 비회원끼리는 통화할 수 없습니다. 회원이 올린 초대글에는 비회원도 눌러서 참여할 수 있습니다.\n• 비회원이 올린 초대 대화는 3분까지입니다. 끝나기 30초 전에 알려 드립니다.\n• 초대글은 폰 하나에 하나만 올릴 수 있고, 통화가 끝나면 사라집니다. 다시 올리면 됩니다.\n• 인사와 짧은 자기소개로 시작하고, 상대가 말할 때는 끝까지 기다려 주세요. 통역은 한 사람씩 전합니다.\n• 욕설, 성적인 말, 연락처·SNS 같은 개인정보 요구는 금지입니다. 불쾌한 상대는 통화 중 깃발 버튼으로 신고하세요. 바로 끝나고 다시 연결되지 않습니다.\n• 대화를 공부방에 저장해 연습하려면 통화가 끝난 뒤 회원으로 가입하세요.',
     ),
     'en': DuoBoardIntroNoticeCopy(
       title: 'About the Duo Invite Board',
@@ -49,7 +49,8 @@ class DuoBoardIntroNoticeCopy {
       cancel: 'Cancel',
       openBoard: 'View board',
       promoTitle: '📣 Open to guests during our promotion',
-      promoBody: 'Right now even people without an account can talk to each other. Anyone can post an invitation with \'Write a guest invitation\' at the bottom of the board, and anyone in the world can tap it to join.\n• Calls on guest invitations last up to 3 minutes. We\'ll let you know 30 seconds before the end.\n• One phone can post one invitation. It disappears after the call, and you can post again.\n• Start with a greeting and a short introduction, and let the other person finish speaking. The interpreter passes on one person at a time.\n• No swearing, sexual talk, or asking for contact details or social media. If someone makes you uncomfortable, tap the flag during the call to report them. The call ends and you won\'t be matched again.\n• To save the conversation to your Study Room and practice with it, sign up after the call.',
+      promoBody:
+          'You can post an invitation without signing up for now. Posts made using “Write a guest invitation” at the bottom of the board are visible only to members, and only members can tap to join. Guests can’t call each other. Guests can tap to join invitations posted by members.\n• Calls started from guest invitations last up to 3 minutes. We’ll let you know 30 seconds before the end.\n• Each phone can have one invitation posted at a time. It disappears when the call ends, and you can post again.\n• Start with a greeting and a short introduction, and let the other person finish speaking. The interpreter relays one person at a time.\n• Swearing, sexual talk, and requests for personal information such as contact details or social media are not allowed. If someone makes you uncomfortable, tap the flag during the call to report them. The call will end immediately, and you won’t be connected again.\n• To save the conversation to your Study Room and practice with it, sign up after the call.',
     ),
     'ja': DuoBoardIntroNoticeCopy(
       title: 'Duo招待掲示板のご案内',
@@ -60,7 +61,8 @@ class DuoBoardIntroNoticeCopy {
       cancel: 'キャンセル',
       openBoard: '掲示板を見る',
       promoTitle: '📣 プロモーション期間限定オープン',
-      promoBody: '今は登録していないゲスト同士でも通話できます。掲示板下の「ゲスト招待を書く」で誰でも招待を投稿でき、世界中の誰でもタップして参加できます。\n• ゲストが投稿した招待の会話は3分までです。終了30秒前にお知らせします。\n• 招待は1台のスマホにつき1件まで。通話が終わると消えるので、また投稿できます。\n• あいさつと短い自己紹介から始め、相手が話している間は最後まで待ってください。通訳は1人ずつ伝えます。\n• 暴言、性的な発言、連絡先やSNSなど個人情報を求めることは禁止です。不快な相手は通話中の旗ボタンで通報してください。すぐに終了し、再びつながりません。\n• 会話を学習ルームに保存して練習するには、通話後に会員登録してください。',
+      promoBody:
+          '今は登録しなくても招待を投稿できます。掲示板下の「ゲスト招待を書く」から投稿した招待は会員にのみ表示され、会員だけがタップして参加できます。ゲスト同士では通話できません。会員が投稿した招待には、ゲストもタップして参加できます。\n• ゲストが投稿した招待からの通話は3分までです。終了30秒前にお知らせします。\n• 招待はスマホ1台につき1件まで投稿できます。通話が終わると消えるので、また投稿できます。\n• あいさつと短い自己紹介から始め、相手が話している間は最後まで待ってください。通訳は1人ずつ伝えます。\n• 暴言、性的な発言、連絡先やSNSなどの個人情報を求めることは禁止です。不快な相手は通話中に旗ボタンで通報してください。通話はすぐに終了し、再びつながることはありません。\n• 会話を学習ルームに保存して練習するには、通話後に会員登録してください。',
     ),
     'zh': DuoBoardIntroNoticeCopy(
       title: 'Duo 邀请公告板说明',
@@ -71,7 +73,8 @@ class DuoBoardIntroNoticeCopy {
       cancel: '取消',
       openBoard: '查看公告板',
       promoTitle: '📣 推广期间特别开放',
-      promoBody: '现在未注册的访客之间也可以通话。任何人都可以通过公告板下方的“写访客邀请”发布邀请，全世界任何人都可以点击参加。\n• 访客发布的邀请通话最长3分钟。结束前30秒会提醒您。\n• 每部手机只能发布一条邀请，通话结束后会消失，可以再次发布。\n• 先打招呼并简短自我介绍，对方说话时请耐心听完。口译一次只转达一个人的话。\n• 禁止脏话、性相关言论以及索要联系方式、社交账号等个人信息。遇到让您不适的人，请在通话中点击旗帜按钮举报，通话会立即结束且不会再匹配。\n• 想把对话保存到学习室练习，请在通话结束后注册会员。',
+      promoBody:
+          '现在无需注册也可以发布邀请。通过公告板下方的“写访客邀请”发布的内容仅会员可见，也只有会员可以点击参加。访客之间无法通话。访客可以点击参加会员发布的邀请。\n• 通过访客邀请发起的通话最长为3分钟。结束前30秒会提醒您。\n• 每部手机一次只能发布一条邀请。通话结束后邀请会消失，之后可以再次发布。\n• 先打招呼并简短自我介绍，对方说话时请耐心听完。口译一次只转达一个人的话。\n• 禁止脏话、性相关言论，以及索要联系方式、社交账号等个人信息。遇到让您不适的人，请在通话中点击旗帜按钮举报。通话会立即结束，之后不会再次为你们匹配。\n• 想把对话保存到学习室练习，请在通话结束后注册会员。',
     ),
     'es': DuoBoardIntroNoticeCopy(
       title: 'Acerca del tablón de invitaciones de Duo',
@@ -83,7 +86,8 @@ class DuoBoardIntroNoticeCopy {
       cancel: 'Cancelar',
       openBoard: 'Ver tablón',
       promoTitle: '📣 Abierto a invitados durante la promoción',
-      promoBody: 'Ahora incluso las personas sin cuenta pueden hablar entre sí. Cualquiera puede publicar una invitación con «Escribir invitación de invitado» al final del tablón, y cualquier persona del mundo puede tocarla para unirse.\n• Las llamadas de invitaciones de invitados duran hasta 3 minutos. Te avisamos 30 segundos antes del final.\n• Cada teléfono puede publicar una invitación. Desaparece después de la llamada y puedes volver a publicar.\n• Empieza con un saludo y una breve presentación, y deja que la otra persona termine de hablar. El intérprete transmite a una persona cada vez.\n• Prohibidos los insultos, el contenido sexual y pedir contactos o redes sociales. Si alguien te incomoda, toca la bandera durante la llamada para denunciarlo. La llamada termina y no volveréis a coincidir.\n• Para guardar la conversación en tu Sala de estudio y practicar, regístrate después de la llamada.',
+      promoBody:
+          'Por ahora puedes publicar una invitación sin registrarte. Las publicaciones hechas con «Escribir invitación de invitado» al final del tablón solo las ven los miembros, y solo ellos pueden tocar para unirse. Los invitados no pueden llamarse entre sí. Los invitados sí pueden tocar para unirse a las invitaciones publicadas por miembros.\n• Las llamadas iniciadas desde invitaciones de invitados duran hasta 3 minutos. Te avisaremos 30 segundos antes del final.\n• Solo se puede publicar una invitación por teléfono. Desaparece cuando termina la llamada y puedes publicar otra.\n• Empieza con un saludo y una breve presentación, y deja que la otra persona termine de hablar. El intérprete transmite a una persona cada vez.\n• No se permiten insultos, contenido sexual ni pedir datos personales como contactos o redes sociales. Si alguien te incomoda, toca la bandera durante la llamada para denunciarlo. La llamada terminará de inmediato y no volveréis a coincidir.\n• Para guardar la conversación en tu Sala de estudio y practicar, regístrate después de la llamada.',
     ),
     'fr': DuoBoardIntroNoticeCopy(
       title: 'À propos du tableau d’invitations Duo',
@@ -95,7 +99,8 @@ class DuoBoardIntroNoticeCopy {
       cancel: 'Annuler',
       openBoard: 'Voir le tableau',
       promoTitle: '📣 Ouvert aux invités pendant la promotion',
-      promoBody: 'En ce moment, même les personnes sans compte peuvent se parler. Tout le monde peut publier une invitation avec « Écrire une invitation invité » en bas du tableau, et n\'importe qui dans le monde peut la toucher pour participer.\n• Les appels sur les invitations d\'invités durent 3 minutes maximum. Nous vous prévenons 30 secondes avant la fin.\n• Un téléphone peut publier une invitation. Elle disparaît après l\'appel et vous pouvez en publier une autre.\n• Commencez par saluer et vous présenter brièvement, et laissez l\'autre personne finir de parler. L\'interprète transmet une personne à la fois.\n• Interdits : insultes, propos sexuels, demandes de coordonnées ou de réseaux sociaux. Si quelqu\'un vous met mal à l\'aise, touchez le drapeau pendant l\'appel pour le signaler. L\'appel se termine et vous ne serez plus mis en relation.\n• Pour enregistrer la conversation dans votre Salle d\'étude et vous entraîner, inscrivez-vous après l\'appel.',
+      promoBody:
+          'Vous pouvez publier une invitation sans vous inscrire pour le moment. Les publications faites avec « Écrire une invitation invité » en bas du tableau sont visibles uniquement par les membres, et seuls les membres peuvent appuyer dessus pour participer. Les invités ne peuvent pas s’appeler entre eux. Les invités peuvent appuyer sur les invitations publiées par les membres pour participer.\n• Les appels lancés depuis une invitation d’invité durent 3 minutes maximum. Nous vous prévenons 30 secondes avant la fin.\n• Un seul appel peut être publié à la fois par téléphone. L’invitation disparaît à la fin de l’appel ; vous pouvez ensuite en publier une autre.\n• Commencez par saluer et vous présenter brièvement, et laissez l’autre personne finir de parler. L’interprète transmet une personne à la fois.\n• Les insultes, les propos sexuels et les demandes d’informations personnelles comme des coordonnées ou des réseaux sociaux sont interdits. Si quelqu’un vous met mal à l’aise, appuyez sur le drapeau pendant l’appel pour le signaler. L’appel prend fin immédiatement et vous ne serez plus mis en relation.\n• Pour enregistrer la conversation dans votre Salle d’étude et vous entraîner, inscrivez-vous après l’appel.',
     ),
     'de': DuoBoardIntroNoticeCopy(
       title: 'Über das Duo-Einladungsboard',
@@ -107,7 +112,8 @@ class DuoBoardIntroNoticeCopy {
       cancel: 'Abbrechen',
       openBoard: 'Board ansehen',
       promoTitle: '📣 Während der Aktion auch für Gäste offen',
-      promoBody: 'Gerade können auch Menschen ohne Konto miteinander sprechen. Jeder kann unten im Board mit „Gast-Einladung schreiben“ eine Einladung posten, und jeder auf der Welt kann sie antippen und mitmachen.\n• Gespräche über Gast-Einladungen dauern höchstens 3 Minuten. 30 Sekunden vor Ende geben wir Bescheid.\n• Pro Telefon eine Einladung. Sie verschwindet nach dem Gespräch, danach kannst du neu posten.\n• Beginne mit einem Gruß und einer kurzen Vorstellung und lass die andere Person ausreden. Der Dolmetscher überträgt jeweils eine Person.\n• Keine Beleidigungen, keine sexuellen Inhalte, keine Fragen nach Kontaktdaten oder Social Media. Wenn dir jemand unangenehm ist, tippe im Gespräch auf die Flagge und melde ihn. Das Gespräch endet und ihr werdet nicht wieder verbunden.\n• Um das Gespräch in deinem Lernraum zu speichern und damit zu üben, registriere dich nach dem Gespräch.',
+      promoBody:
+          'Du kannst jetzt auch ohne Anmeldung eine Einladung posten. Beiträge über „Gast-Einladung schreiben“ unten im Board sind nur für Mitglieder sichtbar, und nur Mitglieder können darauf tippen, um teilzunehmen. Gäste können nicht miteinander telefonieren. Bei Einladungen von Mitgliedern können auch Gäste auf Teilnehmen tippen.\n• Gespräche über Gast-Einladungen dauern höchstens 3 Minuten. 30 Sekunden vor Ende geben wir Bescheid.\n• Pro Telefon kann jeweils eine Einladung gepostet werden. Nach dem Gespräch verschwindet sie, danach kannst du erneut posten.\n• Beginne mit einem Gruß und einer kurzen Vorstellung und lass die andere Person ausreden. Der Dolmetscher überträgt jeweils eine Person.\n• Beleidigungen, sexuelle Inhalte und Fragen nach persönlichen Daten wie Kontaktdaten oder Social-Media-Profilen sind verboten. Wenn dir jemand unangenehm ist, tippe während des Gesprächs auf die Flagge und melde die Person. Das Gespräch endet sofort und ihr werdet nicht wieder verbunden.\n• Um das Gespräch in deinem Lernraum zu speichern und damit zu üben, registriere dich nach dem Gespräch.',
     ),
     'hi': DuoBoardIntroNoticeCopy(
       title: 'Duo आमंत्रण बोर्ड के बारे में',
@@ -119,7 +125,8 @@ class DuoBoardIntroNoticeCopy {
       cancel: 'रद्द करें',
       openBoard: 'बोर्ड देखें',
       promoTitle: '📣 प्रचार अवधि में अतिथियों के लिए खुला',
-      promoBody: 'अभी बिना खाते वाले लोग भी आपस में बात कर सकते हैं। बोर्ड के नीचे \'अतिथि निमंत्रण लिखें\' से कोई भी निमंत्रण पोस्ट कर सकता है, और दुनिया में कोई भी उसे टैप करके जुड़ सकता है।\n• अतिथि निमंत्रण की कॉल अधिकतम 3 मिनट की होती है। खत्म होने से 30 सेकंड पहले हम बताएँगे।\n• एक फ़ोन से एक निमंत्रण। कॉल के बाद यह हट जाता है और आप फिर से पोस्ट कर सकते हैं।\n• अभिवादन और छोटे परिचय से शुरू करें, और सामने वाले को बात पूरी करने दें। अनुवादक एक समय में एक व्यक्ति की बात पहुँचाता है।\n• गाली, यौन बातें, या संपर्क/सोशल मीडिया जानकारी माँगना मना है। कोई असहज करे तो कॉल के दौरान झंडा बटन से रिपोर्ट करें। कॉल तुरंत खत्म होगी और आप दोबारा नहीं जुड़ेंगे।\n• बातचीत को स्टडी रूम में सहेजकर अभ्यास करने के लिए कॉल के बाद सदस्य बनें।',
+      promoBody:
+          'अभी आप साइन अप किए बिना भी निमंत्रण पोस्ट कर सकते हैं। बोर्ड के नीचे ‘अतिथि निमंत्रण लिखें’ से पोस्ट किए गए निमंत्रण सिर्फ़ सदस्यों को दिखते हैं, और उनमें शामिल होने के लिए केवल सदस्य ही टैप कर सकते हैं। अतिथि आपस में कॉल नहीं कर सकते। सदस्य के पोस्ट किए निमंत्रण में अतिथि भी टैप करके शामिल हो सकते हैं।\n• अतिथि निमंत्रण से शुरू होने वाली कॉल अधिकतम 3 मिनट की होती है। खत्म होने से 30 सेकंड पहले हम बताएँगे।\n• एक फ़ोन से एक समय में केवल एक निमंत्रण पोस्ट किया जा सकता है। कॉल खत्म होने पर निमंत्रण हट जाता है; आप फिर से पोस्ट कर सकते हैं।\n• अभिवादन और छोटे परिचय से शुरू करें, और सामने वाले को बात पूरी करने दें। अनुवादक एक समय में एक व्यक्ति की बात पहुँचाता है।\n• गाली-गलौज, यौन बातें और संपर्क या सोशल मीडिया जैसी निजी जानकारी माँगना मना है। कोई असहज करे तो कॉल के दौरान झंडा बटन से रिपोर्ट करें। कॉल तुरंत खत्म हो जाएगी और आप दोबारा नहीं जुड़ेंगे।\n• बातचीत को स्टडी रूम में सहेजकर अभ्यास करने के लिए कॉल के बाद सदस्य बनें।',
     ),
     'ru': DuoBoardIntroNoticeCopy(
       title: 'О доске приглашений Duo',
@@ -131,7 +138,8 @@ class DuoBoardIntroNoticeCopy {
       cancel: 'Отмена',
       openBoard: 'Открыть доску',
       promoTitle: '📣 Во время акции открыто для гостей',
-      promoBody: 'Сейчас даже люди без аккаунта могут разговаривать друг с другом. Любой может опубликовать приглашение кнопкой «Написать гостевое приглашение» внизу доски, а любой человек в мире может нажать на него и присоединиться.\n• Разговоры по гостевым приглашениям длятся до 3 минут. За 30 секунд до конца мы предупредим.\n• С одного телефона — одно приглашение. После звонка оно исчезает, и можно опубликовать снова.\n• Начните с приветствия и короткого рассказа о себе и дайте собеседнику договорить. Переводчик передаёт речь по одному человеку.\n• Запрещены ругательства, сексуальные темы и просьбы о контактах или соцсетях. Если собеседник неприятен, нажмите флажок во время звонка, чтобы пожаловаться. Звонок завершится, и вас больше не соединят.\n• Чтобы сохранить разговор в Учебной комнате и практиковаться, зарегистрируйтесь после звонка.',
+      promoBody:
+          'Сейчас приглашение можно опубликовать и без регистрации. Приглашения, опубликованные через пункт «Написать гостевое приглашение» внизу доски, видны только участникам, и присоединиться к ним могут только участники. Гости не могут звонить друг другу. Гости могут нажать на приглашение, опубликованное участником, и присоединиться.\n• Разговоры по гостевым приглашениям длятся до 3 минут. За 30 секунд до конца мы предупредим.\n• С одного телефона одновременно можно опубликовать только одно приглашение. После звонка оно исчезает, и можно опубликовать новое.\n• Начните с приветствия и короткого рассказа о себе и дайте собеседнику договорить. Переводчик передаёт речь по одному человеку.\n• Запрещены ругательства, сексуальные темы и просьбы сообщить личные данные, например контакты или соцсети. Если собеседник вызывает у вас дискомфорт, нажмите флажок во время звонка, чтобы пожаловаться. Звонок сразу завершится, и вас больше не соединят.\n• Чтобы сохранить разговор в Учебной комнате и практиковаться, зарегистрируйтесь после звонка.',
     ),
     'pt': DuoBoardIntroNoticeCopy(
       title: 'Sobre o mural de convites do Duo',
@@ -143,7 +151,8 @@ class DuoBoardIntroNoticeCopy {
       cancel: 'Cancelar',
       openBoard: 'Ver mural',
       promoTitle: '📣 Aberto a convidados durante a promoção',
-      promoBody: 'Agora até pessoas sem conta podem conversar entre si. Qualquer um pode publicar um convite com «Escrever convite de convidado» no fim do quadro, e qualquer pessoa no mundo pode tocar para participar.\n• Chamadas de convites de convidados duram até 3 minutos. Avisamos 30 segundos antes do fim.\n• Cada telefone pode publicar um convite. Ele some depois da chamada e você pode publicar de novo.\n• Comece com um cumprimento e uma breve apresentação, e deixe a outra pessoa terminar de falar. O intérprete transmite uma pessoa por vez.\n• Proibidos palavrões, conteúdo sexual e pedir contatos ou redes sociais. Se alguém te incomodar, toque na bandeira durante a chamada para denunciar. A chamada termina e vocês não serão conectados de novo.\n• Para salvar a conversa na sua Sala de Estudo e praticar, cadastre-se depois da chamada.',
+      promoBody:
+          'Por enquanto, você pode publicar um convite sem se cadastrar. As publicações feitas em «Escrever convite de convidado», no fim do quadro, ficam visíveis apenas para membros, e só eles podem tocar para participar. Convidados não podem ligar uns para os outros. Convidados podem tocar para participar de convites publicados por membros.\n• Chamadas iniciadas por convites de convidados duram até 3 minutos. Avisamos 30 segundos antes do fim.\n• Cada telefone pode ter apenas um convite publicado por vez. Ele desaparece quando a chamada termina, e você pode publicar outro.\n• Comece com um cumprimento e uma breve apresentação, e deixe a outra pessoa terminar de falar. O intérprete transmite uma pessoa por vez.\n• Não são permitidos palavrões, conteúdo sexual nem pedidos de informações pessoais, como contatos ou redes sociais. Se alguém deixar você desconfortável, toque na bandeira durante a chamada para denunciar. A chamada será encerrada imediatamente e vocês não serão conectados novamente.\n• Para salvar a conversa na sua Sala de Estudo e praticar, cadastre-se depois da chamada.',
     ),
     'it': DuoBoardIntroNoticeCopy(
       title: 'Informazioni sulla bacheca degli inviti Duo',
@@ -155,7 +164,8 @@ class DuoBoardIntroNoticeCopy {
       cancel: 'Annulla',
       openBoard: 'Vedi bacheca',
       promoTitle: '📣 Aperto agli ospiti durante la promozione',
-      promoBody: 'In questo periodo anche chi non ha un account può parlare con gli altri. Chiunque può pubblicare un invito con «Scrivi un invito da ospite» in fondo alla bacheca, e chiunque nel mondo può toccarlo per partecipare.\n• Le chiamate sugli inviti degli ospiti durano al massimo 3 minuti. Ti avvisiamo 30 secondi prima della fine.\n• Ogni telefono può pubblicare un invito. Sparisce dopo la chiamata e puoi pubblicarne un altro.\n• Inizia con un saluto e una breve presentazione, e lascia finire di parlare l\'altra persona. L\'interprete trasmette una persona alla volta.\n• Vietati insulti, contenuti sessuali e richieste di contatti o social. Se qualcuno ti mette a disagio, tocca la bandiera durante la chiamata per segnalarlo. La chiamata termina e non sarete più abbinati.\n• Per salvare la conversazione nella tua Aula studio ed esercitarti, registrati dopo la chiamata.',
+      promoBody:
+          'Per ora puoi pubblicare un invito senza registrarti. Gli inviti pubblicati con «Scrivi un invito da ospite» in fondo alla bacheca sono visibili solo ai membri, e solo i membri possono toccarli per partecipare. Gli ospiti non possono chiamarsi tra loro. Gli ospiti possono toccare gli inviti pubblicati dai membri per partecipare.\n• Le chiamate avviate tramite inviti degli ospiti durano al massimo 3 minuti. Ti avvisiamo 30 secondi prima della fine.\n• Ogni telefono può avere un solo invito pubblicato alla volta. L’invito scompare al termine della chiamata e puoi pubblicarne un altro.\n• Inizia con un saluto e una breve presentazione, e lascia finire di parlare l’altra persona. L’interprete trasmette una persona alla volta.\n• Sono vietati insulti, contenuti sessuali e richieste di informazioni personali come contatti o profili social. Se qualcuno ti mette a disagio, tocca la bandiera durante la chiamata per segnalarlo. La chiamata terminerà subito e non sarete più abbinati.\n• Per salvare la conversazione nella tua Aula studio ed esercitarti, registrati dopo la chiamata.',
     ),
     'nl': DuoBoardIntroNoticeCopy(
       title: 'Over het Duo-uitnodigingenbord',
@@ -167,7 +177,8 @@ class DuoBoardIntroNoticeCopy {
       cancel: 'Annuleren',
       openBoard: 'Bord bekijken',
       promoTitle: '📣 Tijdens de actie open voor gasten',
-      promoBody: 'Nu kunnen zelfs mensen zonder account met elkaar praten. Iedereen kan onderaan het bord met \'Gastuitnodiging schrijven\' een uitnodiging plaatsen, en iedereen ter wereld kan erop tikken om mee te doen.\n• Gesprekken via gastuitnodigingen duren maximaal 3 minuten. 30 seconden voor het einde laten we het weten.\n• Eén uitnodiging per telefoon. Die verdwijnt na het gesprek en je kunt opnieuw plaatsen.\n• Begin met een groet en een korte introductie, en laat de ander uitpraten. De tolk geeft één persoon tegelijk door.\n• Geen gescheld, seksuele praat of vragen naar contactgegevens of sociale media. Voelt iemand onprettig, tik dan tijdens het gesprek op de vlag om te melden. Het gesprek stopt en jullie worden niet meer verbonden.\n• Wil je het gesprek in je Studieruimte bewaren en ermee oefenen, meld je dan na het gesprek aan.',
+      promoBody:
+          'Je kunt nu een uitnodiging plaatsen zonder je aan te melden. Uitnodigingen via \'Gastuitnodiging schrijven\' onderaan het bord zijn alleen zichtbaar voor leden, en alleen leden kunnen erop tikken om mee te doen. Gasten kunnen elkaar niet bellen. Gasten kunnen wel tikken om mee te doen aan uitnodigingen van leden.\n• Gesprekken via gastuitnodigingen duren maximaal 3 minuten. 30 seconden voor het einde laten we het weten.\n• Per telefoon kan er maar één uitnodiging tegelijk geplaatst zijn. Na het gesprek verdwijnt die en kun je opnieuw plaatsen.\n• Begin met een groet en een korte introductie, en laat de ander uitpraten. De tolk geeft één persoon tegelijk door.\n• Schelden, seksuele praat en vragen om persoonlijke gegevens zoals contactgegevens of sociale media zijn niet toegestaan. Voelt iemand onprettig, tik dan tijdens het gesprek op de vlag om diegene te melden. Het gesprek stopt meteen en jullie worden niet opnieuw verbonden.\n• Wil je het gesprek in je Studieruimte bewaren en ermee oefenen, meld je dan na het gesprek aan.',
     ),
   };
 }

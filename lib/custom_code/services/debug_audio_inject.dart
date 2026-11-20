@@ -44,9 +44,12 @@ Future<DebugInjectedAudio?> takeDebugInjectedAudio({bool playNow = true}) async 
     final tmp = await getTemporaryDirectory();
     final dst = '${tmp.path}/inject_${DateTime.now().millisecondsSinceEpoch}.wav';
     await File(dst).writeAsBytes(bytes);
-    debugPrint('🧪 [AUDIO-INJECT] taken ${ms}ms ($sampleRate Hz)');
+    // 영상용 "빈 시간": stt_inject_silent 파일이 있으면 스피커로 내지 않는다
+    // (시청자가 따라 말할 자리를 비워 둔다). 전사에는 그대로 보낸다.
+    final silent = await File('${docs.path}/stt_inject_silent').exists();
+    debugPrint('🧪 [AUDIO-INJECT] taken ${ms}ms ($sampleRate Hz) silent=$silent');
     // 영상용: 전사로 보내는 것과 같은 소리를 폰 스피커로도 낸다(화면 녹화에 담긴다).
-    if (playNow) unawaited(_playThroughSpeaker(dst));
+    if (playNow && !silent) unawaited(_playThroughSpeaker(dst));
     return DebugInjectedAudio(dst, ms);
   } catch (error) {
     debugPrint('🧪 [AUDIO-INJECT] read failed: $error');

@@ -85,7 +85,7 @@ class ShortsScenarioException implements Exception {
 }
 
 /// 서버 결과 맵 → 대화. 쓸 수 없는 영상이면 unusable 예외.
-@visibleForTesting
+/// (녹음 가져오기도 같은 결과 모양이라 함께 쓴다.)
 ShortsDialogue parseShortsDialogue(Object? data) {
   if (data is! Map) throw const ShortsScenarioException('failed');
   if (data['usable'] != true) throw const ShortsScenarioException('unusable');
@@ -149,6 +149,7 @@ Map<String, dynamic> shortsRoomDoc(
   required String nativeLang,
   required String targetLang,
   required Object createdAt,
+  String source = 'shorts',
 }) {
   return <String, dynamic>{
     'created_at': createdAt,
@@ -167,7 +168,7 @@ Map<String, dynamic> shortsRoomDoc(
     'last_message': dialogue.lines.last.meaning,
     'native_lang': nativeLang,
     'target_lang': targetLang,
-    'source': 'shorts',
+    'source': source,
     if (dialogue.sourceUrl.isNotEmpty) 'shorts_source_url': dialogue.sourceUrl,
     ...historyDraftSeed(),
   };
@@ -179,6 +180,7 @@ Map<String, dynamic> shortsRoomDoc(
 List<Map<String, dynamic>> shortsMessageDocs(
   ShortsDialogue dialogue, {
   required DateTime base,
+  String source = 'shorts',
 }) {
   return [
     for (var i = 0; i < dialogue.lines.length; i++)
@@ -189,7 +191,7 @@ List<Map<String, dynamic>> shortsMessageDocs(
         'target_generated_at':
             Timestamp.fromDate(base.add(Duration(seconds: i))),
         'created_at': Timestamp.fromDate(base.add(Duration(seconds: i))),
-        'source': 'shorts',
+        'source': source,
       },
   ];
 }
@@ -239,10 +241,27 @@ class ShortsScenarioService {
       throw const ShortsScenarioException('failed');
     }
 
+    return writeStudyRoom(
+      dialogue,
+      uid: user.uid,
+      originLanguage: originLanguage,
+      targetLanguage: targetLanguage,
+      source: 'shorts',
+    );
+  }
+
+  /// 대화 → 공부방 방 하나(방 문서 + 줄 문서). 쇼츠 링크와 녹음 가져오기가 함께 쓴다.
+  static Future<ShortsRoomResult> writeStudyRoom(
+    ShortsDialogue dialogue, {
+    required String uid,
+    required String originLanguage,
+    required String targetLanguage,
+    required String source,
+  }) async {
     try {
       final db = FirebaseFirestore.instance;
       final roomRef =
-          db.collection('users').doc(user.uid).collection('chat_history').doc();
+          db.collection('users').doc(uid).collection('chat_history').doc();
       final batch = db.batch();
       batch.set(
         roomRef,
@@ -251,15 +270,19 @@ class ShortsScenarioService {
           nativeLang: originLanguage,
           targetLang: targetLanguage,
           createdAt: FieldValue.serverTimestamp(),
+          source: source,
         ),
       );
-      for (final message
-          in shortsMessageDocs(dialogue, base: DateTime.now())) {
+      for (final message in shortsMessageDocs(
+        dialogue,
+        base: DateTime.now(),
+        source: source,
+      )) {
         batch.set(roomRef.collection('messages').doc(), message);
       }
       await batch.commit();
-      debugPrint('[SHORTS-SCENARIO] room=${roomRef.id} '
-          'lines=${dialogue.lines.length} ms=${sw.elapsedMilliseconds}');
+      debugPrint('[SHORTS-SCENARIO] room=${roomRef.id} source=$source '
+          'lines=${dialogue.lines.length}');
       return ShortsRoomResult(
         ref: roomRef,
         remainingSeconds: dialogue.remainingSeconds,
