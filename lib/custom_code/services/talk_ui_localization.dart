@@ -55,6 +55,25 @@ class TalkUiCopy {
       'shortsLinkNotice':
           'Please note\n· For users aged 18 and over only. If you’re under 18, please use Suggest a scenario or enter your own.\n· Only public YouTube videos can be analyzed. For longer videos, only the first 3 minutes are used.\n· Each link you create uses 1 minute. If we can’t read the video, we’ll refund the time.\n· We turn the conversations in the video into a dialogue between two people and add it to your study room as a new room. We don’t store the video itself.\n· The video’s copyright belongs to its creator. Please use it for personal practice only.',
       'shortsSource': 'Source:',
+      'recordingImport': 'Import recording',
+      'recordingPick': 'Choose a recording file',
+      'recordingCreate': 'Create a conversation',
+      'recordingNotice':
+          'Please note\n· For users aged 18 and over only.\n· Choose a call recording of your own. We use only about the first 3 minutes.\n· Each creation uses 1 minute of your time. If we can’t read the recording, we’ll refund it.\n· We create a new two-person conversation based on the situation in the recording and add it to your study room as a new room. Only you can see it, and we don’t save the recording.',
+      'recordingError_noFile': 'Please choose a recording file first.',
+      'recordingError_badFile':
+          'We couldn’t read this file. Please choose an audio recording, such as an m4a or mp3 file.',
+      'recordingError_tooBig':
+          'This recording is too large. Please choose a shorter one.',
+      'recordingError_unusable':
+          'There’s no conversation to practice in this recording. Try another one.',
+      'recordingError_limit':
+          'You have used all of today’s recording imports. Please try again tomorrow.',
+      'recordingError_noTime': 'You need remaining time to import a recording.',
+      'recordingError_adultOnly':
+          'Importing a recording is only available to users 18 or older.',
+      'recordingError_failed':
+          'Couldn’t read the recording. Please try again in a moment.',
       'shortsError_adultOnly':
           'Shorts links are only available to users 18 or older. Try a suggested scenario or enter your own.',
       'shortsError_notYoutube':
@@ -118,6 +137,18 @@ class TalkUiCopy {
       'shortsCreate': '쇼츠 대화 생성',
       'shortsLinkNotice': '유의 사항\n· 만 18세 이상만 쓸 수 있어요. 18세 미만은 상황 추천이나 직접 입력으로 이용해 주세요.\n· 공개된 유튜브 영상만 읽을 수 있어요. 긴 영상은 앞 3분만 사용해요.\n· 링크를 한 번 만들 때마다 시간이 1분 쓰여요. 영상을 읽지 못하면 되돌려 드려요.\n· 영상 속 대화를 두 사람 대화로 정리해 내 공부방에 새 방으로 넣어 드려요. 영상 자체는 저장하지 않아요.\n· 영상의 저작권은 만든 분에게 있어요. 개인 연습용으로만 써 주세요.',
       'shortsSource': '출처:',
+      'recordingImport': '녹음 가져오기',
+      'recordingPick': '녹음 파일 고르기',
+      'recordingCreate': '대화 만들기',
+      'recordingNotice': '유의 사항\n· 만 18세 이상만 쓸 수 있어요.\n· 내 통화 녹음을 골라 주세요. 앞 3분 정도만 사용해요.\n· 한 번 만들 때마다 시간이 1분 쓰여요. 녹음을 읽지 못하면 되돌려 드려요.\n· 녹음 속 상황을 바탕으로 두 사람 대화를 새로 만들어 내 공부방에 새 방으로 넣어 드려요. 나만 볼 수 있고, 녹음은 저장하지 않아요.',
+      'recordingError_noFile': '먼저 녹음 파일을 골라 주세요.',
+      'recordingError_badFile': '이 파일을 읽을 수 없어요. m4a, mp3 같은 음성 녹음 파일을 골라 주세요.',
+      'recordingError_tooBig': '녹음 파일이 너무 커요. 더 짧은 녹음을 골라 주세요.',
+      'recordingError_unusable': '이 녹음에는 따라 해 볼 대화가 없어요. 다른 녹음으로 해 보세요.',
+      'recordingError_limit': '오늘은 녹음 가져오기를 다 쓰셨어요. 내일 다시 해 보세요.',
+      'recordingError_noTime': '남은 시간이 있어야 녹음을 가져올 수 있어요.',
+      'recordingError_adultOnly': '녹음 가져오기는 만 18세 이상만 쓸 수 있어요.',
+      'recordingError_failed': '녹음을 읽지 못했어요. 잠시 뒤 다시 해 보세요.',
       'shortsError_adultOnly': '쇼츠 링크는 만 18세 이상만 쓸 수 있어요. 상황 추천이나 직접 입력으로 이용해 주세요.',
       'shortsError_notYoutube': '유튜브 링크가 아니에요. 쇼츠 링크를 붙여 넣어 주세요.',
       'shortsError_unavailable': '이 영상을 볼 수 없어요. 공개된 영상인지 확인해 주세요.',
@@ -179,6 +210,19 @@ class TalkUiCopy {
       'shortsCreate': 'Shortsの会話を作成',
       'shortsError_unavailable': 'この動画は視聴できません。公開されている動画か確認してください。',
       'shortsSource': '出典：',
+      'recordingError_failed': '録音を読み込めませんでした。少ししてからもう一度お試しください。',
+      'recordingImport': '録音をインポート',
+      'recordingError_noTime': '録音をインポートするには、残り時間が必要です。',
+      'recordingError_noFile': '先に録音ファイルを選択してください。',
+      'recordingError_limit': '今日の録音のインポート回数は上限に達しました。明日またお試しください。',
+      'recordingPick': '録音ファイルを選択',
+      'recordingError_badFile': 'このファイルは読み込めません。m4aやmp3などの音声ファイルを選んでください。',
+      'recordingNotice':
+          'ご利用上の注意\n· 18歳以上の方のみご利用いただけます。\n· ご自身の通話録音を選んでください。最初の約3分のみ使用します。\n· 作成1回につき時間を1分使用します。録音を読み取れなかった場合は、時間をお返しします。\n· 録音の状況をもとに2人の会話を新しく作成し、学習ルームに新しいルームとして追加します。自分だけが閲覧でき、録音は保存されません。',
+      'recordingError_unusable': 'この録音には練習できる会話がありません。別の録音を試してください。',
+      'recordingError_adultOnly': '録音のインポートは18歳以上の方のみご利用いただけます。',
+      'recordingCreate': '会話を作成',
+      'recordingError_tooBig': '録音ファイルが大きすぎます。もっと短い録音を選んでください。',
       'shortsError_noTime': '残り時間がないと、ショート動画のリンクは使えません。',
       'shortsError_unusable': 'この動画には練習できる会話がありません。別のショート動画を試してください。',
       'shortsLinkNotice':
@@ -234,6 +278,19 @@ class TalkUiCopy {
       'shortsError_adultOnly': '仅限年满18岁的用户使用 Shorts 链接。请使用情景推荐，或自行输入。',
       'shortsError_noTime': '有剩余时间才能使用 Shorts 链接。',
       'shortsSource': '来源：',
+      'recordingNotice':
+          '请注意\n· 仅限年满18岁者使用。\n· 请选择你自己的通话录音。我们只会使用开头约3分钟。\n· 每创建一次会消耗1分钟时长。如果无法读取录音，我们会退还时长。\n· 我们会根据录音中的情境生成一段全新的双人对话，并将其作为新房间添加到你的学习空间。只有你能看到，录音不会被保存。',
+      'recordingError_noFile': '请先选择录音文件。',
+      'recordingCreate': '创建对话',
+      'recordingError_adultOnly': '仅限年满18周岁的用户导入录音。',
+      'recordingPick': '选择录音文件',
+      'recordingError_limit': '今天的录音导入次数已用完，请明天再试。',
+      'recordingError_tooBig': '录音文件太大了，请选择一段更短的录音。',
+      'recordingError_unusable': '这段录音里没有可以跟读练习的对话。试试其他录音吧。',
+      'recordingError_badFile': '无法读取此文件。请选择 m4a 或 mp3 等音频文件。',
+      'recordingError_noTime': '导入录音需要有剩余时间。',
+      'recordingImport': '导入录音',
+      'recordingError_failed': '无法读取录音，请稍后再试。',
       'shortsLinkNotice':
           '请注意\n· 仅限年满18岁者使用。未满18岁请使用“推荐情境”或自行输入。\n· 仅支持读取公开的 YouTube 视频。较长的视频仅使用前3分钟。\n· 每创建一个链接会消耗1分钟。若无法读取视频，我们会退还这段时间。\n· 我们会将视频中的对话整理成两人对话，作为新房间添加到你的学习空间。不会保存视频本身。\n· 视频版权归创作者所有。请仅用于个人练习。',
       'shortsLink': 'Shorts 链接',
@@ -294,6 +351,26 @@ class TalkUiCopy {
       'shortsError_noTime':
           'Necesitas tener tiempo disponible para usar enlaces de Shorts.',
       'shortsSource': 'Fuente:',
+      'recordingError_limit':
+          'Ya agotaste las importaciones de grabaciones de hoy. Inténtalo de nuevo mañana.',
+      'recordingError_unusable':
+          'En esta grabación no hay ninguna conversación para practicar. Prueba con otra.',
+      'recordingError_noFile': 'Primero, selecciona un archivo de grabación.',
+      'recordingCreate': 'Crear una conversación',
+      'recordingError_adultOnly':
+          'La importación de grabaciones solo está disponible para mayores de 18 años.',
+      'recordingNotice':
+          'Ten en cuenta\n· Solo para mayores de 18 años.\n· Elige una grabación de una llamada tuya. Solo usamos los primeros 3 minutos, aproximadamente.\n· Cada creación consume 1 minuto de tiempo. Si no podemos leer la grabación, te devolveremos ese tiempo.\n· Creamos un diálogo nuevo entre dos personas basado en la situación de la grabación y lo añadimos a tu espacio de estudio como una nueva sala. Solo tú puedes verlo y no guardamos la grabación.',
+      'recordingError_failed':
+          'No se pudo leer la grabación. Inténtalo de nuevo en un momento.',
+      'recordingError_noTime':
+          'Necesitas tiempo disponible para importar una grabación.',
+      'recordingImport': 'Importar grabación',
+      'recordingError_badFile':
+          'No podemos leer este archivo. Elige un archivo de audio, como m4a o mp3.',
+      'recordingPick': 'Seleccionar un archivo de grabación',
+      'recordingError_tooBig':
+          'La grabación es demasiado grande. Elige una más corta.',
       'shortsError_unavailable':
           'No se puede ver este video. Comprueba que sea público.',
       'shortsLinkTitle': 'Pega un enlace de YouTube Shorts',
@@ -366,6 +443,27 @@ class TalkUiCopy {
           'Il vous faut du temps restant pour utiliser les liens Shorts.',
       'shortsLinkTitle': 'Collez un lien YouTube Shorts',
       'shortsSource': 'Source :',
+      'recordingError_adultOnly':
+          'L’importation d’enregistrements est réservée aux personnes de 18 ans et plus.',
+      'recordingError_unusable':
+          'Il n’y a pas de conversation à pratiquer dans cet enregistrement. Essayez-en un autre.',
+      'recordingError_noTime':
+          'Il vous faut du temps restant pour importer un enregistrement.',
+      'recordingError_badFile':
+          'Impossible de lire ce fichier. Veuillez choisir un fichier audio, comme un fichier m4a ou mp3.',
+      'recordingImport': 'Importer un enregistrement',
+      'recordingError_failed':
+          'Impossible de lire l’enregistrement. Réessayez dans un instant.',
+      'recordingNotice':
+          'À noter\n· Réservé aux personnes de 18 ans et plus.\n· Choisissez un enregistrement de l’une de vos propres conversations. Seules les 3 premières minutes environ sont utilisées.\n· Chaque création utilise 1 minute de votre temps. Si nous ne parvenons pas à lire l’enregistrement, nous vous rendrons ce temps.\n· Nous créons un nouveau dialogue entre deux personnes à partir de la situation de l’enregistrement et l’ajoutons à votre espace d’étude sous forme de nouvelle salle. Vous seul pouvez le voir, et l’enregistrement n’est pas conservé.',
+      'recordingError_tooBig':
+          'L’enregistrement est trop volumineux. Choisissez-en un plus court.',
+      'recordingCreate': 'Créer une conversation',
+      'recordingError_limit':
+          'Vous avez épuisé vos importations d’enregistrements pour aujourd’hui. Réessayez demain.',
+      'recordingPick': 'Choisir un fichier d’enregistrement',
+      'recordingError_noFile':
+          'Veuillez d’abord sélectionner un fichier d’enregistrement.',
       'shortsError_adultOnly':
           'Les liens Shorts sont réservés aux personnes de 18 ans et plus. Choisissez une situation suggérée ou saisissez la vôtre.',
       'shortsError_notYoutube':
@@ -437,6 +535,26 @@ class TalkUiCopy {
       'shortsError_notYoutube':
           'Das ist kein YouTube-Link. Bitte füge einen Shorts-Link ein.',
       'shortsSource': 'Quelle:',
+      'recordingError_unusable':
+          'In dieser Aufnahme gibt es keinen Dialog zum Üben. Probier eine andere aus.',
+      'recordingError_badFile':
+          'Diese Datei kann nicht gelesen werden. Bitte wählen Sie eine Audiodatei wie m4a oder mp3 aus.',
+      'recordingError_noTime':
+          'Zum Importieren einer Aufnahme muss noch Zeit übrig sein.',
+      'recordingError_limit':
+          'Du hast dein Kontingent für den Import von Aufnahmen heute aufgebraucht. Versuch es morgen wieder.',
+      'recordingError_adultOnly':
+          'Aufnahmen können nur von Personen ab 18 Jahren importiert werden.',
+      'recordingError_tooBig':
+          'Die Aufnahme ist zu groß. Bitte wähle eine kürzere aus.',
+      'recordingNotice':
+          'Bitte beachten\n· Nur für Personen ab 18 Jahren.\n· Wähle eine eigene Gesprächsaufnahme aus. Es werden nur die ersten etwa 3 Minuten verwendet.\n· Jede Erstellung kostet 1 Minute deiner Zeit. Wenn wir die Aufnahme nicht auslesen können, erhältst du die Zeit zurück.\n· Wir erstellen anhand der Situation in der Aufnahme einen neuen Dialog zwischen zwei Personen und fügen ihn als neuen Raum zu deinem Lernbereich hinzu. Nur du kannst ihn sehen, und die Aufnahme wird nicht gespeichert.',
+      'recordingPick': 'Aufnahmedatei auswählen',
+      'recordingError_failed':
+          'Die Aufnahme konnte nicht gelesen werden. Bitte versuche es gleich noch einmal.',
+      'recordingCreate': 'Gespräch erstellen',
+      'recordingError_noFile': 'Bitte wähle zuerst eine Aufnahmedatei aus.',
+      'recordingImport': 'Aufnahme importieren',
       'shortsLinkTitle': 'YouTube-Shorts-Link einfügen',
       'shortsError_unavailable':
           'Dieses Video ist nicht verfügbar. Bitte prüfen Sie, ob es öffentlich ist.',
@@ -491,6 +609,26 @@ class TalkUiCopy {
       'scenarioRecommendError': 'परिदृश्य सुझाया नहीं जा सका। फिर प्रयास करें।',
       'scenarioRequired': 'स्थिति और दोनों भूमिकाएँ भरें।',
       'shortsSource': 'स्रोत:',
+      'recordingError_noTime':
+          'रिकॉर्डिंग इंपोर्ट करने के लिए समय बचा होना चाहिए।',
+      'recordingError_limit':
+          'आज के लिए रिकॉर्डिंग इंपोर्ट करने की सीमा पूरी हो गई है। कृपया कल फिर से कोशिश करें।',
+      'recordingError_tooBig':
+          'यह रिकॉर्डिंग बहुत बड़ी है। कृपया इससे छोटी रिकॉर्डिंग चुनें।',
+      'recordingCreate': 'बातचीत बनाएँ',
+      'recordingError_badFile':
+          'यह फ़ाइल पढ़ी नहीं जा सकी। कृपया m4a या mp3 जैसी ऑडियो फ़ाइल चुनें।',
+      'recordingImport': 'रिकॉर्डिंग इंपोर्ट करें',
+      'recordingError_failed':
+          'रिकॉर्डिंग पढ़ी नहीं जा सकी। कृपया थोड़ी देर बाद फिर कोशिश करें।',
+      'recordingError_noFile': 'कृपया पहले रिकॉर्डिंग फ़ाइल चुनें।',
+      'recordingError_adultOnly':
+          'रिकॉर्डिंग इंपोर्ट करने की सुविधा केवल 18 वर्ष या उससे अधिक उम्र के लोगों के लिए उपलब्ध है।',
+      'recordingPick': 'रिकॉर्डिंग फ़ाइल चुनें',
+      'recordingNotice':
+          'कृपया ध्यान दें\n· केवल 18 वर्ष या उससे अधिक उम्र के लोगों के लिए।\n· अपनी किसी कॉल की रिकॉर्डिंग चुनें। हम केवल शुरुआती लगभग 3 मिनट का इस्तेमाल करते हैं।\n· हर बार बनाने पर 1 मिनट का समय खर्च होता है। अगर हम रिकॉर्डिंग पढ़ नहीं पाए, तो आपका समय वापस कर देंगे।\n· रिकॉर्डिंग की स्थिति के आधार पर हम दो लोगों की नई बातचीत बनाकर आपके स्टडी रूम में एक नए रूम के रूप में जोड़ते हैं। इसे सिर्फ़ आप देख सकते हैं और रिकॉर्डिंग सेव नहीं की जाती।',
+      'recordingError_unusable':
+          'इस रिकॉर्डिंग में अभ्यास करने के लिए कोई बातचीत नहीं है। कोई दूसरी रिकॉर्डिंग आज़माएँ।',
       'shortsError_failed':
           'वीडियो पढ़ नहीं पाए। कृपया कुछ देर बाद फिर से कोशिश करें।',
       'shortsLink': 'Shorts लिंक',
@@ -563,6 +701,26 @@ class TalkUiCopy {
           'Вы использовали все ссылки Shorts на сегодня. Попробуйте снова завтра.',
       'shortsLinkTitle': 'Вставьте ссылку на YouTube Shorts',
       'shortsSource': 'Источник:',
+      'recordingImport': 'Импортировать запись',
+      'recordingError_tooBig':
+          'Файл записи слишком большой. Выберите запись покороче.',
+      'recordingError_unusable':
+          'В этой записи нет диалога для практики. Попробуйте другую запись.',
+      'recordingError_noTime':
+          'Чтобы импортировать запись, должно оставаться время.',
+      'recordingPick': 'Выбрать файл записи',
+      'recordingCreate': 'Создать разговор',
+      'recordingError_badFile':
+          'Не удалось прочитать этот файл. Выберите аудиофайл, например m4a или mp3.',
+      'recordingError_limit':
+          'Вы исчерпали лимит импорта записей на сегодня. Попробуйте снова завтра.',
+      'recordingError_adultOnly':
+          'Импортировать записи могут только пользователи от 18 лет.',
+      'recordingError_failed':
+          'Не удалось прочитать запись. Повторите попытку чуть позже.',
+      'recordingNotice':
+          'Обратите внимание\n· Только для пользователей старше 18 лет.\n· Выберите запись собственного звонка. Используются только первые примерно 3 минуты.\n· Каждое создание расходует 1 минуту времени. Если нам не удастся прочитать запись, мы вернём это время.\n· На основе ситуации из записи мы создадим новый диалог двух людей и добавим его в вашу учебную комнату как новую комнату. Его видите только вы, а запись не сохраняется.',
+      'recordingError_noFile': 'Сначала выберите файл записи.',
       'shortsError_notYoutube':
           'Это не ссылка на YouTube. Вставьте ссылку на Shorts.',
       'shortsError_adultOnly':
@@ -630,6 +788,26 @@ class TalkUiCopy {
           'Esse não é um link do YouTube. Cole um link do Shorts.',
       'shortsLinkTitle': 'Cole um link do YouTube Shorts',
       'shortsSource': 'Fonte:',
+      'recordingError_unusable':
+          'Não há nenhuma conversa para praticar nesta gravação. Tente outra.',
+      'recordingError_tooBig':
+          'A gravação é muito grande. Escolha uma mais curta.',
+      'recordingError_noTime':
+          'Para importar uma gravação, é preciso ter tempo restante.',
+      'recordingError_badFile':
+          'Não foi possível ler este arquivo. Escolha um arquivo de áudio, como m4a ou mp3.',
+      'recordingError_noFile': 'Selecione primeiro um arquivo de gravação.',
+      'recordingError_adultOnly':
+          'A importação de gravações está disponível apenas para pessoas com 18 anos ou mais.',
+      'recordingNotice':
+          'Atenção\n· Disponível apenas para maiores de 18 anos.\n· Escolha uma gravação de uma chamada sua. Usamos apenas os primeiros 3 minutos, aproximadamente.\n· Cada criação consome 1 minuto do seu tempo. Se não conseguirmos ler a gravação, devolveremos esse tempo.\n· Criamos uma nova conversa entre duas pessoas com base na situação da gravação e a adicionamos ao seu espaço de estudo como uma nova sala. Só você pode ver, e a gravação não é salva.',
+      'recordingCreate': 'Criar uma conversa',
+      'recordingImport': 'Importar gravação',
+      'recordingPick': 'Escolher um arquivo de gravação',
+      'recordingError_failed':
+          'Não foi possível ler a gravação. Tente novamente daqui a pouco.',
+      'recordingError_limit':
+          'Você já usou todas as importações de gravações de hoje. Tente novamente amanhã.',
       'shortsError_unavailable':
           'Não é possível assistir a este vídeo. Confira se ele está público.',
       'shortsLinkNotice':
@@ -694,6 +872,26 @@ class TalkUiCopy {
       'scenarioRecommendError': 'Impossibile suggerire uno scenario. Riprova.',
       'scenarioRequired': 'Compila la situazione e i due ruoli.',
       'shortsSource': 'Fonte:',
+      'recordingError_limit':
+          'Hai esaurito le importazioni di registrazioni di oggi. Riprova domani.',
+      'recordingError_unusable':
+          'In questa registrazione non c’è nessuna conversazione da cui esercitarsi. Prova con un’altra.',
+      'recordingError_tooBig':
+          'La registrazione è troppo grande. Scegline una più breve.',
+      'recordingError_noTime':
+          'Per importare una registrazione, deve esserci tempo residuo.',
+      'recordingError_badFile':
+          'Non riusciamo a leggere questo file. Scegli un file audio, ad esempio m4a o mp3.',
+      'recordingError_noFile': 'Seleziona prima un file di registrazione.',
+      'recordingError_adultOnly':
+          'L’importazione di registrazioni è disponibile solo per chi ha almeno 18 anni.',
+      'recordingNotice':
+          'Attenzione\n· Solo per chi ha almeno 18 anni.\n· Scegli una registrazione di una tua chiamata. Usiamo solo i primi 3 minuti circa.\n· Ogni creazione consuma 1 minuto del tuo tempo. Se non riusciamo a leggere la registrazione, ti restituiremo il tempo.\n· Creiamo un nuovo dialogo tra due persone basato sulla situazione della registrazione e lo aggiungiamo al tuo spazio di studio come nuova stanza. Solo tu puoi vederlo e la registrazione non viene salvata.',
+      'recordingCreate': 'Crea una conversazione',
+      'recordingImport': 'Importa registrazione',
+      'recordingPick': 'Scegli un file di registrazione',
+      'recordingError_failed':
+          'Impossibile leggere la registrazione. Riprova tra poco.',
       'shortsLinkNotice':
           'Nota bene\n· Solo per utenti dai 18 anni in su. Se hai meno di 18 anni, usa «Suggerisci una situazione» oppure inseriscine una tu.\n· È possibile leggere solo video pubblici di YouTube. Per i video più lunghi, vengono usati solo i primi 3 minuti.\n· Ogni link creato consuma 1 minuto. Se non riusciamo a leggere il video, ti restituiremo il tempo.\n· Organizziamo i dialoghi del video come una conversazione tra due persone e la aggiungiamo alla tua stanza di studio come nuova stanza. Non conserviamo il video.\n· I diritti d’autore del video appartengono al suo creatore. Usalo solo per esercitarti personalmente.',
       'shortsError_unavailable':
@@ -761,6 +959,26 @@ class TalkUiCopy {
           'Kon geen scenario voorstellen. Probeer opnieuw.',
       'scenarioRequired': 'Vul de situatie en beide rollen in.',
       'shortsSource': 'Bron:',
+      'recordingImport': 'Opname importeren',
+      'recordingError_noTime':
+          'Je hebt resterende tijd nodig om een opname te importeren.',
+      'recordingPick': 'Kies een opnamebestand',
+      'recordingNotice':
+          'Let op\n· Alleen voor gebruikers van 18 jaar en ouder.\n· Kies een opname van een eigen gesprek. We gebruiken alleen de eerste 3 minuten ongeveer.\n· Elke keer dat je iets maakt, kost dat 1 minuut van je tijd. Kunnen we de opname niet uitlezen, dan krijg je die tijd terug.\n· We maken op basis van de situatie in de opname een nieuw gesprek tussen twee personen en voegen dit als nieuwe ruimte toe aan je studieruimte. Alleen jij kunt het zien en de opname wordt niet opgeslagen.',
+      'recordingCreate': 'Gesprek maken',
+      'recordingError_noFile': 'Selecteer eerst een opnamebestand.',
+      'recordingError_unusable':
+          'In deze opname staat geen gesprek om mee te oefenen. Probeer een andere opname.',
+      'recordingError_tooBig':
+          'De opname is te groot. Kies een kortere opname.',
+      'recordingError_failed':
+          'Kan de opname niet lezen. Probeer het over een ogenblik opnieuw.',
+      'recordingError_limit':
+          'Je hebt het aantal opnames dat je vandaag kunt importeren opgebruikt. Probeer het morgen opnieuw.',
+      'recordingError_adultOnly':
+          'Opnamen importeren is alleen beschikbaar voor gebruikers van 18 jaar en ouder.',
+      'recordingError_badFile':
+          'Dit bestand kan niet worden gelezen. Kies een audiobestand, zoals m4a of mp3.',
       'shortsError_failed':
           'De video kon niet worden geladen. Probeer het over een tijdje opnieuw.',
       'shortsLinkNotice':

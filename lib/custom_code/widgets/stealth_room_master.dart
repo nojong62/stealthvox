@@ -20,6 +20,8 @@ import 'dart:ui';
 import 'dart:async';
 import 'package:flutter/services.dart'; // 쇼츠 링크 클립보드
 import '/custom_code/services/shorts_scenario_service.dart';
+import '/custom_code/services/recording_picker.dart';
+import 'recording_import_dialog.dart';
 import 'dart:convert';
 import 'dart:math'; // 서클 분야 순서 셔플
 import 'package:shared_preferences/shared_preferences.dart'; // 분야 순회 커서
@@ -374,13 +376,16 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     final copy = _setupCopy;
     final choice = await showModalBottomSheet<String>(
       context: context,
+      // 일본어처럼 설명 글이 긴 언어에서 기본 높이(화면의 9/16)를 넘쳐 아래가
+      // 잘렸다. 높이 제한을 풀고, 그래도 넘치면 스크롤되게 한다.
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF17171A),
       barrierColor: Colors.black.withValues(alpha: 0.6),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetContext) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -795,6 +800,30 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     );
     // 팝업을 닫으면(만들기 성공·취소 모두) 칸을 비운다.
     _shortsUrlController.clear();
+    if (roomRef == null || !mounted) return;
+    // 공부방 안은 과금 구간이다(목록 첫 페이지만 무과금).
+    if (!guardBillingEntry(context)) return;
+    context.pushNamed(
+      'ChatDetail',
+      queryParameters: {
+        'historyRef': serializeParam(roomRef, ParamType.DocumentReference),
+      }.withoutNulls,
+    );
+  }
+
+  /// 🎙️ 녹음 가져오기 — 팝업에서 만들면 쇼츠 링크처럼 새 공부방으로 들어간다.
+  Future<void> _openRecordingDialog() async {
+    final target = FFAppState().targetLang.trim();
+    final roomRef = await showRecordingImportDialog(
+      context,
+      copy: _setupCopy,
+      originLanguage: _chatLanguage,
+      targetLanguage: target.isEmpty ? 'English' : target,
+      onRemainingSeconds: (left) {
+        FFAppState().remainingTime = left;
+        BillingTicker.instance.remainingSecondsNotifier.value = left;
+      },
+    );
     if (roomRef == null || !mounted) return;
     // 공부방 안은 과금 구간이다(목록 첫 페이지만 무과금).
     if (!guardBillingEntry(context)) return;
@@ -1394,7 +1423,20 @@ Return ONLY valid JSON: {"name":"..."}.
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _buildShortsLinkEntry(),
+                  if (kRecordingImportEnabled)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        RecordingImportEntry(
+                          copy: _setupCopy,
+                          onTap: _openRecordingDialog,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(child: _buildShortsLinkEntry()),
+                      ],
+                    )
+                  else
+                    _buildShortsLinkEntry(),
                   const SizedBox(height: 12),
                   Text(
                     _setupCopy['modesTitle'],

@@ -2561,6 +2561,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _silenceCounter = 0;
     _autoVadElapsedTicks = 0;
     _autoVadPollBusy = false;
+    debugPrint('[turnPracticeVAD] my_turn_start index=$currentIndex');
     try {
       final dir = await getTemporaryDirectory();
       final path =

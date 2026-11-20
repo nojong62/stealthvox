@@ -387,8 +387,15 @@ function createShortsScenario({admin}) {
 
 module.exports = {
   DAILY_LIMIT,
+  GEMINI_ENDPOINT,
   GEMINI_MODEL,
+  GEMINI_TIMEOUT_MS,
   MAX_LINES,
+  MAX_ROLE_CHARS,
+  MAX_TITLE_CHARS,
+  RESPONSE_SCHEMA,
+  geminiApiKey,
+  languageOr,
   buildGeminiRequest,
   buildPrompt,
   createShortsScenario,

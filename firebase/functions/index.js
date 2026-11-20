@@ -121,6 +121,9 @@ exports.adminUpdateCoupon = coupons.adminUpdateCoupon;
 // 쇼츠 링크 → 시나리오톡 세 칸. firebase/functions/shorts_scenario.js
 const shortsScenario = require("./shorts_scenario").createShortsScenario({admin});
 exports.extractShortsScenario = shortsScenario.extractShortsScenario;
+// 녹음 가져오기 → 공부방 대화. firebase/functions/recording_scenario.js
+const recordingScenario = require("./recording_scenario").createRecordingScenario({admin});
+exports.extractRecordingScenario = recordingScenario.extractRecordingScenario;
 
 // 헬스체크(자가진단) — 매일 07:00 KST + 관리자 수동 실행. firebase/functions/health_check.js
 const healthCheck = require("./health_check");
