@@ -17,7 +17,7 @@ class DuoInviteCopy {
     'memberBadge': 'Member',
     'guestBadge': 'Guest · 3 min',
     'guestHostPitch':
-        'Post an invitation without signing up. If a member taps it, you can have an interpreted conversation for 3 minutes, each in your own language. Non-members can’t call each other.',
+        'Post an invitation to members without signing up. If a member taps it, you can have an interpreted conversation for 3 minutes, each speaking your own language.',
     'guestHostWrite': 'Write a guest invitation',
     'guestDailyLimitPersonal': 'You\'ve used today\'s 3 guest calls. Come back tomorrow or join as a member.',
     'hostDailyLimit': 'This host has used up today\'s guest calls.',
@@ -126,7 +126,7 @@ class DuoInviteCopy {
       // 📣 비회원 초대(홍보 기간)·신고
       'memberBadge': '회원',
       'guestBadge': '비회원 · 3분',
-      'guestHostPitch': '가입 없이 초대글을 올려 보세요. 회원이 눌러 주면 3분 동안 각자 자기 말로 통역 대화를 할 수 있어요. 비회원끼리는 통화할 수 없어요.',
+      'guestHostPitch': '가입 없이 회원에게 초대글을 올려 보세요. 회원이 눌러 주면 3분 동안 각자 자기 말로 통역 대화를 할 수 있어요.',
       'guestHostWrite': '비회원 초대글 쓰기',
       'guestDailyLimitPersonal': '오늘 비회원 통화 3통을 모두 썼어요. 내일 다시 오시거나 회원으로 참여해 주세요.',
       'hostDailyLimit': '이 초대자는 오늘 비회원 통화를 모두 썼어요.',
@@ -227,7 +227,7 @@ class DuoInviteCopy {
       'memberBadge': '会員',
       'guestBadge': 'ゲスト · 3分',
       'guestHostPitch':
-          '登録なしで招待を投稿できます。会員がタップすると、3分間、それぞれの言葉で通訳付きの会話ができます。非会員同士では通話できません。',
+          '登録せずに会員向けの招待を投稿できます。会員がタップすると、3分間、それぞれ自分の言葉で通訳付きの会話ができます。',
       'guestHostWrite': 'ゲスト招待を書く',
       'guestDailyLimitPersonal': '本日のゲスト通話3回をすべて使いました。明日また来るか、会員として参加してください。',
       'hostDailyLimit': 'この招待者は本日のゲスト通話をすべて使いました。',
@@ -325,7 +325,7 @@ class DuoInviteCopy {
       // 📣 비회원 초대(홍보 기간)·신고
       'memberBadge': '会员',
       'guestBadge': '访客 · 3分钟',
-      'guestHostPitch': '无需注册即可发布邀请。会员点击后，你们就能用各自的语言进行3分钟的翻译对话。非会员之间无法通话。',
+      'guestHostPitch': '无需注册即可向会员发布邀请。会员点击后，你们就能用各自的语言进行3分钟的口译对话。',
       'guestHostWrite': '写访客邀请',
       'guestDailyLimitPersonal': '今天的3次访客通话已用完。请明天再来，或以会员身份参加。',
       'hostDailyLimit': '该邀请者今天的访客通话已用完。',
@@ -424,7 +424,7 @@ class DuoInviteCopy {
       'memberBadge': 'Miembro',
       'guestBadge': 'Invitado · 3 min',
       'guestHostPitch':
-          'Publica una invitación sin registrarte. Si la toca un miembro, podrán conversar con traducción durante 3 minutos, cada uno en su idioma. Los no miembros no pueden llamarse entre sí.',
+          'Publica una invitación para los miembros sin registrarte. Si la toca un miembro, podrán conversar con traducción durante 3 minutos, cada uno en su propio idioma.',
       'guestHostWrite': 'Escribir invitación de invitado',
       'guestDailyLimitPersonal': 'Ya usaste las 3 llamadas de invitado de hoy. Vuelve mañana o únete como miembro.',
       'hostDailyLimit': 'Este anfitrión ya usó sus llamadas de invitado de hoy.',
@@ -533,7 +533,7 @@ class DuoInviteCopy {
       'memberBadge': 'Membre',
       'guestBadge': 'Invité · 3 min',
       'guestHostPitch':
-          'Publiez une invitation sans vous inscrire. Si un membre appuie dessus, vous pourrez discuter avec traduction pendant 3 minutes, chacun dans sa langue. Les non-membres ne peuvent pas s’appeler entre eux.',
+          'Publiez une invitation destinée aux membres sans vous inscrire. Si un membre appuie dessus, vous pourrez discuter avec traduction pendant 3 minutes, chacun dans sa propre langue.',
       'guestHostWrite': 'Écrire une invitation invité',
       'guestDailyLimitPersonal': 'Vous avez utilisé vos 3 appels invités du jour. Revenez demain ou rejoignez-nous en tant que membre.',
       'hostDailyLimit': 'Cet hôte a utilisé tous ses appels invités du jour.',
@@ -643,7 +643,7 @@ class DuoInviteCopy {
       'memberBadge': 'Mitglied',
       'guestBadge': 'Gast · 3 Min.',
       'guestHostPitch':
-          'Veröffentliche eine Einladung ohne Registrierung. Tippt ein Mitglied darauf, könnt ihr 3 Minuten lang mit Übersetzung sprechen, jeder in seiner eigenen Sprache. Nichtmitglieder können sich nicht gegenseitig anrufen.',
+          'Veröffentliche ohne Registrierung eine Einladung für Mitglieder. Tippt ein Mitglied darauf, könnt ihr 3 Minuten lang mit Übersetzung sprechen, jeder in seiner eigenen Sprache.',
       'guestHostWrite': 'Gast-Einladung schreiben',
       'guestDailyLimitPersonal': 'Du hast heute alle 3 Gastgespräche genutzt. Komm morgen wieder oder mach als Mitglied mit.',
       'hostDailyLimit': 'Dieser Gastgeber hat seine Gastgespräche für heute aufgebraucht.',
@@ -753,7 +753,7 @@ class DuoInviteCopy {
       'memberBadge': 'सदस्य',
       'guestBadge': 'अतिथि · 3 मिनट',
       'guestHostPitch':
-          'बिना साइन अप किए निमंत्रण पोस्ट करें। अगर कोई सदस्य इस पर टैप करता है, तो आप 3 मिनट तक अपनी-अपनी भाषा में अनुवाद के साथ बात कर सकते हैं। गैर-सदस्य आपस में कॉल नहीं कर सकते।',
+          'बिना साइन अप किए सदस्यों के लिए निमंत्रण पोस्ट करें। अगर कोई सदस्य इस पर टैप करता है, तो आप 3 मिनट तक अपनी-अपनी भाषा में अनुवाद के साथ बात कर सकते हैं।',
       'guestHostWrite': 'अतिथि निमंत्रण लिखें',
       'guestDailyLimitPersonal': 'आज की 3 अतिथि कॉल आप उपयोग कर चुके हैं। कल फिर आएँ या सदस्य के रूप में जुड़ें।',
       'hostDailyLimit': 'इस मेज़बान की आज की अतिथि कॉल समाप्त हो गई हैं।',
@@ -861,7 +861,7 @@ class DuoInviteCopy {
       'memberBadge': 'Участник',
       'guestBadge': 'Гость · 3 мин',
       'guestHostPitch':
-          'Опубликуйте приглашение без регистрации. Если участник нажмёт на него, вы сможете 3 минуты общаться с переводом, каждый на своём языке. Незарегистрированные пользователи не могут звонить друг другу.',
+          'Опубликуйте приглашение для участников без регистрации. Если участник нажмёт на него, вы сможете 3 минуты общаться с переводом, каждый на своём языке.',
       'guestHostWrite': 'Написать гостевое приглашение',
       'guestDailyLimitPersonal': 'Вы использовали все 3 гостевых звонка на сегодня. Приходите завтра или присоединяйтесь как участник.',
       'hostDailyLimit': 'Этот хозяин уже использовал гостевые звонки на сегодня.',
@@ -969,7 +969,7 @@ class DuoInviteCopy {
       'memberBadge': 'Membro',
       'guestBadge': 'Convidado · 3 min',
       'guestHostPitch':
-          'Publique um convite sem se cadastrar. Se um membro tocar nele, vocês poderão conversar com tradução por 3 minutos, cada um no seu idioma. Não membros não podem ligar uns para os outros.',
+          'Publique um convite para os membros sem se cadastrar. Se um membro tocar nele, vocês poderão conversar com tradução por 3 minutos, cada um no seu próprio idioma.',
       'guestHostWrite': 'Escrever convite de convidado',
       'guestDailyLimitPersonal': 'Você já usou as 3 chamadas de convidado de hoje. Volte amanhã ou participe como membro.',
       'hostDailyLimit': 'Este anfitrião já usou as chamadas de convidado de hoje.',
@@ -1078,7 +1078,7 @@ class DuoInviteCopy {
       'memberBadge': 'Membro',
       'guestBadge': 'Ospite · 3 min',
       'guestHostPitch':
-          'Pubblica un invito senza registrarti. Se un membro lo tocca, potrete parlare con traduzione per 3 minuti, ognuno nella propria lingua. I non membri non possono chiamarsi tra loro.',
+          'Pubblica un invito rivolto ai membri senza registrarti. Se un membro lo tocca, potrete parlare con traduzione per 3 minuti, ognuno nella propria lingua.',
       'guestHostWrite': 'Scrivi un invito da ospite',
       'guestDailyLimitPersonal': 'Hai usato le 3 chiamate ospite di oggi. Torna domani o partecipa come membro.',
       'hostDailyLimit': 'Questo host ha esaurito le chiamate ospite di oggi.',
@@ -1188,7 +1188,7 @@ class DuoInviteCopy {
       'memberBadge': 'Lid',
       'guestBadge': 'Gast · 3 min',
       'guestHostPitch':
-          'Plaats een uitnodiging zonder je aan te melden. Tikt een lid erop, dan kunnen jullie 3 minuten met vertaling praten, ieder in de eigen taal. Niet-leden kunnen elkaar niet bellen.',
+          'Plaats zonder je aan te melden een uitnodiging voor leden. Tikt een lid erop, dan kunnen jullie 3 minuten met vertaling praten, ieder in de eigen taal.',
       'guestHostWrite': 'Gastuitnodiging schrijven',
       'guestDailyLimitPersonal': 'Je hebt de 3 gastgesprekken van vandaag gebruikt. Kom morgen terug of doe mee als lid.',
       'hostDailyLimit': 'Deze host heeft de gastgesprekken van vandaag opgebruikt.',
