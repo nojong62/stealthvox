@@ -3261,6 +3261,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     String? responseFormat,
     String? language,
     String? markup,
+    String? engine,
+    String? stylePrompt,
+    void Function(String provider)? onProvider,
   }) async {
     // 🎫 소리를 **새로 만드는** 유일한 자리다. 여기만 막으면 이미 받아 둔
     //   소리는 그대로 들리고, 새 비용만 나가지 않는다.
@@ -3295,6 +3298,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                 ..addAll({
                   if (markup != null && markup.trim().isNotEmpty)
                     'markup': markup.trim(),
+                  // Gemini 전용. Gateway가 모르면 무시하고 Chirp으로 읽는다.
+                  if (engine != null && engine.isNotEmpty) 'engine': engine,
+                  if (stylePrompt != null && stylePrompt.trim().isNotEmpty)
+                    'style_prompt': stylePrompt.trim(),
                   // 표현형 프로필은 speed를 싣지 않는다. 1이 아니면 직접
                   // 싣는다 — Chirp은 speaking_rate로 받는다.
                   if (speed != 1.0) 'speed': speed,
@@ -3305,6 +3312,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           .timeout(Duration(seconds: responseFormat == 'pcm' ? 30 : 10));
       debugPrint(
           '[HISTORY-TTS] model=$model voice=$voice instruction=${instructionTag ?? 'none'} status=${response.statusCode} chars=${text.trim().length}');
+      if (response.statusCode == 200) {
+        onProvider?.call(response.headers['x-stealthvox-tts-provider'] ?? '');
+      }
       return response.statusCode == 200 ? response.bodyBytes : null;
     } catch (e) {
       debugPrint("[fetchOpenAITTS] $e");
@@ -6799,10 +6809,15 @@ RULES — follow exactly:
     final ChirpPause pause = shadowing ? _p3ShadowPause : ChirpPause.short;
     final double speed = shadowing ? _p3ShadowSpeed : _snapEchoSpeed;
     final SnapUnitSize size = _p3SnapSize;
+    // ✨ 영어 에코잉은 Gemini TTS를 먼저 쓴다. 소리가 달라서 캐시 칸도 따로 선다.
+    final bool useGemini = !shadowing &&
+        kSnapGeminiTts &&
+        SnapEchoChunker.isEnglish(_sessionTargetLangName());
     // 고른 쉼·속도·단위 길이마다 소리가 다르다 — 캐시 칸도 따로 선다.
     final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3'
         '_${pause.name}_x$speed'
-        '${shadowing ? '' : '_${snapChunkVersionFor(_sessionTargetLangName())}_${size.name}'}';
+        '${shadowing ? '' : '_${snapChunkVersionFor(_sessionTargetLangName())}_${size.name}'}'
+        '${useGemini ? '_$kSnapGeminiCacheTag' : ''}';
     final requestKey = '$ns|$text';
     final existing = _breathPcmInFlight[requestKey];
     if (existing != null) return existing;
@@ -6841,6 +6856,7 @@ RULES — follow exactly:
       }
       // 낭독 지시(instructions)는 보내지 않는다 — 지시가 붙으면 Gateway가
       // 표현형으로 보고 Chirp 3 HD가 아닌 OpenAI로 넘긴다.
+      String provider = '';
       final raw = await _fetchOpenAITTSInternal(
         text,
         speed,
@@ -6849,8 +6865,15 @@ RULES — follow exactly:
         instructionTag: '${style.id}_p3',
         responseFormat: 'pcm',
         markup: markup,
+        engine: useGemini ? 'gemini' : null,
+        stylePrompt: useGemini ? kSnapGeminiStylePrompt : null,
+        onProvider: (p) => provider = p,
       );
       if (raw == null || raw.isEmpty) return null;
+      debugPrint('[SNAP-TTS] provider=$provider gemini=$useGemini');
+      // Gemini를 청했는데 Chirp이 읽었으면(Gateway 미배포·폴백) 이 칸에
+      // 저장하지 않는다 — 나중에 Gemini 소리가 나올 자리를 막는다.
+      if (useGemini && !provider.contains('gemini')) return raw;
       final wav = pcm16ToWav(raw, sampleRate: kStealthVoxSttSampleRate);
       await TtsCache.put(text, ns, wav);
       // 원본(관리자 방)에서 만든 소리만 올린다. 올리기 권한도 관리자뿐이다.

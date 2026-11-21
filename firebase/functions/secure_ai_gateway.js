@@ -59,6 +59,21 @@ const MAX_GOOGLE_TTS_INPUT_BYTES = 5000;
 // Upper bound for one request through this gateway, split across Google calls.
 const MAX_TTS_INPUT_CHARS = 5000;
 
+// Gemini TTS runs through the same Google endpoint as Chirp, selected by
+// `voice.modelName`, and takes a natural-language style prompt that Chirp does
+// not. The app opts in per request with `engine: "gemini"`; any failure falls
+// back to Chirp so a preview-model change can never silence a screen. Setting
+// GEMINI_TTS_DISABLED=1 on the function turns the route off without an app
+// update. English only for now.
+const GEMINI_TTS_MODEL = "gemini-2.5-flash-tts";
+const GEMINI_TTS_LOCALES = new Set(["en-US"]);
+const GEMINI_MAX_PIECES = 40;
+const GEMINI_MAX_PROMPT_CHARS = 800;
+const GEMINI_SAMPLE_RATE = 24000;
+// The app finds breath edges from silence (it needs >= 180 ms), so the gap
+// stands in for Chirp's [pause] tags and must be clearly longer than that.
+const GEMINI_PAUSE_MS = { short: 450, medium: 700, long: 1000 };
+
 // This authentication object uses the Cloud Functions runtime service account.
 // No Google API key is issued to, stored in, or recoverable from the APK.
 const googleAuth = new GoogleAuth({ scopes: [GOOGLE_TTS_SCOPE] });
@@ -222,6 +237,8 @@ function openAiSpeechBody(body) {
   const sanitized = { ...body };
   delete sanitized.language;
   delete sanitized.markup;
+  delete sanitized.engine;
+  delete sanitized.style_prompt;
   const voice = String(sanitized.voice || "").trim().toLowerCase();
   if (OPENAI_VOICE_FOR_GENDER_ID.has(voice)) {
     sanitized.voice = OPENAI_VOICE_FOR_GENDER_ID.get(voice);
@@ -405,6 +422,111 @@ async function tryProxyChirpSpeech(req, res) {
   }
 }
 
+function shouldUseGemini(body) {
+  if (process.env.GEMINI_TTS_DISABLED === "1") return false;
+  if (!body || typeof body !== "object") return false;
+  if (String(body.engine || "").trim().toLowerCase() !== "gemini") return false;
+  if (String(body.instructions || "").trim()) return false;
+  // Silence between pieces is spliced into raw PCM; MP3 has no safe splice.
+  if (requestedAudioFormat(body) !== "pcm") return false;
+  return GEMINI_TTS_LOCALES.has(chirpLocaleForRequest(body));
+}
+
+function geminiPromptForRequest(body) {
+  const prompt = String(body && body.style_prompt || "").trim();
+  return prompt ? prompt.slice(0, GEMINI_MAX_PROMPT_CHARS) : "";
+}
+
+// The app writes `unit [pause short] unit ...` for Chirp. Gemini reads each
+// unit on its own and the gap between units is real silence.
+function geminiPiecesForRequest(body) {
+  const source = chirpMarkupForRequest(body) || String(body && body.input || "");
+  const parts = source.split(/\s*\[pause(?:\s+(short|long))?\]\s*/u);
+  const pieces = [];
+  // split() with one capture group yields: text, tag, text, tag, ... text
+  for (let i = 0; i < parts.length; i += 2) {
+    const text = String(parts[i] || "").trim();
+    if (!text) continue;
+    const tag = parts[i + 1];
+    pieces.push({ text, pauseMs: GEMINI_PAUSE_MS[tag || "medium"] });
+  }
+  if (pieces.length > 0) pieces[pieces.length - 1].pauseMs = 0;
+  return pieces;
+}
+
+function silencePcm(ms) {
+  const samples = Math.round(GEMINI_SAMPLE_RATE * ms / 1000);
+  return Buffer.alloc(samples * 2);
+}
+
+function geminiVoiceForRequest(body, locale) {
+  return {
+    languageCode: locale,
+    name: chirpGenderForRequest(body) === "male" ? CHIRP_MALE_VOICE : CHIRP_FEMALE_VOICE,
+    modelName: GEMINI_TTS_MODEL,
+  };
+}
+
+async function synthesizeGeminiPiece(client, text, prompt, voice) {
+  const response = await client.request({
+    url: GOOGLE_TTS_ENDPOINT,
+    method: "POST",
+    data: {
+      input: prompt ? { text, prompt } : { text },
+      voice,
+      audioConfig: { audioEncoding: "LINEAR16", sampleRateHertz: GEMINI_SAMPLE_RATE },
+    },
+  });
+  const encoded = response && response.data && response.data.audioContent;
+  if (typeof encoded !== "string" || !encoded) {
+    throw new Error("Gemini TTS returned no audio.");
+  }
+  return stripWavContainer(Buffer.from(encoded, "base64"));
+}
+
+async function synthesizeGemini(body, locale) {
+  const pieces = geminiPiecesForRequest(body);
+  if (pieces.length === 0 || pieces.length > GEMINI_MAX_PIECES) return null;
+  const prompt = geminiPromptForRequest(body);
+  const voice = geminiVoiceForRequest(body, locale);
+  const client = await googleAuth.getClient();
+  const audio = await Promise.all(pieces.map(
+    piece => synthesizeGeminiPiece(client, piece.text, prompt, voice)));
+  const parts = [];
+  audio.forEach((pcm, i) => {
+    parts.push(pcm);
+    if (pieces[i].pauseMs > 0) parts.push(silencePcm(pieces[i].pauseMs));
+  });
+  return { voiceName: voice.name, audio: Buffer.concat(parts) };
+}
+
+// Returns false on any problem so the caller continues to the Chirp route.
+async function tryProxyGeminiSpeech(req, res) {
+  const body = req.body && typeof req.body === "object" ? req.body : null;
+  if (!shouldUseGemini(body)) return false;
+  const locale = chirpLocaleForRequest(body);
+  try {
+    const synthesized = await synthesizeGemini(body, locale);
+    if (!synthesized || synthesized.audio.length === 0) return false;
+    res.status(200);
+    res.setHeader("cache-control", "no-store");
+    res.setHeader(
+      "x-stealthvox-tts-provider",
+      "google-gemini-tts-" + locale.toLowerCase() + "-" +
+        synthesized.voiceName.toLowerCase()
+    );
+    res.setHeader("content-type", "audio/L16; rate=24000; channels=1");
+    res.send(synthesized.audio);
+    return true;
+  } catch (error) {
+    functions.logger.error("Gemini TTS failed; falling back to Chirp", {
+      locale,
+      message: error && error.message,
+    });
+    return false;
+  }
+}
+
 function proxyOpenAiRequest(req, res, upstreamPath, apiKey, bodyOverride = null) {
   const headers = {
     authorization: "Bearer " + apiKey,
@@ -575,6 +697,9 @@ const openAiProxy = functions
     }
     const path = normalizedProxyPath(req);
     const isSpeech = req.method === "POST" && path === "/v1/audio/speech";
+    if (isSpeech && await tryProxyGeminiSpeech(req, res)) {
+      return;
+    }
     if (isSpeech && await tryProxyChirpSpeech(req, res)) {
       return;
     }
@@ -602,6 +727,11 @@ module.exports = {
   chirpLocaleForRequest,
   chirpVoiceForRequest,
   shouldUseChirp,
+  shouldUseGemini,
+  geminiPiecesForRequest,
+  geminiPromptForRequest,
+  geminiVoiceForRequest,
+  silencePcm,
   openAiSpeechBody,
   splitForGoogleTts,
   chirpAudioConfig,

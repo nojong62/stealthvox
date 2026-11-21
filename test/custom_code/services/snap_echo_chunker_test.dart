@@ -109,6 +109,12 @@ void main() {
       );
     });
 
+    test('Gemini style prompt asks for a relaxed pace and clear stress', () {
+      expect(kSnapGeminiStylePrompt, contains('85 percent'));
+      expect(kSnapGeminiStylePrompt, contains('stressed syllable'));
+      expect(kSnapGeminiCacheTag, isNotEmpty);
+    });
+
     test('markup puts the pause tag between every unit', () {
       expect(
         SnapEchoChunker.markup(

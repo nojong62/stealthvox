@@ -31,6 +31,25 @@ const String kSnapChunkVersion = 'snap_chunk_v3';
 /// 다른 언어는 [kSnapChunkVersion]을 그대로 써서 기존 소리가 유지된다.
 const String kSnapChunkEnglishStressVersion = 'snap_chunk_en_stress_v1';
 
+/// ✨ 영어 Snap Echoing 소리를 Gemini TTS로 만든다. Gateway가 실패하거나 꺼져
+/// 있으면 Chirp 3 HD가 대신 읽는다. 끄려면 빌드에
+/// `--dart-define=SNAP_GEMINI_TTS=false`.
+const bool kSnapGeminiTts =
+    bool.fromEnvironment('SNAP_GEMINI_TTS', defaultValue: true);
+
+/// Gemini로 만든 소리의 캐시 판 꼬리표. 지시문을 바꾸면 올린다.
+const String kSnapGeminiCacheTag = 'gem1';
+
+/// Gemini에게 주는 낭독 지시. 속도는 숫자로 못 정해서 말로 적는다 — 보통
+/// 대화 속도의 85% 안팎, 한 호흡에 따라 하기 좋은 박자.
+const String kSnapGeminiStylePrompt =
+    'Read this short phrase for an English learner who will repeat it right '
+    'after you. Speak clearly at a relaxed pace, about 85 percent of normal '
+    'conversational speed, as one smooth breath. Give each stressed syllable '
+    'a clear, slightly longer beat and keep unstressed words short and light, '
+    'so the rhythm is easy to copy. Do not rush, do not exaggerate, and do '
+    'not add anything.';
+
 /// 이 언어 이름으로 만든 소리가 쓸 캐시 판.
 String snapChunkVersionFor(String languageName) =>
     SnapEchoChunker.isEnglish(languageName)
