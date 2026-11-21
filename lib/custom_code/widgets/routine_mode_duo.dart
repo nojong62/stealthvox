@@ -3794,7 +3794,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     unawaited(playDuoCheckpointChime());
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(DuoInviteCopy.forSystemLocale()['checkpointSaved']),
-      duration: const Duration(seconds: 4),
+      duration: const Duration(seconds: 8),
     ));
   }
 
