@@ -72,16 +72,16 @@ void main() {
     final history = File('lib/custom_code/widgets/chat_history_master.dart')
         .readAsStringSync();
 
-    test('유저에게 보이는 이름은 PRACTICE · ESSAY다', () {
+    test('유저에게 보이는 이름은 PRACTICE · MY STORY다', () {
       // 2026-10-15 실장님 지시. NATURAL & SHARP는 빠지고 CLEAR & EASY 글이
-      // ESSAY라는 이름으로 남는다. 저장 칸(`my_speech`)은 그대로다.
-      expect(history, contains('"ESSAY"'));
+      // MY STORY라는 이름으로 남는다(2026-10 개명: ESSAY → MY STORY). 저장 칸(`my_speech`)은 그대로다.
+      expect(history, contains('"MY STORY"'));
       expect(history, isNot(contains('"CLEAR & EASY"')));
       expect(history, isNot(contains('"NATURAL & SHARP"')));
       expect(history, contains('"Practice"'));
     });
 
-    test('ESSAY 카드는 글을 미리 보여 준다', () {
+    test('MY STORY 카드는 글을 미리 보여 준다', () {
       // 2026-10-15 실장님 지시 — 누르기 전에 내용을 읽어 볼 수 있다.
       expect(history, isNot(contains('Larry King–style Plain Spoken English')));
       expect(history, contains('preview: _mySpeech'));

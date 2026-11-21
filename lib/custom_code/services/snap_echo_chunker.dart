@@ -42,7 +42,7 @@ enum SnapUnitSize { quick, full }
 
 extension SnapUnitSizeLabel on SnapUnitSize {
   /// 화면 이름. 고유명사처럼 쓰므로 번역하지 않는다.
-  String get label => this == SnapUnitSize.quick ? 'Quick Snap' : 'Full Breath';
+  String get label => this == SnapUnitSize.quick ? 'Quick Snap' : 'Full Beat';
 }
 
 class SnapEchoChunker {

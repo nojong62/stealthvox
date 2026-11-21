@@ -5479,7 +5479,7 @@ RULES — follow exactly:
                     if (speechReady) ...[
                       const SizedBox(height: 12),
                       _buildStudyPathCard(
-                        title: "ESSAY",
+                        title: "MY STORY",
                         icon: Icons.record_voice_over_rounded,
                         color: const Color(0xFF38BDF8),
                         // 📖 만들어 둔 글이 있으면 누르기 전에 읽어 볼 수 있다.
@@ -7605,7 +7605,7 @@ RULES — follow exactly:
     try {
       // ① ESSAY
       if (_mySpeech.trim().isEmpty) {
-        _setTrialPrep('ESSAY 만드는 중');
+        _setTrialPrep('MY STORY 만드는 중');
         if (!await _ensureMySpeech()) throw StateError('essay');
       }
       // ② 다른 표현
@@ -8024,7 +8024,7 @@ RULES — follow exactly:
         _p3Segments = const <BreathSegment>[];
       });
 
-  /// ⚡ [SNAP-ECHO] 한 호흡 단위 길이 고르기 — Quick Snap / Full Breath.
+  /// ⚡ [SNAP-ECHO] 한 호흡 단위 길이 고르기 — Quick Snap / Full Beat.
   Widget _buildP3SnapSizePicker() {
     return Row(
       children: [
