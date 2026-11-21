@@ -73,6 +73,7 @@ import '/custom_code/services/tts_adapter.dart';
 import '/custom_code/services/user_line_fix.dart';
 import '/custom_code/services/transcript_text_clean.dart';
 import '/custom_code/services/short_reply_gate.dart';
+import '/custom_code/services/completion_budget.dart';
 import '/custom_code/services/late_continuation.dart';
 import '/custom_code/services/listening_practice.dart';
 import '/custom_code/services/conversation_cancel_command.dart';
@@ -234,6 +235,14 @@ class CircleTalkCostTracker {
   int ttsRequestCount = 0;
   int ttsDuplicateBlocked = 0;
   int retranscribeRequestCount = 0;
+  // 📤 gpt-transcribe(파일 전사)로 올린 소리. 호출 수와 길이를 센다.
+  int transcribeAudioMs = 0;
+  int transcribeCallCount = 0;
+
+  void addTranscribeBytes(int byteCount) {
+    transcribeAudioMs += (byteCount / kStealthVoxSttBytesPerMs).round();
+    transcribeCallCount++;
+  }
 
   /// 💾 창고 실측을 같은 줄에 붙여 찍는다. 붙이지 않으면 비용 로그와 창고
   ///   로그가 세션 경계에서 어긋나 짝을 맞출 수 없다.
@@ -271,7 +280,9 @@ class CircleTalkCostTracker {
           'tts_input_chars=$ttsInputChars '
           'tts_request_count=$ttsRequestCount '
           'tts_duplicate_blocked=$ttsDuplicateBlocked '
-          'retranscribe_request_count=$retranscribeRequestCount',
+          'retranscribe_request_count=$retranscribeRequestCount '
+          'transcribe_audio_ms=$transcribeAudioMs '
+          'transcribe_call_count=$transcribeCallCount',
     );
     // 💾 24시간·200MB·40MB는 근거 있는 값이 아니라 보호용 출발점이다.
     //   이 줄이 쌓여야 실제 값으로 바꿀 수 있다.
@@ -755,6 +766,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     //   창고는 히스토리에 줄이 저장될 때 이것을 그대로 받아 쓴다.
     _lastTurnPcm = pcm;
     _costTracker.recordRetranscribeRequest();
+    _costTracker.addTranscribeBytes(pcm.length);
     final requestStartedAt = DateTime.now();
     _markFirstSpeech('FIRST_PCM_SENT_TO_STT', at: requestStartedAt);
     final transcript = await OpenAiTranscribeService.transcribePcm16(
@@ -7094,6 +7106,7 @@ Return only the line itself.'''
       }
       final body =
           jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      logLlmUsage('generateOpener', body);
       final text =
           (body['choices']?[0]?['message']?['content'] as String?)?.trim() ??
               '';
@@ -7292,6 +7305,7 @@ Return only the line itself.'''
       if (response.statusCode != 200) return '';
       final body =
           jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      logLlmUsage('generateCircleMemberTurn', body);
       final text =
           (body['choices']?[0]?['message']?['content'] as String?)?.trim() ??
               '';
@@ -7645,6 +7659,7 @@ content and gist of the WHOLE conversation.
       if (response.statusCode != 200) return null;
       final body =
           jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      logLlmUsage('generateExpandedFromConversation', body);
       String s =
           ((body['choices'] as List).first['message']['content'] as String)
               .trim();
@@ -7952,6 +7967,7 @@ ${buildHeardConfirmOutputRule(originLang)}
               'body=${body.length > 200 ? body.substring(0, 200) : body}');
         } else {
           final data = jsonDecode(utf8.decode(response.bodyBytes));
+          logLlmUsage('translateOriginalToTarget', data);
           final translated =
               data['choices'][0]['message']['content'].toString().trim();
           if (translated.isNotEmpty) return translated;
@@ -8033,6 +8049,7 @@ Output only the translation on one line — no explanation, notes, or quotation 
 
         if (res.statusCode == 200) {
           final data = jsonDecode(utf8.decode(res.bodyBytes));
+          logLlmUsage('generateCleanOriginal', data);
           final result =
               data['choices'][0]['message']['content'].toString().trim();
           // 응답 검증: 번역 대신 안내/메타 응답이 오면 재시도 후 fallback.
@@ -8123,6 +8140,7 @@ Update the private memory:'''
         return previousMemory;
       }
       final data = jsonDecode(utf8.decode(response.bodyBytes));
+      logLlmUsage('updateCharacterMemory', data);
       final result = data['choices'][0]['message']['content'].toString().trim();
       debugPrint('[FreeTalkBrain.updateCharacterMemory] status=200 '
           'empty=${result.isEmpty}');
@@ -8182,6 +8200,7 @@ only the rewritten $languageName reply.'''
       if (response.statusCode != 200) return source;
       final body =
           jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      logLlmUsage('rewriteToNaturalRegister', body);
       final rewritten =
           ((body['choices'] as List).first['message']['content'] as String)
               .trim()
