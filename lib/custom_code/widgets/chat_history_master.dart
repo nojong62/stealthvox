@@ -6802,7 +6802,7 @@ RULES — follow exactly:
     // 고른 쉼·속도·단위 길이마다 소리가 다르다 — 캐시 칸도 따로 선다.
     final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3'
         '_${pause.name}_x$speed'
-        '${shadowing ? '' : '_${kSnapChunkVersion}_${size.name}'}';
+        '${shadowing ? '' : '_${snapChunkVersionFor(_sessionTargetLangName())}_${size.name}'}';
     final requestKey = '$ns|$text';
     final existing = _breathPcmInFlight[requestKey];
     if (existing != null) return existing;
