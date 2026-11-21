@@ -77,6 +77,32 @@ const int kDuoUtteranceEndMs = 1800;
 ///   목소리가 내 말 위로 끼어든다.
 const int kDuoSpeechStaleMs = 3000;
 
+/// 🔇 [SILENCE-GATE] Deepgram에는 **말이 있는 구간만** 보낸다(직접 대화).
+///
+/// 과금이 보낸 소리 길이를 따르므로, 무음까지 통화 내내 흘리면 말하는 시간의
+/// 3~4배를 낸다(2026-11-21 실측: 30분 통화에 폰마다 30.3분 전송).
+/// Deepgram은 경계 센서일 뿐이고 소리는 앱이 따로 담으므로, 보내지 않은
+/// 구간이 전사·저장에 미치는 영향은 없다.
+///
+/// 끄려면 `--dart-define=DUO_DG_SILENCE_GATE=false`.
+const bool kDuoDeepgramSilenceGate =
+    bool.fromEnvironment('DUO_DG_SILENCE_GATE', defaultValue: true);
+
+/// 이 세기(dBFS) 이상인 조각이 오면 문을 연다. 기존 "목소리 프레임" 기준과
+/// 같은 값이다 — 근거리 말소리 −30~−37, 방 잡음 −60대(2026-11 실측).
+const double kDuoDeepgramGateOpenDbfs = -50.0;
+
+/// 문이 닫혀 있는 동안 들고 있다가, 열릴 때 **앞서** 보내는 소리의 길이.
+/// 첫 음절이 문 여는 순간보다 앞에서 시작하기 때문이다.
+const int kDuoDeepgramGatePrerollMs = 1000;
+
+/// 마지막 목소리 뒤로도 이만큼은 계속 보낸다. **[kDuoUtteranceEndMs]보다 길어야
+/// 한다** — Deepgram이 1.8초 무음을 "들어야" UtteranceEnd를 낸다.
+const int kDuoDeepgramGateHangoverMs = kDuoUtteranceEndMs + 600;
+
+/// 소리를 안 보내는 동안 연결을 살려 두는 주기(Deepgram은 10초 침묵에 끊는다).
+const Duration kDuoDeepgramKeepAliveEvery = Duration(seconds: 4);
+
 /// 언어를 아직 모를 때 쓰는 값. **비워 두면 안 된다** — Deepgram의 기본은
 /// `en`이라, 한국어를 말하는데 영어 모델로 듣게 된다. 그러면 단어가 확정되지
 /// 않고, 마지막 단어 시각에 기대는 UtteranceEnd가 제때 오지 않는다.
@@ -121,7 +147,11 @@ class DuoDeepgramEndpointSensor {
     required this.apiKey,
     required this.languageCode,
     this.onLog,
+    this.silenceGate = false,
   });
+
+  /// 무음 구간을 Deepgram에 보내지 않는다. 직접 대화만 켠다.
+  final bool silenceGate;
 
   final String apiKey;
 
@@ -166,6 +196,26 @@ class DuoDeepgramEndpointSensor {
   int _droppedFrames = 0;
   int _lastSendLogAt = 0;
 
+  // [SILENCE-GATE] 상태. 문이 닫힌 동안은 최근 [kDuoDeepgramGatePrerollMs]만 들고 있다.
+  bool _gateOpen = false;
+  int _gateSilentMs = 0;
+  int _gateSkippedBytes = 0;
+  int _gateOpenCount = 0;
+  int _gateCloseCount = 0;
+  int _keepAliveCount = 0;
+  final List<Uint8List> _gateRing = <Uint8List>[];
+  int _gateRingBytes = 0;
+  Timer? _keepAliveTimer;
+
+  @visibleForTesting
+  bool get gateOpenForTest => _gateOpen;
+  @visibleForTesting
+  int get gateSkippedBytesForTest => _gateSkippedBytes;
+  @visibleForTesting
+  int get gateOpenCountForTest => _gateOpenCount;
+  @visibleForTesting
+  int get gateCloseCountForTest => _gateCloseCount;
+
   int _speechStartedCount = 0;
   int _staleCount = 0;
   int _utteranceEndCount = 0;
@@ -208,6 +258,7 @@ class DuoDeepgramEndpointSensor {
         cancelOnError: false,
       );
       _closed = false;
+      _startKeepAlive();
       _lg('connected model=nova-3 lang=${uri.queryParameters['language']} '
           'utteranceEndMs=$kDuoUtteranceEndMs');
       return true;
@@ -221,12 +272,19 @@ class DuoDeepgramEndpointSensor {
   /// 소리를 흘려보낸다. **되돌아오는 글자는 쓰지 않는다.**
   void addPcm(Uint8List pcm) {
     if (_closed || pcm.isEmpty) {
-      // 🔎 [계측] 닫힌 소켓으로 온 몫. 동작은 예전과 같다.
+      // [계측] 닫힌 소켓으로 온 몫. 동작은 예전과 같다.
       if (pcm.isNotEmpty) _droppedFrames++;
       return;
     }
     _micFrames++;
     _micBytes += pcm.lengthInBytes;
+    if (!silenceGate || _gateAllows(pcm)) {
+      _sendPcm(pcm);
+    }
+    _maybeLogPcm();
+  }
+
+  void _sendPcm(Uint8List pcm) {
     try {
       _channel?.sink.add(pcm);
       if (_channel == null) {
@@ -239,14 +297,87 @@ class DuoDeepgramEndpointSensor {
       // 소켓이 잠깐 닫힌 것뿐이다. 소리는 이미 캡처가 들고 있다.
       _droppedFrames++;
     }
-    // 🔎 [계측] 받은 것과 실제로 보낸 것을 갈라 놓는다. 둘이 벌어지면
-    //   배선이 끊긴 것이고, 나란히 가면 소켓까지는 갔다는 뜻이다.
+  }
+
+  /// 이 조각을 지금 Deepgram에 보내야 하는가.
+  ///
+  /// 열기: 목소리 세기가 문턱을 넘으면 열고, 들고 있던 앞소리를 먼저 보낸다.
+  /// 닫기: 목소리가 끊긴 지 [kDuoDeepgramGateHangoverMs]가 지나고 Deepgram도
+  /// "말하는 중"이 아닐 때만 닫는다 — 그 전에 닫으면 UtteranceEnd가 안 온다.
+  bool _gateAllows(Uint8List pcm) {
+    final double db = pcm16LinearToDbfs(pcm16Rms(pcm));
+    // 24kHz 16bit mono = 48 bytes/ms
+    final int ms = pcm.lengthInBytes ~/ 48;
+    final bool voiced = db >= kDuoDeepgramGateOpenDbfs;
+    if (voiced) {
+      _gateSilentMs = 0;
+    } else {
+      _gateSilentMs += ms;
+    }
+    if (_gateOpen) {
+      final bool deepgramBusy = _speechOpen && !_speechStale;
+      if (!voiced &&
+          !deepgramBusy &&
+          _gateSilentMs >= kDuoDeepgramGateHangoverMs) {
+        _gateOpen = false;
+        _gateCloseCount++;
+        _lg('silence_gate=closed silentMs=$_gateSilentMs');
+        _holdInRing(pcm);
+        return false;
+      }
+      return true;
+    }
+    if (voiced) {
+      _gateOpen = true;
+      _gateOpenCount++;
+      _lg('silence_gate=open dbfs=${db.toStringAsFixed(1)} '
+          'prerollBytes=$_gateRingBytes');
+      for (final Uint8List held in _gateRing) {
+        _sendPcm(held);
+      }
+      _gateRing.clear();
+      _gateRingBytes = 0;
+      return true;
+    }
+    _holdInRing(pcm);
+    return false;
+  }
+
+  void _holdInRing(Uint8List pcm) {
+    _gateSkippedBytes += pcm.lengthInBytes;
+    _gateRing.add(pcm);
+    _gateRingBytes += pcm.lengthInBytes;
+    final int maxBytes = kDuoDeepgramGatePrerollMs * 48;
+    while (_gateRingBytes > maxBytes && _gateRing.length > 1) {
+      _gateRingBytes -= _gateRing.removeAt(0).lengthInBytes;
+    }
+  }
+
+  void _startKeepAlive() {
+    _keepAliveTimer?.cancel();
+    if (!silenceGate) return;
+    _keepAliveTimer = Timer.periodic(kDuoDeepgramKeepAliveEvery, (_) {
+      if (_closed || _channel == null || _gateOpen) return;
+      try {
+        _channel?.sink.add(jsonEncode(<String, String>{'type': 'KeepAlive'}));
+        _keepAliveCount++;
+      } catch (_) {}
+    });
+  }
+
+  void _maybeLogPcm() {
+    // [계측] 받은 것과 실제로 보낸 것을 갈라 놓는다. 둘이 벌어지면
+    // 배선이 끊긴 것이고, 나란히 가면 소켓까지는 갔다는 뜻이다.
+    // (무음 게이트가 켜져 있으면 sentBytes가 micBytes보다 작은 것이 정상이다)
     if (_micFrames - _lastSendLogAt >= 100) {
       _lastSendLogAt = _micFrames;
       _lg('[DUO-DG-PCM] micFrames=$_micFrames sentFrames=$_sentFrames '
           'droppedFrames=$_droppedFrames micBytes=$_micBytes '
           'sentBytes=$_sentBytes socket=${_channel == null ? 'null' : 'open'} '
-          'closed=$_closed speechOpen=$_speechOpen stale=$_speechStale');
+          'closed=$_closed speechOpen=$_speechOpen stale=$_speechStale '
+          'gate=${silenceGate ? (_gateOpen ? 'open' : 'closed') : 'off'} '
+          'gateSkippedBytes=$_gateSkippedBytes gateOpens=$_gateOpenCount '
+          'keepAlives=$_keepAliveCount');
     }
   }
 
@@ -383,11 +514,14 @@ class DuoDeepgramEndpointSensor {
     _speechOpen = false;
     _speechStale = false;
     _cancelStaleTimer();
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = null;
     _lg('closing started=$_speechStartedCount ended=$_utteranceEndCount '
         'ignored=$_ignoredEndCount stale=$_staleCount');
     _lg('[DUO-DG-PCM] call_summary micFrames=$_micFrames '
         'sentFrames=$_sentFrames droppedFrames=$_droppedFrames '
-        'micBytes=$_micBytes sentBytes=$_sentBytes');
+        'micBytes=$_micBytes sentBytes=$_sentBytes gateSkippedBytes=$_gateSkippedBytes '
+        'gateOpens=$_gateOpenCount keepAlives=$_keepAliveCount');
     try {
       _channel?.sink.add(jsonEncode(<String, String>{'type': 'CloseStream'}));
     } catch (_) {}

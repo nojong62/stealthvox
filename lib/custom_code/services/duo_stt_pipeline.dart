@@ -350,6 +350,9 @@ class DuoSttPipeline {
       apiKey: deepgramKey,
       languageCode: originLanguageCode(),
       onLog: (tag, msg) => onLog?.call(tag, 'mode=$mode $msg'),
+      // 직접 대화만 무음 구간을 안 보낸다. 통역은 양보·TTS 타이밍이 이
+      // 센서에 기대므로 이번 범위가 아니다.
+      silenceGate: kDuoDeepgramSilenceGate && mode == 'direct',
     );
     sensor.onSpeechStarted = _handleSpeechStarted;
     sensor.onUtteranceEnd = _handleUtteranceEnd;
