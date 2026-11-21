@@ -28,3 +28,16 @@ void logCompletionBudgetRaw(String tag, String raw) {
     logCompletionBudget(tag, jsonDecode(raw));
   } catch (_) {}
 }
+
+/// 비용 측정용. 스트리밍이 아닌 chat completions 응답의 토큰 사용량을 한 줄로 남긴다.
+/// [tag]는 호출 지점 이름이다. 내용(글자)은 싣지 않는다.
+void logLlmUsage(String tag, Object? body) {
+  if (body is! Map) return;
+  final usage = body['usage'];
+  if (usage is! Map) return;
+  final details = usage['prompt_tokens_details'];
+  debugPrint('📏 [LLM-USAGE] $tag model=${body['model']} '
+      'prompt=${usage['prompt_tokens']} '
+      'cached=${details is Map ? details['cached_tokens'] : 0} '
+      'completion=${usage['completion_tokens']}');
+}
