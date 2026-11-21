@@ -53,8 +53,9 @@ const int kOriginPcmSessionMaxBytes = 40 * 1024 * 1024;
 /// 창고 전체 상한. 청소 뒤에도 넘치면 오래된 방부터 통째로 버린다.
 const int kOriginPcmGlobalMaxBytes = 200 * 1024 * 1024;
 
-/// 이만큼 지난 방 폴더는 주인이 없다고 본다.
-const Duration kOriginPcmMaxAge = Duration(hours: 24);
+/// 이만큼 지난 방 폴더는 주인이 없다고 본다. 직접 통화의 재전사는 공부방을 열 때
+/// 돌고, 그때까지 소리가 있어야 하므로 7일(2026-11-21, 24시간에서 늘림).
+const Duration kOriginPcmMaxAge = Duration(days: 7);
 
 /// 📌 [TRANSCRIBE-STATE] 방 하나의 전사가 어디까지 갔는가.
 ///
