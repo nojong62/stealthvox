@@ -117,8 +117,6 @@ class DuoInviteCopy {
     'activatePost': 'Make invitation active',
     'deactivatePost': 'Make invitation inactive',
     'visibilityFailed': 'Could not change the invitation status.',
-    'checkpointSaved':
-        'Your conversation so far has been saved. We’ll remind you every 10 minutes. Keep talking.',
     'deletePost': 'Delete post',
   };
 
@@ -130,7 +128,6 @@ class DuoInviteCopy {
       'guestBadge': '비회원 · 3분',
       'guestHostPitch': '가입 없이 회원에게 초대글을 올려 보세요. 회원이 눌러 주면 3분 동안 각자 자기 말로 통역 대화를 할 수 있어요.',
       'guestHostWrite': '비회원 초대글 쓰기',
-      'checkpointSaved': '지금까지의 대화가 저장됐어요. 10분마다 알려 드려요. 계속 이야기하세요.',
       'guestDailyLimitPersonal': '오늘 비회원 통화 3통을 모두 썼어요. 내일 다시 오시거나 회원으로 참여해 주세요.',
       'hostDailyLimit': '이 초대자는 오늘 비회원 통화를 모두 썼어요.',
       'promoClosed': '비회원 초대 기간이 끝났어요.',
@@ -232,7 +229,6 @@ class DuoInviteCopy {
       'guestHostPitch':
           '登録せずに会員向けの招待を投稿できます。会員がタップすると、3分間、それぞれ自分の言葉で通訳付きの会話ができます。',
       'guestHostWrite': 'ゲスト招待を書く',
-      'checkpointSaved': 'ここまでの会話を保存しました。10分ごとにお知らせします。話し続けてください。',
       'guestDailyLimitPersonal': '本日のゲスト通話3回をすべて使いました。明日また来るか、会員として参加してください。',
       'hostDailyLimit': 'この招待者は本日のゲスト通話をすべて使いました。',
       'promoClosed': 'ゲスト招待の期間は終了しました。',
@@ -331,7 +327,6 @@ class DuoInviteCopy {
       'guestBadge': '访客 · 3分钟',
       'guestHostPitch': '无需注册即可向会员发布邀请。会员点击后，你们就能用各自的语言进行3分钟的口译对话。',
       'guestHostWrite': '写访客邀请',
-      'checkpointSaved': '目前为止的对话已保存。我们每10分钟提醒您一次。请继续聊吧。',
       'guestDailyLimitPersonal': '今天的3次访客通话已用完。请明天再来，或以会员身份参加。',
       'hostDailyLimit': '该邀请者今天的访客通话已用完。',
       'promoClosed': '访客邀请期已结束。',
@@ -431,8 +426,6 @@ class DuoInviteCopy {
       'guestHostPitch':
           'Publica una invitación para los miembros sin registrarte. Si la toca un miembro, podrán conversar con traducción durante 3 minutos, cada uno en su propio idioma.',
       'guestHostWrite': 'Escribir invitación de invitado',
-      'checkpointSaved':
-          'La conversación hasta ahora se ha guardado. Te avisaremos cada 10 minutos. Sigue hablando.',
       'guestDailyLimitPersonal': 'Ya usaste las 3 llamadas de invitado de hoy. Vuelve mañana o únete como miembro.',
       'hostDailyLimit': 'Este anfitrión ya usó sus llamadas de invitado de hoy.',
       'promoClosed': 'El periodo de invitaciones de invitados ha terminado.',
@@ -542,8 +535,6 @@ class DuoInviteCopy {
       'guestHostPitch':
           'Publiez une invitation destinée aux membres sans vous inscrire. Si un membre appuie dessus, vous pourrez discuter avec traduction pendant 3 minutes, chacun dans sa propre langue.',
       'guestHostWrite': 'Écrire une invitation invité',
-      'checkpointSaved':
-          'Votre conversation a été enregistrée jusqu’ici. Nous vous le rappellerons toutes les 10 minutes. Continuez à parler.',
       'guestDailyLimitPersonal': 'Vous avez utilisé vos 3 appels invités du jour. Revenez demain ou rejoignez-nous en tant que membre.',
       'hostDailyLimit': 'Cet hôte a utilisé tous ses appels invités du jour.',
       'promoClosed': 'La période des invitations invités est terminée.',
@@ -654,8 +645,6 @@ class DuoInviteCopy {
       'guestHostPitch':
           'Veröffentliche ohne Registrierung eine Einladung für Mitglieder. Tippt ein Mitglied darauf, könnt ihr 3 Minuten lang mit Übersetzung sprechen, jeder in seiner eigenen Sprache.',
       'guestHostWrite': 'Gast-Einladung schreiben',
-      'checkpointSaved':
-          'Dein bisheriges Gespräch wurde gespeichert. Wir erinnern dich alle 10 Minuten daran. Sprich einfach weiter.',
       'guestDailyLimitPersonal': 'Du hast heute alle 3 Gastgespräche genutzt. Komm morgen wieder oder mach als Mitglied mit.',
       'hostDailyLimit': 'Dieser Gastgeber hat seine Gastgespräche für heute aufgebraucht.',
       'promoClosed': 'Der Zeitraum für Gast-Einladungen ist vorbei.',
@@ -766,8 +755,6 @@ class DuoInviteCopy {
       'guestHostPitch':
           'बिना साइन अप किए सदस्यों के लिए निमंत्रण पोस्ट करें। अगर कोई सदस्य इस पर टैप करता है, तो आप 3 मिनट तक अपनी-अपनी भाषा में अनुवाद के साथ बात कर सकते हैं।',
       'guestHostWrite': 'अतिथि निमंत्रण लिखें',
-      'checkpointSaved':
-          'अब तक की बातचीत सेव हो गई है। हम आपको हर 10 मिनट में याद दिलाएँगे। बात करते रहें।',
       'guestDailyLimitPersonal': 'आज की 3 अतिथि कॉल आप उपयोग कर चुके हैं। कल फिर आएँ या सदस्य के रूप में जुड़ें।',
       'hostDailyLimit': 'इस मेज़बान की आज की अतिथि कॉल समाप्त हो गई हैं।',
       'promoClosed': 'अतिथि निमंत्रण की अवधि समाप्त हो गई है।',
@@ -876,8 +863,6 @@ class DuoInviteCopy {
       'guestHostPitch':
           'Опубликуйте приглашение для участников без регистрации. Если участник нажмёт на него, вы сможете 3 минуты общаться с переводом, каждый на своём языке.',
       'guestHostWrite': 'Написать гостевое приглашение',
-      'checkpointSaved':
-          'Ваша беседа сохранена. Мы будем напоминать об этом каждые 10 минут. Продолжайте говорить.',
       'guestDailyLimitPersonal': 'Вы использовали все 3 гостевых звонка на сегодня. Приходите завтра или присоединяйтесь как участник.',
       'hostDailyLimit': 'Этот хозяин уже использовал гостевые звонки на сегодня.',
       'promoClosed': 'Период гостевых приглашений закончился.',
@@ -986,8 +971,6 @@ class DuoInviteCopy {
       'guestHostPitch':
           'Publique um convite para os membros sem se cadastrar. Se um membro tocar nele, vocês poderão conversar com tradução por 3 minutos, cada um no seu próprio idioma.',
       'guestHostWrite': 'Escrever convite de convidado',
-      'checkpointSaved':
-          'Sua conversa até agora foi salva. Vamos lembrar você a cada 10 minutos. Continue falando.',
       'guestDailyLimitPersonal': 'Você já usou as 3 chamadas de convidado de hoje. Volte amanhã ou participe como membro.',
       'hostDailyLimit': 'Este anfitrião já usou as chamadas de convidado de hoje.',
       'promoClosed': 'O período de convites de convidados terminou.',
@@ -1097,8 +1080,6 @@ class DuoInviteCopy {
       'guestHostPitch':
           'Pubblica un invito rivolto ai membri senza registrarti. Se un membro lo tocca, potrete parlare con traduzione per 3 minuti, ognuno nella propria lingua.',
       'guestHostWrite': 'Scrivi un invito da ospite',
-      'checkpointSaved':
-          'La conversazione fatta finora è stata salvata. Te lo ricorderemo ogni 10 minuti. Continua a parlare.',
       'guestDailyLimitPersonal': 'Hai usato le 3 chiamate ospite di oggi. Torna domani o partecipa come membro.',
       'hostDailyLimit': 'Questo host ha esaurito le chiamate ospite di oggi.',
       'promoClosed': 'Il periodo degli inviti ospite è terminato.',
@@ -1209,8 +1190,6 @@ class DuoInviteCopy {
       'guestHostPitch':
           'Plaats zonder je aan te melden een uitnodiging voor leden. Tikt een lid erop, dan kunnen jullie 3 minuten met vertaling praten, ieder in de eigen taal.',
       'guestHostWrite': 'Gastuitnodiging schrijven',
-      'checkpointSaved':
-          'Je gesprek tot nu toe is opgeslagen. We herinneren je er elke 10 minuten aan. Blijf praten.',
       'guestDailyLimitPersonal': 'Je hebt de 3 gastgesprekken van vandaag gebruikt. Kom morgen terug of doe mee als lid.',
       'hostDailyLimit': 'Deze host heeft de gastgesprekken van vandaag opgebruikt.',
       'promoClosed': 'De periode voor gastuitnodigingen is voorbij.',

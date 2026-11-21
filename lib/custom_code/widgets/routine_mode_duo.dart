@@ -106,7 +106,6 @@ import '../services/voice_tier.dart';
 import '../services/duo_billing_policy.dart';
 import '../services/other_chat_language.dart';
 import '../services/debug_audio_inject.dart'; // 🧪 테스트 브랜치 전용
-import '../services/duo_checkpoint_chime.dart';
 
 // ============================================================================
 // 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다. **통신 로직 자체가 다르다** —
@@ -2428,8 +2427,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         .removeListener(_onGuestBalanceGrace);
     WidgetsBinding.instance.removeObserver(this);
     _promoCallTicker?.cancel();
-    _checkpointTimer?.cancel();
-    _chimeMuteTimer?.cancel();
     _promoRemaining.dispose();
     _guestBackgroundExitTimer?.cancel();
     _guestBackgroundExitTimer = null;
@@ -2961,7 +2958,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
     _setDuoState('live');
     BillingTicker.instance.resumeFromActivity('duo_direct_start');
-    _startCheckpointTimer();
 
     try {
       // 🔉 세기 계측기는 **진단 여부와 무관하게** 만든다. 게이트가 이 값을 본다.
@@ -3091,7 +3087,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         //   음성 수신은 그대로 살아 있다 — 여기서 내 조각만 버린다. 전사도
         //   같이 막는다. 안 그러면 음소거 중에 한 말이 History에 남는다.
         //   (WebRTC 경로는 트랙도 함께 끈다 — `_onDirectMicToggle`)
-        isMuted: () => _directMuted || _chimeMute,
+        isMuted: () => _directMuted,
         isSttOpen: () {
           final stt = _directStt;
           return stt != null && stt.audioGateOpen;
@@ -3757,47 +3753,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   ///   ③ 그 전사문의 History·채널 저장이 끝날 때까지 대기
   ///   ④ 그다음에야 세대 증가 + 세션 dispose
   /// 진행 중 발화가 없으면 ②③은 즉시 통과한다(말없이 끄면 안 느려진다).
-  // ── 🔔 [DUO-CHECKPOINT] 직접 통화 10분 저장 안내 ─────────────────────────
-  // 대화 줄은 발화마다 바로 저장된다. 통화가 길어져도 "지금까지 저장돼 있다"는
-  // 것을 소리와 안내로 알린다. 통화는 끊지 않고 방도 바꾸지 않는다.
-  // 폰마다 자기 통화 시작 시각으로 잰다 — 두 폰을 맞출 필요가 없다.
-  Timer? _checkpointTimer;
-  Timer? _chimeMuteTimer;
-  bool _chimeMute = false;
-  int _checkpointCount = 0;
-
-  void _startCheckpointTimer() {
-    if (!_isDirectMode) return;
-    _checkpointTimer?.cancel();
-    _checkpointTimer =
-        Timer.periodic(kDuoCheckpointEvery, (_) => _onCheckpoint());
-  }
-
-  void _stopCheckpointTimer() {
-    _checkpointTimer?.cancel();
-    _checkpointTimer = null;
-  }
-
-  void _onCheckpoint() {
-    if (!mounted || _isExiting || !_directCallActive || !_isDirectMode) return;
-    // 저장된 줄이 하나도 없으면 "저장됐다"고 말할 근거가 없다.
-    if (_historyMessageCount == 0) return;
-    _checkpointCount++;
-    _lgDuo('[DUO-CHECKPOINT]',
-        'n=$_checkpointCount lines=$_historyMessageCount');
-    // 소리가 마이크로 돌아가 글자로 전사되지 않게 잠시 전사를 막는다.
-    _chimeMute = true;
-    _chimeMuteTimer?.cancel();
-    _chimeMuteTimer = Timer(const Duration(milliseconds: kDuoChimeMuteMs), () {
-      _chimeMute = false;
-    });
-    unawaited(playDuoCheckpointChime());
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(DuoInviteCopy.forSystemLocale()['checkpointSaved']),
-      duration: const Duration(seconds: 8),
-    ));
-  }
-
   Future<void> _stopDirectCall(String reason) async {
     if (_directStopping) return; // 중복 종료 가드 (연속 두 번 탭)
     if (!_directCallActive &&
@@ -3808,7 +3763,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       return;
     }
     _directStopping = true;
-    _stopCheckpointTimer();
     _directCaptureFirstFrameAt = null;
 
     // ① 추가 PCM부터 끊는다. 확정 직후 들어온 소리가 새 발화를 열면 안 된다.
