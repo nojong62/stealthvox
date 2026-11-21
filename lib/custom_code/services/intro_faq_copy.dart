@@ -57,7 +57,7 @@ class IntroFaqCopy {
       ],
       [
         'How does pricing work?',
-        'You’re charged only for the time you use, deducted from your remaining time. When you sign up, 1 hour is added automatically (once per phone). Top up more time in the Store. Time is based on HD voice; choose the basic voice in the lobby to get 3 times as much use from the same amount of time.',
+        'You’re charged only for the time you use, deducted from your remaining time. When you sign up, 1 hour is added automatically (once per phone). Top up more time in the Store. Time is based on HD voice; choose the basic voice in the lobby to get 2 times as much use from the same amount of time.',
       ],
       [
         'Can I practice directly with English conversation Shorts?',
@@ -95,7 +95,7 @@ class IntroFaqCopy {
       ],
       [
         '요금은 어떻게 되나요?',
-        '쓴 시간만큼만 남은 시간에서 차감됩니다. 처음 가입하면 1시간이 자동으로 충전되고(폰 한 대당 한 번), 이후 시간은 Store에서 충전합니다. 시간은 HD 음성 기준이며, 로비에서 기본 음성을 고르면 같은 시간으로 3배 오래 씁니다.',
+        '쓴 시간만큼만 남은 시간에서 차감됩니다. 처음 가입하면 1시간이 자동으로 충전되고(폰 한 대당 한 번), 이후 시간은 Store에서 충전합니다. 시간은 HD 음성 기준이며, 로비에서 기본 음성을 고르면 같은 시간으로 2배 오래 씁니다.',
       ],
       [
         '본 영어회화 쇼츠로 직접 연습할 수 있나요?',
@@ -133,7 +133,7 @@ class IntroFaqCopy {
       ],
       [
         '料金はどうなりますか？',
-        '使った時間分だけ残り時間から差し引かれます。初めて登録すると1時間が自動でチャージされます（端末1台につき1回）。その後は Store で時間をチャージできます。時間はHD音声を基準にしています。ロビーでベーシック音声を選ぶと、同じ時間で3倍長く使えます。',
+        '使った時間分だけ残り時間から差し引かれます。初めて登録すると1時間が自動でチャージされます（端末1台につき1回）。その後は Store で時間をチャージできます。時間はHD音声を基準にしています。ロビーでベーシック音声を選ぶと、同じ時間で2倍長く使えます。',
       ],
       [
         '英会話のショート動画を使って、自分でも練習できますか？',
@@ -171,7 +171,7 @@ class IntroFaqCopy {
       ],
       [
         '如何收费？',
-        '只扣除实际使用的时间。首次注册时会自动充值 1 小时（每部手机仅限一次），之后可在 Store 充值。时长按 HD 语音计算；在大厅选择基础语音，同样的时长可使用 3 倍时间。',
+        '只扣除实际使用的时间。首次注册时会自动充值 1 小时（每部手机仅限一次），之后可在 Store 充值。时长按 HD 语音计算；在大厅选择基础语音，同样的时长可使用 2 倍时间。',
       ],
       [
         '可以用英语会话短视频亲自练习吗？',
@@ -209,7 +209,7 @@ class IntroFaqCopy {
       ],
       [
         '¿Cómo se cobra?',
-        'Solo se descuenta de tu tiempo restante el tiempo que usas. Al registrarte por primera vez, se añade 1 hora automáticamente (una vez por teléfono). Después, puedes recargar tiempo en la Store. El tiempo se calcula según el uso de la voz HD; si eliges la voz básica en el lobby, podrás usarla durante 3 veces más tiempo con la misma cantidad.',
+        'Solo se descuenta de tu tiempo restante el tiempo que usas. Al registrarte por primera vez, se añade 1 hora automáticamente (una vez por teléfono). Después, puedes recargar tiempo en la Store. El tiempo se calcula según el uso de la voz HD; si eliges la voz básica en el lobby, podrás usarla durante 2 veces más tiempo con la misma cantidad.',
       ],
       [
         '¿Puedo practicar por mi cuenta con Shorts de conversaciones en inglés?',
@@ -247,7 +247,7 @@ class IntroFaqCopy {
       ],
       [
         'Comment est-ce facturé ?',
-        'Seul le temps utilisé est déduit de votre temps restant. Lors de votre première inscription, 1 heure est ajoutée automatiquement (une fois par téléphone). Vous pouvez ensuite recharger du temps dans le Store. Le temps est calculé sur la base de la voix HD ; choisissez la voix de base dans le lobby pour en profiter 3 fois plus longtemps avec le même crédit.',
+        'Seul le temps utilisé est déduit de votre temps restant. Lors de votre première inscription, 1 heure est ajoutée automatiquement (une fois par téléphone). Vous pouvez ensuite recharger du temps dans le Store. Le temps est calculé sur la base de la voix HD ; choisissez la voix de base dans le lobby pour en profiter 2 fois plus longtemps avec le même crédit.',
       ],
       [
         'Puis-je m’entraîner moi-même avec des Shorts de conversation en anglais ?',
@@ -285,7 +285,7 @@ class IntroFaqCopy {
       ],
       [
         'Wie wird abgerechnet?',
-        'Es wird nur die tatsächlich genutzte Zeit von deiner Restzeit abgezogen. Bei deiner ersten Registrierung wird automatisch 1 Stunde gutgeschrieben (einmal pro Telefon). Weitere Zeit kannst du im Store aufladen. Die Zeitangaben basieren auf der HD-Stimme. Wählst du in der Lobby die Basis-Stimme, kannst du dein Guthaben dreimal so lange nutzen.',
+        'Es wird nur die tatsächlich genutzte Zeit von deiner Restzeit abgezogen. Bei deiner ersten Registrierung wird automatisch 1 Stunde gutgeschrieben (einmal pro Telefon). Weitere Zeit kannst du im Store aufladen. Die Zeitangaben basieren auf der HD-Stimme. Wählst du in der Lobby die Basis-Stimme, kannst du dein Guthaben doppelt so lange nutzen.',
       ],
       [
         'Kann ich mit englischen Gesprächs-Shorts selbst üben?',
@@ -323,7 +323,7 @@ class IntroFaqCopy {
       ],
       [
         'शुल्क कैसे लगता है?',
-        'आपके बचे हुए समय में से सिर्फ़ इस्तेमाल किया गया समय घटता है। पहली बार साइन अप करने पर 1 घंटा अपने आप जुड़ जाता है (हर फ़ोन पर एक बार)। इसके बाद Store में समय रिचार्ज करें। समय की गणना HD वॉइस के आधार पर होती है। लॉबी में बेसिक आवाज़ चुनने पर उतने ही समय में 3 गुना ज़्यादा देर तक इस्तेमाल कर सकते हैं।',
+        'आपके बचे हुए समय में से सिर्फ़ इस्तेमाल किया गया समय घटता है। पहली बार साइन अप करने पर 1 घंटा अपने आप जुड़ जाता है (हर फ़ोन पर एक बार)। इसके बाद Store में समय रिचार्ज करें। समय की गणना HD वॉइस के आधार पर होती है। लॉबी में बेसिक आवाज़ चुनने पर उतने ही समय में 2 गुना ज़्यादा देर तक इस्तेमाल कर सकते हैं।',
       ],
       [
         'क्या मैं अंग्रेज़ी बातचीत वाले Shorts से खुद अभ्यास कर सकता/सकती हूँ?',
@@ -361,7 +361,7 @@ class IntroFaqCopy {
       ],
       [
         'Как устроена оплата?',
-        'Из остатка списывается только фактически использованное время. При первой регистрации автоматически начисляется 1 час (один раз на телефон). Затем время можно пополнить в Store. Расчёт времени ведётся для HD-голоса. Выберите базовый голос в лобби, и того же запаса времени хватит втрое дольше.',
+        'Из остатка списывается только фактически использованное время. При первой регистрации автоматически начисляется 1 час (один раз на телефон). Затем время можно пополнить в Store. Расчёт времени ведётся для HD-голоса. Выберите базовый голос в лобби, и того же запаса времени хватит вдвое дольше.',
       ],
       [
         'Можно ли самостоятельно заниматься по Shorts с диалогами на английском?',
@@ -399,7 +399,7 @@ class IntroFaqCopy {
       ],
       [
         'Como funciona a cobrança?',
-        'Só o tempo que você usa é descontado do seu tempo restante. Ao se cadastrar pela primeira vez, 1 hora é adicionada automaticamente (uma vez por telefone). Depois, você pode recarregar na Store. O tempo é calculado com base na voz HD. Escolha a voz básica no lobby para usar o mesmo tempo por 3 vezes mais.',
+        'Só o tempo que você usa é descontado do seu tempo restante. Ao se cadastrar pela primeira vez, 1 hora é adicionada automaticamente (uma vez por telefone). Depois, você pode recarregar na Store. O tempo é calculado com base na voz HD. Escolha a voz básica no lobby para usar o mesmo tempo pelo dobro do tempo.',
       ],
       [
         'Posso praticar por conta própria com Shorts de conversação em inglês?',
@@ -437,7 +437,7 @@ class IntroFaqCopy {
       ],
       [
         'Come funziona il pagamento?',
-        'Dal tempo rimanente viene scalato solo quello che usi. Al primo accesso, ti viene aggiunta automaticamente 1 ora (una volta per telefono). In seguito, puoi ricaricare nello Store. Il tempo è calcolato in base alla voce HD. Scegli la voce base nella lobby per usare lo stesso credito per 3 volte più a lungo.',
+        'Dal tempo rimanente viene scalato solo quello che usi. Al primo accesso, ti viene aggiunta automaticamente 1 ora (una volta per telefono). In seguito, puoi ricaricare nello Store. Il tempo è calcolato in base alla voce HD. Scegli la voce base nella lobby per usare lo stesso credito per il doppio del tempo.',
       ],
       [
         'Posso esercitarmi direttamente con gli Shorts di conversazione in inglese?',
@@ -475,7 +475,7 @@ class IntroFaqCopy {
       ],
       [
         'Hoe werkt betalen?',
-        'Alleen de tijd die je gebruikt, wordt van je resterende tijd afgetrokken. Wanneer je je voor het eerst aanmeldt, krijg je automatisch 1 uur tegoed (één keer per telefoon). Daarna kun je tijd opwaarderen in de Store. De tijd is gebaseerd op HD-stem. Kies de basisstem in de lobby en je doet 3 keer zo lang met dezelfde hoeveelheid tijd.',
+        'Alleen de tijd die je gebruikt, wordt van je resterende tijd afgetrokken. Wanneer je je voor het eerst aanmeldt, krijg je automatisch 1 uur tegoed (één keer per telefoon). Daarna kun je tijd opwaarderen in de Store. De tijd is gebaseerd op HD-stem. Kies de basisstem in de lobby en je doet 2 keer zo lang met dezelfde hoeveelheid tijd.',
       ],
       [
         'Kan ik zelf oefenen met Shorts met Engelse gesprekken?',

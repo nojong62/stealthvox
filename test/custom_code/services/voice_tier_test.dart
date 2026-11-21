@@ -17,20 +17,23 @@ void main() {
 
   test('billing rates follow the 2026-11-09 policy', () {
     expect(billingRateFor(VoiceTier.premium).multiplier, 1.0);
-    expect(billingRateFor(VoiceTier.basic).multiplier, closeTo(1 / 3, 1e-9));
+    expect(billingRateFor(VoiceTier.basic).multiplier, closeTo(1 / 2, 1e-9));
     expect(billingRateFor(VoiceTier.premium, interp: true).multiplier, 2.0);
     expect(billingRateFor(VoiceTier.basic, interp: true).multiplier,
-        closeTo(2 / 3, 1e-9));
+        closeTo(1.0, 1e-9));
+    // 통역은 몫만큼이다: 기본 음성 두 몫 = 한 몫의 2배.
+    expect(billingRateFor(VoiceTier.basic, interp: true).multiplier,
+        closeTo(2 * billingRateFor(VoiceTier.basic).multiplier, 1e-9));
     expect(BillingRate.direct.multiplier, 0.5);
   });
 
-  test('one premium hour is three basic hours', () {
+  test('one premium hour is two basic hours', () {
     expect(secondsUsableAt(3600, VoiceTier.premium), 3600);
-    expect(secondsUsableAt(3600, VoiceTier.basic), 10800);
+    expect(secondsUsableAt(3600, VoiceTier.basic), 7200);
     expect(secondsUsableAt(0, VoiceTier.basic), 0);
   });
 
-  test('three basic ticks deduct one second', () {
+  test('two basic ticks deduct one second', () {
     var debt = 0.0;
     var deducted = 0;
     for (var i = 0; i < 300; i++) {
@@ -39,7 +42,7 @@ void main() {
       debt -= whole;
       deducted += whole;
     }
-    expect(deducted, inInclusiveRange(99, 100));
+    expect(deducted, inInclusiveRange(149, 150));
   });
 
   test('speech payload carries voice_tier only for the basic tier', () {

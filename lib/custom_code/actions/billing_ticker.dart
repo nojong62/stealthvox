@@ -30,15 +30,16 @@ Future billingTicker() async {}
 
 /// 과금 배율. 잔액은 "프리미엄 기준 초"이고 배율이 차감 속도를 정한다.
 ///
-/// 2026-11-09 정책(실장님): 기본 음성(WaveNet)은 프리미엄의 1/3, 통역 통화는
-/// 초대자가 양쪽 몫(2배), Duo 직접통화는 음성 합성이 없어 1/2.
+/// 2026-11-09 정책(실장님), 기본 음성 배율은 2026-11-21에 1/3에서 1/2로 올렸다:
+/// 기본 음성(WaveNet)은 프리미엄의 1/2, 통역 통화는 초대자가 양쪽 몫(2배),
+/// Duo 직접통화는 음성 합성이 없어 1/2.
 /// 등급과 배율의 짝은 `voice_tier.dart`의 [billingRateFor]가 정한다.
 /// 새 배율을 넣기 전에 먼저 정책을 확인할 것.
 enum BillingRate {
   full, // 1.0x — 프리미엄 음성, 1초 사용 시 1초 차감
-  basic, // 1/3x — 기본 음성
+  basic, // 1/2x — 기본 음성
   interpPremium, // 2.0x — 통역 통화 프리미엄(초대자가 양쪽 몫)
-  interpBasic, // 2/3x — 통역 통화 기본
+  interpBasic, // 1.0x — 통역 통화 기본(양쪽 몫 = basic의 2배)
   direct, // 0.5x — Duo 직접통화(음성 합성 없음)
 }
 
@@ -48,11 +49,11 @@ extension BillingRateMultiplier on BillingRate {
       case BillingRate.full:
         return 1.0;
       case BillingRate.basic:
-        return 1 / 3;
+        return 1 / 2;
       case BillingRate.interpPremium:
         return 2.0;
       case BillingRate.interpBasic:
-        return 2 / 3;
+        return 1.0;
       case BillingRate.direct:
         return 0.5;
     }
