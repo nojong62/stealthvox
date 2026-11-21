@@ -31,8 +31,7 @@ class _AppUpdateGateState extends State<AppUpdateGate> {
   // 상위 버전이 나오면 권장 Update로 안내한다.
   bool _playUpdateAvailable = false;
 
-  OriginSurfaceCopy get _copy =>
-      OriginSurfaceCopy.forSystemLocale();
+  OriginSurfaceCopy get _copy => OriginSurfaceCopy.forSystemLocale();
 
   @override
   void initState() {
@@ -107,65 +106,69 @@ class _AppUpdateGateState extends State<AppUpdateGate> {
     final visible = requirement == AppUpdateRequirement.required ||
         (requirement == AppUpdateRequirement.recommended &&
             !_recommendedDismissedForSession);
-    if (!visible) return widget.child;
 
     final isRequired = requirement == AppUpdateRequirement.required;
+    // 안내창이 떠 있든 닫혔든 child의 부모 트리를 같게 둔다. 닫을 때 child가 Stack
+    // 안에서 밖으로 옮겨 가면 앱 전체 Router가 새로 만들어지고, 경로를 다시 읽다가
+    // go_router가 RangeError를 낸다(2026-11-21 실기기, "나중에"를 누른 직후).
     return PopScope(
-      canPop: false,
+      canPop: !visible,
       child: Stack(
         fit: StackFit.expand,
         children: [
           widget.child,
-          const ModalBarrier(dismissible: false, color: Colors.black54),
-          SafeArea(
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Material(
-                  color: Colors.transparent,
-                  child: AlertDialog(
-                    backgroundColor: const Color(0xFF1C1C1E),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    title: Text(
-                      _copy['updateAvailable'],
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
+          if (visible)
+            const ModalBarrier(dismissible: false, color: Colors.black54),
+          if (visible)
+            SafeArea(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: AlertDialog(
+                      backgroundColor: const Color(0xFF1C1C1E),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                    ),
-                    content: Text(
-                      _copy['updateMessage'],
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                    actions: [
-                      if (!isRequired)
+                      title: Text(
+                        _copy['updateAvailable'],
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      content: Text(
+                        _copy['updateMessage'],
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      actions: [
+                        if (!isRequired)
+                          TextButton(
+                            onPressed: () => setState(
+                              () => _recommendedDismissedForSession = true,
+                            ),
+                            child: Text(
+                              _copy['later'],
+                              style: const TextStyle(color: Colors.white60),
+                            ),
+                          ),
                         TextButton(
-                          onPressed: () => setState(
-                            () => _recommendedDismissedForSession = true,
-                          ),
+                          onPressed: _update,
                           child: Text(
-                            _copy['later'],
-                            style: const TextStyle(color: Colors.white60),
+                            _copy['update'],
+                            style: const TextStyle(
+                              color: Color(0xFF0A84FF),
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
-                      TextButton(
-                        onPressed: _update,
-                        child: Text(
-                          _copy['update'],
-                          style: const TextStyle(
-                            color: Color(0xFF0A84FF),
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
