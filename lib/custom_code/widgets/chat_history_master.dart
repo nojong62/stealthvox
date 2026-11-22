@@ -1314,6 +1314,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       // ✂️ [DUO-SEGMENT] 긴 통화를 10분 조각 기록으로 나눈다. 시험 빌드에서만
       //   돈다(`DUO_SEGMENT_SPLIT`). 재전사가 시간 안에 끝난 방만 나눈다 —
       //   진행 중이면 옮긴 줄을 되쓰려다 실패한다.
+      if (kDuoSegmentSplit && wait == DuoFinalWaitResult.timedOut) {
+        duoSegmentDiag = 'skip final_wait_timed_out';
+      }
       if (kDuoSegmentSplit &&
           mounted &&
           wait != DuoFinalWaitResult.timedOut) {
@@ -1329,7 +1332,18 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           if (splitData is Map<String, dynamic>) _cacheRoomData(splitData);
         } catch (e) {
           debugPrint('[DUO-SEGMENT] split_failed=${e.runtimeType}');
+          duoSegmentDiag = 'failed ${e.runtimeType}';
         }
+      }
+      if (kDuoSegmentSplit && mounted) {
+        // 시험 빌드 진단: 결과를 화면에 15초 띄운다.
+        final msg = duoSegmentDiag.isEmpty ? 'no_attempt' : duoSegmentDiag;
+        try {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('[SEG] $msg'),
+            duration: const Duration(seconds: 15),
+          ));
+        } catch (_) {}
       }
     }
 

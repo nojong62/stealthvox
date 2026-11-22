@@ -90,6 +90,18 @@ bool shouldSplitDuoHistory(
   return true;
 }
 
+/// 시험 빌드 진단: 마지막 분할 시도의 결과를 한 줄로 남긴다(화면에 띄운다).
+String duoSegmentDiag = '';
+
+String _diagWhy(Map<String, dynamic>? room) {
+  if (room == null) return 'no_room';
+  return 'room=${(room[kDuoRoomIdField] ?? '').toString().isNotEmpty} '
+      'mode=${room[kDuoModeField]} state=${room[kHistoryStateField]} '
+      'canon=${room[kDuoCanonicalAppliedAtField] != null} '
+      'split=${room[kDuoSegmentSplitAtField] != null} '
+      'finalOk=${duoFinalSupersedesRestoration(room)}';
+}
+
 const String kDuoSegmentSplitAtField = 'duo_segment_split_at';
 const String kDuoSegmentIndexField = 'duo_segment_index';
 const String kDuoSegmentTotalField = 'duo_segment_total';
@@ -103,7 +115,10 @@ Future<int> splitDuoHistoryIntoSegments(
 ) async {
   final snap = await historyRef.get();
   final room = snap.data();
-  if (!shouldSplitDuoHistory(room)) return 1;
+  if (!shouldSplitDuoHistory(room)) {
+    duoSegmentDiag = 'skip ${_diagWhy(room)}';
+    return 1;
+  }
 
   final messages = await historyRef.collection('messages').get();
   final rows = <DuoSplitRow>[
@@ -111,7 +126,13 @@ Future<int> splitDuoHistoryIntoSegments(
       DuoSplitRow(id: d.id, createdAtMs: _ms(d.data()['created_at']))
   ]..removeWhere((r) => r.createdAtMs == 0);
   final bounds = duoSegmentBoundsMs(rows);
-  if (bounds.isEmpty) return 1;
+  if (bounds.isEmpty) {
+    final ms = rows.map((r) => r.createdAtMs).toList()..sort();
+    duoSegmentDiag = 'one_cell rows=${rows.length} '
+        'spanSec=${ms.isEmpty ? 0 : (ms.last - ms.first) ~/ 1000} '
+        'segMs=$kDuoSegmentMs';
+    return 1;
+  }
 
   final int total = bounds.length + 1;
   final byId = {for (final d in messages.docs) d.id: d};
@@ -167,6 +188,7 @@ Future<int> splitDuoHistoryIntoSegments(
     kDuoSegmentSplitAtField: FieldValue.serverTimestamp(),
   });
   await cleanup.commit(); // 2) 원본에서 옮긴 줄을 지우는 것은 맨 마지막이다.
+  duoSegmentDiag = 'split segments=$total rows=${rows.length}';
   debugPrint('[DUO-SEGMENT] split history=${historyRef.id} segments=$total');
   return total;
 }
