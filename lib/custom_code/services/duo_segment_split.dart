@@ -31,7 +31,9 @@ import 'history_finalize.dart' show kHistoryStateDraft, kHistoryStateField;
 const bool kDuoSegmentSplit =
     bool.fromEnvironment('DUO_SEGMENT_SPLIT', defaultValue: false);
 
-const int kDuoSegmentMs = 10 * 60 * 1000;
+/// 시험 빌드만 `--dart-define=DUO_SEGMENT_MS=60000`으로 줄인다. 기본 10분.
+const int kDuoSegmentMs =
+    int.fromEnvironment('DUO_SEGMENT_MS', defaultValue: 10 * 60 * 1000);
 
 /// 이 줄이 어느 시각의 줄인가. 나누기 계획의 입력.
 class DuoSplitRow {
