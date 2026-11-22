@@ -2601,7 +2601,11 @@ RULES — follow exactly:
 
         // STEP 4: 교정 문장 TTS 생성
         if (_keeperTutoringCorrected.isNotEmpty) {
-          final audio = await _fetchTts(_keeperTutoringCorrected, 'nova');
+          final audio = await _fetchTts(
+            _keeperTutoringCorrected,
+            _keeperPlayVoice,
+            model: TtsModelPolicy.conversation.model,
+          );
           if (audio != null) {
             _keeperCorrectedAudio = audio;
             _keeperDialogSetState?.call(() {});
