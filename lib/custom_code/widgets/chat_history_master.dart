@@ -6893,6 +6893,7 @@ RULES — follow exactly:
       final chunkMs = timing.elapsedMilliseconds;
       // 낭독 지시(instructions)는 보내지 않는다 — 지시가 붙으면 Gateway가
       // 표현형으로 보고 Chirp 3 HD가 아닌 OpenAI로 넘긴다.
+      String provider = '';
       Future<Uint8List?> synth() => _fetchOpenAITTSInternal(
             text,
             speed,
@@ -6905,7 +6906,6 @@ RULES — follow exactly:
             stylePrompt: useGemini ? kSnapGeminiStylePrompt : null,
             onProvider: (p) => provider = p,
           );
-      String provider = '';
       var raw = await synth();
       // "음성을 못 불러왔습니다"를 바로 띄우지 않는다. 한 번은 조용히 다시 받는다.
       if (raw == null || raw.isEmpty) {
