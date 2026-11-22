@@ -6525,9 +6525,8 @@ RULES — follow exactly:
 
   /// 낭독 속도. Gateway가 Chirp의 speaking_rate로 넘긴다.
   /// 쉐도잉은 넷 중에서 고른다. Snap Echoing은 [_snapEchoSpeed].
-  /// ⚡ Snap Echoing 속도는 단위 길이를 따른다. 짧은 단위는 조금 천천히,
-  /// 긴 단위는 보통 빠르기에 가깝게 — 리듬을 그대로 복사하게 한다.
-  double get _snapEchoSpeed => _p3SnapSize == SnapUnitSize.quick ? 0.96 : 0.98;
+  /// ⚡ Snap Echoing 속도는 단위 길이와 무관하게 99%로 고정한다.
+  double get _snapEchoSpeed => 0.99;
   static const List<double> _kShadowSpeeds = <double>[0.83, 0.87, 0.93, 0.97];
 
   /// 🚧 P3 전용 timing. **다른 모드의 VAD 값과 무관하다.** 최종값 아님.

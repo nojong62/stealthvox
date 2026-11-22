@@ -3,9 +3,10 @@
 //   몇 단어씩 쪼개는 것이 아니다. 뜻이 한 덩어리로 완결되고, 한 숨에 리듬을
 //   타며 읽을 만한 길이로 끊는다. 이웃 덩어리끼리 길이가 비슷해 박자가 고르게
 //   흐르도록 한다. 길이는 둘 중에서 고른다([SnapUnitSize]):
-//     · Quick Snap — 박자 2개, 대개 3~5단어
-//     · Full Breath — 박자 3~4개, 대개 6~9단어
-//   (실장님 지시, 2026-10-15).
+//     · Quick Snap — 강세 1개 중심의 한 덩어리
+//     · Full Breath — 강세 2개 중심의 한 덩어리
+//   영어는 단어 수를 세지 않고 강세 박자로만 나눈다. 다른 언어는 글자 길이 기준.
+//   (실장님 지시, 2026-10-15; 영어 강세 기준은 2026-11-22 변경).
 //
 //   역할 분담:
 //     · 어디서 끊을지 — 여기(글자). 모델이 단위만 나누고 글자는 안 바꾼다.
@@ -30,7 +31,7 @@ const String kSnapChunkVersion = 'snap_chunk_v4';
 
 /// 영어 전용 강세 박자 규칙으로 만든 소리의 캐시 판. 영어 규칙을 바꾸면 올린다.
 /// 다른 언어는 [kSnapChunkVersion]을 그대로 써서 기존 소리가 유지된다.
-const String kSnapChunkEnglishStressVersion = 'snap_chunk_en_stress_v1';
+const String kSnapChunkEnglishStressVersion = 'snap_chunk_en_stress_v2';
 
 /// ✨ 영어 Snap Echoing 소리를 Gemini TTS로 만든다. Gateway가 실패하거나 꺼져
 /// 있으면 Chirp 3 HD가 대신 읽는다. 끄려면 빌드에
@@ -39,17 +40,18 @@ const bool kSnapGeminiTts =
     bool.fromEnvironment('SNAP_GEMINI_TTS', defaultValue: true);
 
 /// Gemini로 만든 소리의 캐시 판 꼬리표. 지시문을 바꾸면 올린다.
-const String kSnapGeminiCacheTag = 'gem1';
+const String kSnapGeminiCacheTag = 'gem2';
 
-/// Gemini에게 주는 낭독 지시. 속도는 숫자로 못 정해서 말로 적는다 — 보통
-/// 대화 속도의 85% 안팎, 한 호흡에 따라 하기 좋은 박자.
+/// Gemini에게 주는 낭독 지시(소리에 실린다). 속도는 정상 대화 속도의 99%.
+/// 강세 하나(또는 둘)를 중심으로 한 덩어리를 한 호흡에 자연스럽게 읽게 한다.
 const String kSnapGeminiStylePrompt =
     'Read this short phrase for an English learner who will repeat it right '
-    'after you. Speak clearly at a relaxed pace, about 85 percent of normal '
-    'conversational speed, as one smooth breath. Give each stressed syllable '
-    'a clear, slightly longer beat and keep unstressed words short and light, '
-    'so the rhythm is easy to copy. Do not rush, do not exaggerate, and do '
-    'not add anything.';
+    'after you. Speak at a natural, conversational pace, about 99 percent of '
+    'normal speed, in one breath. Center the rhythm on the stressed syllables: '
+    'each stressed syllable is a beat, and the unstressed words in between are '
+    'light and quick, leaning into the stress that follows them. Do not pause '
+    'inside the phrase, do not slow down, do not exaggerate, and do not add '
+    'anything.';
 
 /// 이 언어 이름으로 만든 소리가 쓸 캐시 판.
 String snapChunkVersionFor(String languageName) =>
@@ -79,9 +81,10 @@ class SnapEchoChunker {
         name.startsWith('english(') || name == 'en' || name.startsWith('en-');
   }
 
+  /// 영어는 단어 수를 세지 않는다. 강세 박자 수만 본다.
   static String _stressLengthRule(SnapUnitSize size) => size == SnapUnitSize.quick
-      ? '- Exactly 2 stressed beats in almost every group (3 only to keep a fixed expression whole), about 3 to 5 words. Never over 6 words.'
-      : '- 3 to 4 stressed beats per group, about 6 to 9 words. Never over 11 words. Do not leave a last group with a single stressed beat; fold it into the group before it.';
+      ? '- Exactly 1 stressed beat per group: one stressed syllable at the center, with its unstressed words around it. The number of words does not matter.'
+      : '- Exactly 2 stressed beats per group, centered on two stressed syllables with their unstressed words between and around them. The number of words does not matter. Use 1 beat only if no other cut keeps the meaning intact.';
 
   /// 영어 전용: 강세 박자를 세어 끊는다. 뜻의 경계 안에서만 끊고, 그 안에서
   /// 박자 수를 고르게 맞춘다.
@@ -93,7 +96,7 @@ English is stress-timed: the stressed syllables fall on a steady beat, and the u
 - Unstressed (squeezed): articles, prepositions, auxiliaries and modals, pronouns, conjunctions, "to" before a verb.
 
 Rules:
-- One group = a set number of stressed beats, spoken in one comfortable breath at an even pace.
+- One group = a set number of stressed beats, spoken in one comfortable breath at an even pace. Group length is decided by stress, never by word count.
 ${_stressLengthRule(size)}
 - Unstressed words lean forward: they attach to the stressed word that FOLLOWS them ("to the STORE", "I NEEDED"), never trail onto the group before. A group may begin with unstressed words and should end on a stressed word.
 - Never end a group on an article, preposition, conjunction, auxiliary, or pronoun.
@@ -174,9 +177,7 @@ Return JSON only: {"chunks": ["...", "..."]}''';
       if (response.statusCode != 200) return null;
       final parsed = parseChunks(utf8.decode(response.bodyBytes), input);
       if (parsed == null) return null;
-      return isEnglish(languageName) && size == SnapUnitSize.full
-          ? mergeOrphanTail(parsed)
-          : parsed;
+      return parsed;
     } catch (_) {
       return null;
     }

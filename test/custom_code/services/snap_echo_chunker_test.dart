@@ -79,8 +79,8 @@ void main() {
       final quick =
           SnapEchoChunker.instructions('English', SnapUnitSize.quick);
       final full = SnapEchoChunker.instructions('English', SnapUnitSize.full);
-      expect(quick, contains('Exactly 2 stressed beats'));
-      expect(full, contains('3 to 4 stressed beats'));
+      expect(quick, contains('Exactly 1 stressed beat'));
+      expect(full, contains('Exactly 2 stressed beats'));
       expect(quick, isNot(equals(full)));
     });
 
@@ -109,8 +109,9 @@ void main() {
       );
     });
 
-    test('Gemini style prompt asks for a relaxed pace and clear stress', () {
-      expect(kSnapGeminiStylePrompt, contains('85 percent'));
+    test('Gemini style prompt asks for 99% pace and stress-centered rhythm', () {
+      expect(kSnapGeminiStylePrompt, contains('99 percent'));
+      expect(kSnapGeminiStylePrompt, isNot(contains('85 percent')));
       expect(kSnapGeminiStylePrompt, contains('stressed syllable'));
       expect(kSnapGeminiCacheTag, isNotEmpty);
     });
