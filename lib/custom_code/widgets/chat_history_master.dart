@@ -1332,7 +1332,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           if (splitData is Map<String, dynamic>) _cacheRoomData(splitData);
         } catch (e) {
           debugPrint('[DUO-SEGMENT] split_failed=${e.runtimeType}');
-          duoSegmentDiag = 'failed ${e.runtimeType}';
+          final String em = e.toString().replaceAll('
+', ' ');
+          duoSegmentDiag =
+              'failed ${e.runtimeType} ${em.length > 140 ? em.substring(0, 140) : em}';
         }
       }
       if (kDuoSegmentSplit && mounted) {

@@ -143,11 +143,15 @@ Future<int> splitDuoHistoryIntoSegments(
   }
 
   final String name = (room!['room_name'] ?? '').toString();
-  final batch = ChunkedWriteBatch();
+  // 변환기가 붙은 참조를 batch에 그대로 넘기면 타입 검사(_TypeError)에 걸린다.
+  // 쓰기는 변환기 없는 참조로 한다.
+  final db = historyRef.firestore;
+  final DocumentReference<Map<String, dynamic>> rawRef = db.doc(historyRef.path);
+  final batch = ChunkedWriteBatch(firestore: db);
   for (var k = 1; k < total; k++) {
     final docs = perSegment[k];
     if (docs.isEmpty) continue;
-    final sibling = historyRef.parent.doc('${historyRef.id}_s$k');
+    final sibling = db.collection(rawRef.parent.path).doc('${historyRef.id}_s$k');
     final int visible =
         docs.where((d) => isStudyVisible(d.data()[kStudyStateField])).length;
     final int firstMs = docs.map((d) => _ms(d.data()['created_at'])).reduce(
@@ -171,7 +175,7 @@ Future<int> splitDuoHistoryIntoSegments(
   }
   await batch.commit(); // 1) 형제를 먼저 쓴다.
 
-  final cleanup = ChunkedWriteBatch();
+  final cleanup = ChunkedWriteBatch(firestore: db);
   for (var k = 1; k < total; k++) {
     for (final d in perSegment[k]) {
       cleanup.delete(d.reference);
@@ -180,7 +184,7 @@ Future<int> splitDuoHistoryIntoSegments(
   final int firstVisible = perSegment[0]
       .where((d) => isStudyVisible(d.data()[kStudyStateField]))
       .length;
-  cleanup.update(historyRef, <String, dynamic>{
+  cleanup.update(rawRef, <String, dynamic>{
     'room_name': '$name (1/$total)',
     'msg_count': firstVisible,
     kDuoSegmentIndexField: 0,
