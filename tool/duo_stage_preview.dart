@@ -24,18 +24,15 @@ class _PreviewApp extends StatelessWidget {
             children: const [
               _Case(
                 title: '직접 대화 · 상대 없음',
-                child: DuoDirectStage(
-                    callActive: false, muted: false, partnerOnline: false),
+                child: DuoDirectStage(ready: false, partnerOnline: false),
               ),
               _Case(
                 title: '직접 대화 · 통화 중',
-                child: DuoDirectStage(
-                    callActive: true, muted: false, partnerOnline: true),
+                child: DuoDirectStage(ready: true, partnerOnline: true),
               ),
               _Case(
                 title: '직접 대화 · 음소거',
-                child: DuoDirectStage(
-                    callActive: true, muted: true, partnerOnline: true),
+                child: DuoDirectStage(ready: false, partnerOnline: true),
               ),
               _Case(
                 title: '만능 통역 · 대기',
