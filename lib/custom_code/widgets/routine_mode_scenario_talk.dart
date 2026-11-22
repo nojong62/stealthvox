@@ -5219,6 +5219,8 @@ class DeepgramV2VoiceManager {
         pingInterval: const Duration(seconds: 10),
       );
       _lg('🎤 [DG-01]', 'WebSocket 연결 요청 전송');
+      // 연결 실패는 stream.onError로 처리한다. `ready` 오류를 안 받으면 치명으로 보고된다.
+      _channel!.ready.catchError((Object _) {});
 
       await _wsSub?.cancel();
       _wsSub = _channel!.stream.listen(

@@ -6725,6 +6725,8 @@ class DeepgramV2VoiceManager {
             pingInterval: const Duration(seconds: 10),
           );
       _channel = channel;
+      // 연결 실패는 stream.onError로 처리한다. `ready` 오류를 안 받으면 치명으로 보고된다.
+      channel.ready.catchError((Object _) {});
       _pcmTransportReady = true;
       _startKeepAlive();
       _lg(

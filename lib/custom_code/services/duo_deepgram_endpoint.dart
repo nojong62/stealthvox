@@ -245,6 +245,9 @@ class DuoDeepgramEndpointSensor {
         uri,
         headers: <String, dynamic>{'Authorization': 'Bearer $apiKey'},
       );
+      // 연결 실패는 아래 stream.onError로 이미 처리한다. `ready`를 아무도 안 받으면
+      // 같은 오류가 "잡히지 않은 오류"로 Crashlytics에 치명으로 올라간다(DNS 실패 시).
+      _channel!.ready.catchError((Object _) {});
       _sub = _channel!.stream.listen(
         _onMessage,
         onError: (Object e) {
