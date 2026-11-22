@@ -240,9 +240,19 @@ class _DeletionUiCopy {
 // Chirp 3 HD 여성 음성(Leda)으로 읽는다. 기존 OpenAI 낭독 지시는 쓰지 않는다.
 // 캐시 키에 음성 칸을 따로 둬서 예전 nova 소리가 섞여 나오지 않게 한다.
 const String _keeperPlayVoice = 'google-female';
+
+/// Keepers 소리의 언어. Gateway는 한글이 없는 글자에 언어가 없으면 Chirp이
+/// 아니라 OpenAI로 보낸다. 그래서 저장된 배울 언어를 꼭 함께 보낸다.
+/// 오래된 Keeper처럼 값이 없으면 로비의 배울 언어, 그것도 없으면 English.
+String _keeperTtsLanguage(Object? saved) {
+  final value = (saved ?? '').toString().trim();
+  if (value.isNotEmpty) return value;
+  final lobby = FFAppState().targetLang.trim();
+  return lobby.isNotEmpty ? lobby : 'English';
+}
 String get _keeperPlayTtsCacheVoice => TtsModelPolicy.cacheNamespace(
       TtsWorkload.conversation,
-      'keeper-google-female-v1',
+      'keeper-google-female-v2',
     );
 
 class ChatHistoryListMaster extends StatefulWidget {
@@ -1585,7 +1595,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                     : Icons.play_circle_rounded,
                 color: Colors.amberAccent,
                 tooltip: _surfaceCopy['listen'],
-                onTap: () => _playKeeperAudio(doc.id, translated),
+                onTap: () => _playKeeperAudio(
+                  doc.id,
+                  translated,
+                  _keeperTtsLanguage(data['target_lang']),
+                ),
               ),
               // 2) 튜터링
               _buildKeeperAction(
@@ -1642,7 +1656,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   //  Keepers 소리듣기
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Future<void> _playKeeperAudio(String keeperId, String text) async {
+  Future<void> _playKeeperAudio(
+      String keeperId, String text, String language) async {
     resetBillingIdle();
     if (text.isEmpty || _apiKey.isEmpty) return;
 
@@ -1666,6 +1681,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           text,
           _keeperPlayVoice,
           model: TtsModelPolicy.conversation.model,
+          language: language,
         );
         if (audio != null) {
           TtsCache.put(text, _keeperPlayTtsCacheVoice, audio);
@@ -1703,6 +1719,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           text,
           _keeperPlayVoice,
           model: TtsModelPolicy.conversation.model,
+          language: language,
         );
         if (fresh == null || !mounted) rethrow;
         TtsCache.put(text, _keeperPlayTtsCacheVoice, fresh);
@@ -1727,6 +1744,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     double speed = 1.0,
     String? model,
     String? instructions,
+    String? language,
   }) async {
     if (_apiKey.isEmpty || text.trim().isEmpty) return null;
     try {
@@ -1739,6 +1757,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         voice: voice,
         speed: speed,
         instructions: instructions,
+        language: language,
       );
       if (model != null && model.trim().isNotEmpty) {
         payload['model'] = model.trim();
@@ -2605,6 +2624,7 @@ RULES — follow exactly:
             _keeperTutoringCorrected,
             _keeperPlayVoice,
             model: TtsModelPolicy.conversation.model,
+            language: _keeperTtsLanguage(_keeperTutoringTarget),
           );
           if (audio != null) {
             _keeperCorrectedAudio = audio;
