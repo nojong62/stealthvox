@@ -109,8 +109,8 @@ void main() {
       );
     });
 
-    test('Gemini style prompt asks for 99% pace and stress-centered rhythm', () {
-      expect(kSnapGeminiStylePrompt, contains('99 percent'));
+    test('Gemini style prompt asks for 95% pace and stress-centered rhythm', () {
+      expect(kSnapGeminiStylePrompt, contains('95 percent'));
       expect(kSnapGeminiStylePrompt, isNot(contains('85 percent')));
       expect(kSnapGeminiStylePrompt, contains('stressed syllable'));
       expect(kSnapGeminiCacheTag, isNotEmpty);

@@ -40,14 +40,14 @@ const bool kSnapGeminiTts =
     bool.fromEnvironment('SNAP_GEMINI_TTS', defaultValue: true);
 
 /// Gemini로 만든 소리의 캐시 판 꼬리표. 지시문을 바꾸면 올린다.
-const String kSnapGeminiCacheTag = 'gem3';
+const String kSnapGeminiCacheTag = 'gem4';
 
-/// Gemini에게 주는 낭독 지시(소리에 실린다). 속도는 정상 대화 속도의 99%.
+/// Gemini에게 주는 낭독 지시(소리에 실린다). 속도는 정상 대화 속도의 95%.
 /// 네이티브 화자처럼 자연스럽게, 강세 중심의 리듬으로 한 호흡에 읽게 한다.
 const String kSnapGeminiStylePrompt =
     'Read this short phrase the way a native English speaker would say it '
     'naturally in conversation, with a lively, natural rhythm. Speak at about '
-    '99 percent of normal speed, in one breath. Center the rhythm on the '
+    '95 percent of normal speed, in one breath. Center the rhythm on the '
     'stressed syllables: each stressed syllable is a beat, and the unstressed '
     'words in between are light and quick, leaning into the stress that follows '
     'them. Sound like a native speaker, not a textbook reader. Do not pause '
