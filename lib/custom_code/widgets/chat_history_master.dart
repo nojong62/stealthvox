@@ -1337,16 +1337,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
               'failed ${e.runtimeType} ${em.length > 140 ? em.substring(0, 140) : em}';
         }
       }
-      if (kDuoSegmentSplit && mounted) {
-        // 시험 빌드 진단: 결과를 화면에 15초 띄운다.
-        final msg = duoSegmentDiag.isEmpty ? 'no_attempt' : duoSegmentDiag;
-        try {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('[SEG] $msg'),
-            duration: const Duration(seconds: 15),
-          ));
-        } catch (_) {}
-      }
     }
 
     // Duo 복원은 canonical 뒤에서 시작하며, _fetchRoomData가 이 작업을 기다린다.

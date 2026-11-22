@@ -18,8 +18,9 @@ import 'history_finalize.dart' show kHistoryStateDraft, kHistoryStateField;
 // 경계는 줄의 `created_at`으로 정한다. 정돈이 이 값을 **공유 시간축**으로 다시
 // 써 두었으므로, 두 폰이 같은 규칙을 쓰면 같은 자리에서 끊긴다(폰 시계 무관).
 //
-// ⚠️ **기본은 꺼져 있다.** `--dart-define=DUO_SEGMENT_SPLIT=true`인 시험 빌드에서만
-// 돈다. 실기기에서 두 폰이 같은 조각을 만드는지 확인하기 전에는 켜지 않는다.
+// ✅ **기본은 켜져 있다**(2026-11-22 실기기 통과: 1분·10분 조각 모두 호스트·게스트가
+// 같은 자리에서 끊김). 끄려면 `--dart-define=DUO_SEGMENT_SPLIT=false`.
+// 10분이 안 되는 통화는 칸이 하나뿐이라 아무것도 하지 않는다.
 //
 // 안전장치
 //   · 형제 문서 id가 정해져 있다(`<원본>_s<k>`) — 다시 돌려도 중복이 안 생긴다.
@@ -29,7 +30,7 @@ import 'history_finalize.dart' show kHistoryStateDraft, kHistoryStateField;
 // ====================================================================
 
 const bool kDuoSegmentSplit =
-    bool.fromEnvironment('DUO_SEGMENT_SPLIT', defaultValue: false);
+    bool.fromEnvironment('DUO_SEGMENT_SPLIT', defaultValue: true);
 
 /// 시험 빌드만 `--dart-define=DUO_SEGMENT_MS=60000`으로 줄인다. 기본 10분.
 const int kDuoSegmentMs =

@@ -47,9 +47,9 @@ void main() {
           'duo_final_success_count': 5,
         };
 
-    test('off by default', () {
+    test('can be switched off; on by default', () {
       expect(shouldSplitDuoHistory(ready(), enabled: false), isFalse);
-      expect(kDuoSegmentSplit, isFalse);
+      expect(kDuoSegmentSplit, isTrue);
     });
 
     test('splits only a finished direct draft that was not split yet', () {
