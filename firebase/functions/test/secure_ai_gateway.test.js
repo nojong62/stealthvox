@@ -12,6 +12,11 @@ const {
   chirpLocaleForRequest,
   chirpVoiceForRequest,
   shouldUseChirp,
+  shouldUseGemini,
+  geminiPiecesForRequest,
+  geminiPromptForRequest,
+  geminiVoiceForRequest,
+  silencePcm,
   openAiSpeechBody,
   splitForGoogleTts,
   chirpAudioConfig,
@@ -319,4 +324,49 @@ test("app-written pause markup is used only when it fits one request", () => {
   );
   assert.equal(chirpMarkupForRequest({ input: "Hi" }), null);
   assert.equal(chirpMarkupForRequest({ markup: "가".repeat(1700) }), null);
+});
+
+test("Gemini route is opt-in, English, PCM and prompt-free of instructions", () => {
+  const base = { input: "Hello", language: "en", voice: "google-female",
+    response_format: "pcm", engine: "gemini" };
+  assert.equal(shouldUseGemini(base), true);
+  assert.equal(shouldUseGemini({ ...base, engine: undefined }), false);
+  assert.equal(shouldUseGemini({ ...base, response_format: "mp3" }), false);
+  assert.equal(shouldUseGemini({ ...base, language: "ko" }), false);
+  assert.equal(shouldUseGemini({ ...base, instructions: "warm" }), false);
+  process.env.GEMINI_TTS_DISABLED = "1";
+  assert.equal(shouldUseGemini(base), false);
+  delete process.env.GEMINI_TTS_DISABLED;
+});
+
+test("Gemini pieces follow the app's pause tags", () => {
+  const pieces = geminiPiecesForRequest({
+    input: "I went to the store because I needed milk.",
+    markup: "I went to the store [pause short] because I needed milk.",
+  });
+  assert.deepEqual(pieces.map(p => p.text),
+    ["I went to the store", "because I needed milk."]);
+  assert.ok(pieces[0].pauseMs >= 300);
+  assert.equal(pieces[1].pauseMs, 0);
+  assert.equal(geminiPiecesForRequest({ input: "Just one." }).length, 1);
+  assert.deepEqual(geminiPiecesForRequest({ input: "  " }), []);
+});
+
+test("Gemini voice keeps the Chirp voice names and prompt is capped", () => {
+  assert.deepEqual(
+    geminiVoiceForRequest({ voice: "google-male" }, "en-US"),
+    { languageCode: "en-US", name: "Charon", modelName: "gemini-2.5-flash-tts" });
+  assert.equal(geminiVoiceForRequest({ voice: "google-female" }, "en-US").name, "Leda");
+  assert.equal(geminiPromptForRequest({ style_prompt: "x".repeat(2000) }).length, 800);
+  assert.equal(geminiPromptForRequest({}), "");
+});
+
+test("silence is 16-bit mono PCM of the asked length", () => {
+  assert.equal(silencePcm(500).length, 24000 * 2 * 0.5);
+});
+
+test("OpenAI fallback body drops Gemini-only fields", () => {
+  assert.deepEqual(
+    openAiSpeechBody({ input: "Hi", voice: "nova", engine: "gemini", style_prompt: "slow" }),
+    { input: "Hi", voice: "nova" });
 });

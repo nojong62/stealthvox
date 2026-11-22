@@ -28,12 +28,41 @@ import 'secure_ai_gateway.dart';
 /// v4(2026-11-08): MY STORY의 줄바꿈(한 줄 = 한 호흡)을 넘어 단위를 잇지 않는다.
 const String kSnapChunkVersion = 'snap_chunk_v4';
 
+/// 영어 전용 강세 박자 규칙으로 만든 소리의 캐시 판. 영어 규칙을 바꾸면 올린다.
+/// 다른 언어는 [kSnapChunkVersion]을 그대로 써서 기존 소리가 유지된다.
+const String kSnapChunkEnglishStressVersion = 'snap_chunk_en_stress_v1';
+
+/// ✨ 영어 Snap Echoing 소리를 Gemini TTS로 만든다. Gateway가 실패하거나 꺼져
+/// 있으면 Chirp 3 HD가 대신 읽는다. 끄려면 빌드에
+/// `--dart-define=SNAP_GEMINI_TTS=false`.
+const bool kSnapGeminiTts =
+    bool.fromEnvironment('SNAP_GEMINI_TTS', defaultValue: true);
+
+/// Gemini로 만든 소리의 캐시 판 꼬리표. 지시문을 바꾸면 올린다.
+const String kSnapGeminiCacheTag = 'gem1';
+
+/// Gemini에게 주는 낭독 지시. 속도는 숫자로 못 정해서 말로 적는다 — 보통
+/// 대화 속도의 85% 안팎, 한 호흡에 따라 하기 좋은 박자.
+const String kSnapGeminiStylePrompt =
+    'Read this short phrase for an English learner who will repeat it right '
+    'after you. Speak clearly at a relaxed pace, about 85 percent of normal '
+    'conversational speed, as one smooth breath. Give each stressed syllable '
+    'a clear, slightly longer beat and keep unstressed words short and light, '
+    'so the rhythm is easy to copy. Do not rush, do not exaggerate, and do '
+    'not add anything.';
+
+/// 이 언어 이름으로 만든 소리가 쓸 캐시 판.
+String snapChunkVersionFor(String languageName) =>
+    SnapEchoChunker.isEnglish(languageName)
+        ? kSnapChunkEnglishStressVersion
+        : kSnapChunkVersion;
+
 /// 한 호흡 의미 단위의 길이.
 enum SnapUnitSize { quick, full }
 
 extension SnapUnitSizeLabel on SnapUnitSize {
   /// 화면 이름. 고유명사처럼 쓰므로 번역하지 않는다.
-  String get label => this == SnapUnitSize.quick ? 'Quick Snap' : 'Full Breath';
+  String get label => this == SnapUnitSize.quick ? 'Quick Snap' : 'Full Beat';
 }
 
 class SnapEchoChunker {
@@ -43,7 +72,57 @@ class SnapEchoChunker {
       ? '- Usually 2 stressed beats, about 3 to 5 words (in languages written without spaces, about 5 to 10 characters). Never under 2 words unless the passage leaves no choice. Never over 6 words.'
       : '- Usually 3 to 4 stressed beats, about 6 to 9 words (in languages written without spaces, about 10 to 18 characters). Never under 4 words unless the passage leaves no choice. Never over 11 words.';
 
-  static String instructions(String languageName, SnapUnitSize size) => '''
+  /// 배울 언어가 영어인가. 영어만 강세 박자 규칙을 쓴다.
+  static bool isEnglish(String languageName) {
+    final name = languageName.trim().toLowerCase();
+    return name == 'english' || name.startsWith('english ') ||
+        name.startsWith('english(') || name == 'en' || name.startsWith('en-');
+  }
+
+  static String _stressLengthRule(SnapUnitSize size) => size == SnapUnitSize.quick
+      ? '- Exactly 2 stressed beats in almost every group (3 only to keep a fixed expression whole), about 3 to 5 words. Never over 6 words.'
+      : '- 3 to 4 stressed beats per group, about 6 to 9 words. Never over 11 words. Do not leave a last group with a single stressed beat; fold it into the group before it.';
+
+  /// 영어 전용: 강세 박자를 세어 끊는다. 뜻의 경계 안에서만 끊고, 그 안에서
+  /// 박자 수를 고르게 맞춘다.
+  static String englishStressInstructions(SnapUnitSize size) => '''
+You divide an English passage into stress groups for rhythmic read-aloud practice. A learner hears one group, then says it back in one breath.
+
+English is stress-timed: the stressed syllables fall on a steady beat, and the unstressed words between them are squeezed short. Count beats, not words.
+- Stressed (a beat): content words — nouns, main verbs, adjectives, adverbs, numbers, negatives (not, never, no), question words, and demonstratives used alone.
+- Unstressed (squeezed): articles, prepositions, auxiliaries and modals, pronouns, conjunctions, "to" before a verb.
+
+Rules:
+- One group = a set number of stressed beats, spoken in one comfortable breath at an even pace.
+${_stressLengthRule(size)}
+- Unstressed words lean forward: they attach to the stressed word that FOLLOWS them ("to the STORE", "I NEEDED"), never trail onto the group before. A group may begin with unstressed words and should end on a stressed word.
+- Never end a group on an article, preposition, conjunction, auxiliary, or pronoun.
+- Cut only at a natural meaning boundary — punctuation, a clause edge, before a prepositional phrase, after a conjunction. Within that limit, choose the cuts that keep neighbouring groups at the same beat count.
+- Never cut inside a fixed expression, phrasal verb, name, number with its unit, or a noun phrase.
+- Keep every character of the passage, in order. Do not add, drop, reorder, or change any word or punctuation mark. Punctuation stays attached to the word before it.
+
+Return JSON only: {"chunks": ["...", "..."]}''';
+
+  /// 영어 Full: 한 박자뿐인 꼬리 조각은 앞 단위에 붙인다. 너무 길어지면 그대로 둔다.
+  static List<String> mergeOrphanTail(List<String> chunks) {
+    if (chunks.length < 2) return chunks;
+    int words(String s) =>
+        s.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+    final last = chunks.last;
+    final prev = chunks[chunks.length - 2];
+    if (words(last) >= 3 || words(prev) + words(last) > 11) return chunks;
+    return <String>[
+      ...chunks.sublist(0, chunks.length - 2),
+      '$prev $last',
+    ];
+  }
+
+  static String instructions(String languageName, SnapUnitSize size) =>
+      isEnglish(languageName)
+          ? englishStressInstructions(size)
+          : _meaningInstructions(languageName, size);
+
+  static String _meaningInstructions(String languageName, SnapUnitSize size) => '''
 You divide a $languageName passage into breath groups for rhythmic read-aloud practice. A learner hears one group, then says it back.
 
 Each group is one complete unit of meaning that can be spoken in a single comfortable breath with a clear, steady rhythm — the way a skilled teacher reads aloud for learners, ideally phrased and evenly paced. It is not word-by-word chopping, and it is not the long, fast run a fluent native speaker might say in one go.
@@ -93,7 +172,11 @@ Return JSON only: {"chunks": ["...", "..."]}''';
           )
           .timeout(timeout);
       if (response.statusCode != 200) return null;
-      return parseChunks(utf8.decode(response.bodyBytes), input);
+      final parsed = parseChunks(utf8.decode(response.bodyBytes), input);
+      if (parsed == null) return null;
+      return isEnglish(languageName) && size == SnapUnitSize.full
+          ? mergeOrphanTail(parsed)
+          : parsed;
     } catch (_) {
       return null;
     }

@@ -60,6 +60,61 @@ void main() {
       );
     });
 
+    test('only English uses the stress-beat rules and its own cache version', () {
+      expect(SnapEchoChunker.isEnglish('English'), isTrue);
+      expect(SnapEchoChunker.isEnglish(' english '), isTrue);
+      expect(SnapEchoChunker.isEnglish('Korean'), isFalse);
+      expect(SnapEchoChunker.isEnglish('Japanese'), isFalse);
+
+      expect(SnapEchoChunker.instructions('English', SnapUnitSize.quick),
+          contains('stress-timed'));
+      expect(SnapEchoChunker.instructions('Spanish', SnapUnitSize.quick),
+          isNot(contains('stress-timed')));
+
+      expect(snapChunkVersionFor('English'), kSnapChunkEnglishStressVersion);
+      expect(snapChunkVersionFor('Korean'), kSnapChunkVersion);
+    });
+
+    test('English quick and full state different beat counts', () {
+      final quick =
+          SnapEchoChunker.instructions('English', SnapUnitSize.quick);
+      final full = SnapEchoChunker.instructions('English', SnapUnitSize.full);
+      expect(quick, contains('Exactly 2 stressed beats'));
+      expect(full, contains('3 to 4 stressed beats'));
+      expect(quick, isNot(equals(full)));
+    });
+
+    test('mergeOrphanTail folds a short last unit into the one before', () {
+      expect(
+        SnapEchoChunker.mergeOrphanTail(
+            <String>['I went to the store', 'yesterday.']),
+        <String>['I went to the store yesterday.'],
+      );
+      // 꼬리가 충분히 길면 그대로 둔다.
+      expect(
+        SnapEchoChunker.mergeOrphanTail(
+            <String>['I went to the store', 'because I needed milk.']),
+        <String>['I went to the store', 'because I needed milk.'],
+      );
+      // 합치면 11단어를 넘으면 그대로 둔다.
+      expect(
+        SnapEchoChunker.mergeOrphanTail(<String>[
+          'one two three four five six seven eight nine ten',
+          'eleven twelve',
+        ]),
+        <String>[
+          'one two three four five six seven eight nine ten',
+          'eleven twelve',
+        ],
+      );
+    });
+
+    test('Gemini style prompt asks for a relaxed pace and clear stress', () {
+      expect(kSnapGeminiStylePrompt, contains('85 percent'));
+      expect(kSnapGeminiStylePrompt, contains('stressed syllable'));
+      expect(kSnapGeminiCacheTag, isNotEmpty);
+    });
+
     test('markup puts the pause tag between every unit', () {
       expect(
         SnapEchoChunker.markup(

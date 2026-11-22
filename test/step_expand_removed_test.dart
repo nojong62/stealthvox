@@ -83,7 +83,7 @@ void main() {
       expect(history, contains('"Practice"'));
     });
 
-    test('ESSAY 카드는 글을 미리 보여 준다', () {
+    test('MY STORY 카드는 글을 미리 보여 준다', () {
       // 2026-10-15 실장님 지시 — 누르기 전에 내용을 읽어 볼 수 있다.
       expect(history, isNot(contains('Larry King–style Plain Spoken English')));
       expect(history, contains('preview: _mySpeech'));
