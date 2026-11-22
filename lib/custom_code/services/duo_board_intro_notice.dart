@@ -486,7 +486,7 @@ class IntroWelcomePageCopy {
       'duoInvite': 'Duo Invite',
       'loginOrJoin': 'Login or Join',
       'signupBonus':
-          '1 hour added automatically when you sign up (3 hours with the basic voice)',
+          '1 hour added automatically when you sign up (2 hours with the basic voice)',
       'swipeContinue': 'Swipe to Continue',
       'studyTrial': 'Try the Study Room',
       'studyTrialUsed': 'This phone has already used the trial.',
@@ -500,7 +500,7 @@ class IntroWelcomePageCopy {
       'headlineAfter': '',
       'duoInvite': 'Duo 초대',
       'loginOrJoin': '로그인 또는 가입',
-      'signupBonus': '가입 즉시 1시간 자동 충전 (기본 음성은 3시간)',
+      'signupBonus': '가입 즉시 1시간 자동 충전 (기본 음성은 2시간)',
       'swipeContinue': '스와이프하여 계속',
       'studyTrial': '공부방 체험',
       'studyTrialUsed': '이 폰에서는 이미 체험했어요.',
