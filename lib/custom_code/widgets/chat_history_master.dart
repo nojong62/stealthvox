@@ -53,7 +53,7 @@ import '/custom_code/services/study_trial.dart';
 import '/custom_code/services/study_trial_audio.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
 import '/custom_code/services/chirp_pause_markup.dart';
-import '/custom_code/services/snap_echo_chunker.dart';
+import '/custom_code/services/snap_echo_voice.dart';
 import '/custom_code/services/breath_echoing_engine.dart';
 import '/custom_code/services/breath_segment.dart';
 import '/custom_code/services/p2_voice_styles.dart';
@@ -107,12 +107,10 @@ const Color _p3PracticeSurfaceColor = Color(0xFF1C1C1C);
 const Color _p3PracticeBorderColor = Color(0x22FFFFFF);
 const Color _p3BreathAccentColor = Color(0xFF7DD3FC);
 
-/// ⚡ [SNAP-ECHO] Snap Echoing의 호흡. **끊는 자리는 의미 단위가 정한다** —
-/// [SnapEchoChunker]가 나눈 한 호흡 단위 사이마다 Chirp이 쉬고, 여기서는 그
-/// 쉼을 소리로 찾아 자른다. 단위 안의 자연스러운 짧은 틈은 자르지 않는다.
-/// [maxBreathMs]는 단위 나누기가 실패해 문장부호 쉼만 있을 때의 안전판이다
-/// (Full Breath의 6~9단어도 0.88배속에서 4초 안쪽이다). 실기기에서 조정할
-/// 값이다.
+/// ⚡ [SNAP-ECHO] Snap Echoing의 호흡. 글자를 쪼개지 않고 TTS가 쉬는 자리
+/// (문장부호·줄 끝, 영어 Gemini는 프롬프트의 호흡 단위)를 소리의 무음으로
+/// 찾아 자른다. 단위 안의 자연스러운 짧은 틈은 자르지 않는다.
+/// [maxBreathMs]는 쉼이 드물 때의 안전판이다. 실기기에서 조정할 값이다.
 const BreathAnalysisConfig _kSnapEchoBreathConfig = BreathAnalysisConfig(
   minBreathMs: 600,
   maxBreathMs: 5000,
@@ -6874,11 +6872,11 @@ RULES — follow exactly:
     // ✨ 영어 에코잉은 Gemini TTS를 먼저 쓴다. 소리가 달라서 캐시 칸도 따로 선다.
     final bool useGemini = !shadowing &&
         kSnapGeminiTts &&
-        SnapEchoChunker.isEnglish(_sessionTargetLangName());
+        snapIsEnglish(_sessionTargetLangName());
     // 고른 쉼·속도·단위 길이마다 소리가 다르다 — 캐시 칸도 따로 선다.
     final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3'
         '_${pause.name}_x$speed'
-        '${shadowing ? '' : '_${snapChunkVersionFor(_sessionTargetLangName())}_${size.name}'}'
+        '${shadowing ? '' : '_snap_plain_v1${useGemini ? '_${size.name}' : ''}'}'
         '${useGemini ? '_$kSnapGeminiCacheTag' : ''}';
     final requestKey = '$ns|$text';
     final existing = _breathPcmInFlight[requestKey];
@@ -6902,22 +6900,9 @@ RULES — follow exactly:
           return pcmFromWav(shared);
         }
       }
-      // ⚡ Snap Echoing은 문장 구조로 나눈 단위 사이마다 쉰다. 나누기에
-      //   실패하면 쉐도잉과 같은 문장부호 쉼으로 돌아간다.
-      String markup = chirpPauseMarkup(text, pause);
+      // 쉼은 문장부호·줄 끝 기준이다. 글자를 따로 쪼개지 않는다.
+      final markup = chirpPauseMarkup(text, pause);
       final timing = Stopwatch()..start();
-      if (!shadowing && !text.contains('[') && !text.contains(']')) {
-        final chunks = await SnapEchoChunker.chunk(
-          apiKey: _apiKey,
-          text: text,
-          languageName: _sessionTargetLangName(),
-          size: size,
-        );
-        debugPrint('[SNAP-CHUNK] ok=${chunks != null} '
-            'chunks=${chunks?.length ?? 0} size=${size.name}');
-        if (chunks != null) markup = SnapEchoChunker.markup(chunks, pause);
-      }
-      final chunkMs = timing.elapsedMilliseconds;
       // 낭독 지시(instructions)는 보내지 않는다 — 지시가 붙으면 Gateway가
       // 표현형으로 보고 Chirp 3 HD가 아닌 OpenAI로 넘긴다.
       String provider = '';
@@ -6930,18 +6915,18 @@ RULES — follow exactly:
             responseFormat: 'pcm',
             markup: markup,
             engine: useGemini ? 'gemini' : null,
-            stylePrompt: useGemini ? kSnapGeminiStylePrompt : null,
+            stylePrompt: useGemini ? snapGeminiStylePrompt(size) : null,
             onProvider: (p) => provider = p,
           );
       var raw = await synth();
       // "음성을 못 불러왔습니다"를 바로 띄우지 않는다. 한 번은 조용히 다시 받는다.
       if (raw == null || raw.isEmpty) {
         debugPrint('[P3-TIMING] retry chars=${text.length} '
-            'firstMs=${timing.elapsedMilliseconds - chunkMs}');
+            'firstMs=${timing.elapsedMilliseconds}');
         raw = await synth();
       }
-      debugPrint('[P3-TIMING] chars=${text.length} chunkMs=$chunkMs '
-          'ttsMs=${timing.elapsedMilliseconds - chunkMs} '
+      debugPrint('[P3-TIMING] chars=${text.length} '
+          'ttsMs=${timing.elapsedMilliseconds} '
           'ok=${raw != null && raw.isNotEmpty} mode=${_p3PracticeMode.name}');
       if (raw == null || raw.isEmpty) return null;
       debugPrint('[SNAP-TTS] provider=$provider gemini=$useGemini');
