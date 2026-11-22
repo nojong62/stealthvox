@@ -6869,10 +6869,11 @@ RULES — follow exactly:
     final ChirpPause pause = shadowing ? _p3ShadowPause : ChirpPause.short;
     final double speed = shadowing ? _p3ShadowSpeed : _snapEchoSpeed;
     final SnapUnitSize size = _p3SnapSize;
-    // ✨ 영어 에코잉은 Gemini TTS를 먼저 쓴다. 소리가 달라서 캐시 칸도 따로 선다.
-    final bool useGemini = !shadowing &&
-        kSnapGeminiTts &&
-        snapIsEnglish(_sessionTargetLangName());
+    // ✨ 한국어를 뺀 모든 언어의 에코잉은 Gemini TTS를 먼저 쓴다. 소리가 달라서
+    //   캐시 칸도 따로 선다. 한국어는 Chirp 3 HD다.
+    final String snapLang = _sessionTargetLangName();
+    final bool useGemini =
+        !shadowing && kSnapGeminiTts && !snapIsKorean(snapLang);
     // 고른 쉼·속도·단위 길이마다 소리가 다르다 — 캐시 칸도 따로 선다.
     final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3'
         '_${pause.name}_x$speed'
@@ -6915,7 +6916,9 @@ RULES — follow exactly:
             responseFormat: 'pcm',
             markup: markup,
             engine: useGemini ? 'gemini' : null,
-            stylePrompt: useGemini ? snapGeminiStylePrompt(size) : null,
+            stylePrompt: useGemini
+                ? snapGeminiStylePrompt(size, languageName: snapLang)
+                : null,
             onProvider: (p) => provider = p,
           );
       var raw = await synth();

@@ -13,6 +13,8 @@ const {
   chirpVoiceForRequest,
   shouldUseChirp,
   shouldUseGemini,
+  geminiLocaleAllowed,
+  markGeminiLocaleUnsupported,
   geminiPiecesForRequest,
   geminiPromptForRequest,
   geminiVoiceForRequest,
@@ -326,17 +328,56 @@ test("app-written pause markup is used only when it fits one request", () => {
   assert.equal(chirpMarkupForRequest({ markup: "가".repeat(1700) }), null);
 });
 
-test("Gemini route is opt-in, English, PCM and prompt-free of instructions", () => {
-  const base = { input: "Hello", language: "en", voice: "google-female",
-    response_format: "pcm", engine: "gemini" };
-  assert.equal(shouldUseGemini(base), true);
-  assert.equal(shouldUseGemini({ ...base, engine: undefined }), false);
-  assert.equal(shouldUseGemini({ ...base, response_format: "mp3" }), false);
-  assert.equal(shouldUseGemini({ ...base, language: "ko" }), false);
-  assert.equal(shouldUseGemini({ ...base, instructions: "warm" }), false);
+test("Gemini is the default for every language except Korean", () => {
+  const en = { input: "Hello", language: "en", voice: "google-female",
+    response_format: "pcm" };
+  assert.equal(shouldUseGemini(en), true);
+  assert.equal(shouldUseGemini({ ...en, response_format: "mp3" }), true);
+  assert.equal(shouldUseGemini({ ...en, language: "ja", input: "こんにちは" }), true);
+  assert.equal(shouldUseGemini({ ...en, language: "es", input: "Hola" }), true);
+  // Korean (by language or by Hangul) always stays on Chirp.
+  assert.equal(shouldUseGemini({ ...en, language: "ko" }), false);
+  assert.equal(shouldUseGemini({ ...en, language: "ko", engine: "gemini" }), false);
+  assert.equal(shouldUseGemini({ ...en, input: "안녕하세요" }), false);
+  // Unknown language codes stay on the dynamic Google route.
+  assert.equal(shouldUseGemini({ ...en, language: "th" }), false);
+});
+
+test("Gemini steps aside for instructions, WaveNet tier, numeric speed and opt-outs", () => {
+  const en = { input: "Hello", language: "en", voice: "google-female",
+    response_format: "mp3" };
+  assert.equal(shouldUseGemini({ ...en, instructions: "warm" }), false);
+  assert.equal(shouldUseGemini({ ...en, voice_tier: "basic" }), false);
+  assert.equal(shouldUseGemini({ ...en, engine: "chirp" }), false);
+  assert.equal(shouldUseGemini({ ...en, response_format: "wav" }), false);
+  // Shadowing's chosen pace is a Chirp feature; a style prompt lifts that.
+  assert.equal(shouldUseGemini({ ...en, speed: 0.87 }), false);
+  assert.equal(shouldUseGemini({ ...en, speed: 1 }), true);
+  assert.equal(shouldUseGemini({ ...en, speed: 0.95, style_prompt: "x" }), true);
+  assert.equal(
+    shouldUseGemini({ ...en, speed: 0.95, engine: "gemini", voice_tier: "basic" }),
+    true);
+});
+
+test("Gemini kill switches", () => {
+  const en = { input: "Hello", language: "en", response_format: "pcm" };
+  process.env.GEMINI_TTS_DEFAULT = "0";
+  assert.equal(shouldUseGemini(en), false);
+  assert.equal(shouldUseGemini({ ...en, engine: "gemini" }), true);
+  delete process.env.GEMINI_TTS_DEFAULT;
   process.env.GEMINI_TTS_DISABLED = "1";
-  assert.equal(shouldUseGemini(base), false);
+  assert.equal(shouldUseGemini({ ...en, engine: "gemini" }), false);
   delete process.env.GEMINI_TTS_DISABLED;
+});
+
+test("a locale Gemini rejected is skipped, Korean never allowed", () => {
+  assert.equal(geminiLocaleAllowed("ko-KR"), false);
+  assert.equal(geminiLocaleAllowed(null), false);
+  assert.equal(geminiLocaleAllowed("vi-VN"), true);
+  markGeminiLocaleUnsupported("vi-VN");
+  assert.equal(geminiLocaleAllowed("vi-VN"), false);
+  assert.equal(shouldUseGemini({ input: "Xin chao", language: "vi",
+    response_format: "mp3" }), false);
 });
 
 test("Gemini pieces follow the app's pause tags", () => {

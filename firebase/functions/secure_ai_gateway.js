@@ -92,12 +92,19 @@ const MAX_TTS_INPUT_CHARS = 5000;
 
 // Gemini TTS runs through the same Google endpoint as Chirp, selected by
 // `voice.modelName`, and takes a natural-language style prompt that Chirp does
-// not. The app opts in per request with `engine: "gemini"`; any failure falls
-// back to Chirp so a preview-model change can never silence a screen. Setting
-// GEMINI_TTS_DISABLED=1 on the function turns the route off without an app
-// update. English only for now.
+// not. Every language except Korean goes to Gemini first (2026-11-22); Korean
+// always stays on Chirp 3 HD. A language Gemini does not have, or any failure,
+// falls back to Chirp so a preview-model change can never silence a screen.
+// Switches on the function (no app update needed):
+//   GEMINI_TTS_DISABLED=1  - Gemini off everywhere, even when the app asks.
+//   GEMINI_TTS_DEFAULT=0   - Gemini only when the app sends `engine: "gemini"`.
+// A request can also send `engine: "chirp"` to stay on Chirp.
 const GEMINI_TTS_MODEL = "gemini-2.5-flash-tts";
-const GEMINI_TTS_LOCALES = new Set(["en-US"]);
+// Locales Gemini rejected (a 4xx that names the language/voice/model) are not
+// retried for an hour on this instance, so an unsupported language costs one
+// failed call instead of one per request.
+const GEMINI_UNSUPPORTED_TTL_MS = 60 * 60 * 1000;
+const geminiUnsupportedLocales = new Map();
 const GEMINI_MAX_PIECES = 40;
 const GEMINI_MAX_PROMPT_CHARS = 800;
 const GEMINI_SAMPLE_RATE = 24000;
@@ -665,14 +672,41 @@ async function tryProxyChirpSpeech(req, res) {
   }
 }
 
+// Korean is never sent to Gemini; a locale Gemini recently rejected is skipped.
+function geminiLocaleAllowed(locale) {
+  if (!locale || locale === "ko-KR") return false;
+  const until = geminiUnsupportedLocales.get(locale);
+  if (until === undefined) return true;
+  if (until > Date.now()) return false;
+  geminiUnsupportedLocales.delete(locale);
+  return true;
+}
+
+function markGeminiLocaleUnsupported(locale) {
+  geminiUnsupportedLocales.set(locale, Date.now() + GEMINI_UNSUPPORTED_TTL_MS);
+}
+
 function shouldUseGemini(body) {
   if (process.env.GEMINI_TTS_DISABLED === "1") return false;
   if (!body || typeof body !== "object") return false;
-  if (String(body.engine || "").trim().toLowerCase() !== "gemini") return false;
+  const engine = String(body.engine || "").trim().toLowerCase();
+  if (engine === "chirp") return false;
+  // Expressive requests carry OpenAI-only `instructions`; Gemini does not read them.
   if (String(body.instructions || "").trim()) return false;
-  // Silence between pieces is spliced into raw PCM; MP3 has no safe splice.
-  if (requestedAudioFormat(body) !== "pcm") return false;
-  return GEMINI_TTS_LOCALES.has(chirpLocaleForRequest(body));
+  const format = requestedAudioFormat(body);
+  if (format !== "pcm" && format !== "mp3") return false;
+  if (engine !== "gemini") {
+    // Default routing for callers that did not ask for an engine.
+    if (process.env.GEMINI_TTS_DEFAULT === "0") return false;
+    // The cheaper WaveNet tier stays where it is.
+    if (voiceTierForRequest(body) === "basic") return false;
+    // Gemini has no numeric speed (e.g. shadowing's chosen pace); only Chirp
+    // honors it, so such requests stay on Chirp unless a style prompt is sent.
+    const speed = Number(body.speed);
+    if (Number.isFinite(speed) && speed > 0 && speed !== 1 &&
+        !String(body.style_prompt || "").trim()) return false;
+  }
+  return geminiLocaleAllowed(chirpLocaleForRequest(body));
 }
 
 function geminiPromptForRequest(body) {
@@ -710,37 +744,45 @@ function geminiVoiceForRequest(body, locale) {
   };
 }
 
-async function synthesizeGeminiPiece(client, text, prompt, voice) {
+async function synthesizeGeminiPiece(client, text, prompt, voice, format) {
+  const audioConfig = format === "mp3"
+    ? { audioEncoding: "MP3" }
+    : { audioEncoding: "LINEAR16", sampleRateHertz: GEMINI_SAMPLE_RATE };
   const response = await client.request({
     url: GOOGLE_TTS_ENDPOINT,
     method: "POST",
     data: {
       input: prompt ? { text, prompt } : { text },
       voice,
-      audioConfig: { audioEncoding: "LINEAR16", sampleRateHertz: GEMINI_SAMPLE_RATE },
+      audioConfig,
     },
   });
   const encoded = response && response.data && response.data.audioContent;
   if (typeof encoded !== "string" || !encoded) {
     throw new Error("Gemini TTS returned no audio.");
   }
-  return stripWavContainer(Buffer.from(encoded, "base64"));
+  const bytes = Buffer.from(encoded, "base64");
+  return format === "mp3" ? bytes : stripWavContainer(bytes);
 }
 
 async function synthesizeGemini(body, locale) {
+  const format = requestedAudioFormat(body);
   const pieces = geminiPiecesForRequest(body);
   if (pieces.length === 0 || pieces.length > GEMINI_MAX_PIECES) return null;
+  // Silence between pieces can only be spliced into raw PCM. An MP3 request
+  // with pause tags stays on Chirp, which writes the pauses itself.
+  if (format === "mp3" && pieces.length > 1) return null;
   const prompt = geminiPromptForRequest(body);
   const voice = geminiVoiceForRequest(body, locale);
   const client = await googleAuth.getClient();
   const audio = await Promise.all(pieces.map(
-    piece => synthesizeGeminiPiece(client, piece.text, prompt, voice)));
+    piece => synthesizeGeminiPiece(client, piece.text, prompt, voice, format)));
   const parts = [];
   audio.forEach((pcm, i) => {
     parts.push(pcm);
     if (pieces[i].pauseMs > 0) parts.push(silencePcm(pieces[i].pauseMs));
   });
-  return { voiceName: voice.name, audio: Buffer.concat(parts) };
+  return { format, voiceName: voice.name, audio: Buffer.concat(parts) };
 }
 
 // Returns false on any problem so the caller continues to the Chirp route.
@@ -758,13 +800,29 @@ async function tryProxyGeminiSpeech(req, res) {
       "google-gemini-tts-" + locale.toLowerCase() + "-" +
         synthesized.voiceName.toLowerCase()
     );
-    res.setHeader("content-type", "audio/L16; rate=24000; channels=1");
+    res.setHeader(
+      "content-type",
+      synthesized.format === "mp3"
+        ? "audio/mpeg"
+        : "audio/L16; rate=24000; channels=1"
+    );
     res.send(synthesized.audio);
     return true;
   } catch (error) {
+    const status = Number(
+      (error && error.response && error.response.status) ||
+      (error && error.status) || (error && error.statusCode)) || 0;
+    const message = String(error && error.message || "");
+    // A 400/404 that names the language, voice or model means Gemini does not
+    // have this locale. Other errors (quota, outage, bad input) are not cached.
+    if ((status === 400 || status === 404) &&
+        /language|locale|voice|model/i.test(message)) {
+      markGeminiLocaleUnsupported(locale);
+    }
     functions.logger.error("Gemini TTS failed; falling back to Chirp", {
       locale,
-      message: error && error.message,
+      status,
+      message,
     });
     return false;
   }
@@ -971,6 +1029,8 @@ module.exports = {
   chirpVoiceForRequest,
   shouldUseChirp,
   shouldUseGemini,
+  geminiLocaleAllowed,
+  markGeminiLocaleUnsupported,
   geminiPiecesForRequest,
   geminiPromptForRequest,
   geminiVoiceForRequest,

@@ -11,6 +11,24 @@ void main() {
       expect(snapIsEnglish('Japanese'), isFalse);
     });
 
+    test('Korean is recognised so it can stay on Chirp', () {
+      expect(snapIsKorean('Korean'), isTrue);
+      expect(snapIsKorean(' korean '), isTrue);
+      expect(snapIsKorean('ko-KR'), isTrue);
+      expect(snapIsKorean('한국어'), isTrue);
+      expect(snapIsKorean('English'), isFalse);
+      expect(snapIsKorean('Japanese'), isFalse);
+    });
+
+    test('other languages get a native-rhythm prompt at 95%', () {
+      final prompt =
+          snapGeminiStylePrompt(SnapUnitSize.quick, languageName: 'Japanese');
+      expect(prompt, contains('native Japanese speaker'));
+      expect(prompt, contains('95 percent'));
+      expect(prompt, isNot(contains('stressed syllable')));
+      expect(prompt.length, lessThanOrEqualTo(800));
+    });
+
     test('Gemini prompt asks for 95% pace and stress-centered rhythm', () {
       for (final size in SnapUnitSize.values) {
         final prompt = snapGeminiStylePrompt(size);
