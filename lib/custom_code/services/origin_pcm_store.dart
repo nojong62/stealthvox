@@ -53,8 +53,9 @@ const int kOriginPcmSessionMaxBytes = 40 * 1024 * 1024;
 /// 창고 전체 상한. 청소 뒤에도 넘치면 오래된 방부터 통째로 버린다.
 const int kOriginPcmGlobalMaxBytes = 200 * 1024 * 1024;
 
-/// 이만큼 지난 방 폴더는 주인이 없다고 본다.
-const Duration kOriginPcmMaxAge = Duration(hours: 24);
+/// 이만큼 지난 방 폴더는 주인이 없다고 본다. 2026-11-22 24시간에서 7일로 늘렸다
+/// (7일 안에 공부방에 들어오면 재전사, 아니면 버린다).
+const Duration kOriginPcmMaxAge = Duration(days: 7);
 
 /// 📌 [TRANSCRIBE-STATE] 방 하나의 전사가 어디까지 갔는가.
 ///
@@ -632,7 +633,7 @@ class OriginPcmStore {
 
   /// 실측용 한 줄. 세션이 끝날 때 대화방이 부른다.
   ///
-  /// 24시간·200MB·40MB는 근거 있는 측정값이 아니라 보호용 출발점이다. 이
+  /// 7일·200MB·40MB는 근거 있는 측정값이 아니라 보호용 출발점이다. 이
   /// 네 숫자가 쌓여야 실제 값으로 바꿀 수 있다.
   void logSnapshot(String roomId) {
     final key = roomId.trim().isEmpty ? kOriginPcmPendingDir : roomId.trim();

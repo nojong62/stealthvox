@@ -4,7 +4,7 @@
 // 전례가 있다.** 그래서 여기서 가장 중요한 단언은 하나다 — 방 폴더 안의
 // 파일까지 실제로 세는가.
 //
-// 나이는 파일 mtime을 직접 세팅해 만든다. 24시간을 기다릴 수는 없다.
+// 나이는 파일 mtime을 직접 세팅해 만든다. 7일을 기다릴 수는 없다.
 
 import 'dart:io';
 import 'dart:typed_data';
@@ -47,9 +47,9 @@ void main() {
   });
 
   group('나이', () {
-    test('24시간 경계 — 23시간은 남고 25시간은 지워진다', () async {
-      makeRoom('young', fileCount: 2, bytes: 1000, age: const Duration(hours: 23));
-      makeRoom('old', fileCount: 2, bytes: 1000, age: const Duration(hours: 25));
+    test('7일 경계 — 6일은 남고 8일은 지워진다', () async {
+      makeRoom('young', fileCount: 2, bytes: 1000, age: const Duration(days: 6));
+      makeRoom('old', fileCount: 2, bytes: 1000, age: const Duration(days: 8));
 
       await s.cleanup();
 
@@ -60,7 +60,7 @@ void main() {
     test('폴더는 늙었지만 안의 파일이 새것이면 살린다', () async {
       // 폴더 mtime은 플랫폼마다 갱신 시점이 다르다. 그것만 믿으면 지금
       // 쓰고 있는 방을 늙었다고 지운다.
-      final dir = makeRoom('active', fileCount: 1, bytes: 1000, age: const Duration(hours: 30));
+      final dir = makeRoom('active', fileCount: 1, bytes: 1000, age: const Duration(days: 8));
       File('${dir.path}/turn_002.wav')
         ..writeAsBytesSync(Uint8List(1000))
         ..setLastModifiedSync(DateTime.now());
@@ -71,7 +71,7 @@ void main() {
     });
 
     test('_pending도 나이로 회수된다', () async {
-      makeRoom(kOriginPcmPendingDir, fileCount: 1, bytes: 500, age: const Duration(hours: 40));
+      makeRoom(kOriginPcmPendingDir, fileCount: 1, bytes: 500, age: const Duration(days: 8));
       await s.cleanup();
       expect(Directory('${store.path}/$kOriginPcmPendingDir').existsSync(), isFalse);
     });
@@ -137,7 +137,7 @@ void main() {
 
     test('폴더가 아닌 것이 루트에 있어도 넘어간다', () async {
       File('${store.path}/stray.txt').writeAsStringSync('x');
-      makeRoom('a', fileCount: 1, bytes: 100, age: const Duration(hours: 40));
+      makeRoom('a', fileCount: 1, bytes: 100, age: const Duration(days: 8));
 
       await s.cleanup();
 
@@ -146,12 +146,12 @@ void main() {
     });
 
     test('cleanupOnce는 앱 실행당 한 번이다', () async {
-      makeRoom('old', fileCount: 1, bytes: 100, age: const Duration(hours: 40));
+      makeRoom('old', fileCount: 1, bytes: 100, age: const Duration(days: 8));
       await OriginPcmStore.cleanupOnce();
       expect(Directory('${store.path}/old').existsSync(), isFalse);
 
       // 두 번째 방은 두 번째 호출이 무시되므로 남는다.
-      makeRoom('old2', fileCount: 1, bytes: 100, age: const Duration(hours: 40));
+      makeRoom('old2', fileCount: 1, bytes: 100, age: const Duration(days: 8));
       await OriginPcmStore.cleanupOnce();
       expect(Directory('${store.path}/old2').existsSync(), isTrue);
     });
