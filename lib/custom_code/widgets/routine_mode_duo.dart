@@ -31,6 +31,7 @@ import 'package:flutter/foundation.dart' as foundation;
 import '/custom_code/services/transcript_text_clean.dart';
 import '/custom_code/services/completion_budget.dart';
 import '/custom_code/services/duo_direct_audio.dart';
+import '/custom_code/services/duo_pcm_inject.dart';
 import '/custom_code/services/duo_partner_echo.dart';
 import '/custom_code/services/duo_call_resolution.dart';
 import '/custom_code/services/duo_interpreter_protocol.dart';
@@ -894,6 +895,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 🎙️ WebRTC가 연 **하나뿐인 마이크**에서 전사 갈래를 받는 통로.
   /// 릴레이 경로에서는 null이고, 그때는 `_directCapture`가 그 자리를 맡는다.
   DuoWebrtcMicTap? _webrtcMicTap;
+  // 🧪 [DUO-INJECT] 시험 빌드 전용(DUO_PCM_INJECT). 기본 빌드에선 늘 null.
+  DuoPcmInjector? _duoPcmInjector;
 
   /// ⏱️ [INTERP-LATENCY] 지금 처리 중인 상대 발화 한 턴의 시각표.
   /// 턴마다 새로 만들고, 로그 한 줄을 남긴 뒤 버린다.
@@ -3153,10 +3156,30 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final fanout = _buildDirectFanout(kDuoSttPcmSourceWebrtcMic);
     _directFanout = fanout;
 
+    // 🧪 [DUO-INJECT] 시험 빌드면 마이크 대신 역할별 소리 파일을 흘려 넣는다.
+    DuoPcmInjector? injector;
+    if (kDuoPcmInject) {
+      injector = DuoPcmInjector(
+        asset: duoPcmInjectAssetFor(_myRole),
+        onLog: _lgDuo,
+        onPcm: (bytes) {
+          if (generation != _directGeneration) {
+            injector?.stop();
+            return;
+          }
+          if (!_directPcmFlowing && mounted) {
+            setState(() => _directPcmFlowing = true);
+          }
+          fanout.add(bytes);
+        },
+      );
+    }
+
     final ok = await tap.start(
       trackId: trackId,
       onPcm: (bytes) {
         if (generation != _directGeneration) return;
+        if (injector?.replacingMic == true) return;
         if (!_directPcmFlowing && mounted) {
           setState(() => _directPcmFlowing = true);
         }
@@ -3170,6 +3193,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (!ok) {
       _lgDuo('⚠️ [DUO-MIC-TAP]', 'attach_failed — 전사 없이 통화만 진행한다');
       _webrtcMicTap = null;
+    }
+    if (injector != null) {
+      _duoPcmInjector = injector;
+      await injector.start();
     }
     if (mounted) setState(() => _micActive = true);
   }
@@ -3774,6 +3801,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final micTap = _webrtcMicTap;
     _webrtcMicTap = null;
     await micTap?.stop();
+    _duoPcmInjector?.stop();
+    _duoPcmInjector = null;
 
     // ②③ 마지막 발화 확정 → 전사문 대기 → 저장 완료까지.
     //     `_directCallActive`와 세대는 아직 그대로다. 이 창 안에서 도착한
