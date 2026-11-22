@@ -43,7 +43,6 @@ import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/origin_surface_localization.dart';
 import '/custom_code/services/system_ui_language.dart';
 
-const String _historyListTtsVoice = 'nova';
 
 // Deletion dialogs follow the Original language selected in the lobby.
 class _DeletionUiCopy {
@@ -238,19 +237,13 @@ class _DeletionUiCopy {
 }
 
 // ── Keepers 소리듣기 전용 ─────────────────────────────────────────────
-// 의미단위 리듬을 말로 지시하려면 instructions를 받는 모델이어야 한다.
-// tts-1은 instructions 자리가 없고, gpt-4o-mini-tts는 대신 speed를 무시한다.
-// 캐시 키에 모델명을 박아 tts-1 시절 음성이 섞여 나오지 않게 한다.
-String get _keeperPlayTtsModel => TtsModelPolicy.expressiveStudy.model;
+// Chirp 3 HD 여성 음성(Leda)으로 읽는다. 기존 OpenAI 낭독 지시는 쓰지 않는다.
+// 캐시 키에 음성 칸을 따로 둬서 예전 nova 소리가 섞여 나오지 않게 한다.
+const String _keeperPlayVoice = 'google-female';
 String get _keeperPlayTtsCacheVoice => TtsModelPolicy.cacheNamespace(
-      TtsWorkload.expressiveStudy,
-      'keeper-nova',
+      TtsWorkload.conversation,
+      'keeper-google-female-v1',
     );
-const String _keeperPlayInstruction = '''
-Read the line in natural meaning units — breath groups of roughly five to seven words.
-Leave a brief pause at each unit boundary and hold a steady, rhythmic cadence throughout.
-Speak clearly and slightly slower than conversational pace, as a model for a learner shadowing along.
-Do not add, drop, or reword anything in the text.''';
 
 class ChatHistoryListMaster extends StatefulWidget {
   const ChatHistoryListMaster({Key? key, this.width, this.height})
@@ -1671,9 +1664,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
       if (audio == null) {
         audio = await _fetchTts(
           text,
-          _historyListTtsVoice,
-          model: _keeperPlayTtsModel,
-          instructions: _keeperPlayInstruction,
+          _keeperPlayVoice,
+          model: TtsModelPolicy.conversation.model,
         );
         if (audio != null) {
           TtsCache.put(text, _keeperPlayTtsCacheVoice, audio);
@@ -1709,9 +1701,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         await TtsCache.invalidate(text, _keeperPlayTtsCacheVoice);
         final fresh = await _fetchTts(
           text,
-          _historyListTtsVoice,
-          model: _keeperPlayTtsModel,
-          instructions: _keeperPlayInstruction,
+          _keeperPlayVoice,
+          model: TtsModelPolicy.conversation.model,
         );
         if (fresh == null || !mounted) rethrow;
         TtsCache.put(text, _keeperPlayTtsCacheVoice, fresh);
