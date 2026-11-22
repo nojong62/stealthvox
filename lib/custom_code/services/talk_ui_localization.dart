@@ -825,7 +825,7 @@ class TalkUiCopy {
       'bestValue': 'Best Value',
       'premium': 'Premium',
       'storeVoiceNote':
-          'Prices and usage time are based on the HD voice. With the basic voice, the same amount of time goes 3 times further.',
+          'Prices and usage time are based on the HD voice. With the basic voice, the same amount of time goes 2 times further.',
       'finalizeEdits': 'Finish final edits',
       'finishFinalEditsFirst':
           'Please finish the final edits before using this feature.',
@@ -865,7 +865,7 @@ class TalkUiCopy {
       'standard': '스탠다드',
       'bestValue': '최고 혜택',
       'premium': '프리미엄',
-      'storeVoiceNote': '가격과 시간은 HD 음성 기준입니다. 기본 음성은 같은 시간으로 3배 오래 쓸 수 있습니다.',
+      'storeVoiceNote': '가격과 시간은 HD 음성 기준입니다. 기본 음성은 같은 시간으로 2배 오래 쓸 수 있습니다.',
       'finalizeEdits': '최종 수정 완료',
       'finishFinalEditsFirst': '먼저 최종 수정 완료를 마친 후 이용해 주세요.',
       'cannotEditAfter': '완료 후에는 대화를 수정할 수 없습니다.',
@@ -904,7 +904,7 @@ class TalkUiCopy {
       'standard': 'スタンダード',
       'bestValue': 'お得',
       'premium': 'プレミアム',
-      'storeVoiceNote': '料金と利用時間はHD音声を基準にしています。ベーシック音声なら、同じ時間で3倍長く使えます。',
+      'storeVoiceNote': '料金と利用時間はHD音声を基準にしています。ベーシック音声なら、同じ時間で2倍長く使えます。',
       'finalizeEdits': '最終編集を完了',
       'finishFinalEditsFirst': '先に最終編集を完了してからご利用ください。',
       'cannotEditAfter': '完了後はこの会話を編集できません。',
@@ -942,7 +942,7 @@ class TalkUiCopy {
       'standard': '标准',
       'bestValue': '最划算',
       'premium': '高级',
-      'storeVoiceNote': '价格和使用时长以 HD 语音为准。使用基础语音时，同样的时长可使用 3 倍时间。',
+      'storeVoiceNote': '价格和使用时长以 HD 语音为准。使用基础语音时，同样的时长可使用 2 倍时间。',
       'finalizeEdits': '完成最终修改',
       'finishFinalEditsFirst': '请先完成最终修改后再使用。',
       'cannotEditAfter': '完成后将无法修改此对话。',
@@ -982,7 +982,7 @@ class TalkUiCopy {
       'bestValue': 'Mejor oferta',
       'premium': 'Premium',
       'storeVoiceNote':
-          'Los precios y el tiempo de uso se calculan según la voz HD. Con la voz básica, el mismo tiempo rinde 3 veces más.',
+          'Los precios y el tiempo de uso se calculan según la voz HD. Con la voz básica, el mismo tiempo rinde 2 veces más.',
       'finalizeEdits': 'Terminar la edición final',
       'finishFinalEditsFirst':
           'Primero termina la edición final para usar esta función.',
@@ -1024,7 +1024,7 @@ class TalkUiCopy {
       'bestValue': 'Meilleure offre',
       'premium': 'Premium',
       'storeVoiceNote':
-          'Les prix et la durée d’utilisation sont calculés sur la base de la voix HD. Avec la voix de base, la même durée permet d’utiliser le service 3 fois plus longtemps.',
+          'Les prix et la durée d’utilisation sont calculés sur la base de la voix HD. Avec la voix de base, la même durée permet d’utiliser le service 2 fois plus longtemps.',
       'finalizeEdits': 'Terminer les modifications',
       'finishFinalEditsFirst':
           'Terminez d’abord les modifications finales avant d’utiliser cette fonction.',
@@ -1067,7 +1067,7 @@ class TalkUiCopy {
       'bestValue': 'Bestes Angebot',
       'premium': 'Premium',
       'storeVoiceNote':
-          'Preise und Nutzungsdauer beziehen sich auf die HD-Stimme. Mit der Basis-Stimme reicht dieselbe Zeit dreimal so lange.',
+          'Preise und Nutzungsdauer beziehen sich auf die HD-Stimme. Mit der Basis-Stimme reicht dieselbe Zeit doppelt so lange.',
       'finalizeEdits': 'Endbearbeitung abschließen',
       'finishFinalEditsFirst':
           'Schließe zuerst die Endbearbeitung ab, bevor du diese Funktion verwendest.',
@@ -1111,7 +1111,7 @@ class TalkUiCopy {
       'bestValue': 'सर्वोत्तम मूल्य',
       'premium': 'प्रीमियम',
       'storeVoiceNote':
-          'कीमत और इस्तेमाल का समय HD आवाज़ के आधार पर है। बेसिक आवाज़ के साथ उतने ही समय में 3 गुना ज़्यादा इस्तेमाल कर सकते हैं।',
+          'कीमत और इस्तेमाल का समय HD आवाज़ के आधार पर है। बेसिक आवाज़ के साथ उतने ही समय में 2 गुना ज़्यादा इस्तेमाल कर सकते हैं।',
       'finalizeEdits': 'अंतिम संपादन पूरा करें',
       'finishFinalEditsFirst':
           'इस सुविधा का उपयोग करने से पहले अंतिम संपादन पूरा करें।',
@@ -1153,7 +1153,7 @@ class TalkUiCopy {
       'bestValue': 'Выгодно',
       'premium': 'Премиум',
       'storeVoiceNote':
-          'Цены и время использования указаны для HD-голоса. С базовым голосом того же времени хватает в 3 раза дольше.',
+          'Цены и время использования указаны для HD-голоса. С базовым голосом того же времени хватает в 2 раза дольше.',
       'finalizeEdits': 'Завершить правки',
       'finishFinalEditsFirst':
           'Сначала завершите окончательное редактирование.',
@@ -1195,7 +1195,7 @@ class TalkUiCopy {
       'bestValue': 'Melhor oferta',
       'premium': 'Premium',
       'storeVoiceNote':
-          'Os preços e o tempo de uso são calculados com base na voz HD. Com a voz básica, o mesmo tempo rende 3 vezes mais.',
+          'Os preços e o tempo de uso são calculados com base na voz HD. Com a voz básica, o mesmo tempo rende 2 vezes mais.',
       'finalizeEdits': 'Concluir edição final',
       'finishFinalEditsFirst':
           'Conclua primeiro a edição final antes de usar este recurso.',
@@ -1237,7 +1237,7 @@ class TalkUiCopy {
       'bestValue': 'Miglior offerta',
       'premium': 'Premium',
       'storeVoiceNote':
-          'Prezzi e tempo di utilizzo si riferiscono alla voce HD. Con la voce base, lo stesso tempo dura 3 volte di più.',
+          'Prezzi e tempo di utilizzo si riferiscono alla voce HD. Con la voce base, lo stesso tempo dura 2 volte di più.',
       'finalizeEdits': 'Completa le modifiche finali',
       'finishFinalEditsFirst':
           'Completa prima le modifiche finali per usare questa funzione.',
@@ -1279,7 +1279,7 @@ class TalkUiCopy {
       'bestValue': 'Beste waarde',
       'premium': 'Premium',
       'storeVoiceNote':
-          'Prijzen en gebruiksduur zijn gebaseerd op de HD-stem. Met de basisstem gaat dezelfde tijd 3 keer zo lang mee.',
+          'Prijzen en gebruiksduur zijn gebaseerd op de HD-stem. Met de basisstem gaat dezelfde tijd 2 keer zo lang mee.',
       'finalizeEdits': 'Laatste bewerkingen afronden',
       'finishFinalEditsFirst':
           'Rond eerst de laatste bewerkingen af voordat je deze functie gebruikt.',

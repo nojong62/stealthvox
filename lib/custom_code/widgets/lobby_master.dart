@@ -1244,7 +1244,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     var appState = FFAppState();
     // 🎙️ [VOICE-TIER] 잔액은 프리미엄 기준 초다. 기본 음성을 골랐으면 그
-    //   등급으로 쓸 수 있는 시간(3배)을 보여 준다.
+    //   등급으로 쓸 수 있는 시간(2배)을 보여 준다.
     final int _lobbyTotalSec = secondsUsableAt(
             appState.remainingTime.toInt().clamp(0, 999999), lobbyVoiceTier)
         .clamp(0, 9999999);
