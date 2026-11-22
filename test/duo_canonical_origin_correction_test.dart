@@ -184,7 +184,7 @@ void main() {
     });
 
     test('구조 판정은 교정된 글을 본다', () {
-      expect(src, contains('source: effective'));
+      expect(src, contains('source: chunkEffective'));
     });
 
     test('canonical 프롬프트의 "글자를 고치지 않는다" 계약은 그대로다', () {

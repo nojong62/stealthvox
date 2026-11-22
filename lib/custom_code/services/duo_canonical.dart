@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'chunked_write_batch.dart';
 import 'duo_origin_corrector.dart';
 import 'duo_study_state.dart';
 import 'history_finalize.dart';
@@ -275,6 +276,65 @@ String duoDominantSourceLanguage(List<DuoSourceUtterance> source) {
     }
   });
   return best;
+}
+
+/// 🧩 [CHUNK] 긴 통화를 한 번에 정돈하지 않는다.
+///
+/// 문맥 교정(출력 1200토큰)과 구조 판정(출력 10000토큰)은 통화 **전체**를 한 번에
+/// 보내므로, 통화가 길수록 40초 제한과 출력 한도에 걸려 정돈이 빠진다(실패하면
+/// 기본 병합으로 떨어진다). 그래서 말한 시각 기준 10분, 최대 80줄씩 끊어 각각
+/// 돌린다. **10분·80줄 이하인 통화는 한 덩어리라 예전과 똑같다.**
+///
+/// 말한 시각(`spokenAtMs`)은 폰 시계라 두 폰 사이에 조금 어긋날 수 있다. 여기서는
+/// GPT 호출을 나누는 데만 쓰고 줄이 어느 기록에 속하는지는 정하지 않으므로, 경계
+/// 근처의 어긋남은 결과에 영향이 없다.
+const int kDuoCanonicalChunkMs = 10 * 60 * 1000;
+const int kDuoCanonicalChunkMaxLines = 80;
+
+/// 시각순으로 정렬된 [sorted]를 덩어리로 자른다. 순서는 그대로다.
+List<List<DuoSourceUtterance>> splitDuoSourceIntoChunks(
+  List<DuoSourceUtterance> sorted, {
+  int chunkMs = kDuoCanonicalChunkMs,
+  int maxLines = kDuoCanonicalChunkMaxLines,
+}) {
+  final out = <List<DuoSourceUtterance>>[];
+  var current = <DuoSourceUtterance>[];
+  var startMs = 0;
+  for (final u in sorted) {
+    if (current.isNotEmpty &&
+        (u.spokenAtMs - startMs >= chunkMs || current.length >= maxLines)) {
+      out.add(current);
+      current = <DuoSourceUtterance>[];
+    }
+    if (current.isEmpty) startMs = u.spokenAtMs;
+    current.add(u);
+  }
+  if (current.isNotEmpty) out.add(current);
+  return out;
+}
+
+/// 덩어리별 교정 결과를 하나로 합친다. 폭주(overflow)는 **덩어리 단위로** 버려지므로
+/// 한 덩어리가 폭주해도 나머지 교정은 살아 있다.
+DuoOriginCorrectionResult mergeDuoOriginCorrectionResults(
+  List<DuoOriginCorrectionResult> parts,
+) {
+  if (parts.isEmpty) return const DuoOriginCorrectionResult.none();
+  final corrections = <String, String>{};
+  var proposed = 0;
+  var overflow = false;
+  final rejected = <String>[];
+  for (final part in parts) {
+    corrections.addAll(part.corrections);
+    proposed += part.proposed;
+    overflow = overflow || part.overflow;
+    rejected.addAll(part.rejected);
+  }
+  return DuoOriginCorrectionResult(
+    corrections: corrections,
+    proposed: proposed,
+    overflow: overflow,
+    rejected: rejected,
+  );
 }
 
 /// 채택된 교정을 원본 타임라인에 얹는다. **원본 목록은 그대로 둔다.**
@@ -718,28 +778,44 @@ Future<void> buildDuoCanonical({
     //
     //   실패는 전부 "원 전사 유지"다. 교정이 안 되는 것과 대화가 안 만들어
     //   지는 것은 전혀 다른 무게라, 이 호출이 canonical을 무너뜨리지 않는다.
-    final correction = await correctDuoOriginTexts(
-      apiKey: apiKey,
-      model: correctorModel,
-      sourceName: duoDominantSourceLanguage(source),
-      lines: duoOriginLinesOf(source),
-    ).catchError((Object e) {
-      debugPrint('[DUO-ORIGIN-CORRECT] failed=${e.runtimeType}');
-      return const DuoOriginCorrectionResult.none();
-    });
-    final effective =
-        applyDuoOriginCorrectionsToSource(source, correction.corrections);
-
-    final reconciled = await reconcileDuoConversation(
-      apiKey: apiKey,
-      model: model,
+    // 🧩 [CHUNK] 10분·80줄씩 끊어 덩어리마다 교정과 구조 판정을 따로 돌린다.
+    final chunks = splitDuoSourceIntoChunks(source);
+    final corrections = <DuoOriginCorrectionResult>[];
+    final effective = <DuoSourceUtterance>[];
+    final reconciledTurns = <DuoCanonicalTurn>[];
+    var reconciledChunks = 0;
+    for (final chunk in chunks) {
+      final correction = await correctDuoOriginTexts(
+        apiKey: apiKey,
+        model: correctorModel,
+        sourceName: duoDominantSourceLanguage(chunk),
+        lines: duoOriginLinesOf(chunk),
+      ).catchError((Object e) {
+        debugPrint('[DUO-ORIGIN-CORRECT] failed=${e.runtimeType}');
+        return const DuoOriginCorrectionResult.none();
+      });
+      corrections.add(correction);
+      final chunkEffective =
+          applyDuoOriginCorrectionsToSource(chunk, correction.corrections);
+      effective.addAll(chunkEffective);
       // 교정된 글로 구조를 본다. 되먹임·중복 판정도 같은 글 위에서 돈다.
-      source: effective,
-    );
+      final chunkReconciled = await reconcileDuoConversation(
+        apiKey: apiKey,
+        model: model,
+        source: chunkEffective,
+      );
+      if (chunkReconciled != null) reconciledChunks++;
+      reconciledTurns.addAll(chunkReconciled ?? fallbackCanonical(chunkEffective));
+    }
+    final correction = mergeDuoOriginCorrectionResults(corrections);
+    // 한 덩어리도 성공하지 못했을 때만 기본 병합으로 적는다.
+    final reconciled = reconciledChunks == 0 ? null : reconciledTurns;
+    debugPrint('[DUO-CANON] chunks=${chunks.length} '
+        'reconciledChunks=$reconciledChunks');
     // 🔤 교정 전 글자를 canonical에 함께 싣는다. 개인 방이 이 값을
     //   `original_text_raw`로 옮겨, 무엇이 어떻게 들렸는지가 남는다.
     final turns = attachDuoOriginRawTexts(
-      reconciled ?? fallbackCanonical(effective),
+      reconciledTurns,
       source,
       correction.corrections,
     );
@@ -1157,7 +1233,7 @@ Future<bool> applyDuoCanonicalToHistory({
       for (final p in plans) p.sourceId: p
     };
 
-    final batch = FirebaseFirestore.instance.batch();
+    final batch = ChunkedWriteBatch(); // 500건 한도를 넘지 않게 나눠 쓴다
     var applied = 0;
     var created = 0;
     for (final turn in turns) {
