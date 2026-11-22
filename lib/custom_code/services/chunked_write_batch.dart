@@ -42,6 +42,10 @@ class ChunkedWriteBatch {
     _ops.add((b) => b.set(ref, data, options));
   }
 
+  void delete(DocumentReference<Object?> ref) {
+    _ops.add((b) => b.delete(ref));
+  }
+
   Future<void> commit() async {
     for (var i = 0; i < _ops.length; i += maxOps) {
       final batch = _db.batch();

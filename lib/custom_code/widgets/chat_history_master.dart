@@ -67,6 +67,7 @@ import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/duo_final_transcription.dart';
 import '/custom_code/services/duo_final_transcription_runner.dart';
 import '/custom_code/services/duo_canonical.dart';
+import '/custom_code/services/duo_segment_split.dart';
 import '/custom_code/services/study_access.dart';
 import 'package:url_launcher/url_launcher.dart'; // 쇼츠 방 출처 링크
 import '/custom_code/services/pcm_audio_utils.dart'
@@ -1309,6 +1310,27 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       final refreshedFinal = await widget.historyDoc.get();
       final finalData = refreshedFinal.data();
       if (finalData is Map<String, dynamic>) _cacheRoomData(finalData);
+
+      // ✂️ [DUO-SEGMENT] 긴 통화를 10분 조각 기록으로 나눈다. 시험 빌드에서만
+      //   돈다(`DUO_SEGMENT_SPLIT`). 재전사가 시간 안에 끝난 방만 나눈다 —
+      //   진행 중이면 옮긴 줄을 되쓰려다 실패한다.
+      if (kDuoSegmentSplit &&
+          mounted &&
+          wait != DuoFinalWaitResult.timedOut) {
+        try {
+          await splitDuoHistoryIntoSegments(
+            widget.historyDoc.withConverter<Map<String, dynamic>>(
+              fromFirestore: (snap, _) => snap.data() ?? <String, dynamic>{},
+              toFirestore: (data, _) => data,
+            ),
+          );
+          final afterSplit = await widget.historyDoc.get();
+          final splitData = afterSplit.data();
+          if (splitData is Map<String, dynamic>) _cacheRoomData(splitData);
+        } catch (e) {
+          debugPrint('[DUO-SEGMENT] split_failed=${e.runtimeType}');
+        }
+      }
     }
 
     // Duo 복원은 canonical 뒤에서 시작하며, _fetchRoomData가 이 작업을 기다린다.
