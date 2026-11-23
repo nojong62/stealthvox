@@ -24,6 +24,9 @@ const {
   chirpAudioConfig,
   chirpMarkupForRequest,
   chirpInputWithCommaPauses,
+  chirpMarkupForLocale,
+  koreanNumbersToWords,
+  sinoKorean,
   realtimeClientSecret,
   voiceTierForRequest,
   wavenetVoiceForRequest,
@@ -167,12 +170,12 @@ test("Chirp voices keep Circle Talk female and Scenario Talk male in every local
   assert.equal(chirpVoiceForRequest({ voice: "shimmer" }, "ko-KR"), "ko-KR-Chirp3-HD-Achernar");
   assert.equal(chirpVoiceForRequest({ voice: "echo" }, "ko-KR"), "ko-KR-Chirp3-HD-Puck");
   assert.equal(chirpVoiceForRequest({ voice: "shimmer" }, "en-US"), "en-US-Chirp3-HD-Leda");
-  assert.equal(chirpVoiceForRequest({ voice: "echo" }, "cmn-CN"), "cmn-CN-Chirp3-HD-Charon");
+  assert.equal(chirpVoiceForRequest({ voice: "echo" }, "cmn-CN"), "cmn-CN-Chirp3-HD-Puck");
   assert.equal(chirpVoiceForRequest({ voice: "google-female" }, "ja-JP"), "ja-JP-Chirp3-HD-Leda");
-  assert.equal(chirpVoiceForRequest({ voice: "google-male" }, "fr-FR"), "fr-FR-Chirp3-HD-Charon");
+  assert.equal(chirpVoiceForRequest({ voice: "google-male" }, "fr-FR"), "fr-FR-Chirp3-HD-Puck");
   assert.equal(chirpVoiceForRequest({ voice: "google-ko-male" }, "ko-KR"), "ko-KR-Chirp3-HD-Puck");
   for (const voice of ["verse", "onyx", "ash", "cedar", "ballad", "fable"]) {
-    assert.equal(chirpVoiceForRequest({ voice }, "de-DE"), "de-DE-Chirp3-HD-Charon", voice);
+    assert.equal(chirpVoiceForRequest({ voice }, "de-DE"), "de-DE-Chirp3-HD-Puck", voice);
   }
   for (const voice of ["nova", "coral", "marin", "sage", "alloy", "unknown"]) {
     assert.equal(chirpVoiceForRequest({ voice }, "it-IT"), "it-IT-Chirp3-HD-Leda", voice);
@@ -393,11 +396,11 @@ test("Gemini pieces follow the app's pause tags", () => {
   assert.deepEqual(geminiPiecesForRequest({ input: "  " }), []);
 });
 
-test("Gemini voice keeps the Chirp voice names and prompt is capped", () => {
+test("Gemini voice: male keeps Charon, female is the brighter Zephyr; prompt is capped", () => {
   assert.deepEqual(
     geminiVoiceForRequest({ voice: "google-male" }, "en-US"),
     { languageCode: "en-US", name: "Charon", modelName: "gemini-2.5-flash-tts" });
-  assert.equal(geminiVoiceForRequest({ voice: "google-female" }, "en-US").name, "Leda");
+  assert.equal(geminiVoiceForRequest({ voice: "google-female" }, "en-US").name, "Zephyr");
   assert.equal(geminiPromptForRequest({ style_prompt: "x".repeat(2000) }).length, 800);
   assert.equal(geminiPromptForRequest({}), "");
 });
@@ -410,4 +413,43 @@ test("OpenAI fallback body drops Gemini-only fields", () => {
   assert.deepEqual(
     openAiSpeechBody({ input: "Hi", voice: "nova", engine: "gemini", style_prompt: "slow" }),
     { input: "Hi", voice: "nova" });
+});
+
+test("Korean numerals: sino-Korean amounts are written out", () => {
+  assert.equal(sinoKorean(0), "영");
+  assert.equal(sinoKorean(1500), "천오백");
+  assert.equal(sinoKorean(10000), "만");
+  assert.equal(sinoKorean(15000), "만오천");
+  assert.equal(sinoKorean(100000), "십만");
+  assert.equal(sinoKorean(123456), "십이만삼천사백오십육");
+  assert.equal(sinoKorean(100000000), "일억");
+  assert.equal(koreanNumbersToWords("1500원이에요"), "천오백 원이에요");
+  assert.equal(koreanNumbersToWords("1,500원"), "천오백 원");
+  assert.equal(koreanNumbersToWords("10,000원"), "만 원");
+  assert.equal(koreanNumbersToWords("2022년 11월 23일"), "이천이십이 년 십일 월 이십삼 일");
+  assert.equal(koreanNumbersToWords("30분 걸려요"), "삼십 분 걸려요");
+  assert.equal(koreanNumbersToWords("50%"), "오십 퍼센트");
+});
+
+test("Korean numerals: native counters, month exceptions and untouched text", () => {
+  assert.equal(koreanNumbersToWords("2시 30분"), "두 시 삼십 분");
+  assert.equal(koreanNumbersToWords("3개"), "세 개");
+  assert.equal(koreanNumbersToWords("20살"), "스무 살");
+  assert.equal(koreanNumbersToWords("21명"), "스물한 명");
+  assert.equal(koreanNumbersToWords("1시간"), "한 시간");
+  assert.equal(koreanNumbersToWords("6월 10월"), "유 월 시 월");
+  assert.equal(koreanNumbersToWords("1개월"), "1개월");
+  assert.equal(koreanNumbersToWords("3.5%"), "3.5%");
+  assert.equal(koreanNumbersToWords("402번 버스"), "402번 버스");
+  assert.equal(koreanNumbersToWords("010-1234-5678"), "010-1234-5678");
+  assert.equal(koreanNumbersToWords("안녕하세요"), "안녕하세요");
+  assert.equal(koreanNumbersToWords(""), "");
+  assert.equal(koreanNumbersToWords("100명"), "100명");
+});
+
+test("Korean numerals: only Korean markup is rewritten", () => {
+  const body = { markup: "1500원 [pause short] 3개" };
+  assert.equal(chirpMarkupForLocale(body, "ko-KR"), "천오백 원 [pause short] 세 개");
+  assert.equal(chirpMarkupForLocale(body, "en-US"), "1500원 [pause short] 3개");
+  assert.equal(chirpMarkupForLocale({}, "ko-KR"), null);
 });

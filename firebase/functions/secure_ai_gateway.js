@@ -28,7 +28,12 @@ const GOOGLE_TTS_ENDPOINT = "https://texttospeech.googleapis.com/v1/text:synthes
 // per gender (Leda / Charon): Circle Talk sends `shimmer` (female), Scenario Talk sends `echo`
 // (male), and History practice sends `google-female` / `google-male`.
 const CHIRP_FEMALE_VOICE = "Leda";
-const CHIRP_MALE_VOICE = "Charon";
+// Chirp 3 HD male is Puck in every locale (2026-11-23, same as Korean).
+const CHIRP_MALE_VOICE = "Puck";
+// Gemini TTS only (2026-11-23): a brighter, clearer female voice than Leda;
+// the male stays Charon.
+const GEMINI_FEMALE_VOICE = "Zephyr";
+const GEMINI_MALE_VOICE = "Charon";
 const KO_CHIRP_FEMALE_VOICE = "Achernar";
 const KO_CHIRP_MALE_VOICE = "Puck";
 const CHIRP_LOCALES = new Map([
@@ -297,6 +302,79 @@ function wavenetSsmlFromMarkup(markup) {
   return utf8Bytes(ssml) <= MAX_GOOGLE_TTS_INPUT_BYTES ? ssml : null;
 }
 
+// ── Korean numerals (2026-11-23) ─────────────────────────────────────────────
+// Chirp misread "1500원" as "일 오백 원". Digits followed by a unit are written
+// out as Korean words just before synthesis; the text shown in the app and kept
+// in history is untouched. Sino-Korean numerals go with 원/년/월/일/분..., native
+// numerals (1-99) with counters like 시/개/명/살. Decimals, phone numbers, dates
+// joined by "-" and units with ambiguous readings (번) are left alone.
+const SINO_DIGITS = ["", "일", "이", "삼", "사", "오", "육", "칠", "팔", "구"];
+const NATIVE_ONES = ["", "한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉"];
+const NATIVE_TENS = ["", "열", "스물", "서른", "마흔", "쉰", "예순", "일흔", "여든", "아흔"];
+
+function sinoBelow10000(n) {
+  let out = "";
+  for (const [value, name] of [[1000, "천"], [100, "백"], [10, "십"]]) {
+    const digit = Math.floor(n / value) % 10;
+    if (digit) out += (digit === 1 ? "" : SINO_DIGITS[digit]) + name;
+  }
+  return out + SINO_DIGITS[n % 10];
+}
+
+function sinoKorean(n) {
+  if (n === 0) return "영";
+  let rest = n;
+  let out = "";
+  for (const [value, name] of [[1e12, "조"], [1e8, "억"], [1e4, "만"]]) {
+    const group = Math.floor(rest / value);
+    rest %= value;
+    // 10,000 is "만", not "일만"; 억 and 조 keep the "일".
+    if (group) out += (name === "만" && group === 1 ? "" : sinoBelow10000(group)) + name;
+  }
+  return out + (rest ? sinoBelow10000(rest) : "");
+}
+
+function nativeKorean(n) {
+  if (n === 20) return "스무";
+  return NATIVE_TENS[Math.floor(n / 10)] + NATIVE_ONES[n % 10];
+}
+
+const KO_NUM_GUARD = "(?<![\\d.A-Za-z\\-/:])";
+const KO_SINO_RE = new RegExp(
+  KO_NUM_GUARD + "(\\d{1,3}(?:,\\d{3})+|\\d+)(?!\\.\\d)\\s?" +
+  "(원|달러|엔|퍼센트|%|년|월|일|분|초|층|호|킬로그램|킬로|센티미터|미터)", "gu");
+const KO_NATIVE_RE = new RegExp(
+  KO_NUM_GUARD + "(\\d{1,2})(?!\\.\\d)\\s?" +
+  "(시간|시|개(?!월)|명|살|마리|잔|병|권|대|장|곳)", "gu");
+
+function koreanNumbersToWords(text) {
+  const source = String(text || "");
+  if (!/\d/.test(source)) return source;
+  return source
+    .replace(KO_SINO_RE, (match, digits, unit) => {
+      const plain = digits.replace(/,/g, "");
+      if (plain.length > 15) return match;
+      const n = Number(plain);
+      if (unit === "월" && n === 6) return "유 월";
+      if (unit === "월" && n === 10) return "시 월";
+      return sinoKorean(n) + " " + (unit === "%" ? "퍼센트" : unit);
+    })
+    .replace(KO_NATIVE_RE, (match, digits, unit) => {
+      const n = Number(digits);
+      if (n < 1 || n > 99) return match;
+      return nativeKorean(n) + " " + unit;
+    });
+}
+
+// The markup sent to Google for [locale], or null when it no longer fits one
+// request after the numerals are written out (the caller then sends plain text).
+function chirpMarkupForLocale(body, locale) {
+  const markup = chirpMarkupForRequest(body);
+  if (!markup || locale !== "ko-KR") return markup;
+  const spoken = koreanNumbersToWords(markup);
+  return utf8Bytes(spoken) <= MAX_GOOGLE_TTS_INPUT_BYTES ? spoken : null;
+}
+
 // Chirp has no equivalent of `instructions`, so expressive requests keep the
 // OpenAI model that honors them.
 function shouldUseChirp(body) {
@@ -454,13 +532,14 @@ async function synthesizeChirp(body, locale, voiceNameOverride = null) {
   const voiceName = voiceNameOverride || chirpVoiceForRequest(body, locale);
   const audioConfig = chirpAudioConfig(body, format);
   const client = await googleAuth.getClient();
-  const markup = chirpMarkupForRequest(body);
+  const markup = chirpMarkupForLocale(body, locale);
   if (markup) {
     const audio = await synthesizeChirpPiece(
       client, { markup }, locale, voiceName, audioConfig, format);
     return { format, voiceName, audio };
   }
-  const pieces = splitForGoogleTts(input);
+  const spokenInput = locale === "ko-KR" ? koreanNumbersToWords(input) : input;
+  const pieces = splitForGoogleTts(spokenInput);
   const audio = [];
   for (let i = 0; i < pieces.length; i++) {
     const speechInput = chirpInputWithCommaPauses(pieces[i]);
@@ -484,14 +563,15 @@ async function synthesizeWavenet(body, locale, voiceName) {
   if (!format) return null;
   const audioConfig = chirpAudioConfig(body, format);
   const client = await googleAuth.getClient();
-  const ssml = wavenetSsmlFromMarkup(chirpMarkupForRequest(body));
+  const ssml = wavenetSsmlFromMarkup(chirpMarkupForLocale(body, locale));
   if (ssml) {
     const audio = await synthesizeChirpPiece(
       client, { ssml }, locale, voiceName, audioConfig, format);
     return { format, voiceName, audio };
   }
+  const spokenInput = locale === "ko-KR" ? koreanNumbersToWords(input) : input;
   const audio = [];
-  for (const piece of splitForGoogleTts(input)) {
+  for (const piece of splitForGoogleTts(spokenInput)) {
     audio.push(await synthesizeChirpPiece(
       client, { text: piece }, locale, voiceName, audioConfig, format));
   }
@@ -739,7 +819,7 @@ function silencePcm(ms) {
 function geminiVoiceForRequest(body, locale) {
   return {
     languageCode: locale,
-    name: chirpGenderForRequest(body) === "male" ? CHIRP_MALE_VOICE : CHIRP_FEMALE_VOICE,
+    name: chirpGenderForRequest(body) === "male" ? GEMINI_MALE_VOICE : GEMINI_FEMALE_VOICE,
     modelName: GEMINI_TTS_MODEL,
   };
 }
@@ -1039,6 +1119,9 @@ module.exports = {
   splitForGoogleTts,
   chirpAudioConfig,
   chirpMarkupForRequest,
+  chirpMarkupForLocale,
+  koreanNumbersToWords,
+  sinoKorean,
   chirpInputWithCommaPauses,
   voiceTierForRequest,
   wavenetVoiceForRequest,
