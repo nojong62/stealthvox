@@ -29,22 +29,56 @@ void main() {
       expect(prompt.length, lessThanOrEqualTo(800));
     });
 
-    test('Gemini prompt asks for 95% pace and stress-centered rhythm', () {
+    test('English prompt asks for 100% pace and short one-breath phrases', () {
       for (final size in SnapUnitSize.values) {
         final prompt = snapGeminiStylePrompt(size);
-        expect(prompt, contains('95 percent'));
-        expect(prompt, contains('stressed syllable'));
+        expect(prompt, contains('100 percent'));
+        expect(prompt, contains('three to six words'));
+        expect(prompt, contains('do not add or repeat'));
         expect(prompt, contains('native English speaker'));
         // Gateway cuts the prompt at 800 characters.
         expect(prompt.length, lessThanOrEqualTo(800));
       }
     });
 
-    test('quick asks for one stressed beat, full for two', () {
+    test('quick stresses one word per phrase, full stresses two', () {
       expect(snapGeminiStylePrompt(SnapUnitSize.quick),
-          contains('exactly one stressed beat'));
+          contains('exactly one important word'));
       expect(snapGeminiStylePrompt(SnapUnitSize.full),
-          contains('exactly two stressed beats'));
+          contains('exactly two important words'));
+    });
+
+    test('role-play prompt keeps normal speed and rhythm', () {
+      final prompt = rolePlayGeminiStylePrompt(languageName: 'English');
+      expect(prompt, contains('100 percent'));
+      expect(prompt, contains('rhythm'));
+      expect(prompt.length, lessThanOrEqualTo(800));
+    });
+
+    test('Snap Echoing leaves out Vietnamese only', () {
+      for (final name in <String>[
+        'Vietnamese',
+        ' vietnamese ',
+        'vi',
+        'vi-VN',
+      ]) {
+        expect(snapEchoingSupported(name), isFalse, reason: name);
+      }
+      for (final name in <String>[
+        'Indonesian',
+        'id',
+        'Bahasa Indonesia',
+        'English',
+        'Korean',
+        'Japanese',
+        'Chinese',
+        'Spanish',
+        'Hindi',
+        'Dutch',
+        '',
+      ]) {
+        expect(snapEchoingSupported(name), isTrue, reason: name);
+      }
     });
 
     test('Gemini cache tag is set', () {

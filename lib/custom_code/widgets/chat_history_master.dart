@@ -2514,7 +2514,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       return;
     }
     try {
-      Uint8List? audio = await _getOrFetchPracticeTTS(text, voice);
+      Uint8List? audio =
+          await _getOrFetchPracticeTTS(text, voice, gemini: isPracticeMode);
       if (audio == null) {
         if (_apiKey.isEmpty) {
           if (mounted && isPracticeMode) {
@@ -3217,23 +3218,42 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         voice,
       );
 
-  Future<Uint8List?> _fetchPracticeTTS(String text, String voice) =>
-      _fetchOpenAITTS(
+  Future<Uint8List?> _fetchPracticeTTS(String text, String voice,
+      {bool gemini = false}) async {
+    if (gemini) {
+      // 🎭 역할교환 대사는 Gemini 2.5로 읽는다. 실패하면 Chirp으로 한 번 더.
+      final audio = await _fetchOpenAITTSInternal(
         text,
         1.0,
         voice,
         model: _historyPracticeTtsModel,
+        engine: 'gemini',
+        stylePrompt:
+            rolePlayGeminiStylePrompt(languageName: _sessionTargetLangName()),
       );
+      if (audio != null && audio.isNotEmpty) return audio;
+    }
+    return _fetchOpenAITTS(
+      text,
+      1.0,
+      voice,
+      model: _historyPracticeTtsModel,
+    );
+  }
 
-  Future<Uint8List?> _getOrFetchPracticeTTS(String text, String voice) {
-    final cacheVoice = _practiceCacheVoice(voice);
+  Future<Uint8List?> _getOrFetchPracticeTTS(String text, String voice,
+      {bool gemini = false}) {
+    // Gemini 소리는 캐시 칸이 따로 선다 — 예전 Chirp 소리를 재생하지 않는다.
+    final cacheVoice = gemini
+        ? '${_practiceCacheVoice(voice)}_$kRolePlayGeminiCacheTag'
+        : _practiceCacheVoice(voice);
     final requestKey = '$cacheVoice|${text.trim()}';
     final existing = _openAiTtsInFlight[requestKey];
     if (existing != null) return existing;
     final future = () async {
       var audio = await TtsCache.get(text, cacheVoice);
       if (audio != null) return audio;
-      audio = await _fetchPracticeTTS(text, voice);
+      audio = await _fetchPracticeTTS(text, voice, gemini: gemini);
       if (audio != null) await TtsCache.put(text, cacheVoice, audio);
       return audio;
     }();
@@ -3327,7 +3347,11 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           // PCM은 mp3보다 응답이 커서 10초로는 모자랄 수 있다. 연습 음성(PCM)은
           // 길이가 길면 30초를 넘겼다(2026-11-09 실측) — 글을 30초 분량으로
           // 줄였지만 합성이 느린 날을 위해 60초까지 기다린다.
-          .timeout(Duration(seconds: responseFormat == 'pcm' ? 60 : 10));
+          // Gemini는 Chirp보다 느려 mp3여도 30초까지 기다린다.
+          .timeout(Duration(
+              seconds: responseFormat == 'pcm'
+                  ? 60
+                  : (engine == 'gemini' ? 30 : 10)));
       debugPrint(
           '[HISTORY-TTS] model=$model voice=$voice instruction=${instructionTag ?? 'none'} status=${response.statusCode} chars=${text.trim().length}');
       if (response.statusCode == 200) {
@@ -6544,7 +6568,8 @@ RULES — follow exactly:
 
   /// 🗣️ 목소리는 에코잉·쉐도잉이 **따로** 든다(실장님 지시, 2026-10-15).
   final Map<P3PracticeMode, String> _p3Voices = <P3PracticeMode, String>{
-    P3PracticeMode.echoing: _kBreathVoice,
+    // 에코잉은 남성 목소리가 기본이다(2026-11-23). 이미 정해 둔 대화는 그대로.
+    P3PracticeMode.echoing: _kP3MaleVoice,
     P3PracticeMode.shadowing: _kBreathVoice,
   };
 
@@ -6874,7 +6899,7 @@ RULES — follow exactly:
     //   캐시 칸도 따로 선다. 한국어는 Chirp 3 HD다.
     final String snapLang = _sessionTargetLangName();
     final bool useGemini =
-        !shadowing && kSnapGeminiTts && !snapIsKorean(snapLang);
+        !shadowing && kSnapGeminiTts && snapIsEnglish(snapLang);
     // 고른 쉼·속도·단위 길이마다 소리가 다르다 — 캐시 칸도 따로 선다.
     final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3'
         '_${pause.name}_x$speed'
@@ -6915,8 +6940,12 @@ RULES — follow exactly:
             model: _historyPracticeTtsModel,
             instructionTag: '${style.id}_p3',
             responseFormat: 'pcm',
-            markup: markup,
-            engine: useGemini ? 'gemini' : null,
+            // Gemini는 쉼 표시 없이 글 전체를 한 번에 보낸다. 표시를 보내면
+            // 서버가 조각내 따로 읽어 소리가 되풀이됐다.
+            markup: useGemini ? null : markup,
+            // 에코잉·쉐도잉은 Gemini를 쓰지 않는 한 Chirp으로 못 박는다. 비워
+            // 두면 서버 기본 경로가 속도 1.0 요청을 Gemini로 보낼 수 있다.
+            engine: useGemini ? 'gemini' : 'chirp',
             stylePrompt: useGemini
                 ? snapGeminiStylePrompt(size, languageName: snapLang)
                 : null,
@@ -7340,6 +7369,12 @@ RULES — follow exactly:
   /// 이어진다. 그때부터는 Start를 다시 누르지 않는다: 메뉴에서 모드나 문장을
   /// 고르면 아래 내용이 곧바로 그것으로 바뀌며 진행된다.
   Widget _buildP3SpeakingScreen() {
+    // 에코잉을 못 쓰는 언어(베트남어·인도네시아어)는 쉐도잉으로 연다.
+    if (!_p3EchoingAvailable && _p3PracticeMode == P3PracticeMode.echoing) {
+      _p3PracticeMode = P3PracticeMode.shadowing;
+      _coerceP3VoiceForMode();
+      _applyP3Lock();
+    }
     final text = _p3TargetSentence;
     final bool started = _p3Stage != P3Stage.idle;
     return MediaQuery.withClampedTextScaling(
@@ -7362,10 +7397,8 @@ RULES — follow exactly:
               _buildP3PracticeModePicker(),
               const SizedBox(height: 12),
               _buildP3ModeSettings(),
-              if (_p3PracticeMode == P3PracticeMode.echoing) ...[
-                const SizedBox(height: 8),
-                _buildP3SnapSizePicker(),
-              ],
+              // Quick Snap / Full Beat 선택은 없앴다(2026-11-23). 한 호흡은
+              // MY STORY 글의 한 줄이다.
 
               // 오류는 연습이 시작되지 못했을 때도 보여야 하므로 밖에 둔다.
               if (_p3Error != null) ...[
@@ -7819,18 +7852,17 @@ RULES — follow exactly:
       int sounds = 0;
       for (final step in <(P3PracticeMode, SnapUnitSize)>[
         (P3PracticeMode.echoing, SnapUnitSize.quick),
-        (P3PracticeMode.echoing, SnapUnitSize.full),
         (P3PracticeMode.shadowing, SnapUnitSize.quick),
       ]) {
         if (!mounted) return;
         _p3PracticeMode = step.$1;
         _p3SnapSize = step.$2;
-        _setTrialPrep('연습 소리 ${sounds + 1}/3');
+        _setTrialPrep('연습 소리 ${sounds + 1}/2');
         final pcm = await _getP3OriginalPcm(essay, forceTrialUpload: true);
         if (pcm != null && pcm.isNotEmpty) sounds++;
       }
       // 빠진 것 없이 다 갖춰졌을 때만 준비 완료로 적는다. 그 뒤로 🪄은 사라진다.
-      if (altMissing == 0 && sounds == 3) {
+      if (altMissing == 0 && sounds == 2) {
         await widget.historyDoc.update(<String, dynamic>{
           kStudyTrialPreparedField: FieldValue.serverTimestamp(),
         });
@@ -7839,10 +7871,10 @@ RULES — follow exactly:
           kStudyTrialPreparedField: Timestamp.now(),
         };
       }
-      _setTrialPrep('완료 · 다른 표현 $made줄 · 소리 $sounds/3');
-      _showRoomEntryToast(altMissing == 0 && sounds == 3
-          ? '체험 준비 완료 · 다른 표현 $made줄 · 소리 $sounds/3'
-          : '체험 준비 덜 됨 · 다른 표현 빠짐 $altMissing줄 · 소리 $sounds/3 — 다시 눌러 주세요');
+      _setTrialPrep('완료 · 다른 표현 $made줄 · 소리 $sounds/2');
+      _showRoomEntryToast(altMissing == 0 && sounds == 2
+          ? '체험 준비 완료 · 다른 표현 $made줄 · 소리 $sounds/2'
+          : '체험 준비 덜 됨 · 다른 표현 빠짐 $altMissing줄 · 소리 $sounds/2 — 다시 눌러 주세요');
     } catch (e) {
       _setTrialPrep('실패: $e');
       _showRoomEntryToast('체험 준비 실패: $e');
@@ -7877,7 +7909,10 @@ RULES — follow exactly:
   void _applyP3Lock() {
     final lock = _p3Locks[_p3PracticeMode];
     if (lock == null) return;
-    if (_kP3Voices.contains(lock.voice)) {
+    // 에코잉은 반복 횟수만 묶는다. 목소리(남/여)는 언제든 바꿀 수 있다
+    // (2026-11-23). 쉐도잉은 예전처럼 목소리도 묶는다.
+    if (_p3PracticeMode != P3PracticeMode.echoing &&
+        _kP3Voices.contains(lock.voice)) {
       _p3Voices[_p3PracticeMode] = lock.voice;
     }
     if (lock.repeat != null) _p3EchoRepeat = lock.repeat!;
@@ -7923,6 +7958,53 @@ RULES — follow exactly:
     final bool echoing = _p3PracticeMode == P3PracticeMode.echoing;
     final String second =
         echoing ? 'Repeat ×$_p3EchoRepeat' : '${_p3ShadowSpeed}x';
+    // 🔒 에코잉: 반복 횟수는 묶였어도 목소리는 계속 고를 수 있다.
+    if (_p3SettingsLocked && echoing) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: _p3Dropdown<String>(
+              label: _surfaceCopy['voice'],
+              value: _p3Voice,
+              items: <String, String>{
+                for (final v in _kP3Voices) v: _p3VoiceLabel(v),
+              },
+              onChanged: !_p3Busy ? (v) => unawaited(_selectP3Voice(v)) : null,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.035),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                    color: _p3ShadowingAccentColor.withValues(alpha: 0.34)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.lock_rounded,
+                      size: 14, color: Colors.white38),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      second,
+                      style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
     if (_p3SettingsLocked) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
@@ -8104,10 +8186,18 @@ RULES — follow exactly:
     await _stopP3Shadowing(resetSelection: true);
   }
 
+  /// 이 언어에서 Snap Echoing을 쓸 수 있는가. 못 쓰면 메뉴에서 빠진다.
+  bool get _p3EchoingAvailable =>
+      snapEchoingSupported(_sessionTargetLangName());
+
   Widget _buildP3PracticeModePicker() {
+    final List<P3PracticeMode> modes = <P3PracticeMode>[
+      for (final m in P3PracticeMode.values)
+        if (m != P3PracticeMode.echoing || _p3EchoingAvailable) m,
+    ];
     return Row(
       children: [
-        for (final mode in P3PracticeMode.values) ...[
+        for (final mode in modes) ...[
           Expanded(
             child: InkWell(
               onTap:
@@ -8143,7 +8233,7 @@ RULES — follow exactly:
               ),
             ),
           ),
-          if (mode != P3PracticeMode.values.last) const SizedBox(width: 8),
+          if (mode != modes.last) const SizedBox(width: 8),
         ],
       ],
     );
@@ -8196,26 +8286,6 @@ RULES — follow exactly:
         _p3FullPcm = null;
         _p3Segments = const <BreathSegment>[];
       });
-
-  /// ⚡ [SNAP-ECHO] 한 호흡 단위 길이 고르기 — Quick Snap / Full Beat.
-  Widget _buildP3SnapSizePicker() {
-    return Row(
-      children: [
-        for (final size in SnapUnitSize.values) ...[
-          Expanded(
-            child: _p3OptionChip(
-              label: size.label,
-              selected: _p3SnapSize == size,
-              onTap: _p3Busy || _p3SnapSize == size
-                  ? null
-                  : () => _resetP3Audio(() => _p3SnapSize = size),
-            ),
-          ),
-          if (size != SnapUnitSize.values.last) const SizedBox(width: 6),
-        ],
-      ],
-    );
-  }
 
   /// AI / ECHO / SHADOW 각각 독립 재생. 자동 연속 재생은 하지 않는다.
   Widget _buildP3CompareRow() {
@@ -8499,7 +8569,10 @@ RULES — follow exactly:
   /// 요약체였다(2026-11-09). 끝맺음·대화체 규칙을 넣어 다시 만든다.
   /// `my_story_v4`: v3도 "At the end, …" 같은 보고서 말투가 남아, 그런 글은 한
   /// 번 다시 쓰게 했다(2026-11-09).
-  static const String _kSpeechSchemaVersion = 'my_story_v4';
+  /// `my_story_v5`: 줄 하나가 3~7단어의 작은 문장이고 연결사로 이어 말한다
+  /// (2026-11-23). 한 줄이 곧 Snap Echoing 한 호흡이다. 옛 글은 방을 열 때
+  /// 새로 만든다.
+  static const String _kSpeechSchemaVersion = 'my_story_v5';
   static const String _kNativeEnglishSchemaVersion = 'natural_sharp_trevor_v1';
 
   /// 저장된 MY ENGLISH를 그대로 써도 되는가.
