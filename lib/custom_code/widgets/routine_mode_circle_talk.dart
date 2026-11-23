@@ -5995,7 +5995,7 @@ $userFixPolicy$finalLanguageRule''';
   // ... (_buildTopBar, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
   Widget _buildTopBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
         children: [
           IconButton(
@@ -6006,7 +6006,7 @@ $userFixPolicy$finalLanguageRule''';
             tooltip: _uiCopy['back'],
             padding: EdgeInsets.zero,
             alignment: Alignment.centerLeft,
-            constraints: const BoxConstraints(minWidth: 72, minHeight: 56),
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 56),
             onPressed: _handleAutoSaveAndExit,
           ),
           Expanded(
@@ -6071,7 +6071,10 @@ $userFixPolicy$finalLanguageRule''';
                 ),
                 const SizedBox(width: 4),
                 // [v3.6] 좁은 화면/큰 글꼴에서도 상단 Row가 넘치지 않도록 축소 허용
+                // 잔여 시간이 가장 중요하다. 남는 자리를 3:1로 알약에 더 준다
+                // (320dp·글꼴 1.5에서 반씩 나누면 알약이 34dp로 줄어 숫자가 깨졌다).
                 Flexible(
+                  flex: 3,
                   child: GestureDetector(
                     child: Container(
                       padding: const EdgeInsets.symmetric(
