@@ -175,7 +175,12 @@ class MySpeechLength {
     required this.hardLimit,
     required this.byChars,
     required this.lines,
+    required this.lineMax,
   });
+
+  /// 한 줄(한 호흡)의 상한. 띄어쓰기 없는 언어는 공백을 뺀 글자 수, 나머지는
+  /// 단어 수. 이보다 긴 줄이 여럿이면 다시 쓰게 한다.
+  final int lineMax;
 
   /// 프롬프트에 적는 목표 분량.
   final int target;
@@ -193,21 +198,60 @@ class MySpeechLength {
 /// (150단어)다. 목표는 그 80%인 120단어로 잡는다.
 MySpeechLength mySpeechLengthFor(String language) {
   final lower = language.trim().toLowerCase();
+  // 2026-11-23: 한 줄 = 작은 문장 하나(한 호흡)라 줄 수가 늘었다. 영어는 약
+  // 100단어를 18~22줄로 쓴다.
   if (lower.startsWith('korean')) {
     return const MySpeechLength(
-        target: 180, hardLimit: 260, byChars: true, lines: '9 to 12');
+        target: 180,
+        hardLimit: 260,
+        byChars: true,
+        lines: '18 to 22',
+        lineMax: 18);
   }
   if (lower.startsWith('japanese')) {
     return const MySpeechLength(
-        target: 200, hardLimit: 290, byChars: true, lines: '9 to 12');
+        target: 200,
+        hardLimit: 290,
+        byChars: true,
+        lines: '18 to 22',
+        lineMax: 20);
   }
   if (lower.startsWith('chinese')) {
     return const MySpeechLength(
-        target: 155, hardLimit: 220, byChars: true, lines: '9 to 12');
+        target: 155,
+        hardLimit: 220,
+        byChars: true,
+        lines: '18 to 22',
+        lineMax: 14);
   }
   return const MySpeechLength(
-      target: 120, hardLimit: 150, byChars: false, lines: '9 to 12');
+      target: 100,
+      hardLimit: 130,
+      byChars: false,
+      lines: '18 to 22',
+      lineMax: 9);
 }
+
+/// 한 호흡으로 말하기엔 긴 줄이 몇 개인가. 길이는 [MySpeechLength.lineMax]로 잰다.
+int mySpeechLongLineCount(String text, String language) {
+  final len = mySpeechLengthFor(language);
+  int count = 0;
+  for (final raw in text.split('\n')) {
+    final line = raw.trim();
+    if (line.isEmpty) continue;
+    final int size = len.byChars
+        ? line.replaceAll(RegExp(r'\s+'), '').length
+        : line.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+    if (size > len.lineMax) count++;
+  }
+  return count;
+}
+
+/// 긴 줄이 이만큼보다 많으면 한 번 다시 쓰게 한다. 두어 줄은 봐 준다.
+const int kMySpeechLongLineTolerance = 2;
+
+bool mySpeechHasLongLines(String text, String language) =>
+    mySpeechLongLineCount(text, language) > kMySpeechLongLineTolerance;
 
 /// 영어 글이 **보고서 말투**인가("We talked about…", "At the end,…").
 ///
@@ -352,7 +396,9 @@ Never stop in the middle of a sentence, and never leave the last line unfinished
 Being short does not mean writing a report. Do not list topics with report phrases such as "We talked about…", "Then we discussed…", "At the end, I asked…", "In the end…", "First… Next… Finally…".
 Tell it like a friend over coffee: say what happened, what you said or asked, and how it felt, with contractions and small natural reactions — but only reactions the conversation supports.
 BAD (report): "Then we talked about the weather and whether it would rain."
-GOOD (spoken): "So I asked if it was going to rain, and honestly, she had no idea either."
+GOOD (spoken, small sentences linked):
+So I asked if it would rain.
+And honestly, she had no idea.
 Every line should sound like something a person would really say out loud, not something written down.
 
 [HARD LIMITS]
@@ -369,10 +415,19 @@ Short, natural spoken sentences. Do not force it into one grammatical sentence, 
 Keep it something the user could genuinely say again in their own life.
 No literary phrasing, no heavy idioms, no showy vocabulary. No fillers such as "um" or "uh".
 
-[ONE LINE = ONE BREATH]
-Put a line break after every breath: each line is one short piece a learner can hear, then say back in a single breath.
-Break where a native speaker would naturally pause. Usually about 4 to 10 words per line (in languages written without spaces, about 6 to 20 characters).
-A long sentence runs over several lines; a short sentence can be one line.
+[ONE LINE = ONE BREATH — SMALL SENTENCES, LINKED]
+Tell the story as a chain of small spoken sentences, one per line, the way a native speaker keeps talking: a small sentence, a connector, the next small sentence.
+Each line is ONE small sentence a learner can hear and say back in a single breath: about 3 to 7 words (in languages written without spaces, about 6 to 14 characters).
+Link the lines with natural connectors ("and", "so", "but", "then", "because", "anyway", or the natural equivalent in $language). Put the connector at the START of the next line. Never leave a connector alone on its own line.
+If a thought is long, split it into two or three small sentences joined by connectors. Never run a sentence over several lines.
+Keep the rhythm even: no line under 3 words, no line over 7 words.
+Shape of the story (write yours about this conversation, in $language):
+I went to the market today.
+And it was so crowded.
+So I just grabbed some apples.
+But then I got lost.
+Anyway, a nice lady helped me.
+And she walked me back.
 No blank lines, no numbering, no bullets, no indentation.
 
 [OUTPUT]
@@ -453,26 +508,31 @@ class MySpeechBuilder {
       bool needsFix(String t) =>
           mySpeechIsTooLong(t, targetLang) ||
           !mySpeechEndsCleanly(t) ||
-          mySpeechSoundsLikeReport(t, targetLang);
+          mySpeechSoundsLikeReport(t, targetLang) ||
+          mySpeechHasLongLines(t, targetLang);
       if (needsFix(text)) {
         final len = mySpeechLengthFor(targetLang);
         final bool unfinished = !mySpeechEndsCleanly(text);
         final bool report = mySpeechSoundsLikeReport(text, targetLang);
-        onLog?.call('🗣️ [MY-ENGLISH]',
-            'rewrite len=${text.length} unfinished=$unfinished report=$report');
+        final bool longLines = mySpeechHasLongLines(text, targetLang);
+        onLog?.call(
+            '🗣️ [MY-ENGLISH]',
+            'rewrite len=${text.length} unfinished=$unfinished report=$report '
+                'longLines=${mySpeechLongLineCount(text, targetLang)}');
         try {
           final retry = await post(<Map<String, String>>[
             ...messages,
             <String, String>{'role': 'assistant', 'content': text},
             <String, String>{
               'role': 'user',
-              'content': '${unfinished ? 'That stopped in the middle of a sentence. ' : report ? 'That sounds like a written report, not someone talking. Do not use "We talked about", "At the end", "In the end", "First/Finally". ' : 'That is too long. '}'
+              'content': '${unfinished ? 'That stopped in the middle of a sentence. ' : report ? 'That sounds like a written report, not someone talking. Do not use "We talked about", "At the end", "In the end", "First/Finally". ' : longLines ? 'Some lines are too long to say in one breath. Make every line ONE small sentence of about 3 to 7 words, and link the lines with connectors at the start of the next line. ' : 'That is too long. '}'
                   'Rewrite the WHOLE story so it is complete and ends with a '
                   'finished closing sentence, in about ${len.target} '
                   '${len.byChars ? 'characters' : 'words'} '
                   '(never over ${len.hardLimit}), ${len.lines} lines. '
                   'Keep the 3 or 4 moments that mattered most, drop minor topics, '
-                  'and keep it spoken like a friend talking, one line per breath. '
+                  'and keep it spoken like a friend talking: one small sentence per line, '
+                  'one breath per line, linked by connectors. '
                   'Output only My Story.',
             },
           ]);

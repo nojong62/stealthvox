@@ -43,8 +43,8 @@ void main() {
 
     test('길이는 약 30초 분량으로 줄인다 — 대화가 길어도 짧다', () {
       expect(prompt, contains('[LENGTH — ABOUT 30 SECONDS OF SPEECH]'));
-      expect(prompt, contains('Write about 120 words in total'));
-      expect(prompt, contains('Never go over 150 words'));
+      expect(prompt, contains('Write about 100 words in total'));
+      expect(prompt, contains('Never go over 130 words'));
       expect(prompt, contains('Never pad it.'));
     });
 
@@ -63,9 +63,33 @@ void main() {
     });
 
     test('한도를 넘은 영어 글은 길다고 본다', () {
-      final long = List.filled(151, 'word').join(' ');
+      final long = List.filled(131, 'word').join(' ');
       expect(mySpeechIsTooLong(long, 'English'), isTrue);
       expect(mySpeechIsTooLong('I quit my job today.', 'English'), isFalse);
+    });
+
+    test('한 줄은 한 호흡의 작은 문장이고 연결사로 이어진다', () {
+      expect(prompt, contains('SMALL SENTENCES, LINKED'));
+      expect(prompt, contains('about 3 to 7 words'));
+      expect(prompt, contains('Put the connector at the START of the next line'));
+      expect(prompt, contains('18 to 22 lines'));
+    });
+
+    test('한 호흡보다 긴 줄을 센다', () {
+      const short = 'I went to the market.\nAnd it was crowded.\nSo I left.';
+      expect(mySpeechLongLineCount(short, 'English'), 0);
+      expect(mySpeechHasLongLines(short, 'English'), isFalse);
+      const longLine = 'I went to the market and bought a lot of apples today';
+      final text = List.filled(3, longLine).join('\n');
+      expect(mySpeechLongLineCount(text, 'English'), 3);
+      // 두어 줄은 봐 준다.
+      expect(mySpeechHasLongLines(text, 'English'), isTrue);
+      expect(mySpeechHasLongLines(List.filled(2, longLine).join('\n'), 'English'),
+          isFalse);
+    });
+
+    test('한국어 줄은 글자 수로 잰다', () {
+      expect(mySpeechLongLineCount('가나다라마바사\n${'가' * 19}', 'Korean'), 1);
     });
 
     test('영어 보고서 말투를 가려낸다', () {
@@ -146,8 +170,8 @@ void main() {
     });
 
     test('한 줄 = 한 호흡으로 줄을 바꾼다', () {
-      expect(prompt, contains('[ONE LINE = ONE BREATH]'));
-      expect(prompt, contains('Put a line break after every breath'));
+      expect(prompt, contains('[ONE LINE = ONE BREATH'));
+      expect(prompt, contains('one per line'));
       expect(prompt, contains('No blank lines, no numbering, no bullets'));
     });
 
