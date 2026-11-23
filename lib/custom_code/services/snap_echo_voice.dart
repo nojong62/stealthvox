@@ -3,10 +3,10 @@
 //   예전에는 글자를 먼저 LLM으로 "의미 단위"로 쪼개고, 그 단위마다 TTS를 따로
 //   불러 무음을 끼워 붙였다. 효과가 없어서 **전부 걷어냈다**(2026-11-22).
 //   지금은 글자를 그대로 TTS에 한 번 보낸다.
-//     · 한국어 — 항상 Chirp 3 HD. 쉼은 문장부호·줄 끝 기준([chirpPauseMarkup]).
-//     · 그 밖의 모든 언어 — Gemini 2.5 Flash TTS. 낭독 지시(프롬프트)로 원어민처럼
-//       자연스럽게 읽게 한다(영어는 강세를 박자 삼는다). Gemini에 그 언어가 없거나
-//       실패하면 Gateway가 Chirp 3 HD로 읽는다.
+//     · 현재(2026-11-23)는 모든 언어가 Chirp 3 HD. 쉼은 문장부호·줄 끝 기준
+//       ([chirpPauseMarkup]).
+//     · Gemini 2.5 Flash TTS는 빌드 옵션으로만 켠다([kSnapGeminiTts]). 낭독 지시
+//       (프롬프트)로 원어민처럼 읽게 하는 방식이었으나 실기기에서 반복·지연이 났다.
 //   속도는 95%다. Gemini는 숫자 속도 칸이 없어 프롬프트에 말로 적는다.
 //   Chirp으로 읽을 때는 앱이 보내는 숫자 속도 0.95가 그대로 적용된다.
 //
@@ -41,11 +41,11 @@ bool snapIsKorean(String languageName) {
       languageName.contains('한국');
 }
 
-/// ✨ 한국어를 뺀 모든 언어의 Snap Echoing 소리를 Gemini TTS로 만든다. Gateway가
-/// 실패하거나 꺼져 있거나 그 언어가 없으면 Chirp 3 HD가 대신 읽는다. 끄려면
-/// 빌드에 `--dart-define=SNAP_GEMINI_TTS=false`.
+/// ✨ Snap Echoing 소리를 Gemini TTS로 만들지 여부. 기본은 꺼짐(2026-11-23).
+/// 실기기에서 Gemini가 첫 문장을 되풀이해 336자가 188.7초, 544자가 251.9초로
+/// 나왔다(정상 20~40초). 켜려면 빌드에 `--dart-define=SNAP_GEMINI_TTS=true`.
 const bool kSnapGeminiTts =
-    bool.fromEnvironment('SNAP_GEMINI_TTS', defaultValue: true);
+    bool.fromEnvironment('SNAP_GEMINI_TTS', defaultValue: false);
 
 /// Gemini로 만든 소리의 캐시 판 꼬리표. 지시문을 바꾸면 올린다.
 const String kSnapGeminiCacheTag = 'gem5';
