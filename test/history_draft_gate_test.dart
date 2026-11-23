@@ -175,7 +175,7 @@ void main() {
     });
 
     test('그 자리에 수정 아이콘이 들어갔다', () {
-      expect(master, contains('_buildEditBtn(docs[index], rawOriginal),'));
+      expect(master, contains('_buildEditBtn(docs[index], rawOriginal,'));
       expect(master, contains('Icons.edit_outlined'));
     });
 
@@ -185,11 +185,13 @@ void main() {
       expect(master, contains('Icons.school_rounded'));
     });
 
-    test('확정된 방에서는 수정만 잠긴다', () {
+    test('확정된 방에서는 연필 자리에 현지인 표현이 온다', () {
       final int at = master.indexOf('Widget _buildEditBtn(');
       expect(at, greaterThan(0));
-      final String body = master.substring(at, at + 900);
+      final String body = master.substring(at, at + 1600);
       expect(body, contains('final bool editable = _historyIsDraft;'));
+      expect(body, contains('buildNativeExpressionButton('));
+      expect(body, contains('_showNativeExpression(doc, translated, original)'));
       expect(body, contains("_surfaceCopy['finalizedConversation']"));
     });
   });

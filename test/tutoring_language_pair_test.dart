@@ -115,9 +115,9 @@ void main() {
     });
 
     test('피드백은 원문 언어로 쓰게 한다 — 못 알아들으면 교정이 아니다', () {
-      expect(judge, contains(r'praise line written in $promptLang'));
-      expect(judge, contains(r'constructive feedback written in $promptLang'));
-      expect(judge, contains(r'Write the notes in $promptLang'));
+      expect(judge, contains(r'praise line written in $explainLang'));
+      expect(judge, contains(r'constructive feedback written in $explainLang'));
+      expect(judge, contains(r'Write the notes in $explainLang'));
     });
 
     test('화면 문구도 배울 언어를 따라간다', () {

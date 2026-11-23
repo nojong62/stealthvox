@@ -2567,6 +2567,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     // 🎓 [TUTORING-LANG] STEP 0에서 정해진 짝. 피드백은 원문 언어로 쓴다 —
     //   못 알아들으면 교정이 아니다.
     final String promptLang = _keeperTutoringNative;
+    // 설명(칭찬·교정·쓰임 메모)은 대화 언어가 아니라 폰 시스템 언어다.
+    final String explainLang = systemUiLanguageName();
     final String targetLang = _keeperTutoringTarget;
     try {
       final response = await http.post(
@@ -2596,9 +2598,9 @@ RULES — follow exactly:
    - Different wording, synonyms, or a different valid structure are FINE as long as the meaning matches [PROMPT]. Do not mark a real paraphrase wrong.
    - BUT if a content word changes the intended meaning (e.g. said "order" when the prompt means "arrive", wrong verb/noun, or a tense that changes the intent), it is WRONG. Do NOT praise it.
    - Ignore minor STT noise (punctuation, capitalization).
-2. If the meaning matches AND grammar is correct: set "corrected" to the user's own sentence cleaned of STT noise only, and "explanation" to one short praise line written in $promptLang (you may append the [EXAMPLE] as an alternative phrasing).
-3. If there is a real error: set "corrected" to a $targetLang sentence that is BOTH grammatical AND matches [PROMPT]'s meaning, and "explanation" to ENCOURAGING, constructive feedback written in $promptLang, 2-3 sentences. Do NOT merely say it is wrong: FIRST say what the user's sentence actually means as it stands, THEN show the specific small fix and the meaning it unlocks. Be warm and positive; never scold.
-4. "usage_tip": Suggest 1-2 MORE NATURAL, more native-like or idiomatic ways to say the SAME meaning as "corrected" (a native-speaker upgrade). For each, put the $targetLang expression first, then a short note in $promptLang on the nuance or feel it adds and why a native might prefer it. Aim at real spoken naturalness — idioms, natural phrasings, or common conversational add-ons — NOT a plain synonym swap and NOT just making the sentence longer. Write the notes in $promptLang. If "corrected" is already the most natural way and there is genuinely nothing valuable to add, use "".
+2. If the meaning matches AND grammar is correct: set "corrected" to the user's own sentence cleaned of STT noise only, and "explanation" to one short praise line written in $explainLang (you may append the [EXAMPLE] as an alternative phrasing).
+3. If there is a real error: set "corrected" to a $targetLang sentence that is BOTH grammatical AND matches [PROMPT]'s meaning, and "explanation" to ENCOURAGING, constructive feedback written in $explainLang, 2-3 sentences. Do NOT merely say it is wrong: FIRST say what the user's sentence actually means as it stands, THEN show the specific small fix and the meaning it unlocks. Be warm and positive; never scold.
+4. "usage_tip": Suggest 1-2 MORE NATURAL, more native-like or idiomatic ways to say the SAME meaning as "corrected" (a native-speaker upgrade). For each, put the $targetLang expression first, then a short note in $explainLang on the nuance or feel it adds and why a native might prefer it. Aim at real spoken naturalness — idioms, natural phrasings, or common conversational add-ons — NOT a plain synonym swap and NOT just making the sentence longer. Write the notes in $explainLang. If "corrected" is already the most natural way and there is genuinely nothing valuable to add, use "".
 5. Output ONLY JSON with exactly these keys: {"corrected": "...", "explanation": "...", "usage_tip": "..."}''',
             },
           ],

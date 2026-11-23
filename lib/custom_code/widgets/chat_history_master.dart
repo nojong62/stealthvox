@@ -48,6 +48,9 @@ import '/custom_code/services/deepgram_prewarm_session.dart'
     show deepgramLanguageCode;
 import '/custom_code/services/transcript_repair_guard.dart';
 import 'alt_style_popup.dart';
+import 'native_expression_popup.dart';
+import '/custom_code/services/system_ui_language.dart';
+import '/custom_code/services/native_expression.dart';
 import '/custom_code/services/alt_style.dart';
 import '/custom_code/services/study_trial.dart';
 import '/custom_code/services/study_trial_audio.dart';
@@ -3947,6 +3950,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     // 🎓 [TUTORING] 문제는 원문 언어, 말하는 것은 배울 언어, 피드백은 다시
     //   원문 언어(= 이 사람이 편한 말)다. 셋 다 방 문서에서 온다.
     final String promptLang = _sessionNativeLangName();
+    // 설명(칭찬·교정·쓰임 메모)은 대화 언어가 아니라 폰 시스템 언어다.
+    final String explainLang = systemUiLanguageName();
     final String targetLang = _sessionTargetLangName();
 
     try {
@@ -3988,11 +3993,11 @@ RULES — follow exactly:
    - Ignore minor STT noise (punctuation, capitalization).
 2. If the meaning matches [PROMPT] AND the grammar is correct:
    - "corrected" = the user's OWN sentence, cleaned of STT noise only. Do NOT replace it with [EXAMPLE].
-   - "reason" = one short praise line written in $promptLang. You MAY append the [EXAMPLE] as an alternative phrasing.
+   - "reason" = one short praise line written in $explainLang. You MAY append the [EXAMPLE] as an alternative phrasing.
 3. If there is a real error (meaning mismatch vs [PROMPT], grammar, tense, word order, word choice, or a real pronunciation/spelling error):
    - "corrected" = a corrected $targetLang sentence that is BOTH grammatical AND matches [PROMPT]'s meaning. Fix the actual error; keep the parts that are already correct.
-   - "reason" = ENCOURAGING, constructive feedback written in $promptLang, 2-3 sentences. Do NOT merely say it is wrong. FIRST acknowledge what [USER_SPEECH] actually means as it stands, so the learner sees their attempt made sense. THEN point to the specific small fix and the meaning it unlocks. Be specific, warm, and positive; never scold. Never invent an error that is not present.
-4. "usage_tip": Suggest 1-2 MORE NATURAL, more native-like or idiomatic ways to say the SAME meaning as "corrected" (a native-speaker upgrade). For each, put the $targetLang expression first, then a short note in $promptLang on the nuance or feel it adds and why a native might prefer it. Aim at real spoken naturalness — idioms, natural phrasings, or common conversational add-ons — NOT a plain synonym swap and NOT just making the sentence longer. Write the notes in $promptLang. If "corrected" is already the most natural way and there is genuinely nothing valuable to add, use "".
+   - "reason" = ENCOURAGING, constructive feedback written in $explainLang, 2-3 sentences. Do NOT merely say it is wrong. FIRST acknowledge what [USER_SPEECH] actually means as it stands, so the learner sees their attempt made sense. THEN point to the specific small fix and the meaning it unlocks. Be specific, warm, and positive; never scold. Never invent an error that is not present.
+4. "usage_tip": Suggest 1-2 MORE NATURAL, more native-like or idiomatic ways to say the SAME meaning as "corrected" (a native-speaker upgrade). For each, put the $targetLang expression first, then a short note in $explainLang on the nuance or feel it adds and why a native might prefer it. Aim at real spoken naturalness — idioms, natural phrasings, or common conversational add-ons — NOT a plain synonym swap and NOT just making the sentence longer. Write the notes in $explainLang. If "corrected" is already the most natural way and there is genuinely nothing valuable to add, use "".
 5. Output ONLY valid JSON with exactly these three keys: {"corrected": "...", "reason": "...", "usage_tip": "..."}''';
 
       final resp = await http.post(
@@ -4736,7 +4741,8 @@ RULES — follow exactly:
         Widget controlButtons = Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _buildEditBtn(docs[index], rawOriginal),
+            _buildEditBtn(docs[index], rawOriginal,
+                translated: translated, original: original),
             const SizedBox(height: 4),
             Opacity(
               opacity: _paidStudyAllowed ? 1.0 : 0.4,
@@ -5086,8 +5092,28 @@ RULES — follow exactly:
     }
   }
 
-  Widget _buildEditBtn(DocumentSnapshot doc, String rawOriginal) {
+  Widget _buildEditBtn(
+    DocumentSnapshot doc,
+    String rawOriginal, {
+    required String translated,
+    required String original,
+  }) {
     final bool editable = _historyIsDraft;
+    // 💡 [NATIVE-EXPR] 확정된 방에서는 흐린 연필 대신 현지인 표현이 이 자리에
+    //   온다. 아이콘 수는 그대로 셋이다. 비용이 드는 동작이라 잠기면 흐려진다.
+    //   배울글이 아직 없는 줄은 재료가 없어 흐리게만 둔다 — 연필은 다시
+    //   나오지 않는다.
+    if (!editable) {
+      final bool ready = translated.trim().isNotEmpty;
+      return Opacity(
+        opacity: (_paidStudyAllowed && ready) ? 1.0 : 0.4,
+        child: buildNativeExpressionButton(
+          onPressed: ready
+              ? () => _showNativeExpression(doc, translated, original)
+              : () {},
+        ),
+      );
+    }
     return IconButton(
       padding: const EdgeInsets.all(8),
       constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
@@ -5420,6 +5446,90 @@ RULES — follow exactly:
       _showRoomEntryToast(_uiCopy['finalizeFailed']);
     } finally {
       if (mounted) setState(() => _isFinalizing = false);
+    }
+  }
+
+  /// 💡 [NATIVE-EXPR] 줄마다 이번에 보여 준 표현. 누를 때마다 다른 것이
+  ///   나오도록 다음 요청에 "이건 빼라"로 실어 보낸다. 화면을 나가면 잊는다.
+  final Map<String, List<String>> _nativeExprShown = <String, List<String>>{};
+
+  void _showNativeExpression(
+      DocumentSnapshot doc, String translated, String original) {
+    if (!_guardFinalizedStudyFeature()) return;
+    if (!_guardPaidStudy()) return;
+    _resumeHistoryFromUserAction();
+    final shown = _nativeExprShown.putIfAbsent(doc.id, () => <String>[]);
+    final future = fetchNativeExpression(
+      apiKey: _apiKey,
+      line: translated,
+      originalLine: original,
+      targetLang: _sessionTargetLangName(),
+      nativeLang: _sessionNativeLangName(),
+      // 설명(뜻·쓰임)은 대화 언어가 아니라 폰 시스템 언어로 쓴다.
+      explainLang: systemUiLanguageName(),
+      avoid: List<String>.of(shown),
+    ).then((expr) {
+      if (expr != null) shown.add(expr.expression);
+      return expr;
+    });
+    showNativeExpressionPopup(
+      context: context,
+      future: future,
+      onKeep: (expr) => _saveExpressionToKeepers(doc.id, expr),
+    );
+  }
+
+  /// 표현 → Keepers. 배울 언어(표현) 밑에 대화 언어(뜻)가 오도록 기존
+  /// 대사 저장과 같은 칸에 넣는다. 중복은 표현 글자로 본다 — 같은 줄에서
+  /// 나온 다른 표현은 따로 쌓여야 하기 때문이다.
+  Future<void> _saveExpressionToKeepers(
+      String messageDocId, NativeExpression expr) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final keepersRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('keepers');
+    void toast(String key, Color color) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(_surfaceCopy[key],
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: color,
+        duration: const Duration(seconds: 1),
+      ));
+    }
+
+    try {
+      final existing = await keepersRef
+          .where('translated_text', isEqualTo: expr.expression)
+          .limit(1)
+          .get();
+      if (existing.docs.isNotEmpty) {
+        toast('keeperExists', const Color(0xFF6B7280));
+        return;
+      }
+      await keepersRef.add({
+        'translated_text': expr.expression,
+        'original_text': expr.meaning,
+        'usage_note': expr.usage,
+        'kind': 'native_expression',
+        'speaker_role': 'EXPRESSION',
+        // 대사 저장의 중복 판정(source_message_id == 줄 id)에 걸리지 않게
+        // 꼬리를 붙인다. 이 표현을 저장해도 그 대사는 따로 저장할 수 있다.
+        'source_message_id': '$messageDocId#expr',
+        'source_room_id': widget.historyDoc.id,
+        'source_room_name': roomName,
+        'native_lang': _sessionNativeLangName(),
+        'target_lang': _sessionTargetLangName(),
+        'created_at': FieldValue.serverTimestamp(),
+        'pinned_at': null,
+        'is_deleted': false,
+      });
+      toast('keeperSaved', const Color(0xFFD97706));
+    } catch (e) {
+      debugPrint('[NATIVE-EXPR] keep failed: $e');
+      toast('saveFailed', Colors.redAccent);
     }
   }
 
