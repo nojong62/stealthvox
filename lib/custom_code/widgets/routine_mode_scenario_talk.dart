@@ -89,6 +89,7 @@ import '/custom_code/services/tts_adapter.dart';
 import '/custom_code/services/tts_model_policy.dart';
 import '/custom_code/services/voice_ids.dart';
 import '/custom_code/services/user_line_fix.dart';
+import '/custom_code/services/free_talk_meaning_check.dart';
 import '/custom_code/services/transcript_text_clean.dart';
 import '/custom_code/services/short_reply_gate.dart';
 import 'first_utterance_context_judge.dart'; // 3모드 공통 응답 길이 규칙
@@ -169,6 +170,14 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   //   확인해 주면 그대로 재개하고, 아니면 버린다. 잘못 들은 문장이
   //   화면에 남아 유저가 컴플레인할 일을 없애는 것이 목적이다.
   String? _pendingHeardConfirmation;
+  // 🧭 [MEANING-CHECK] Free Talk에서 뜻을 되물은 뒤 유저의 대답을 기다리는
+  //   동안만 채워진다(`free_talk_meaning_check.dart`). 처음 한 말, 확인 단계에서
+  //   "이 말이에요?"로 물은 문장(되묻기 단계에서는 null), 되물은 횟수.
+  String? _pendingMeaningAttempt;
+  String? _pendingMeaningSentence;
+  int _meaningRounds = 0;
+  // 기다리는 동안 받아쓰기를 자동 감지로 돌려 두었는가.
+  bool _meaningSttAuto = false;
   // 직전 턴에서 [USER_FIX]가 확정됐으면 다음 Dialog Brain 호출 한 번만
   // 교정된 문맥을 더 주의 깊게 읽는다. 호출 직전에 소비되므로 지속 상태가 아니다.
   bool _previousTurnHadUserFix = false;
@@ -492,6 +501,25 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   /// 👂 [ASK-BACK] 못 알아들은 말풍선에 붙는 안내. 유저의 ORIGIN으로 적는다.
   String _unheardBubbleHint() => unheardBubbleHintLine(_nativeLangName());
 
+  /// 🧭 [MEANING-CHECK] 뜻 확인 대기 상태를 비우고 받아쓰기 언어를 되돌린다.
+  void _clearPendingMeaningCheck() {
+    _pendingMeaningAttempt = null;
+    _pendingMeaningSentence = null;
+    _meaningRounds = 0;
+    _setMeaningSttAuto(false);
+  }
+
+  /// 🧭 [MEANING-CHECK] 뜻 확인을 기다리는 동안 받아쓰기를 자동 감지로 둔다.
+  /// 유저는 배울 언어로도, 대화언어로도 대답할 수 있다. 끝나면 언어를 다시 박는다.
+  void _setMeaningSttAuto(bool on) {
+    if (_meaningSttAuto == on) return;
+    _meaningSttAuto = on;
+    unawaited(_streamingStt?.switchLanguage(on ? '' : _sttLangCode(),
+            allowAuto: true) ??
+        Future<bool>.value(false));
+    _log('🧭 [MEANING-CHECK]', 'stt_auto=$on');
+  }
+
   /// 👂 [HEARD-CONFIRM] 확인이 끝났으니 되묻기 흔적을 걷어낸다.
   ///
   /// **`setState` 안에서 부른다.** 흐린 유저 말풍선과 되묻는 말풍선은 한 쌍이라
@@ -646,6 +674,9 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   String _buildScenarioMemberInstructions({
     ListeningStep step = ListeningStep.step1,
     bool disableContextualCorrection = false,
+    bool allowMeaningCheck = false,
+    String? meaningClarifyAttempt,
+    String? meaningResolvedSentence,
   }) {
     final nativeLang = _nativeLangName();
     final bool step2 = step == ListeningStep.step2;
@@ -661,7 +692,20 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
         : buildNativeOutputLanguagePolicy(_nativeLangName());
     final String replyLang = step2 ? targetLang : nativeLang;
     // 🩹 유저 줄은 Step과 무관하게 언제나 대화 언어다.
-    final String userFixPolicy = buildUserFixPolicy(nativeLang: nativeLang);
+    // 🧭 [MEANING-CHECK] Free Talk은 서클톡과 같은 교정 규칙을 붙인다.
+    final String userFixPolicy = <String>[
+      buildUserFixPolicy(nativeLang: nativeLang),
+      if (_freeTalk) buildFreeTalkLearnerFixPolicy(spokenLang: nativeLang),
+      if (allowMeaningCheck) buildMeaningCheckPolicy(spokenLang: nativeLang),
+      if (meaningClarifyAttempt != null)
+        buildMeaningClarifyNote(
+            spokenLang: nativeLang,
+            chatLang: targetLang,
+            attempt: meaningClarifyAttempt),
+      if (meaningResolvedSentence != null)
+        buildMeaningResolvedNote(
+            spokenLang: nativeLang, sentence: meaningResolvedSentence),
+    ].join('\n\n');
     // Step 2에서만 붙는 마지막 언어 규칙. Step 1은 빈 문자열이다.
     final String finalLanguageRule = step2
         ? '\n${buildTargetLanguageFinalRule(nativeLang: nativeLang, targetLang: targetLang)}\n'
@@ -803,6 +847,8 @@ $finalLanguageRule''';
     final signals = _kContextualCorrectionEnabled && allowContextualCorrection
         ? <String>['[RETRY]', '[HEARD_CONFIRM]', '[CORRECTION]', kUserFixTag]
         : <String>['[RETRY]', '[HEARD_CONFIRM]', kUserFixTag];
+    // 🧭 [MEANING-CHECK] 되묻기·확인 태그도 확정 전에는 소리 내지 않는다.
+    if (_freeTalk) signals.addAll(<String>[kMeaningCheckTag, kMeaningConfirmTag]);
     return signals.any(
         (signal) => signal.startsWith(leading) || leading.startsWith(signal));
   }
@@ -1307,6 +1353,7 @@ $finalLanguageRule''';
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
     _pendingHeardConfirmation = null; // 보류된 확인 대기 발화도 버림
+    _clearPendingMeaningCheck();
     _pendingTranscript = ''; // 대기 중 발화도 버림
     _resetTurnPcmBuffer();
     _voiceManager?.dispose();
@@ -1564,6 +1611,7 @@ $finalLanguageRule''';
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
     _pendingHeardConfirmation = null;
+    _clearPendingMeaningCheck();
     var removedUserTurn = false;
     if (mounted) {
       setState(() {
@@ -2752,6 +2800,8 @@ $finalLanguageRule''';
     bool understandingConfirmed = false,
     bool isCorrectionRetry = false,
     bool skipContextualCorrection = false,
+    // 🧭 [MEANING-CHECK] 뜻 확인에서 문장이 확인돼 다시 들어온 턴이면 처음 한 말.
+    String? meaningAttempt,
   }) async {
     if (!mounted ||
         !_isConversationActive ||
@@ -2772,6 +2822,70 @@ $finalLanguageRule''';
       _log('[UNCLEAR-TRANSCRIPT]', 'replacement_received → 새 발화 판정');
       setState(_clearHeardConfirmBubbles);
     }
+    // 🧭 [MEANING-CHECK] 뜻을 되물은 뒤 들어온 대답(서클톡과 같은 흐름).
+    //   확인 단계에서 "네"면 처음 유저 줄을 확인된 문장으로 고쳐 잇는다.
+    //   "아니요"면 다시 말해 달라고 한다. 그 밖의 말은 뜻 설명이라 이 턴에서
+    //   뜻을 잡아 한 번 더 묻는다(배울 언어·대화언어 어느 쪽이든).
+    String? meaningClarifyAttempt;
+    final pendingAttempt = _pendingMeaningAttempt;
+    if (pendingAttempt != null && meaningAttempt == null) {
+      final pendingSentence = _pendingMeaningSentence;
+      if (mounted) setState(_clearHeardConfirmBubbles);
+      _activeHostBubbleId = '';
+      final reply = pendingSentence == null
+          ? MeaningConfirmReply.other
+          : classifyMeaningConfirmReply(userKorean);
+      if (reply == MeaningConfirmReply.yes && pendingSentence != null) {
+        _clearPendingMeaningCheck();
+        _log('🧭 [MEANING-CHECK]',
+            'confirmed "$pendingAttempt" → "$pendingSentence"');
+        return _processScenarioTalkTurn(
+          pendingSentence,
+          generation: generation,
+          understandingConfirmed: true,
+          isCorrectionRetry: true,
+          meaningAttempt: pendingAttempt,
+        );
+      }
+      if (_meaningRounds >= kMeaningCheckMaxRounds) {
+        _clearPendingMeaningCheck();
+        _log('🧭 [MEANING-CHECK]', 'gave_up reply=${reply.name}');
+        if (reply == MeaningConfirmReply.no) {
+          return _processScenarioTalkTurn(
+            pendingAttempt,
+            generation: generation,
+            understandingConfirmed: true,
+            isCorrectionRetry: true,
+          );
+        }
+      } else if (reply == MeaningConfirmReply.no) {
+        _pendingMeaningSentence = null;
+        _meaningRounds++;
+        final line = _scenarioSpokenPhrase('retry', _nativeLangName());
+        _log('🧭 [MEANING-CHECK]', 'denied → 다시 말해 달라고 함');
+        if (mounted) {
+          setState(() {
+            _localMessages.add(<String, dynamic>{
+              'role': 'SYSTEM_ASKBACK',
+              'target': line,
+              'original': '',
+            });
+          });
+          _scrollToBottom();
+        }
+        await _speakKoreanLine(line, step: ListeningStep.step1);
+        if (mounted &&
+            _isConversationActive &&
+            generation == _pipelineGeneration) {
+          _startConfiguredListening();
+        }
+        return;
+      } else {
+        _meaningRounds++;
+        meaningClarifyAttempt = pendingAttempt;
+        _log('🧭 [MEANING-CHECK]', 'clarify round=$_meaningRounds');
+      }
+    }
     // 🔄 Circle Talk과 같은 공용 판정기로, 답변을 만들기 전에 직전 교환을
     // 확실히 되돌린다. 정정 내용이 있으면 그 내용만 한 번 다시 처리하고,
     // 불만만 있으면 이전 교환을 지운 뒤 재청취한다.
@@ -2779,7 +2893,8 @@ $finalLanguageRule''';
     final hasPreviousExchange =
         currentRoomMessages.any((message) => message['role'] == 'HOST') &&
             currentRoomMessages.any((message) => message['role'] == 'SYSTEM');
-    final correctionDecision = !isCorrectionRetry
+    final correctionDecision = !isCorrectionRetry &&
+            meaningClarifyAttempt == null
         ? correction_intent.detectCircleCorrectionIntent(
             userKorean,
             hasPreviousExchange: hasPreviousExchange,
@@ -2887,9 +3002,21 @@ $finalLanguageRule''';
       final aiGenSw = Stopwatch()..start();
       int? firstTokenMs;
       String? aiFinishReason;
+      // 🧭 [MEANING-CHECK] Free Talk은 매 턴 뜻이 안 통하면 묻는다. 확인 중이거나
+      //   확인된 문장을 처리하는 턴, 정정 재처리 턴에서는 다시 묻지 않는다.
+      final bool allowMeaningCheck = meaningCheckAllowed(
+        freeTalk: _freeTalk,
+        alreadyConfirmed: understandingConfirmed ||
+            isCorrectionRetry ||
+            meaningAttempt != null ||
+            meaningClarifyAttempt != null,
+      );
       final scenarioInstructions = _buildScenarioMemberInstructions(
         step: step,
         disableContextualCorrection: skipContextualCorrection,
+        allowMeaningCheck: allowMeaningCheck,
+        meaningClarifyAttempt: meaningClarifyAttempt,
+        meaningResolvedSentence: meaningAttempt != null ? userKorean : null,
       );
 
       await for (final chunk in ScenarioBrain.streamKoreanTurn(
@@ -3035,6 +3162,55 @@ $finalLanguageRule''';
         throw StateError('Scenario Talk response did not complete.');
       }
       aiResponseReady = true;
+      // 🧭 [MEANING-CHECK] 답 대신 되묻기(①)나 확인(②)이 왔으면 내용에 답하지
+      //   않는다. 유저 말풍선은 흐리게 남기고, 배울 언어로 말과 글자를 같이
+      //   낸다. 질문 말풍선은 다음 대답이 들어오면 증발한다.
+      final meaningConfirm = meaningClarifyAttempt != null
+          ? parseMeaningConfirm(aiKorean)
+          : null;
+      final meaningCheck = meaningConfirm == null &&
+              (allowMeaningCheck || meaningClarifyAttempt != null)
+          ? parseMeaningCheck(aiKorean)
+          : null;
+      if (meaningConfirm != null || meaningCheck != null) {
+        earlyUtterance?.cancel();
+        final question = meaningConfirm?.question ?? meaningCheck!.question;
+        _pendingMeaningAttempt = meaningClarifyAttempt ?? userKorean.trim();
+        _pendingMeaningSentence = meaningConfirm?.sentence;
+        if (meaningClarifyAttempt == null) _meaningRounds = 0;
+        _setMeaningSttAuto(true);
+        askedBack = true;
+        _turnCounter--;
+        setState(() {
+          hostBubble['role'] = 'HOST_UNHEARD';
+          if (aiIndex >= 0 && aiIndex < _localMessages.length) {
+            _localMessages.removeAt(aiIndex);
+            aiIndex = -1;
+          }
+          _localMessages.add(<String, dynamic>{
+            'role': 'SYSTEM_ASKBACK',
+            'target': question,
+            'original': '',
+          });
+        });
+        _scrollToBottom();
+        _activeHostBubbleId = '';
+        _activeAiBubbleId = '';
+        _log(
+          '🧭 [MEANING-CHECK]',
+          'turn=$turnNumber stage=${meaningConfirm != null ? 'confirm' : 'ask'} '
+              'round=$_meaningRounds attempt="$_pendingMeaningAttempt" '
+              'sentence="${_pendingMeaningSentence ?? ''}"',
+        );
+        responseCompleted = true;
+        // 질문은 배울 언어다. Free Talk에서는 Step 1이 배울 언어 음성이다.
+        await _speakKoreanLine(question, step: ListeningStep.step1);
+        return;
+      }
+      if (meaningClarifyAttempt != null) _clearPendingMeaningCheck();
+      if (looksLikeMeaningControl(aiKorean)) {
+        throw StateError('Meaning check output was not usable.');
+      }
       // 🩹 [USER-FIX] 답변 앞에 되살린 유저 줄이 붙어 왔으면 직전 유저 말풍선을
       //   그 문장으로 바꾸고(문맥은 말풍선에서 읽으므로 같이 바뀐다), 답변은
       //   [REPLY] 뒤만 쓴다. 원 전사는 stt_text로 남긴다.
@@ -3280,7 +3456,14 @@ $finalLanguageRule''';
         'original_text': userKorean,
         ...listeningStepFields(step,
             isAi: false, targetLang: _targetLangName()),
-        if (sttText != null) ...userLineFixFields(sttText: sttText),
+        // 🧭 [MEANING-CHECK] Free Talk에서 고친 줄은 처음 한 말을 남기고 소리는
+        //   묶지 않는다. stt_text로 두면 원문 복원기가 처음 한 말로 되돌린다.
+        if (meaningAttempt != null)
+          ...meaningCheckFields(attempt: meaningAttempt)
+        else if (sttText != null && _freeTalk)
+          ...meaningCheckFields(attempt: sttText)
+        else if (sttText != null)
+          ...userLineFixFields(sttText: sttText),
       };
       final systemLine = <String, dynamic>{
         'role': 'SYSTEM',
@@ -4363,6 +4546,12 @@ $finalLanguageRule''';
   /// 찾으러 간다.
   int? _stashTurnPcm(Map<String, dynamic> line) {
     if (line['role'] != 'HOST') return null;
+    // 🧭 [MEANING-CHECK] 고친 문장은 유저가 소리 낸 문장이 아니다. 소리를
+    //   묶으면 원문 복원기가 처음 시도한 말로 되돌려 버린다.
+    if (line[kFreeTalkAttemptField] != null) {
+      _lastTurnPcm = null;
+      return null;
+    }
     final pcm = _lastTurnPcm;
     if (pcm == null || pcm.isEmpty) return null;
     final roomId = _myHistoryRef?.id ?? '';
@@ -4406,6 +4595,9 @@ $finalLanguageRule''';
           // 🩹 [USER-FIX] 원 전사. 원문 복원기의 근거이고 화면엔 안 나온다.
           if (line['stt_text'] != null) 'stt_text': line['stt_text'],
           if (line['user_fix'] != null) 'user_fix': line['user_fix'],
+          // 🧭 [MEANING-CHECK] 뜻 확인·교정 전에 처음 한 말. 공부방 복습 자료다.
+          if (line[kFreeTalkAttemptField] != null)
+            kFreeTalkAttemptField: line[kFreeTalkAttemptField],
           'created_at': FieldValue.serverTimestamp(),
         });
         savedIds.add(addedRef.id);
