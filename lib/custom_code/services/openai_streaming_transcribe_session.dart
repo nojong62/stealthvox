@@ -519,8 +519,13 @@ class OpenAiStreamingTranscribeSession {
   ///
   /// 첫 발화를 자동 감지로 받아 실제 언어를 알아낸 직후에 부른다. 두 번째
   /// 턴부터는 언어가 박혀 있어야 짧은 발화의 전사 정확도가 돌아온다.
-  Future<bool> switchLanguage(String code) async {
-    if (_disposed || code.isEmpty || code == _languageCode) return false;
+  ///
+  /// [allowAuto]가 true면 빈 코드로 **자동 감지**로 되돌린다. Free Talk 뜻
+  /// 확인을 기다리는 동안 유저가 대화언어로 대답할 수 있어서다. 끝나면 다시
+  /// 언어를 박는다.
+  Future<bool> switchLanguage(String code, {bool allowAuto = false}) async {
+    if (_disposed || code == _languageCode) return false;
+    if (code.isEmpty && !allowAuto) return false;
     if (!isConnected) {
       // 소켓이 없으면 값만 바꿔 둔다. 다음 connect()가 이 값으로 연다.
       _languageCode = code;

@@ -80,6 +80,7 @@ import '/custom_code/services/listening_practice.dart';
 import '/custom_code/services/conversation_cancel_command.dart';
 import '/custom_code/services/circle_correction_intent.dart'
     as correction_intent;
+import '/custom_code/services/free_talk_meaning_check.dart';
 import 'deepgram_confidence_probe.dart';
 import 'first_utterance_context_judge.dart';
 import 'origin_language_recheck_dialog.dart';
@@ -520,6 +521,14 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
       FirstUtteranceContextJudgeSession();
   String? _pendingHeardConfirmation;
   int _heardConfirmationAttempts = 0;
+  // 🧭 [MEANING-CHECK] Free Talk에서 뜻을 되물은 뒤 유저의 대답을 기다리는
+  //   동안만 채워진다(`free_talk_meaning_check.dart`). 처음 한 말, 확인 단계에서
+  //   "이 말이에요?"로 물은 문장(되묻기 단계에서는 null), 되물은 횟수.
+  String? _pendingMeaningAttempt;
+  String? _pendingMeaningSentence;
+  int _meaningRounds = 0;
+  // 기다리는 동안 받아쓰기를 자동 감지로 돌려 두었는가.
+  bool _meaningSttAuto = false;
   // 직전 턴에서 [USER_FIX]가 확정됐으면 다음 Dialog Brain 호출 한 번만
   // 교정된 문맥을 더 주의 깊게 읽는다. 호출 직전에 소비되므로 지속 상태가 아니다.
   bool _previousTurnHadUserFix = false;
@@ -1635,11 +1644,39 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     }
   }
 
+  /// 되묻기·재요청 문구를 읽을 Step. 문구는 언제나 이 방에서 **말하는** 언어
+  /// (`_nativeLangName()`)로 쓴다. 평소 방은 Step 2 가드를 피해 그대로 읽고,
+  /// Free Talk은 Step 2가 대화언어 음성이라 Step 1로 배울 언어 음성에 맞춘다.
+  ListeningStep get _askBackStep =>
+      _freeTalk ? ListeningStep.step1 : ListeningStep.step2;
+
+  /// 🧭 [MEANING-CHECK] 뜻 확인 대기 상태를 비우고 받아쓰기 언어를 되돌린다.
+  void _clearPendingMeaningCheck() {
+    _pendingMeaningAttempt = null;
+    _pendingMeaningSentence = null;
+    _meaningRounds = 0;
+    _setMeaningSttAuto(false);
+  }
+
+  /// 🧭 [MEANING-CHECK] 뜻 확인을 기다리는 동안 받아쓰기를 자동 감지로 둔다.
+  /// 유저는 배울 언어로도, 대화언어로도 대답할 수 있다. 끝나면 언어를 다시 박는다.
+  void _setMeaningSttAuto(bool on) {
+    if (_meaningSttAuto == on) return;
+    _meaningSttAuto = on;
+    unawaited(_streamingStt?.switchLanguage(on ? '' : _sttLangCode(),
+            allowAuto: true) ??
+        Future<bool>.value(false));
+    _log('🧭 [MEANING-CHECK]', 'stt_auto=$on');
+  }
+
   /// [step]이 Step 2면 출력 언어·말투 두 블록만 배울 언어 버전으로 바뀌고
   /// 청취 연습 규칙이 그 뒤에 붙는다. Step 1은 전과 한 글자도 다르지 않다.
   String _buildCircleMemberInstructions({
     ListeningStep step = ListeningStep.step1,
     bool disableHeardConfirmation = false,
+    bool allowMeaningCheck = false,
+    String? meaningClarifyAttempt,
+    String? meaningResolvedSentence,
   }) {
     final circle = widget.circleDescription
         .replaceAll('<', '（')
@@ -1658,8 +1695,25 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
             '${buildListeningPracticePolicy(nativeLang: _nativeLangName(), targetLang: targetLang)}'
         : buildNativeOutputLanguagePolicy(_nativeLangName());
     // 🩹 유저 줄은 Step과 무관하게 언제나 대화 언어다.
-    final String userFixPolicy =
-        buildUserFixPolicy(nativeLang: _nativeLangName());
+    // 🧭 [MEANING-CHECK] Free Talk은 매 턴 작은 실수를 고쳐 잇는 규칙을,
+    //   묻기가 허용된 턴에만 되묻기 규칙을, 유저가 대답한 턴에는 뜻을 잡아
+    //   한 번 더 확인하라는 메모를, 확인된 직후 턴에는 문장 전체를 이어
+    //   받으라는 메모를 붙인다. 두 지시문(멤버·리스너)이 모두 이
+    //   블록을 받으므로 여기서 잇는다.
+    final String userFixPolicy = <String>[
+      buildUserFixPolicy(nativeLang: _nativeLangName()),
+      if (_freeTalk) buildFreeTalkLearnerFixPolicy(spokenLang: _nativeLangName()),
+      if (allowMeaningCheck)
+        buildMeaningCheckPolicy(spokenLang: _nativeLangName()),
+      if (meaningClarifyAttempt != null)
+        buildMeaningClarifyNote(
+            spokenLang: _nativeLangName(),
+            chatLang: _targetLangName(),
+            attempt: meaningClarifyAttempt),
+      if (meaningResolvedSentence != null)
+        buildMeaningResolvedNote(
+            spokenLang: _nativeLangName(), sentence: meaningResolvedSentence),
+    ].join('\n\n');
     final String hearingGuard = disableHeardConfirmation
         ? '''[HEARING CONFIRMED]
 The user explicitly confirmed that the pending transcript was heard correctly.
@@ -2164,6 +2218,7 @@ $userFixPolicy$finalLanguageRule''';
     _firstUtteranceJudge.cancel();
     _pendingHeardConfirmation = null;
     _heardConfirmationAttempts = 0;
+    _clearPendingMeaningCheck();
     _pendingTranscript = ''; // 대기 중 발화도 버림
     _lastPendingFinalAt = null;
     _handledFinalTranscriptIds.clear();
@@ -2234,6 +2289,7 @@ $userFixPolicy$finalLanguageRule''';
     _ttsAdapter.stopAll(reason: 'voice_cancel_command');
     _pendingHeardConfirmation = null;
     _heardConfirmationAttempts = 0;
+    _clearPendingMeaningCheck();
     _pendingUserTranscript = '';
     _characterShortTermMemory = '';
     var removedUserTurn = false;
@@ -3797,6 +3853,9 @@ $userFixPolicy$finalLanguageRule''';
     required int expectedPipelineGeneration,
     bool isCorrectionRetry = false,
     bool understandingConfirmed = false,
+    // 🧭 [MEANING-CHECK] 뜻 확인에서 문장이 확인돼 다시 들어온 턴이면
+    //   처음 한 말. 이 턴의 유저 줄과 함께 저장된다.
+    String? meaningAttempt,
   }) async {
     if (!isActivePipelineGeneration(
       expected: expectedPipelineGeneration,
@@ -3843,7 +3902,84 @@ $userFixPolicy$finalLanguageRule''';
           break;
       }
     }
-    if (!isCorrectionRetry) {
+    // 🧭 [MEANING-CHECK] 뜻을 되물은 뒤 들어온 대답.
+    //   확인 단계에서 "네"면 처음 유저 줄을 확인된 문장으로 고쳐 잇는다.
+    //   "아니요"면 다시 말해 달라고 한다. 그 밖의 말은 뜻 설명이라 이 턴에서
+    //   뜻을 잡아 한 번 더 묻는다(배울 언어·대화언어 어느 쪽이든).
+    String? meaningClarifyAttempt;
+    final pendingAttempt = _pendingMeaningAttempt;
+    if (pendingAttempt != null && meaningAttempt == null) {
+      final pendingSentence = _pendingMeaningSentence;
+      if (mounted) {
+        setState(() {
+          _localMessages.removeWhere((message) =>
+              message['role'] == 'HOST_TEMP' ||
+              message['role'] == 'HOST_UNHEARD' ||
+              message['role'] == 'SYSTEM_ASKBACK');
+        });
+      }
+      _activeHostBubbleId = '';
+      final reply = pendingSentence == null
+          ? MeaningConfirmReply.other
+          : classifyMeaningConfirmReply(userOriginal);
+      if (reply == MeaningConfirmReply.yes && pendingSentence != null) {
+        _clearPendingMeaningCheck();
+        _log('🧭 [MEANING-CHECK]',
+            'confirmed "$pendingAttempt" → "$pendingSentence"');
+        return _processCircleTalkTurn(
+          pendingSentence,
+          expectedPipelineGeneration: expectedPipelineGeneration,
+          understandingConfirmed: true,
+          meaningAttempt: pendingAttempt,
+        );
+      }
+      if (_meaningRounds >= kMeaningCheckMaxRounds) {
+        // 더 묻지 않는다. "아니요"였으면 처음 한 말로, 아니면 지금 말로 잇는다.
+        _clearPendingMeaningCheck();
+        _log('🧭 [MEANING-CHECK]', 'gave_up reply=${reply.name}');
+        if (reply == MeaningConfirmReply.no) {
+          return _processCircleTalkTurn(
+            pendingAttempt,
+            expectedPipelineGeneration: expectedPipelineGeneration,
+            understandingConfirmed: true,
+          );
+        }
+      } else if (reply == MeaningConfirmReply.no) {
+        _pendingMeaningSentence = null;
+        _meaningRounds++;
+        final line = originRetryLine(_nativeLangName());
+        _log('🧭 [MEANING-CHECK]', 'denied → 다시 말해 달라고 함');
+        if (mounted) {
+          setState(() {
+            _localMessages.add(<String, dynamic>{
+              'role': 'SYSTEM_ASKBACK',
+              'target': line,
+              'original': '',
+            });
+          });
+          _scrollToBottom();
+        }
+        _turnInFlight = false;
+        _closeContinuationWindow(reason: 'meaning_denied');
+        _resetContinuationState();
+        await _speakSystemLine(
+          line,
+          expectedPipelineGeneration: expectedPipelineGeneration,
+          step: _askBackStep,
+        );
+        if (mounted && _isConversationActive) {
+          _restartConfiguredListening(
+              expectedPipelineGeneration: expectedPipelineGeneration);
+        }
+        return;
+      } else {
+        _meaningRounds++;
+        meaningClarifyAttempt = pendingAttempt;
+        _log('🧭 [MEANING-CHECK]', 'clarify round=$_meaningRounds');
+      }
+    }
+    // 뜻 설명 중인 대답은 "아니, 내 말은…"이어도 직전 교환을 지우는 정정이 아니다.
+    if (!isCorrectionRetry && meaningClarifyAttempt == null) {
       final hasPreviousExchange =
           _localMessages.any((m) => m['role'] == 'HOST') &&
               _localMessages.any((m) => m['role'] == 'SYSTEM');
@@ -3952,9 +4088,21 @@ $userFixPolicy$finalLanguageRule''';
       // 🎧 [LISTENING] 이 턴의 Step은 여기서 한 번만 읽는다. 생성 도중 스위치를
       //   눌러도 이 턴은 끝까지 같은 언어로 가고, 다음 턴부터 바뀐다.
       final ListeningStep step = _listeningStep;
+      // 🧭 [MEANING-CHECK] Free Talk은 매 턴 뜻이 안 통하면 묻는다. 확인 중이거나
+      //   확인된 문장을 처리하는 턴, 정정 재처리 턴에서는 다시 묻지 않는다.
+      final bool allowMeaningCheck = meaningCheckAllowed(
+        freeTalk: _freeTalk,
+        alreadyConfirmed: understandingConfirmed ||
+            isCorrectionRetry ||
+            meaningAttempt != null ||
+            meaningClarifyAttempt != null,
+      );
       final systemPrompt = _buildCircleMemberInstructions(
         step: step,
         disableHeardConfirmation: understandingConfirmed,
+        allowMeaningCheck: allowMeaningCheck,
+        meaningClarifyAttempt: meaningClarifyAttempt,
+        meaningResolvedSentence: meaningAttempt != null ? userOriginal : null,
       );
       final previousAssistantText = _recentHistory.reversed
           .where((turn) => turn['role'] == 'assistant')
@@ -4073,6 +4221,60 @@ $userFixPolicy$finalLanguageRule''';
         throw StateError('Circle Talk response did not complete.');
       }
       aiResponseReady = true;
+      // 🧭 [MEANING-CHECK] 답 대신 되묻기(①)나 확인(②)이 왔으면 내용에 답하지
+      //   않는다. 유저 말풍선은 남겨 두고, 배울 언어로 말과 글자를 같이 낸다.
+      //   질문 말풍선은 다음 대답이 들어오면 증발한다.
+      final meaningConfirm = meaningClarifyAttempt != null
+          ? parseMeaningConfirm(aiOriginal)
+          : null;
+      final meaningCheck = meaningConfirm == null &&
+              (allowMeaningCheck || meaningClarifyAttempt != null)
+          ? parseMeaningCheck(aiOriginal)
+          : null;
+      if (meaningConfirm != null || meaningCheck != null) {
+        final question = meaningConfirm?.question ?? meaningCheck!.question;
+        _pendingMeaningAttempt = meaningClarifyAttempt ?? userOriginal.trim();
+        _pendingMeaningSentence = meaningConfirm?.sentence;
+        if (meaningClarifyAttempt == null) _meaningRounds = 0;
+        _setMeaningSttAuto(true);
+        if (mounted) {
+          setState(() {
+            final hostIndex = _bubbleIndexById(hostBubbleId);
+            if (hostIndex >= 0) {
+              _localMessages[hostIndex]['role'] = 'HOST_UNHEARD';
+            }
+            _localMessages.add(<String, dynamic>{
+              'role': 'SYSTEM_ASKBACK',
+              'target': question,
+              'original': '',
+            });
+          });
+          _scrollToBottom();
+        }
+        _activeHostBubbleId = '';
+        _log(
+          '🧭 [MEANING-CHECK]',
+          'turn=$currentTurnId stage=${meaningConfirm != null ? 'confirm' : 'ask'} '
+              'round=$_meaningRounds attempt="$_pendingMeaningAttempt" '
+              'sentence="${_pendingMeaningSentence ?? ''}"',
+        );
+        await _speakSystemLine(
+          question,
+          expectedPipelineGeneration: expectedPipelineGeneration,
+          // 질문은 배울 언어다. Free Talk에서는 Step 1이 배울 언어 음성이다.
+          step: ListeningStep.step1,
+        );
+        return;
+      }
+      if (meaningClarifyAttempt != null) {
+        // 확인 없이 평소 답이 왔다. 기다림을 풀고 그대로 잇는다.
+        _clearPendingMeaningCheck();
+      }
+      if (looksLikeMeaningControl(aiOriginal)) {
+        // 허용되지 않은 턴에 태그가 왔거나 형식이 깨졌다. 태그를 읽어 줄 수는
+        // 없으므로 응답 생성 실패로 처리한다.
+        throw StateError('Meaning check output was not usable.');
+      }
       if (hasHeardConfirmSignal(aiOriginal) && !understandingConfirmed) {
         final spokenQuestion = stripHeardConfirmSignal(aiOriginal)
             .replaceAll(RegExp(r'[\r\n]+'), ' ')
@@ -4112,7 +4314,7 @@ $userFixPolicy$finalLanguageRule''';
           prompt,
           expectedPipelineGeneration: expectedPipelineGeneration,
           // 확인 질문은 항상 대화 언어다. Step 2의 목표 언어 가드를 타지 않는다.
-          step: ListeningStep.step2,
+          step: _askBackStep,
         );
         return;
       }
@@ -4213,7 +4415,14 @@ $userFixPolicy$finalLanguageRule''';
         'original_text': userOriginal,
         ...listeningStepFields(step,
             isAi: false, targetLang: _targetLangName()),
-        if (sttText != null) ...userLineFixFields(sttText: sttText),
+        // 🧭 [MEANING-CHECK] Free Talk에서 고친 줄은 처음 한 말을 남기고 소리는
+        //   묶지 않는다. stt_text로 두면 원문 복원기가 처음 한 말로 되돌린다.
+        if (meaningAttempt != null)
+          ...meaningCheckFields(attempt: meaningAttempt)
+        else if (sttText != null && _freeTalk)
+          ...meaningCheckFields(attempt: sttText)
+        else if (sttText != null)
+          ...userLineFixFields(sttText: sttText),
       };
       final systemLine = <String, dynamic>{
         'role': 'SYSTEM',
@@ -4263,7 +4472,7 @@ $userFixPolicy$finalLanguageRule''';
           await _speakSystemLine(
             retryLine,
             expectedPipelineGeneration: expectedPipelineGeneration,
-            step: ListeningStep.step2,
+            step: _askBackStep,
           );
         } catch (speakError) {
           _log(
@@ -5672,7 +5881,9 @@ $userFixPolicy$finalLanguageRule''';
   /// 찾으러 간다.
   int? _stashTurnPcm(Map<String, dynamic> line) {
     if (line['role'] != 'HOST') return null;
-    if (_typedTurn) {
+    // 🧭 [MEANING-CHECK] 확인된 문장은 유저가 소리 낸 문장이 아니다. 소리를
+    //   묶으면 원문 복원기가 처음 시도한 말로 되돌려 버린다.
+    if (_typedTurn || line[kFreeTalkAttemptField] != null) {
       _lastTurnPcm = null;
       return null;
     }
@@ -5726,6 +5937,9 @@ $userFixPolicy$finalLanguageRule''';
           // 🩹 [USER-FIX] 원 전사. 원문 복원기의 근거이고 화면엔 안 나온다.
           if (line['stt_text'] != null) 'stt_text': line['stt_text'],
           if (line['user_fix'] != null) 'user_fix': line['user_fix'],
+          // 🧭 [MEANING-CHECK] 뜻 확인 전에 처음 한 말. 공부방 복습 자료다.
+          if (line[kFreeTalkAttemptField] != null)
+            kFreeTalkAttemptField: line[kFreeTalkAttemptField],
           'created_at': FieldValue.serverTimestamp(),
         });
       }
