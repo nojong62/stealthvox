@@ -78,6 +78,7 @@ import '/custom_code/services/openai_streaming_transcribe_session.dart';
 // 상대 발화 재생은 Circle Talk과 **같은 재생기 한 벌**을 쓴다. tts-1 PCM을
 // 받는 대로 트는 구조라, mp3를 다 받고 재생하던 예전 경로보다 첫 소리가 빠르다.
 import '/custom_code/services/tts_adapter.dart';
+import '/custom_code/services/voice_ids.dart';
 import 'duo_stage.dart';
 // 마이크 캡처는 Circle Talk과 **같은 구현 한 벌**을 쓴다. 복제하면 sample rate ·
 // 권한 · 종료 처리가 두 군데로 갈라진다.
@@ -722,7 +723,8 @@ Map<String, String> modePickerTextFor(String originLang) =>
 Map<String, String> modePickerTextForSystemUi() =>
     modePickerTextFor(systemUiLanguageName());
 
-const String kInterpreterPartnerTtsVoice = 'alloy';
+// 'alloy'는 Gateway가 여자로 읽는다. 같은 소리를 중립 ID로 적었다(2026-11-25).
+const String kInterpreterPartnerTtsVoice = kVoiceFemale;
 
 /// 재생이 끝난 뒤 이만큼 안에 들어온 전사문만 에코로 의심한다.
 /// 스피커 소리가 마이크로 돌아오는 데 걸리는 시간은 길어야 한두 순간이다.
