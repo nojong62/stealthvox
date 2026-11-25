@@ -70,6 +70,7 @@ import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/study_trial.dart';
 import '/custom_code/services/study_trial_author_relay.dart';
 import '/custom_code/services/tts_adapter.dart';
+import '/custom_code/services/voice_ids.dart';
 import '/custom_code/services/user_line_fix.dart';
 import '/custom_code/services/transcript_text_clean.dart';
 import '/custom_code/services/short_reply_gate.dart';
@@ -510,7 +511,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
       targetLang: FFAppState().targetLang);
 
   /// Circle Talk AI 음성은 로비 설정과 무관하게 tts-1 + shimmer로 고정한다.
-  static const String _aiVoice = 'shimmer';
+  static const String _aiVoice = kVoiceFemale;
   String _characterShortTermMemory = '';
   int _turnCounter = 0;
   // 🧭 [FIRST-CONTEXT] 첫 정상 발화 판정. Anyone은 GPT-4.1 문맥 판정을 쓰지
@@ -4601,7 +4602,9 @@ $userFixPolicy$finalLanguageRule''';
     final text = targetText.trim();
     if (text.isEmpty) return;
     final voice = isAi ? _aiVoice : TtsAdapterConfig.userVoice;
-    final historyVoiceKey = '${TtsAdapterConfig.model}_$voice';
+    // 캐시 키는 옛 이름(shimmer·verse) 그대로 — 저장된 소리를 다시 만들지 않는다.
+    final historyVoiceKey = '${TtsAdapterConfig.model}_'
+        '${isAi ? LegacyVoiceCacheKey.circleFemale : LegacyVoiceCacheKey.historyMale}';
     _costTracker.recordTtsRequest(text.length);
     unawaited(
       _ttsAdapter

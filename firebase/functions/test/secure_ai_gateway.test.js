@@ -453,3 +453,17 @@ test("Korean numerals: only Korean markup is rewritten", () => {
   assert.equal(chirpMarkupForLocale(body, "en-US"), "1500원 [pause short] 3개");
   assert.equal(chirpMarkupForLocale({}, "ko-KR"), null);
 });
+
+test("neutral voice ids female/male pick the same voices as the old names", () => {
+  // The app sends `female` / `male` since 2026-11-25; old names must keep working.
+  assert.equal(chirpVoiceForRequest({ voice: "female" }, "en-US"), "en-US-Chirp3-HD-Leda");
+  assert.equal(chirpVoiceForRequest({ voice: "male" }, "en-US"), "en-US-Chirp3-HD-Puck");
+  assert.equal(chirpVoiceForRequest({ voice: "female" }, "ko-KR"), "ko-KR-Chirp3-HD-Achernar");
+  assert.equal(chirpVoiceForRequest({ voice: "male" }, "ko-KR"), "ko-KR-Chirp3-HD-Puck");
+  assert.equal(geminiVoiceForRequest({ voice: "female" }, "en-US").name, "Zephyr");
+  assert.equal(geminiVoiceForRequest({ voice: "male" }, "en-US").name, "Charon");
+  assert.equal(wavenetVoiceForRequest({ voice: "female" }, "ko-KR"), "ko-KR-Wavenet-A");
+  assert.equal(wavenetVoiceForRequest({ voice: "male" }, "ko-KR"), "ko-KR-Wavenet-C");
+  assert.equal(openAiSpeechBody({ input: "Hi", voice: "female" }).voice, "shimmer");
+  assert.equal(openAiSpeechBody({ input: "Hi", voice: "male" }).voice, "echo");
+});

@@ -26,6 +26,7 @@ import 'package:http/http.dart' as http;
 import 'openai_connection_pool.dart';
 import 'pcm_audio_utils.dart';
 import 'tts_model_policy.dart';
+import 'voice_ids.dart';
 
 // ====================================================================
 // 설정 — 모델 교체는 이 클래스만 수정한다
@@ -120,8 +121,8 @@ class TtsAdapterConfig {
   /// 히스토리 저장 형식. 실시간 출력(PCM)과 분리해서 관리한다.
   static const String historyFormat = 'wav';
 
-  /// 앱 내부 보이스 ID → 제공자 보이스명 매핑.
-  /// 현재는 기존 저장값(nova/marin 등)이 제공자명과 일치하므로 passthrough가
+  /// 앱 내부 보이스 ID → Gateway로 보낼 보이스 ID 매핑.
+  /// 새 코드는 `female`/`male`만 쓴다. 기존 저장값(nova/marin 등)도 passthrough가
   /// 대부분이지만, 미지원 값이 오면 세션을 죽이는 대신 기본 보이스로 강등한다
   /// (legacy voice를 그대로 보내 세션이 통째로 죽던 사고의 재발 방지).
   static const Set<String> _supportedVoices = {
@@ -138,10 +139,13 @@ class TtsAdapterConfig {
     'verse',
     'marin',
     'cedar',
+    // 중립 ID(2026-11-25). 성별만 뜻하고 목소리는 Gateway가 고른다.
+    kVoiceFemale,
+    kVoiceMale,
   };
-  static const String fallbackVoice = 'nova';
-  static const String aiVoice = 'nova';
-  static const String userVoice = 'verse';
+  static const String fallbackVoice = kVoiceFemale;
+  static const String aiVoice = kVoiceFemale;
+  static const String userVoice = kVoiceMale;
 
   static String mapVoice(String voiceId) {
     final v = voiceId.trim().toLowerCase();

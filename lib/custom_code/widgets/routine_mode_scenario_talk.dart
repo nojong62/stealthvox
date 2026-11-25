@@ -87,6 +87,7 @@ import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/step2_native_render.dart';
 import '/custom_code/services/tts_adapter.dart';
 import '/custom_code/services/tts_model_policy.dart';
+import '/custom_code/services/voice_ids.dart';
 import '/custom_code/services/user_line_fix.dart';
 import '/custom_code/services/transcript_text_clean.dart';
 import '/custom_code/services/short_reply_gate.dart';
@@ -141,7 +142,9 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   /// onyx는 굵고 낮아 나이 든 인상이었다. 역할극 상대로는 젊고 경쾌한 쪽이
   /// 맞아 echo로 바꿨다(2026-08-14). tts-1이 주는 남성 목소리는 onyx·echo
   /// 둘뿐이고, fable은 영국식 화자 톤이라 배역이 튄다.
-  static const String _aiVoice = 'echo';
+  static const String _aiVoice = kVoiceMale;
+  // 캐시 키 전용 옛 이름. 서버로 보내지 않는다.
+  static const String _aiCacheVoice = LegacyVoiceCacheKey.scenarioMale;
   static const Duration _accurateTranscribeTimeout = Duration(seconds: 12);
   bool _isConversationActive = false;
   double _fontScale = 1.0;
@@ -1441,6 +1444,7 @@ $finalLanguageRule''';
         _openAiKey,
         _ttsQueueManager,
         _aiVoice,
+        cacheVoice: _aiCacheVoice,
         language: _spokenLangName(),
         isUser: false,
         onLog: _log,
@@ -3448,6 +3452,7 @@ $finalLanguageRule''';
       _openAiKey,
       _ttsQueueManager,
       _aiVoice,
+      cacheVoice: _aiCacheVoice,
       language: lang,
       isUser: false,
       onLog: _log,
@@ -3567,13 +3572,15 @@ $finalLanguageRule''';
           .join("\n");
 
       String userTargetText = "";
-      // User voice follows the lobby My Voice setting; AI remains fixed to nova.
-      final String userVoice =
+      // User voice follows the lobby My Voice setting; AI is fixed to the male voice.
+      // 저장돼 있던 옛 이름(verse·echo)도 받아 서버에는 중립 ID로 보낸다.
+      final String userVoiceRaw =
           FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
       ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
-        userVoice,
+        wireVoiceFor(userVoiceRaw),
+        cacheVoice: legacyCacheVoiceFor(userVoiceRaw),
         language: _targetLangName(),
         onLog: _log,
       );
@@ -3713,6 +3720,7 @@ $finalLanguageRule''';
           _openAiKey,
           _ttsQueueManager,
           _aiVoice,
+          cacheVoice: _aiCacheVoice,
           language: targetLangName,
           isUser: false,
           onLog: _log,
@@ -3768,6 +3776,7 @@ $finalLanguageRule''';
           _openAiKey,
           _ttsQueueManager,
           _aiVoice,
+          cacheVoice: _aiCacheVoice,
           language: targetLangName,
           isUser: false,
           onLog: _log,
@@ -3796,6 +3805,7 @@ $finalLanguageRule''';
           _openAiKey,
           _ttsQueueManager,
           _aiVoice,
+          cacheVoice: _aiCacheVoice,
           language: _spokenLangName(),
           isUser: false,
           onLog: _log,
@@ -3874,6 +3884,7 @@ $finalLanguageRule''';
           _openAiKey,
           _ttsQueueManager,
           _aiVoice,
+          cacheVoice: _aiCacheVoice,
           language: _targetLangName(),
           isUser: false,
           onLog: _log,
@@ -3954,6 +3965,7 @@ $finalLanguageRule''';
         _openAiKey,
         _ttsQueueManager,
         _aiVoice,
+        cacheVoice: _aiCacheVoice,
         language: _spokenLangName(),
         isUser: false, // AI 큐로 분리
         onLog: _log,
@@ -3961,6 +3973,7 @@ $finalLanguageRule''';
       hybridTtsPlayer = HybridTtsPlayer(
         apiKey: _openAiKey,
         voice: _aiVoice,
+        cacheVoice: _aiCacheVoice,
         language: _spokenLangName(),
         onLog: _log,
       );
@@ -4187,7 +4200,8 @@ $finalLanguageRule''';
   void _saveUserFullSentenceToCache(String text) {
     if (text.isEmpty) return;
     TtsCache.get(text,
-            TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, 'nova'))
+            TtsModelPolicy.cacheNamespace(
+                TtsWorkload.conversation, LegacyVoiceCacheKey.historyFemale))
         .then((existing) {
       if (existing != null) return;
       http
@@ -4200,7 +4214,7 @@ $finalLanguageRule''';
         body: jsonEncode(
           TtsModelPolicy.conversation.speechPayload(
             input: text,
-            voice: 'nova',
+            voice: kVoiceFemale,
             language: _targetLangName(),
           ),
         ),
@@ -4209,7 +4223,8 @@ $finalLanguageRule''';
         if (res.statusCode == 200) {
           TtsCache.put(
               text,
-              TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, 'nova'),
+              TtsModelPolicy.cacheNamespace(
+                  TtsWorkload.conversation, LegacyVoiceCacheKey.historyFemale),
               res.bodyBytes);
         }
       }).catchError((e) {
@@ -5812,7 +5827,8 @@ class TtsQueueManager {
 class ChunkedTtsFetcher {
   final String apiKey;
   final TtsQueueManager audioQueue;
-  final String voice;
+  final String voice; // 서버로 보내는 중립 ID
+  final String cacheVoice; // 캐시 키 전용 옛 이름
   final String language;
   final bool isUser; // 🔧 [v3.5] true=유저 큐, false=AI 큐
   final void Function(String tag, String msg)? onLog; // 🔬 [v3.1] 로그 훅
@@ -5843,7 +5859,8 @@ class ChunkedTtsFetcher {
     this.isUser = true, // 🔧 [v3.5] 기본값: 유저 큐
     this.onAllComplete,
     this.onLog,
-  });
+    String? cacheVoice,
+  }) : cacheVoice = cacheVoice ?? legacyCacheVoiceFor(voice);
 
   void addText(String text) {
     if (text.trim().isEmpty) return;
@@ -5861,8 +5878,8 @@ class ChunkedTtsFetcher {
 
   Future<void> _fetch(int id, String text) async {
     // [1단계] 로컬 캐시 확인 (히트 시 즉시 반환)
-    final cached = await TtsCache.get(
-        text, TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, voice));
+    final cached = await TtsCache.get(text,
+        TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, cacheVoice));
     if (cached != null && cached.isNotEmpty) {
       _buffer[id] = cached;
       _pendingCount--;
@@ -5902,7 +5919,8 @@ class ChunkedTtsFetcher {
           // [3단계] 캐시 저장 (백그라운드)
           TtsCache.put(
               text,
-              TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, voice),
+              TtsModelPolicy.cacheNamespace(
+                  TtsWorkload.conversation, cacheVoice),
               result);
           break;
         } else {
@@ -6088,7 +6106,8 @@ class RelayPipeline {
 //   → Rollback: tryFireFirstChunk 제거 후 aiTtsFetcher.addText(toSpeak) 복원
 class HybridTtsPlayer {
   final String apiKey;
-  final String voice;
+  final String voice; // 서버로 보내는 중립 ID
+  final String cacheVoice; // 캐시 키 전용 옛 이름
 
   /// 읽을 말의 언어. Gateway가 Chirp 3 HD 로케일을 고르는 데 쓴다.
   final String? language;
@@ -6102,10 +6121,11 @@ class HybridTtsPlayer {
 
   HybridTtsPlayer({
     required this.apiKey,
-    this.voice = 'nova',
+    this.voice = kVoiceFemale,
     this.language,
     this.onLog,
-  });
+    String? cacheVoice,
+  }) : cacheVoice = cacheVoice ?? legacyCacheVoiceFor(voice);
 
   bool get firstChunkFired => _firstChunkFired;
 
@@ -6209,7 +6229,7 @@ class HybridTtsPlayer {
   Future<void> _cacheFullSentenceInBackground(String fullSentence) async {
     try {
       final cached = await TtsCache.get(fullSentence,
-          TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, voice));
+          TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, cacheVoice));
       if (cached != null && cached.isNotEmpty) {
         lastCacheHit = true;
         lastCacheSaveMs = 0;
@@ -6252,7 +6272,7 @@ class HybridTtsPlayer {
       if (bytes != null) {
         await TtsCache.put(
             fullSentence,
-            TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, voice),
+            TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, cacheVoice),
             bytes);
         lastCacheSaveMs = sw.elapsedMilliseconds;
         onLog?.call(

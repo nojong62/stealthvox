@@ -44,6 +44,7 @@ import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/free_talk_history_flip.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
 import '/custom_code/services/tts_model_policy.dart';
+import '/custom_code/services/voice_ids.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart'
     show deepgramLanguageCode;
 import '/custom_code/services/transcript_repair_guard.dart';
@@ -101,10 +102,10 @@ String _p3CacheNamespaceFor(P3PracticeMode mode, String voice) =>
     );
 
 String get _historyListenTtsModel => TtsModelPolicy.conversation.model;
-const String _historyListenTtsVoice = 'nova';
+const String _historyListenTtsVoice = kVoiceFemale;
 String get _historyPracticeTtsModel => TtsModelPolicy.expressiveStudy.model;
-const String _historyPracticeAiVoice = 'nova';
-const String _historyPracticeUserVoice = 'verse';
+const String _historyPracticeAiVoice = kVoiceFemale;
+const String _historyPracticeUserVoice = kVoiceMale;
 const Color _p3ShadowingAccentColor = Color(0xFF818CF8);
 const Color _p3PracticeSurfaceColor = Color(0xFF1C1C1C);
 const Color _p3PracticeBorderColor = Color(0x22FFFFFF);
@@ -3203,7 +3204,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     }
     final historyId = widget.historyDoc.id;
     final cacheKey =
-        '${TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, 'native_$_historyListenTtsVoice')}_$msgId.mp3';
+        '${TtsModelPolicy.cacheNamespace(TtsWorkload.conversation, 'native_${LegacyVoiceCacheKey.historyFemale}')}_$msgId.mp3';
     final diskHit = await _AudioDiskCache.read(historyId, cacheKey);
     if (diskHit != null) {
       await audioPlayer.play(BytesSource(diskHit));
@@ -3216,9 +3217,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   }
 
   // OpenAI TTS 헬퍼
+  // 캐시 키에는 옛 이름(nova·verse)을 그대로 쓴다 — 저장된 소리를 다시 만들지 않는다.
   String _practiceCacheVoice(String voice) => TtsModelPolicy.cacheNamespace(
         TtsWorkload.expressiveStudy,
-        voice,
+        legacyCacheVoiceFor(voice),
       );
 
   Future<Uint8List?> _fetchPracticeTTS(String text, String voice,

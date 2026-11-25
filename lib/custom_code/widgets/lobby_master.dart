@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
+import '/custom_code/services/voice_ids.dart';
+
 import 'index.dart'; // Imports other custom widgets
 
 // 📦 [Box 1: Imports 및 패키지]
@@ -200,9 +202,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       unawaited(DuoBoardPushService.refreshChatLanguageForCurrentMember());
     }
     // 로비에서 음성을 선택하지 않는다. 사용자 역할 음성이 필요한 기존
-    // 화면(Duo/History Practice)은 항상 verse를 사용한다.
-    if (FFAppState().aiVoice != "verse") {
-      setState(() => FFAppState().aiVoice = "verse");
+    // 화면(Duo/History Practice)은 항상 남자 목소리(male)를 사용한다.
+    if (FFAppState().aiVoice != kVoiceMale) {
+      setState(() => FFAppState().aiVoice = kVoiceMale);
     }
   }
 
