@@ -139,7 +139,9 @@ service cloud.firestore {
           'couponCount',
           'parentConsentGrantedAt',
           'parentConsentMethod',
-          'parentConsentEmail'
+          'parentConsentEmail',
+          'signup_bonus_given',
+          'signup_bonus_granted_at'
         ])
         && (
           !request.resource.data.keys().hasAny(['parentConsentPending'])
@@ -156,7 +158,9 @@ service cloud.firestore {
             'couponCount',
             'parentConsentGrantedAt',
             'parentConsentMethod',
-            'parentConsentEmail'
+            'parentConsentEmail',
+            'signup_bonus_given',
+            'signup_bonus_granted_at'
           ])
         && (
           !request.resource.data.diff(resource.data).affectedKeys().hasAny(['parentConsentPending'])

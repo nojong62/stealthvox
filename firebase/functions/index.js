@@ -146,45 +146,32 @@ async function verifyGoogleOAuthIdToken(idToken) {
     );
   }
 
+  // linkOrCreateAccount와 같은 검증. tokeninfo는 audience를 제한하지 않아
+  // 다른 앱에 발급된 같은 Google 계정의 토큰도 통과했다(계정 복구 로그인 경로).
+  let payload;
   try {
-    const tokenInfoResp = await fetch(
-      "https://oauth2.googleapis.com/tokeninfo?id_token=" +
-        encodeURIComponent(idToken)
-    );
-    if (!tokenInfoResp.ok) {
-      throw new Error("Google token rejected (status " + tokenInfoResp.status + ")");
-    }
-
-    const tokenInfo = await tokenInfoResp.json();
-    if (tokenInfo.email_verified !== "true" && tokenInfo.email_verified !== true) {
-      throw new Error("Google email is not verified.");
-    }
-    if (!tokenInfo.sub) {
-      throw new Error("Google subject is missing.");
-    }
-
-    return {
-      providerUid: String(tokenInfo.sub),
-      email: tokenInfo.email || null,
-      displayName: tokenInfo.name || null,
-    };
+    const ticket = await googleOAuthClient().verifyIdToken({
+      idToken: idToken,
+      audience: GOOGLE_ALLOWED_AUDIENCES,
+    });
+    payload = ticket.getPayload();
   } catch (e) {
     throw new functions.https.HttpsError(
       "unauthenticated",
-      "Invalid Google ID token: " + String(e)
+      "Google token verification failed."
     );
   }
-}
-
-// 카카오 닉네임. 동의항목에 따라 kakao_account.profile 또는 옛 properties에 온다.
-function kakaoNicknameOf(profile) {
-  const raw =
-    (profile && profile.kakao_account && profile.kakao_account.profile &&
-      profile.kakao_account.profile.nickname) ||
-    (profile && profile.properties && profile.properties.nickname) ||
-    "";
-  const nickname = String(raw).trim().slice(0, 60);
-  return nickname || null;
+  if (!payload || payload.email_verified !== true || !payload.sub) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "Google token verification failed."
+    );
+  }
+  return {
+    providerUid: String(payload.sub),
+    email: payload.email || null,
+    displayName: payload.name || null,
+  };
 }
 
 async function verifyKakaoAccessToken(accessToken) {
