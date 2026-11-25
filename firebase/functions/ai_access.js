@@ -14,15 +14,6 @@ function activeDuoGuestAccess(data, uid) {
     (partnerUid === "" && data.isPartnerJoined !== true);
 }
 
-// 홍보 기간 비회원 초대자. 잔여 시간이 없어도 자기가 연 비회원 방(서버가
-// publishDuoBoardPost에서 promoGuestRoom을 박는다)에서는 통역을 쓴다. 비용은
-// 홍보 비용이고 3분 상한·하루 상한이 묶는다. 이 자격이 없어서 10-30 실기기에서
-// 초대자 쪽 통역이 "API 키 없음"으로 멈췄다.
-function activePromoHostAccess(data, uid) {
-  if (!data || data.isDuoEnabled !== true) return false;
-  return data.promoGuestRoom === true && String(data.hostUid || "") === uid;
-}
-
 // 대화맨이 연 방(openDuoBoardRequest가 talkHostRoom을 박는다). 대화맨 본인
 // 시간은 쓰지 않으므로 잔여가 0이어도 통역을 쓴다. 방 필드는 참가자가 쓸 수
 // 있어서, 서버만 쓰는 duo_talk_hosts 문서로 대화맨인지 한 번 더 본다.
@@ -72,9 +63,9 @@ async function resolveAiAccess({ db, uid, roomId }) {
     if (roomSnap.exists && activeDuoGuestAccess(roomSnap.data(), uid)) {
       return { allowed: true, reason: "duo_guest", roomId: safeRoomId };
     }
-    if (roomSnap.exists && activePromoHostAccess(roomSnap.data(), uid)) {
-      return { allowed: true, reason: "duo_promo_host", roomId: safeRoomId };
-    }
+    // 홍보 방(promoGuestRoom) 무료 자격은 2026-11-26 폐지했다. 홍보 서비스를
+    // 접었고, 방장이 자기 방 문서에 그 표시를 직접 쓸 수 있어 잔여 0으로도
+    // AI를 쓰는 길이 됐다. 방에 표시가 남아 있어도 자격은 주지 않는다.
     if (roomSnap.exists && activeTalkHostRoom(roomSnap.data(), uid)) {
       const hostSnap = await db.doc(`duo_talk_hosts/${uid}`).get();
       const host = hostSnap.exists ? hostSnap.data() : null;
@@ -89,7 +80,6 @@ async function resolveAiAccess({ db, uid, roomId }) {
 
 module.exports = {
   activeDuoGuestAccess,
-  activePromoHostAccess,
   activeStudyTrialUntil,
   activeTalkHostRoom,
   normalizedRoomId,
