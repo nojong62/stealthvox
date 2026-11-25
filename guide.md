@@ -25,6 +25,11 @@
 **요청받았을 때만** 한다. 알아서 main에 머지하거나 원격에 push하지 않는다.
 단, 릴리스 빌드의 버전 변경은 출시본 추적이 끊기므로 커밋을 먼저 제안할 것.
 
+## 🛠️ 개발 환경
+- Flutter SDK: `C:\src\flutter` (`android/local.properties`의 `flutter.sdk`, 사용자 PATH 모두 이 경로).
+  예전 `F:\flutter`는 디스크 오류(CRC)로 2026-11-26 제거했다. F: 경로를 쓰지 말 것.
+- 셸 PATH가 예전 값이면 `C:\src\flutter\bin\flutter.bat`을 직접 부른다.
+
 ## 📦 릴리스 빌드 (AAB)
 - 버전: `pubspec.yaml`의 `version: 1.0.N+N` — versionName과 versionCode를 같이 올린다
 - 빌드: `flutter build appbundle --release` (약 8분)
