@@ -47,30 +47,58 @@ bool meaningCheckAllowed({
 }) =>
     freeTalk && !alreadyConfirmed;
 
-/// Free Talk 매 턴에 붙는 규칙. 학습자 실수는 조용히 고치지 않는다.
+/// Free Talk 매 턴에 붙는 강사 원칙(2026-11-27, PC 실험 4차 P5 기준).
+///
+/// 아이에게 말을 걸듯 풍성하게 말하고 끼어들 고리를 걸며, 유저가 말할수록
+/// 물러난다. 유저가 이미 가진 쉬운 영어로 말하게 돕고, 교정은 유저 단어를
+/// 살린 가장 쉬운 문장으로 한다. 세부 규칙을 늘리지 않는다 — 턴 상황은
+/// [buildFreeTalkTurnNote]가 그 턴에만 한 줄씩 준다.
 String buildFreeTalkLearnerFixPolicy({required String spokenLang}) {
-  return '''[FREE TALK — THE USER IS A LEARNER OF $spokenLang]
-The user is practicing $spokenLang, which is not their own language. Every
-learner mistake goes through a short correction step — even a small one
-(grammar, a wrong tense or ending, a missing word, an unnatural word).
+  return '''[FREE TALK — YOU ARE ALSO THE USER'S CONVERSATION COACH]
+The user is practicing $spokenLang, which is not their own language. While you
+stay yourself in this circle, you are also the world's best conversation coach.
+You teach the way caring adults teach a child to talk: plenty of warm, natural
+talk from you, full of easy chances for the user to jump in — and you step back
+as they start talking. The goal is that they lead and you follow.
+
+Your core belief: the user can already say almost anything with the simple
+$spokenLang they have. Learners often break down because they try to translate
+a complex thought from their own language word for word. Show them they don't
+need new structures — just short pieces of what they already know.
+- Share a little of your own life and opinions. Use natural starters ("You know
+  what...", "So the thing is...") only where they truly fit.
+- End with ONE easy way in, and vary it: start a sentence about THEIR life for
+  them to finish, or ask about their own experience. Don't offer two options
+  turn after turn, and don't reuse the same sentence start.
+- When they say something, react warmly and echo it back, keeping their own
+  words and level.
+- When they get tangled in a long sentence, help them split it: "Say it in
+  short pieces — who? what happened? then what?"
+- When they don't know a word, praise any way of saying it around it with
+  simple words.
+- Corrections: do not stop the talk or ask them to repeat. Say the corrected
+  version once, naturally, inside your own reply ("Oh, you went to Busan last
+  week!") — keep their words, fix only the one thing that matters, the simplest
+  correct version, never a fancier native rewrite. Only correct real errors
+  (a wrong tense or form, a missing or wrong word). If a native speaker could
+  say it that way, it is fine — never swap it for a "more natural" version.
+- If they say "skip", push back, or want to just talk, drop the correction
+  immediately and continue the conversation.
+- If they speak their own language, accept it, give the simplest $spokenLang
+  for it, and invite them to try.
+- The more they say, the less you say.
 Never fix a learner mistake silently with USER_FIX. Keep USER_FIX only for a
-word the speech recognizer clearly misheard.
-If the line is already natural $spokenLang, reply normally with no tags.''';
+word the speech recognizer clearly misheard.''';
 }
 
-/// 서클 멤버 시스템 프롬프트에 붙는 교정 규칙. 허용된 턴에만 붙인다.
+/// 서클 멤버 시스템 프롬프트에 붙는 교정 형식. 교정이 허용된 턴에만 붙인다.
+/// 형식은 고를 수 있을 뿐 강제가 아니다 — 대부분의 턴은 평소 답변이다.
 String buildMeaningCheckPolicy({required String spokenLang}) {
-  return '''[CORRECTION STEP — FOR ANY LEARNER MISTAKE]
-Do NOT reply to the content in this turn. Choose one:
-
-A) The intended meaning is clear (one reading). Output exactly:
-$kMeaningConfirmTag
-<a very short, very easy $spokenLang line: "Do you mean this? If yes, say it yourself.">
-$kMeaningSentenceTag
-<the user's line as one natural $spokenLang sentence>
-
-B) Two readings are possible even after fixing the grammar (for example it is
-unclear who did what to whom), or the line makes no sense here. Output exactly:
+  return '''[ASK-BACK FORMAT — ONLY WHEN THE MEANING IS UNCLEAR]
+Ordinary mistakes never stop the talk: reply normally and say the corrected
+version once inside your reply. Stop only when you cannot tell what the user
+meant (or the line makes no sense here). Then do NOT reply to the content in
+this turn. Output exactly:
 $kMeaningCheckTag
 <a very short, very easy $spokenLang question>
 The question connects to what the user was saying, offers the one or two
@@ -80,7 +108,9 @@ it again.
 Rules:
 - Use the simplest words and short sentences a beginner understands.
 - The corrected sentence keeps the user's own words, meaning and sentence shape
-  wherever possible; change only what is wrong.
+  wherever possible; change only what is wrong. It is the simplest correct
+  version, never a fancier native rewrite. If the user got tangled in a long
+  line, it may be two short sentences.
 - Keep the ask-back confirmation (HEARD_CONFIRM) for a garbled transcript only
   (non-words, a sentence cut off mid-way).
 - Never combine these with any other control format.''';
@@ -114,6 +144,8 @@ String? buildMeaningFinalNote({
   required String spokenLang,
   required bool clarifying,
   required bool allowCheck,
+  // 교정 간격이 안 찼다 — 되묻기(뜻이 막힐 때)만 된다.
+  bool checkOnly = false,
 }) {
   if (clarifying) {
     return '''FINAL RULE FOR THIS TURN: the user is explaining what they meant. Do NOT reply
@@ -125,12 +157,92 @@ $kMeaningSentenceTag
 Only if you still cannot tell, output $kMeaningCheckTag with an even simpler question.''';
   }
   if (allowCheck) {
-    return '''FINAL RULE FOR THIS TURN: if the user's line has any learner mistake or is
-unfinished, do NOT reply normally. Output the $kMeaningConfirmTag ... $kMeaningSentenceTag
-format, or $kMeaningCheckTag if two readings are possible. Reply normally only when
-the line is already natural $spokenLang.''';
+    return '''FINAL RULE FOR THIS TURN: reply normally. If the user's line has a mistake that
+matters, say the corrected version once inside your reply${checkOnly ? ' only if it blocks understanding (you corrected recently)' : ''} — do not ask them
+to repeat it. Only if you truly cannot tell what they meant, output $kMeaningCheckTag
+with a very short, very easy $spokenLang question.''';
   }
   return null;
+}
+
+// ── 턴별 한 줄 지시(코드가 상황을 보고 그 턴에만) ────────────────────────
+
+/// AI 줄 끝에서 유저에게 끝맺게 남긴 문장 앞부분("You felt…")을 꺼낸다.
+List<String> usedSentenceStarts(List<String> aiLines) {
+  final out = <String>[];
+  for (final line in aiLines) {
+    final m = RegExp(r'([^.!?“”"]{3,60})(?:…|\.\.\.)\s*["”]?\s*$')
+        .firstMatch(line.trim());
+    if (m != null) out.add(m.group(1)!.trim());
+  }
+  return out.length > 4 ? out.sublist(out.length - 4) : out;
+}
+
+/// 교정(직접 말하게 하는 단계)은 이 턴 수에 한 번까지. 뜻이 막히면 되묻기는 된다.
+const int kFreeTalkCorrectionEveryTurns = 2;
+
+int _wordCount(String s) =>
+    RegExp(r"[A-Za-zÀ-ɏ']+").allMatches(s).length;
+
+/// 유저 발화 길이에 따른 말 양, 막혔을 때의 도움, 유저가 이미 쓰는 문장 시작.
+/// [userLines]는 이번 줄까지 포함한 Free Talk 유저 줄(오래된 것부터).
+String buildFreeTalkTurnNote({
+  required List<String> userLines,
+  required String spokenLang,
+  // 최근 AI 줄. 유저에게 준 문장 앞부분("You felt…")을 다시 쓰지 않게 한다.
+  List<String> aiLines = const <String>[],
+  // 유저가 이 방에서 교정을 그만하라고 했다.
+  bool noCorrection = false,
+}) {
+  if (userLines.isEmpty) return '';
+  final last = userLines.last;
+  final n = _wordCount(last);
+  final notes = <String>[
+    if (noCorrection)
+      'The user asked you to stop correcting them. Do not correct anything for the rest of this conversation — just talk.',
+    if (n < 5)
+      'THIS TURN: you may talk richly — 3 to 4 short sentences (a bit of your own story or opinion), ending with one easy way in.'
+    else if (n < 15)
+      'THIS TURN: 2 sentences plus one question.'
+    else
+      'THIS TURN: a short reaction plus one short question. The user is leading — follow them.',
+  ];
+  final stuck = userLines.length >= 2 &&
+      userLines.sublist(userLines.length - 2).every((u) => _wordCount(u) < 4);
+  final keywordStyle = '...'.allMatches(last).length +
+          '…'.allMatches(last).length >=
+      3;
+  if (stuck) {
+    final used = usedSentenceStarts(aiLines);
+    notes.add(
+        'The user is stuck at a few words. Do not ask a question this turn: start a sentence about THEIR life with "you" and let them finish it.'
+        '${used.isEmpty ? '' : ' Use a new one with a different shape — not like these you already gave: ${used.map((u) => '"$u"').join(', ')}. You may also ask about a new detail instead.'}');
+  } else if (keywordStyle) {
+    notes.add(
+        'The user is speaking in keywords. Echo it back as one simple sentence in their own words, then keep the talk going.');
+  }
+  // 🪜 쉬운 틀에 익숙해져 길게 말하면 한 단계 위로(실장님, 2026-11-27).
+  //   쉬운 틀에 머물면 그 수준에서 굳는다.
+  final bool confident = userLines.length >= 3 &&
+      userLines.sublist(userLines.length - 3).every((u) => _wordCount(u) >= 15);
+  if (confident && !noCorrection) {
+    notes.add(
+        'The user is now speaking with confidence. Stretch them a little: after taking in what they said, offer ONE slightly more advanced way to say a part of it ("Another way to say that is ...") and invite them to use it, and ask deeper questions (why, what if, their opinion).');
+  }
+  final starts = <String>[];
+  for (final u in userLines) {
+    for (final m in RegExp(r"\b((?:I|It|We|He|She|They|My \w+) [a-z']+)\b")
+        .allMatches(u)) {
+      final p = m.group(1)!;
+      if (!starts.contains(p)) starts.add(p);
+    }
+  }
+  if (starts.isNotEmpty) {
+    final recent = starts.length > 8 ? starts.sublist(starts.length - 8) : starts;
+    notes.add(
+        'Sentence starts the user already uses: ${recent.join(', ')}. When they get stuck, point them to one of these instead of a new structure.');
+  }
+  return notes.join('\n');
 }
 
 /// ③ 확인이 끝난 직후 턴에 붙는다. 그 문장 전체를 이어 받아 대화를 잇는다.
@@ -206,7 +318,26 @@ bool looksLikeMeaningControl(String output) =>
 /// [yes]: "네"만 했다 — 직접 말해 보라고 권한다.
 /// [no]: 짧은 부정 — 다시 말해 달라고 한다.
 /// [other]: 새 설명 — 뜻을 다시 잡아 새 문장을 제안한다.
-enum MeaningConfirmReply { repeated, yes, no, other }
+/// [skip]: 넘어가자·그만 고치라는 말 — 교정을 바로 끝내고 처음 한 말로 잇는다.
+enum MeaningConfirmReply { repeated, yes, no, skip, other }
+
+/// 교정을 그만두자는 말. 이 말을 교정 문장으로 만들면 안 된다(실기기,
+/// 2026-11-27: "그냥 넘어가"가 "Let's just move on."으로 제안되고 유저 줄이
+/// 그 문장으로 바뀌었다).
+final List<RegExp> _skipPatterns = [
+  RegExp(r'넘어가|넘어갑|패스|됐어|그만|안\s*고쳐|교정\s*(하지|그만|말)'),
+  RegExp(
+      r"\b(skip|pass|move on|never ?mind|forget it|just talk|no correction|stop correct|my english is fine|i(?:'?m| am) right)\b",
+      caseSensitive: false),
+];
+
+/// 짧게 끝날 때만 포기로 본다. "I don't know how to say…"는 포기가 아니다.
+final RegExp _shortGiveUp =
+    RegExp(r"몰라|모르겠|\bi don'?t know\b", caseSensitive: false);
+
+bool isMeaningSkipReply(String reply) =>
+    _skipPatterns.any((p) => p.hasMatch(reply)) ||
+    (_shortGiveUp.hasMatch(reply) && _tokens(reply).length <= 5);
 
 /// 따라 말한 것으로 칠 때 쓰지 않는 군말.
 const Set<String> _fillers = {'um', 'uh', 'umm', 'uhh', 'er', 'erm', 'so', 'well', 'like'};
@@ -275,6 +406,7 @@ MeaningConfirmReply classifyMeaningConfirmReply(String reply, {String? sentence}
       meaningRepeatScore(reply, sentence) >= kMeaningRepeatThreshold) {
     return MeaningConfirmReply.repeated;
   }
+  if (isMeaningSkipReply(reply)) return MeaningConfirmReply.skip;
   if (_yesCompact.contains(compact)) return MeaningConfirmReply.yes;
   if (_noCompact.contains(compact)) return MeaningConfirmReply.no;
   final tokens = _tokens(reply);

@@ -527,6 +527,11 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   String? _pendingMeaningAttempt;
   String? _pendingMeaningSentence;
   int _meaningRounds = 0;
+  // 🧭 [FREE-TALK-COACH] 이번 방의 유저 줄(턴별 한 줄 지시의 근거)과
+  //   마지막으로 교정 단계를 낸 유저 턴 번호(교정 간격 제한).
+  final List<String> _freeTalkUserLines = <String>[];
+  int _lastFreeTalkCorrectionAt = -100;
+  bool _freeTalkNoCorrection = false;
   // 기다리는 동안 받아쓰기를 자동 감지로 돌려 두었는가.
   bool _meaningSttAuto = false;
   // 직전 턴에서 [USER_FIX]가 확정됐으면 다음 Dialog Brain 호출 한 번만
@@ -3934,6 +3939,16 @@ $userFixPolicy$finalLanguageRule''';
           (reply == MeaningConfirmReply.repeated ||
               (reply == MeaningConfirmReply.yes &&
                   _meaningRounds >= kMeaningCheckMaxRounds));
+      if (reply == MeaningConfirmReply.skip) {
+        // 넘어가자·그만 고치라 — 교정을 끝내고 처음 한 말 그대로 대화를 잇는다.
+        _clearPendingMeaningCheck();
+        _log('🧭 [MEANING-CHECK]', 'skipped by user → "$pendingAttempt"');
+        return _processCircleTalkTurn(
+          pendingAttempt,
+          expectedPipelineGeneration: expectedPipelineGeneration,
+          understandingConfirmed: true,
+        );
+      }
       if (reply == MeaningConfirmReply.yes && !accepted) {
         // "네"만 했다 — 그 문장을 직접 말해 보라고 권하고 계속 기다린다.
         _meaningRounds++;
@@ -4138,13 +4153,42 @@ $userFixPolicy$finalLanguageRule''';
             meaningAttempt != null ||
             meaningClarifyAttempt != null,
       );
+      // 🧭 [FREE-TALK-COACH] 교정은 2턴에 한 번까지. 그 사이엔 뜻이 막힐 때의
+      //   되묻기만 된다. 유저 줄은 턴별 한 줄 지시의 근거로 모은다.
+      final int freeTalkTurn = _freeTalkUserLines.length;
+      if (_freeTalk && meaningAttempt == null && meaningClarifyAttempt == null) {
+        _freeTalkUserLines.add(userOriginal.trim());
+        // "그만 고쳐/just talk"는 이 방 끝까지 지킨다. 프롬프트만으로는 몇 턴
+        //   뒤 다시 고쳤다(PC 실험, 2026-11-27).
+        if (isMeaningSkipReply(userOriginal)) _freeTalkNoCorrection = true;
+      }
+      final bool correctionCapped = _freeTalkNoCorrection ||
+          freeTalkTurn - _lastFreeTalkCorrectionAt <
+              kFreeTalkCorrectionEveryTurns;
       // 🧭 [MEANING-CHECK] 교정 규칙을 유저 말 바로 앞에 한 번 더 둔다.
-      final String? meaningFinalNote = _freeTalk
+      //   그 앞에 이 턴의 말 양·도움 지시를 붙인다.
+      final String? meaningRule = _freeTalk
           ? buildMeaningFinalNote(
               spokenLang: _nativeLangName(),
               clarifying: meaningClarifyAttempt != null,
-              allowCheck: allowMeaningCheck)
+              allowCheck: allowMeaningCheck,
+              checkOnly: correctionCapped)
           : null;
+      final String coachNote = _freeTalk && meaningClarifyAttempt == null
+          ? buildFreeTalkTurnNote(
+              userLines: _freeTalkUserLines,
+              spokenLang: _nativeLangName(),
+              aiLines: _recentHistory
+                  .where((turn) => turn['role'] == 'assistant')
+                  .map((turn) => (turn['content'] ?? '').toString())
+                  .toList(),
+              noCorrection: _freeTalkNoCorrection)
+          : '';
+      final String joinedNote = [coachNote, if (meaningRule != null) meaningRule]
+          .where((s) => s.isNotEmpty)
+          .join('\n\n');
+      final String? meaningFinalNote =
+          _freeTalk && joinedNote.isNotEmpty ? joinedNote : null;
       final systemPrompt = _buildCircleMemberInstructions(
         step: step,
         disableHeardConfirmation: understandingConfirmed,
@@ -4166,6 +4210,7 @@ $userFixPolicy$finalLanguageRule''';
         hasSttCorrectionContext: hasSttCorrectionContext,
         previousTurnHadUserFix: usedPreviousUserFix,
         isStep2: step == ListeningStep.step2,
+        freeTalk: _freeTalk,
       );
       _log(
         '[DIALOG-REASONING]',
@@ -4290,6 +4335,7 @@ $userFixPolicy$finalLanguageRule''';
         _pendingMeaningAttempt = meaningClarifyAttempt ?? userOriginal.trim();
         _pendingMeaningSentence = meaningConfirm?.sentence;
         if (meaningClarifyAttempt == null) _meaningRounds = 0;
+        if (meaningConfirm != null) _lastFreeTalkCorrectionAt = freeTalkTurn;
         _setMeaningSttAuto(true);
         if (mounted) {
           setState(() {

@@ -58,7 +58,13 @@ DialogBrainReasoningDecision selectDialogBrainReasoning({
   bool hasSttCorrectionContext = false,
   bool previousTurnHadUserFix = false,
   bool isStep2 = false,
+  // 🧭 Free Talk은 강사 판단(교정할지, 얼마나 말할지)이 매 턴이라 언제나
+  //   medium이다(실장님, 2026-11-27).
+  bool freeTalk = false,
 }) {
+  if (freeTalk) {
+    return const DialogBrainReasoningDecision('medium', 'free_talk');
+  }
   final text = userText.trim().toLowerCase();
   final previous = previousAssistantText.trim().toLowerCase();
 

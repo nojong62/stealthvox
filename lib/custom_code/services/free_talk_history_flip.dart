@@ -46,16 +46,58 @@ bool freeTalkRoomNeedsFlip(Map<String, dynamic>? room) =>
     room?[kFreeTalkFlippedAtField] == null &&
     historyEditAllowed(room);
 
+/// 🎭 [FREE-TALK-PICK] 이보다 줄이 많으면 역할교환으로 연습할 줄만 추린다
+/// (실장님, 2026-11-27). 공부방에는 강사의 시동·이어가기 줄과 유저가 넓혀
+/// 말한 줄만 남는다. 추리지 않은 줄은 지우지 않고 `messages_full`로 옮긴다.
+const int kFreeTalkPickAbove = 12;
+const int kFreeTalkPickMin = 6;
+const int kFreeTalkPickMax = 12;
+
+/// 추리기 전 전체 대화(원문)를 남겨 두는 방 문서 필드. [{id, role, text}].
+const String kFreeTalkFullLinesField = 'free_talk_full_lines';
+
 String buildFreeTalkFlipInstructions({
   required String spokenLang,
   required String baseLang,
+  bool pick = false,
 }) =>
-    '''You receive a conversation in $spokenLang. The USER is still learning $spokenLang, so their lines may be broken or unnatural.
+    pick
+        ? '''You receive a conversation in $spokenLang between a learner (USER) and a conversation coach (AI). The USER is still learning $spokenLang, so their lines may be broken or unnatural.
+Pick the lines worth practicing as a role-swap dialogue, where the learner will later read the AI's lines too:
+- AI lines that show how to keep a conversation going (natural starters, warm reactions, easy follow-up questions), and USER lines where they said something real about themselves.
+- $kFreeTalkPickMin to $kFreeTalkPickMax lines, in the original order, that still read as one natural conversation (USER and AI alternating where possible).
+- Skip small talk that adds nothing, and lines that only correct or ask back.
+Rewrite each picked line in $baseLang so the USER can read what was meant in their own language.
+- USER lines: what the user meant, as natural $baseLang. Do not change the meaning.
+- AI lines: natural $baseLang; you may shorten a long AI line to its 1-2 most useful sentences.
+Return JSON only: {"lines":[{"id":"...","text":"..."}]} with only the picked lines.'''
+        : '''You receive a conversation in $spokenLang. The USER is still learning $spokenLang, so their lines may be broken or unnatural.
 Rewrite every line in $baseLang so the USER can read what was meant in their own language.
 - USER lines: write what the user meant, as natural $baseLang. Do not fix the meaning, add, or drop anything.
 - AI lines: translate faithfully into natural $baseLang.
 - Keep every id. One output line per input line, same order.
 Return JSON only: {"lines":[{"id":"...","text":"..."}]}''';
+
+/// 추린 답을 읽는다. 있는 id만, [kFreeTalkPickMin]줄 이상이어야 한다.
+Map<String, String>? parseFreeTalkPickedLines(
+    String content, Set<String> ids) {
+  try {
+    final parsed = jsonDecode(content);
+    if (parsed is! Map<String, dynamic>) return null;
+    final lines = parsed['lines'];
+    if (lines is! List) return null;
+    final out = <String, String>{};
+    for (final line in lines) {
+      if (line is! Map) continue;
+      final id = (line['id'] ?? '').toString();
+      final text = (line['text'] ?? '').toString().trim();
+      if (ids.contains(id) && text.isNotEmpty) out[id] = text;
+    }
+    return out.length >= kFreeTalkPickMin ? out : null;
+  } catch (_) {
+    return null;
+  }
+}
 
 /// 모델 답을 줄별로 읽는다. **한 줄이라도 빠지면 null** — 반만 바꾼 방은
 /// 두 언어가 섞여 공부방이 엉뚱한 배울글을 만든다.
@@ -104,6 +146,58 @@ class FreeTalkHistoryFlip {
     return task;
   }
 
+  /// 한 번 묻고 [parse]로 읽는다. 실패하면 null.
+  Future<Map<String, String>?> _ask({
+    required String apiKey,
+    required String instructions,
+    required String transcript,
+    required String roomId,
+    required Map<String, String>? Function(String content) parse,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            SecureAiGateway.openAiUri('/v1/chat/completions'),
+            headers: <String, String>{
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode(<String, dynamic>{
+              'model': kHistoryRepairModel,
+              'reasoning_effort': kHistoryTextReasoningEffort,
+              'max_completion_tokens': 6000,
+              'response_format': <String, String>{'type': 'json_object'},
+              'messages': <Map<String, String>>[
+                <String, String>{'role': 'system', 'content': instructions},
+                <String, String>{
+                  'role': 'user',
+                  'content': 'id\tspeaker\ttext\n$transcript',
+                },
+              ],
+            }),
+          )
+          .timeout(_timeout);
+      if (response.statusCode != 200) {
+        debugPrint('[FREE-TALK-PICK] failed room=$roomId '
+            'status=${response.statusCode}');
+        return null;
+      }
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      logCompletionBudget('[FREE-TALK-PICK]', body);
+      final choices = body['choices'] as List? ?? const <dynamic>[];
+      final message = choices.isEmpty
+          ? null
+          : (choices.first as Map<String, dynamic>)['message']
+              as Map<String, dynamic>?;
+      return parse((message?['content'] ?? '').toString());
+    } catch (error) {
+      debugPrint('[FREE-TALK-PICK] failed room=$roomId '
+          'reason=${error.runtimeType}');
+      return null;
+    }
+  }
+
   Future<bool> _flip(DocumentReference<Object?> roomRef, String apiKey) async {
     final roomId = roomRef.id;
     try {
@@ -133,6 +227,32 @@ class FreeTalkHistoryFlip {
       final started = DateTime.now();
       Map<String, String> meanings = const <String, String>{};
       if (docs.isNotEmpty) {
+        final ids = docs.map((d) => d.id).toSet();
+        final transcript = docs.map((d) {
+          final who = d.data()['role'] == 'HOST' ? 'USER' : 'AI';
+          final text = d.data()['original_text'].toString().trim();
+          return '${d.id}\t$who\t$text';
+        }).join('\n');
+        // 🎭 [FREE-TALK-PICK] 긴 대화는 역할교환용 줄만 추린다. 추리기가
+        //   실패하면 전처럼 모든 줄을 바꾼다.
+        // 체험 제작 방은 줄을 지울 수 없다(보안 규칙) — 추리지 않는다.
+        if (docs.length > kFreeTalkPickAbove && data['study_trial'] != true) {
+          final picked = await _ask(
+            apiKey: apiKey,
+            instructions: buildFreeTalkFlipInstructions(
+                spokenLang: lobbyTargetLang, baseLang: chatLang, pick: true),
+            transcript: transcript,
+            roomId: roomId,
+            parse: (content) => parseFreeTalkPickedLines(content, ids),
+          );
+          if (picked != null) {
+            meanings = picked;
+            debugPrint('[FREE-TALK-PICK] room=$roomId kept=${picked.length} '
+                'of=${docs.length}');
+          }
+        }
+      }
+      if (docs.isNotEmpty && meanings.isEmpty) {
         final ids = docs.map((d) => d.id).toSet();
         final transcript = docs.map((d) {
           final who = d.data()['role'] == 'HOST' ? 'USER' : 'AI';
@@ -188,7 +308,13 @@ class FreeTalkHistoryFlip {
       }
 
       final batch = FirebaseFirestore.instance.batch();
-      for (final doc in docs) {
+      // 🎭 추리지 않은 줄은 버리지 않고 방 문서의 원본 목록에 남긴 뒤 뺀다.
+      //   (새 서브컬렉션은 보안 규칙 배포가 필요해 방 문서 필드로 둔다.)
+      final dropped = docs.where((d) => !meanings.containsKey(d.id)).toList();
+      for (final doc in dropped) {
+        batch.delete(doc.reference);
+      }
+      for (final doc in docs.where((d) => meanings.containsKey(d.id))) {
         batch.update(doc.reference, <String, dynamic>{
           'original_text': meanings[doc.id],
           kMessageSpokenTextField: doc.data()['original_text'],
@@ -201,6 +327,15 @@ class FreeTalkHistoryFlip {
           .toList(growable: false);
       batch.update(roomRef, <String, dynamic>{
         if (orderedMeanings.isNotEmpty) 'last_message': orderedMeanings.last,
+        if (dropped.isNotEmpty) 'msg_count': docs.length - dropped.length,
+        if (dropped.isNotEmpty)
+          kFreeTalkFullLinesField: docs
+              .map((d) => <String, String>{
+                    'id': d.id,
+                    'role': (d.data()['role'] ?? '').toString(),
+                    'text': (d.data()['original_text'] ?? '').toString(),
+                  })
+              .toList(),
         'native_lang': chatLang,
         'target_lang': lobbyTargetLang,
         kFreeTalkFlippedAtField: FieldValue.serverTimestamp(),

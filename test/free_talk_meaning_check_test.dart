@@ -123,4 +123,58 @@ void main() {
     expect(clarify, contains('"meeting finish me"'));
     expect(clarify, contains('Korean'));
   });
+
+  group('넘어가기·턴별 지시', () {
+    test('넘어가자는 말은 교정 문장이 아니라 skip이다', () {
+      const s = 'I went there yesterday.';
+      expect(classifyMeaningConfirmReply('그냥 넘어가', sentence: s),
+          MeaningConfirmReply.skip);
+      expect(classifyMeaningConfirmReply("I don't know. pass", sentence: s),
+          MeaningConfirmReply.skip);
+      expect(classifyMeaningConfirmReply('No, I am right.', sentence: s),
+          MeaningConfirmReply.skip);
+      expect(
+          classifyMeaningConfirmReply(
+              "I don't know how to say it, I went with my friend", sentence: s),
+          MeaningConfirmReply.other);
+    });
+
+    test('짧게만 말하면 길게, 길게 말하면 짧게', () {
+      expect(buildFreeTalkTurnNote(userLines: ['um... weekend'], spokenLang: 'English'),
+          contains('talk richly'));
+      final long = 'So I started tennis and it is harder than I expected because my coach is strict';
+      expect(buildFreeTalkTurnNote(userLines: [long], spokenLang: 'English'),
+          contains('The user is leading'));
+    });
+
+    test('두 턴 연속 몇 단어면 문장 앞부분을 준다', () {
+      final note = buildFreeTalkTurnNote(
+          userLines: ['um... sleep', 'Saturday'], spokenLang: 'English');
+      expect(note, contains('stuck at a few words'));
+    });
+
+    test('이미 준 문장 앞부분은 다시 쓰지 말라고 알려 준다', () {
+      final note = buildFreeTalkTurnNote(
+          userLines: ['um... yes', 'um... sleep'],
+          spokenLang: 'English',
+          aiLines: ['That sounds stressful. You can say, “My boss was angry. I felt…']);
+      expect(note, contains('"I felt"'));
+    });
+
+    test('그만 고치라고 했으면 끝까지 교정하지 않는다', () {
+      final note = buildFreeTalkTurnNote(
+          userLines: ['Just talk, please. I am tired of corrections and I want to talk now ok'],
+          spokenLang: 'English',
+          noCorrection: true);
+      expect(note, contains('Do not correct anything'));
+    });
+
+    test('세 턴 연속 길게 말하면 한 단계 위로', () {
+      final long = 'I went to the park with my friends and we played soccer for two hours yesterday';
+      final note = buildFreeTalkTurnNote(
+          userLines: [long, long, long], spokenLang: 'English');
+      expect(note, contains('Stretch them'));
+      expect(note, contains('I went'));
+    });
+  });
 }
