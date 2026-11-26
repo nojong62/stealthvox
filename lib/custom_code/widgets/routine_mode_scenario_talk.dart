@@ -2364,6 +2364,12 @@ $finalLanguageRule''';
       _log('[SCN-STT]', 'stale_dropped item=$itemId reason=room_closed');
       return;
     }
+    // 🧭 [MEANING-CHECK] 자동 감지 중 엉뚱한 언어로 적힌 소음은 버린다.
+    if (_meaningSttAuto &&
+        !transcriptFitsLanguages(text, _nativeLangName(), _targetLangName())) {
+      _log('🧭 [MEANING-CHECK]', 'foreign_script_dropped len=${text.length}');
+      return;
+    }
     final String dedupeKey = itemId.isNotEmpty
         ? 'rt:$itemId'
         : 'rt-hash:${text.trim().hashCode.toUnsigned(32).toRadixString(16)}';
@@ -2834,8 +2840,37 @@ $finalLanguageRule''';
       _activeHostBubbleId = '';
       final reply = pendingSentence == null
           ? MeaningConfirmReply.other
-          : classifyMeaningConfirmReply(userKorean);
-      if (reply == MeaningConfirmReply.yes && pendingSentence != null) {
+          : classifyMeaningConfirmReply(userKorean, sentence: pendingSentence);
+      // 직접 따라 말했을 때 교정이 끝난다(실장님, 2026-11-26). "네"만 여러 번
+      //   하면 더 붙잡지 않고 끝낸다.
+      final bool accepted = pendingSentence != null &&
+          (reply == MeaningConfirmReply.repeated ||
+              (reply == MeaningConfirmReply.yes &&
+                  _meaningRounds >= kMeaningCheckMaxRounds));
+      if (reply == MeaningConfirmReply.yes && !accepted) {
+        // "네"만 했다 — 그 문장을 직접 말해 보라고 권하고 계속 기다린다.
+        _meaningRounds++;
+        final line = '${meaningSayItLine(_nativeLangName())}\n"$pendingSentence"';
+        _log('🧭 [MEANING-CHECK]', 'yes_only → 직접 말해 보라고 권함');
+        if (mounted) {
+          setState(() {
+            _localMessages.add(<String, dynamic>{
+              'role': 'SYSTEM_ASKBACK',
+              'target': line,
+              'original': '',
+            });
+          });
+          _scrollToBottom();
+        }
+        await _speakKoreanLine(line, step: ListeningStep.step1);
+        if (mounted &&
+            _isConversationActive &&
+            generation == _pipelineGeneration) {
+          _startConfiguredListening();
+        }
+        return;
+      }
+      if (accepted) {
         _clearPendingMeaningCheck();
         _log('🧭 [MEANING-CHECK]',
             'confirmed "$pendingAttempt" → "$pendingSentence"');
@@ -3011,6 +3046,13 @@ $finalLanguageRule''';
             meaningAttempt != null ||
             meaningClarifyAttempt != null,
       );
+      // 🧭 [MEANING-CHECK] 교정 규칙을 유저 말 바로 앞에 한 번 더 둔다.
+      final String? meaningFinalNote = _freeTalk
+          ? buildMeaningFinalNote(
+              spokenLang: _nativeLangName(),
+              clarifying: meaningClarifyAttempt != null,
+              allowCheck: allowMeaningCheck)
+          : null;
       final scenarioInstructions = _buildScenarioMemberInstructions(
         step: step,
         disableContextualCorrection: skipContextualCorrection,
@@ -3026,10 +3068,10 @@ $finalLanguageRule''';
         recentConversation: recentConversation,
         reasoningEffort: reasoning.effort,
         // 🎧 [LISTENING] Step 2는 유저 말 바로 앞에 언어 규칙을 한 번 더 둔다.
-        trailingSystemNote: step == ListeningStep.step2
+        trailingSystemNote: meaningFinalNote ?? (step == ListeningStep.step2
             ? buildTargetLanguageFinalRule(
                 nativeLang: _nativeLangName(), targetLang: _targetLangName())
-            : null,
+            : null),
         onLog: (message) => _log('🧪 [AI-HTTP]', 'turn=$turnNumber $message'),
         onFinish: (finishReason) => aiFinishReason = finishReason,
       )) {
@@ -3142,12 +3184,12 @@ $finalLanguageRule''';
           userText: userKorean,
           recentConversation: recentConversation,
           reasoningEffort: 'low',
-          trailingSystemNote: step == ListeningStep.step2
+          trailingSystemNote: meaningFinalNote ?? (step == ListeningStep.step2
               ? buildTargetLanguageFinalRule(
                   nativeLang: _nativeLangName(),
                   targetLang: _targetLangName(),
                 )
-              : null,
+              : null),
         );
         if (!mounted ||
             !_isConversationActive ||
@@ -3165,7 +3207,9 @@ $finalLanguageRule''';
       // 🧭 [MEANING-CHECK] 답 대신 되묻기(①)나 확인(②)이 왔으면 내용에 답하지
       //   않는다. 유저 말풍선은 흐리게 남기고, 배울 언어로 말과 글자를 같이
       //   낸다. 질문 말풍선은 다음 대답이 들어오면 증발한다.
-      final meaningConfirm = meaningClarifyAttempt != null
+      // 작은 실수는 되묻기 없이 바로 확인(②)으로 올 수 있다.
+      final meaningConfirm =
+          (meaningClarifyAttempt != null || allowMeaningCheck)
           ? parseMeaningConfirm(aiKorean)
           : null;
       final meaningCheck = meaningConfirm == null &&
@@ -3174,7 +3218,11 @@ $finalLanguageRule''';
           : null;
       if (meaningConfirm != null || meaningCheck != null) {
         earlyUtterance?.cancel();
-        final question = meaningConfirm?.question ?? meaningCheck!.question;
+        // 확인 단계는 질문 뒤에 고친 문장을 같이 보이고 읽는다. 문장이 빠지면
+        //   "이 말이에요?"가 무엇을 가리키는지 알 수 없다(실기기, 2026-11-26).
+        final question = meaningConfirm != null
+            ? meaningConfirmLine(meaningConfirm)
+            : meaningCheck!.question;
         _pendingMeaningAttempt = meaningClarifyAttempt ?? userKorean.trim();
         _pendingMeaningSentence = meaningConfirm?.sentence;
         if (meaningClarifyAttempt == null) _meaningRounds = 0;

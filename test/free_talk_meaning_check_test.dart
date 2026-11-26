@@ -37,6 +37,8 @@ void main() {
           '[MEANING_CONFIRM]\nSo you want to say this?\n[SENTENCE]\n"I was late for the meeting."');
       expect(confirm!.question, 'So you want to say this?');
       expect(confirm.sentence, 'I was late for the meeting.');
+      expect(meaningConfirmLine(confirm),
+          'So you want to say this?\n"I was late for the meeting."');
     });
 
     test('문장이 없으면 null', () {
@@ -73,6 +75,43 @@ void main() {
               'No, I wanted to say that I was late for it.'),
           MeaningConfirmReply.other);
     });
+  });
+
+  group('직접 따라 말하기', () {
+    const sentence =
+        'Yesterday my boss called me to his office, and he said my report had many mistakes.';
+
+    test('제안 문장을 따라 말하면 교정 완료', () {
+      expect(
+          classifyMeaningConfirmReply(
+              'Um, yesterday my boss called me to his office and he said my report had many mistakes.',
+              sentence: sentence),
+          MeaningConfirmReply.repeated);
+    });
+
+    test('네만 하면 아직 아니다', () {
+      expect(classifyMeaningConfirmReply('Yes.', sentence: sentence),
+          MeaningConfirmReply.yes);
+    });
+
+    test('다른 설명은 새 설명', () {
+      expect(
+          classifyMeaningConfirmReply(
+              'No, I mean my boss was angry about the meeting time.',
+              sentence: sentence),
+          MeaningConfirmReply.other);
+    });
+
+    test('직접 말해 보라는 한 줄', () {
+      expect(meaningSayItLine('English'), 'Great. Now try saying it yourself.');
+    });
+  });
+
+  test('대답 대기 중 엉뚱한 언어 받아쓰기는 거른다', () {
+    expect(transcriptFitsLanguages('how to say わかこ家庭。', 'English', 'Korean'),
+        isFalse);
+    expect(transcriptFitsLanguages('Yes, 맞아요!', 'English', 'Korean'), isTrue);
+    expect(transcriptFitsLanguages('はい、そうです', 'English', 'Japanese'), isTrue);
   });
 
   test('메모는 문장을 한 줄로 담는다', () {
