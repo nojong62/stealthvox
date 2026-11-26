@@ -560,6 +560,14 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 🔧 틱 방식: 1초마다 활동 여부 확인. 튜터링/녹음/오디오 재생 중엔 카운터 0 유지.
   @override
   String get billingModeName => 'history';
+
+  /// 💰 [DRAFT-BILLING] 대화 직후 원문을 살피고 고치는 동안(검수 중)은
+  ///   차감하지 않는다. `최종 수정 완료`를 누른 순간부터 차감한다.
+  ///   이미 확정된 방(배울글이 나온 방)은 들어오자마자 차감한다.
+  bool _billingHeldForDraft = false;
+
+  @override
+  bool get isBillingEnabled => !_billingHeldForDraft;
   TalkUiCopy get _uiCopy => TalkUiCopy.forSystemLocale();
 
   @override
@@ -670,9 +678,24 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       // 🎙️ [VOICE-TIER] 입장 때는 묻지 않는다. 저장된 등급을 읽은 뒤 그
       //   배율로 시작한다(없으면 기본 배율, 고르는 순간 바뀐다).
       await _roomVoiceTierLoad;
-      if (mounted) {
-        startBillingRoom(rate: billingRateFor(VoiceTierSession.active));
+      // 💰 [DRAFT-BILLING] 검수 중인 방이면 확정 전까지 차감을 미룬다.
+      Map<String, dynamic>? roomData = _cachedRoomData;
+      if (roomData == null) {
+        try {
+          final snap = await widget.historyDoc.get();
+          final data = snap.data();
+          if (data is Map<String, dynamic>) roomData = data;
+        } catch (e) {
+          debugPrint('[DRAFT-BILLING] room read failed: $e');
+        }
       }
+      if (!mounted) return;
+      _billingHeldForDraft = historyEditAllowed(roomData);
+      if (_billingHeldForDraft) {
+        BillingTicker.instance.pause();
+        debugPrint('[DRAFT-BILLING] hold room=$_historyId');
+      }
+      startBillingRoom(rate: billingRateFor(VoiceTierSession.active));
     });
 
     _playerStateSub = audioPlayer.onPlayerStateChanged.listen((state) {
@@ -5440,6 +5463,12 @@ RULES — follow exactly:
       });
       debugPrint('[HISTORY-FINALIZE] room=${widget.historyDoc.id} '
           'msgs=${_cachedDocs.length}');
+      // 💰 [DRAFT-BILLING] 확정한 순간부터 차감한다.
+      if (_billingHeldForDraft) {
+        _billingHeldForDraft = false;
+        debugPrint('[DRAFT-BILLING] start room=$_historyId');
+        startBillingRoom(rate: billingRateFor(VoiceTierSession.active));
+      }
       // 여기서부터 생성이 열린다. 확정한 원문 하나만이 재료다.
       _scheduleMissingTargetGeneration(_cachedDocs);
       _showRoomEntryToast(_uiCopy['finalized']);
