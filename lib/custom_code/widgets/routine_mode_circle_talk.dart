@@ -4146,7 +4146,9 @@ $userFixPolicy$finalLanguageRule''';
       final ListeningStep step = _listeningStep;
       // 🧭 [MEANING-CHECK] Free Talk은 매 턴 뜻이 안 통하면 묻는다. 확인 중이거나
       //   확인된 문장을 처리하는 턴, 정정 재처리 턴에서는 다시 묻지 않는다.
-      final bool allowMeaningCheck = meaningCheckAllowed(
+      final bool allowMeaningCheck = (meaningClarifyAttempt != null ||
+              meaningCheckWorthIt(userOriginal)) &&
+          meaningCheckAllowed(
         freeTalk: _freeTalk,
         alreadyConfirmed: understandingConfirmed ||
             isCorrectionRetry ||

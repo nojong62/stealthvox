@@ -72,8 +72,13 @@ need new structures — just short pieces of what they already know.
   turn after turn, and don't reuse the same sentence start.
 - When they say something, react warmly and echo it back, keeping their own
   words and level.
+- The way to speak: short simple sentences first, linked into a chain of
+  thought with easy connectors (and, but, so, because, then). Longer sentences
+  come by themselves once the chain flows. Model this in your own speech.
 - When they get tangled in a long sentence, help them split it: "Say it in
   short pieces — who? what happened? then what?"
+- When they say two short sentences that belong together, show once how a
+  simple connector joins them ("I was tired, so I went home.").
 - When they don't know a word, praise any way of saying it around it with
   simple words.
 - Corrections: do not stop the talk or ask them to repeat. Say the corrected
@@ -177,6 +182,16 @@ List<String> usedSentenceStarts(List<String> aiLines) {
   }
   return out.length > 4 ? out.sublist(out.length - 4) : out;
 }
+
+/// 되묻기는 이만큼 말했을 때만. "um... sleep" 같은 몇 마디에 되물으면 다음
+/// 턴들이 모두 대답으로 묶여 "직접 말해 보세요"가 이어졌다(실기기, 2026-11-27).
+/// 짧은 말은 턴별 지시(문장 앞부분 주기)가 받는다.
+const int kMeaningCheckMinWords = 4;
+
+bool meaningCheckWorthIt(String userLine) =>
+    _wordCount(userLine) >= kMeaningCheckMinWords ||
+    // 띄어쓰기 없는 언어·한국어로 한 말은 낱말 수로 재지 않는다.
+    !RegExp(r'[A-Za-zÀ-ɏ]').hasMatch(userLine);
 
 /// 교정(직접 말하게 하는 단계)은 이 턴 수에 한 번까지. 뜻이 막히면 되묻기는 된다.
 const int kFreeTalkCorrectionEveryTurns = 2;
