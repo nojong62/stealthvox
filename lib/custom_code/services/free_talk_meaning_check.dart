@@ -103,14 +103,21 @@ word the speech recognizer clearly misheard.''';
 String buildMeaningCheckPolicy({required String spokenLang}) {
   // 교정 방식·HEARD_CONFIRM 구분·"섞지 마라"는 코치 원칙과 제어 형식 목록에
   //   이미 있어 뺐다(2026-11-27 프롬프트 줄이기). 이 블록은 Free Talk에서만 붙는다.
-  return '''• Meaning unclear — the words came through, but you cannot tell what the user
-meant (or it makes no sense here). Ordinary mistakes never stop the talk. Do
-NOT reply to the content this turn. Output exactly:
+  // 🪶 [FREE-TALK-EASY-WAY] 뜻이 안 잡히면 "이 뜻이에요?" 퀴즈 대신, 유저
+  //   단어로 쉽게 말하는 예를 한두 개 보여 주고 다시 해 보게 한다(실장님,
+  //   2026-11-28). 생각을 너무 정확히 하려다 막힌 사람이 쉬운 말로 풀어 가는
+  //   연습. 판단은 AI에게 맡긴다 — 낱말 수 같은 기준을 두지 않는다.
+  return '''• Meaning unclear — the user said a few words but you cannot tell what they
+want to say (often they are stuck trying to say a complex thought exactly).
+Words you can make sense of, even in a broken order, are NOT unclear — fix
+them with $kUserFixTag instead. Only when you truly cannot tell, do NOT
+reply to the content this turn. Output exactly:
 $kMeaningCheckTag
-<a very short, very easy $spokenLang question>
-The question connects to what they were saying, offers the one or two meanings
-you think they meant ("Do you mean ...? Or ...?"), and asks them to say it
-again — simplest words a beginner understands.''';
+<your short, warm $spokenLang help>
+In it: take their words as hints and show one or two very easy ways to say
+it in short simple sentences that use their words ("You can say: ..."), then
+invite them to try it in their own words. Simplest words a beginner
+understands; no quiz, no long explanation.''';
 }
 
 /// ② 유저가 되묻기에 대답한 턴에 붙는다. 뜻을 잡아 **바로 고쳐 잇는다**.
@@ -138,7 +145,7 @@ $kUserFixReplyTag
 The sentence keeps the user's own words wherever possible, adds no idea they
 did not mean, and fits this conversation. Do not ask them to repeat it. If you
 still cannot tell what they mean, output the $kMeaningCheckTag format instead
-with an even simpler question.''';
+with even easier example ways to say it.''';
 }
 
 /// 유저 말 바로 앞(맨 마지막)에 한 번 더 두는 교정 규칙. 긴 시스템 지시 속에
@@ -152,7 +159,7 @@ String? buildMeaningFinalNote({
     return '''FINAL RULE FOR THIS TURN: the user is explaining what they meant. Start with
 $kUserFixTag and what they wanted to say as one correct, natural $spokenLang
 sentence, then $kUserFixReplyTag and your normal reply. Do not ask them to repeat it.
-Only if you still cannot tell, output $kMeaningCheckTag with an even simpler question.''';
+Only if you still cannot tell, output $kMeaningCheckTag with even easier example ways to say it.''';
   }
   // 🩹 [FREE-TALK-LINE-FIX] 틀린 줄은 대답 앞에 [USER_FIX]로 고쳐 낸다.
   //   예전처럼 대답 속에서 고쳐 말하지 않는다 — 고친 줄이 화면에 나온다.
@@ -162,8 +169,9 @@ corrected (their own words, only what is wrong fixed — nothing added), then
 $kUserFixReplyTag and your reply. Do not repeat the correction in the reply.''';
   if (allowCheck) {
     return '''$fixRule
-Only if you truly cannot tell what they meant, output $kMeaningCheckTag with a
-very short, very easy $spokenLang question instead.''';
+Only if you truly cannot tell what they want to say, output $kMeaningCheckTag
+and show one or two very easy ways to say it with their words, then invite
+them to try again.''';
   }
   return fixRule;
 }
@@ -208,15 +216,10 @@ List<String> usedSentenceStarts(List<String> aiLines) {
   return out.length > 4 ? out.sublist(out.length - 4) : out;
 }
 
-/// 되묻기는 이만큼 말했을 때만. "um... sleep" 같은 몇 마디에 되물으면 다음
-/// 턴들이 모두 대답으로 묶여 "직접 말해 보세요"가 이어졌다(실기기, 2026-11-27).
-/// 짧은 말은 턴별 지시(문장 앞부분 주기)가 받는다.
-const int kMeaningCheckMinWords = 4;
-
-bool meaningCheckWorthIt(String userLine) =>
-    _wordCount(userLine) >= kMeaningCheckMinWords ||
-    // 띄어쓰기 없는 언어·한국어로 한 말은 낱말 수로 재지 않는다.
-    !RegExp(r'[A-Za-zÀ-ɏ]').hasMatch(userLine);
+/// 🪶 [FREE-TALK-EASY-WAY] 몇 마디만 하고 막힌 말도 뜻이 안 잡히면 쉬운 예를
+/// 보여 준다. 예전 4낱말 기준은 "직접 말해 보세요" 반복 때문이었는데, 이제
+/// 대답 턴은 바로 고쳐 잇는다. 뜻이 잡히는지는 AI가 판단한다(실장님, 2026-11-28).
+bool meaningCheckWorthIt(String userLine) => userLine.trim().isNotEmpty;
 
 /// 교정(직접 말하게 하는 단계)은 이 턴 수에 한 번까지. 뜻이 막히면 되묻기는 된다.
 const int kFreeTalkCorrectionEveryTurns = 2;
@@ -254,17 +257,12 @@ String buildFreeTalkTurnNote({
     else
       _kFreeTalkLevelAmount[level - 1],
   ];
-  final stuck = userLines.length >= 2 &&
-      userLines.sublist(userLines.length - 2).every((u) => _wordCount(u) < 4);
+  // 🪶 [FREE-TALK-EASY-WAY] 몇 마디에 막힌 경우는 낱말 수로 정하지 않는다 —
+  //   뜻이 잡히면 [USER_FIX], 안 잡히면 AI가 쉬운 예를 보여 준다(되묻기 규칙).
   final keywordStyle = '...'.allMatches(last).length +
           '…'.allMatches(last).length >=
       3;
-  if (stuck) {
-    final used = usedSentenceStarts(aiLines);
-    notes.add(
-        'The user is stuck at a few words. Do not ask a question this turn: start a sentence about THEIR life with "you" and let them finish it.'
-        '${used.isEmpty ? '' : ' Use a new one with a different shape — not like these you already gave: ${used.map((u) => '"$u"').join(', ')}. You may also ask about a new detail instead.'}');
-  } else if (keywordStyle) {
+  if (keywordStyle) {
     notes.add(
         'The user is speaking in keywords. Fix their line into one simple sentence from their own words with $kUserFixTag, then keep the talk going.');
   }

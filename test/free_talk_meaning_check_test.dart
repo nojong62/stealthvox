@@ -148,18 +148,14 @@ void main() {
           contains('The user is leading'));
     });
 
-    test('두 턴 연속 몇 단어면 문장 앞부분을 준다', () {
+    test('몇 단어에 막혀도 낱말 수로 정하지 않고, 짧은 말도 쉬운 예 보여 주기 대상', () {
       final note = buildFreeTalkTurnNote(
           userLines: ['um... sleep', 'Saturday'], spokenLang: 'English');
-      expect(note, contains('stuck at a few words'));
-    });
-
-    test('이미 준 문장 앞부분은 다시 쓰지 말라고 알려 준다', () {
-      final note = buildFreeTalkTurnNote(
-          userLines: ['um... yes', 'um... sleep'],
-          spokenLang: 'English',
-          aiLines: ['That sounds stressful. You can say, “My boss was angry. I felt…']);
-      expect(note, contains('"I felt"'));
+      expect(note, isNot(contains('stuck at a few words')));
+      expect(meaningCheckWorthIt('um... sleep'), isTrue);
+      expect(meaningCheckWorthIt('  '), isFalse);
+      expect(buildMeaningCheckPolicy(spokenLang: 'English'),
+          contains('one or two very easy ways'));
     });
 
     test('그만 고치라고 했으면 끝까지 말로 교정하지 않는다(줄 고치기는 조용히 남는다)', () {
