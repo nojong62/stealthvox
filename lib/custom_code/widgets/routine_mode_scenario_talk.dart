@@ -90,6 +90,7 @@ import '/custom_code/services/tts_model_policy.dart';
 import '/custom_code/services/voice_ids.dart';
 import '/custom_code/services/user_line_fix.dart';
 import '/custom_code/services/free_talk_meaning_check.dart';
+import '/custom_code/services/free_talk_prompt.dart';
 import '/custom_code/services/transcript_text_clean.dart';
 import '/custom_code/services/short_reply_gate.dart';
 import 'first_utterance_context_judge.dart'; // 3모드 공통 응답 길이 규칙
@@ -715,6 +716,56 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
     final String finalLanguageRule = step2
         ? '\n${buildTargetLanguageFinalRule(nativeLang: nativeLang, targetLang: targetLang)}\n'
         : '';
+    final String correctionPolicy = _kContextualCorrectionEnabled && !disableContextualCorrection ? '''
+[CORRECTION REPLACEMENT — CHECK BEFORE ANSWERING]
+Use the recent scene dialogue as evidence. If the latest user line explicitly
+rejects or corrects how their OWN immediately previous line was understood, and
+also supplies the replacement meaning, do not answer in character yet. Output
+exactly four lines:
+[CORRECTION]
+<the replacement meaning as one natural standalone line in $nativeLang>
+[REPLY]
+<the brief in-character reply to that replacement meaning in $replyLang>
+
+Remove framing such as "아니", "내 말은", "그게 아니라", "I mean", or
+"what I said was". For reported questions, restore the direct question.
+Do NOT use this control for an ordinary in-character no/refusal, a new detail, a
+change of mind, a correction of the character's factual claim, or dissatisfaction
+with the character's reply. If there is no replacement content, continue normally.
+''' : disableContextualCorrection ? '''
+[NORMAL REPLY RECOVERY]
+A prior correction-control response was incomplete. Reply to the user's latest
+line normally and briefly in character. Do not output brackets, control labels,
+or a correction format.
+''' : '';
+    // 🧭 [FREE-TALK-PROMPT] Free Talk Step 1은 시나리오 프롬프트 위에 코치를
+    //   얹지 않고 전용 짧은 프롬프트 하나만 쓴다(`free_talk_prompt.dart`).
+    //   "너는 코치가 아니다"와 "너는 코치다"가 부딪치던 자리다.
+    if (_freeTalk && !step2) {
+      return buildFreeTalkSystemPrompt(
+        identity: freeTalkScenarioIdentity(
+          situation: _scenarioSituation.trim(),
+          partnerLabel: _scenarioPartnerLabel.trim(),
+          userLabel: _scenarioUserLabel.trim(),
+        ),
+        spokenLang: nativeLang,
+        registerPolicy: registerPolicy,
+        garbledSignal: FreeTalkGarbledSignal.retry,
+        earlierSummary: _rolloverSummary,
+        extraBlocks: <String>[
+          correctionPolicy.trim(),
+          if (allowMeaningCheck) buildMeaningCheckPolicy(spokenLang: nativeLang),
+          if (meaningClarifyAttempt != null)
+            buildMeaningClarifyNote(
+                spokenLang: nativeLang,
+                chatLang: targetLang,
+                attempt: meaningClarifyAttempt),
+          if (meaningResolvedSentence != null)
+            buildMeaningResolvedNote(
+                spokenLang: nativeLang, sentence: meaningResolvedSentence),
+        ],
+      );
+    }
     return '''
 You are the assigned character inside a live $nativeLang scenario conversation.
 Situation: ${_scenarioSituation.trim()}
@@ -747,28 +798,7 @@ $registerPolicy
 $kSpokenReplyLengthPolicy
 - In character, this means answering like a real person in that situation would: briefly.
 
-${_kContextualCorrectionEnabled && !disableContextualCorrection ? '''
-[CORRECTION REPLACEMENT — CHECK BEFORE ANSWERING]
-Use the recent scene dialogue as evidence. If the latest user line explicitly
-rejects or corrects how their OWN immediately previous line was understood, and
-also supplies the replacement meaning, do not answer in character yet. Output
-exactly four lines:
-[CORRECTION]
-<the replacement meaning as one natural standalone line in $nativeLang>
-[REPLY]
-<the brief in-character reply to that replacement meaning in $replyLang>
-
-Remove framing such as "아니", "내 말은", "그게 아니라", "I mean", or
-"what I said was". For reported questions, restore the direct question.
-Do NOT use this control for an ordinary in-character no/refusal, a new detail, a
-change of mind, a correction of the character's factual claim, or dissatisfaction
-with the character's reply. If there is no replacement content, continue normally.
-''' : disableContextualCorrection ? '''
-[NORMAL REPLY RECOVERY]
-A prior correction-control response was incomplete. Reply to the user's latest
-line normally and briefly in character. Do not output brackets, control labels,
-or a correction format.
-''' : ''}
+$correctionPolicy
 
 [UNCLEAR TRANSCRIPT]
 What you receive is speech-recognition output, not typed text, so it can contain
@@ -3011,20 +3041,8 @@ $finalLanguageRule''';
         .firstOrNull;
     final usedPreviousUserFix = _previousTurnHadUserFix;
     _previousTurnHadUserFix = false;
-    final reasoning = selectDialogBrainReasoning(
-      userText: userKorean,
-      previousAssistantText: previousAssistantText ?? '',
-      hasConversationContext: recentConversation.trim().isNotEmpty,
-      isCorrectionRetry: isCorrectionRetry,
-      hasSttCorrectionContext: hasSttCorrectionContext,
-      previousTurnHadUserFix: usedPreviousUserFix,
-      isStep2: step == ListeningStep.step2,
-      freeTalk: _freeTalk,
-    );
-    _log(
-      '[DIALOG-REASONING]',
-      'mode=Scenario reasoning=${reasoning.effort} reason=${reasoning.reason}',
-    );
+    // 추론 강도는 Free Talk 교정 판단(allowMeaningCheck·correctionCapped)이
+    //   정해진 뒤 try 안에서 고른다.
     // 되묻기가 나오면 이 말풍선을 도로 걷어내야 하므로 참조를 들고 간다.
     // 🔁 [LATE-CONTINUATION] id도 같이 박는다. 이어 말하기로 문장이 자라면
     //   새 말풍선을 만들지 않고 이 id로 찾아 글자만 바꾼다.
@@ -3099,6 +3117,25 @@ $finalLanguageRule''';
           .join('\n\n');
       final String? meaningFinalNote =
           _freeTalk && joinedNote.isNotEmpty ? joinedNote : null;
+      final reasoning = selectDialogBrainReasoning(
+        userText: userKorean,
+        previousAssistantText: previousAssistantText ?? '',
+        hasConversationContext: recentConversation.trim().isNotEmpty,
+        isCorrectionRetry: isCorrectionRetry,
+        hasSttCorrectionContext: hasSttCorrectionContext,
+        previousTurnHadUserFix: usedPreviousUserFix,
+        isStep2: step == ListeningStep.step2,
+        freeTalk: _freeTalk,
+        freeTalkJudgment: meaningClarifyAttempt != null ||
+            (allowMeaningCheck && !correctionCapped),
+      );
+      _log(
+        '[DIALOG-REASONING]',
+        'mode=Scenario reasoning=${reasoning.effort} reason=${reasoning.reason}'
+            '${_freeTalk ? ' allowCheck=$allowMeaningCheck capped=$correctionCapped '
+                'clarify=${meaningClarifyAttempt != null} '
+                'confirmed=$understandingConfirmed resolved=${meaningAttempt != null}' : ''}',
+      );
       final scenarioInstructions = _buildScenarioMemberInstructions(
         step: step,
         disableContextualCorrection: skipContextualCorrection,
@@ -3210,6 +3247,16 @@ $finalLanguageRule''';
               'step=${step.value} ttftMs=${firstTokenMs ?? -1} '
               'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiKorean.length} '
               'text="${aiKorean.replaceAll(RegExp(r'\s+'), ' ')}"');
+      // 📏 [LENGTH-TRIM] 예산에 걸려 끊긴 꼬리는 마지막 완성 문장까지만 쓴다.
+      //   첫 문장 TTS는 이미 완성 문장이라 앞부분은 그대로 남는다.
+      if (aiFinishReason == 'length' && aiKorean.isNotEmpty) {
+        final trimmed = trimToLastCompleteSentence(aiKorean);
+        if (trimmed != aiKorean) {
+          _log('📏 [LENGTH-TRIM]',
+              'turn=$turnNumber ${aiKorean.length}→${trimmed.length}');
+          aiKorean = trimmed;
+        }
+      }
       // reasoning이 256 completion 예산을 모두 쓰고 대사를 한 글자도
       // 내보내지 못한 경우만 한 번 재시도한다. 이미 일부 문장이
       // 화면이나 TTS로 나간 length 응답은 중복 대사를 막기 위해 재시도하지 않는다.
@@ -6685,7 +6732,8 @@ Return only the line itself.'''
               'reasoning_effort': reasoningEffort,
               // 256은 실시간 대화에서 reasoning이 전부 쓸 수 있다.
               // 스트리밍 첫 시도가 0자일 때의 단 한 번 복구 호출이다.
-              'max_completion_tokens': 512,
+              // 512도 Free Talk medium 추론이 다 써서 대사가 잘렸다(2026-11-27).
+              'max_completion_tokens': 1024,
               'messages': <Map<String, String>>[
                 <String, String>{'role': 'system', 'content': instructions},
                 if (recentConversation.trim().isNotEmpty)
@@ -6757,7 +6805,8 @@ Return only the line itself.'''
         'stream': true,
         // Reasoning tokens share this budget. Circle Talk과 같은 모델이
         // 256을 전부 쓰고 0자를 반환한 실기기 결과를 반영한다.
-        'max_completion_tokens': 512,
+        // 512도 Free Talk medium 추론이 다 써서 대사가 잘렸다(2026-11-27).
+        'max_completion_tokens': 1024,
         // 📏 마지막 SSE 조각에 choices가 비고 usage만 실려 온다.
         'stream_options': <String, dynamic>{'include_usage': true},
         'messages': <Map<String, String>>[

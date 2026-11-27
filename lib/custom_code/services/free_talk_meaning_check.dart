@@ -99,26 +99,16 @@ word the speech recognizer clearly misheard.''';
 /// 서클 멤버 시스템 프롬프트에 붙는 교정 형식. 교정이 허용된 턴에만 붙인다.
 /// 형식은 고를 수 있을 뿐 강제가 아니다 — 대부분의 턴은 평소 답변이다.
 String buildMeaningCheckPolicy({required String spokenLang}) {
-  return '''[ASK-BACK FORMAT — ONLY WHEN THE MEANING IS UNCLEAR]
-Ordinary mistakes never stop the talk: reply normally and say the corrected
-version once inside your reply. Stop only when you cannot tell what the user
-meant (or the line makes no sense here). Then do NOT reply to the content in
-this turn. Output exactly:
+  // 교정 방식·HEARD_CONFIRM 구분·"섞지 마라"는 코치 원칙과 제어 형식 목록에
+  //   이미 있어 뺐다(2026-11-27 프롬프트 줄이기). 이 블록은 Free Talk에서만 붙는다.
+  return '''• Meaning unclear — the words came through, but you cannot tell what the user
+meant (or it makes no sense here). Ordinary mistakes never stop the talk. Do
+NOT reply to the content this turn. Output exactly:
 $kMeaningCheckTag
 <a very short, very easy $spokenLang question>
-The question connects to what the user was saying, offers the one or two
-meanings you think they meant ("Do you mean ...? Or ...?"), and asks them to say
-it again.
-
-Rules:
-- Use the simplest words and short sentences a beginner understands.
-- The corrected sentence keeps the user's own words, meaning and sentence shape
-  wherever possible; change only what is wrong. It is the simplest correct
-  version, never a fancier native rewrite. If the user got tangled in a long
-  line, it may be two short sentences.
-- Keep the ask-back confirmation (HEARD_CONFIRM) for a garbled transcript only
-  (non-words, a sentence cut off mid-way).
-- Never combine these with any other control format.''';
+The question connects to what they were saying, offers the one or two meanings
+you think they meant ("Do you mean ...? Or ...?"), and asks them to say it
+again — simplest words a beginner understands.''';
 }
 
 /// ② 유저가 되묻기에 대답한 턴에 붙는다. 뜻을 잡아 한 번 더 확인하게 한다.

@@ -58,12 +58,15 @@ DialogBrainReasoningDecision selectDialogBrainReasoning({
   bool hasSttCorrectionContext = false,
   bool previousTurnHadUserFix = false,
   bool isStep2 = false,
-  // 🧭 Free Talk은 강사 판단(교정할지, 얼마나 말할지)이 매 턴이라 언제나
-  //   medium이다(실장님, 2026-11-27).
+  // 🧭 Free Talk은 강사 판단(교정할지, 뜻 확인)이 걸린 턴만 medium이다.
+  //   예전엔 매 턴 medium이었는데 512 예산을 추론이 다 써서 대사가 0자이거나
+  //   단어 중간에 잘리고 첫 소리까지 12초가 걸렸다(실기기, 2026-11-27).
+  //   나머지 턴은 아래 일반 규칙(정정·문맥 참조 등)을 그대로 탄다.
   bool freeTalk = false,
+  bool freeTalkJudgment = false,
 }) {
-  if (freeTalk) {
-    return const DialogBrainReasoningDecision('medium', 'free_talk');
+  if (freeTalk && freeTalkJudgment) {
+    return const DialogBrainReasoningDecision('medium', 'free_talk_judgment');
   }
   final text = userText.trim().toLowerCase();
   final previous = previousAssistantText.trim().toLowerCase();
@@ -217,3 +220,15 @@ final RegExp _kOtherLangMeaningQuestion = RegExp(
   caseSensitive: false,
   unicode: true,
 );
+
+/// 📏 [LENGTH-TRIM] `finish_reason=length`로 끊긴 대사를 마지막 완성 문장까지만
+/// 남긴다. "At our last alumni get"처럼 단어 중간에 끊긴 꼬리를 화면·TTS에
+/// 내보내지 않기 위해서다(실기기, 2026-11-27). 완성 문장이 하나도 없으면
+/// 아무것도 안 나가는 것보다 낫기 때문에 그대로 돌려준다.
+String trimToLastCompleteSentence(String text) {
+  final matches =
+      RegExp(r'[.!?。！？…]+["”’)\]]*(?=\s|$)').allMatches(text).toList();
+  if (matches.isEmpty) return text;
+  final cut = text.substring(0, matches.last.end).trimRight();
+  return cut.isEmpty ? text : cut;
+}

@@ -81,6 +81,7 @@ import '/custom_code/services/conversation_cancel_command.dart';
 import '/custom_code/services/circle_correction_intent.dart'
     as correction_intent;
 import '/custom_code/services/free_talk_meaning_check.dart';
+import '/custom_code/services/free_talk_prompt.dart';
 import 'deepgram_confidence_probe.dart';
 import 'first_utterance_context_judge.dart';
 import 'origin_language_recheck_dialog.dart';
@@ -1753,6 +1754,36 @@ the subject, introduced a new fact, spoke briefly, or expressed an unusual view.
     final String finalLanguageRule = step2
         ? '\n\n${buildTargetLanguageFinalRule(nativeLang: _nativeLangName(), targetLang: targetLang)}'
         : '';
+    // 🧭 [FREE-TALK-PROMPT] Free Talk Step 1은 멤버/리스너 프롬프트 위에 코치를
+    //   얹지 않고 전용 짧은 프롬프트 하나만 쓴다(`free_talk_prompt.dart`).
+    if (_freeTalk && !step2) {
+      return buildFreeTalkSystemPrompt(
+        identity: widget.userOpens
+            ? kFreeTalkListenerIdentity
+            : freeTalkCircleMemberIdentity(
+                circle.isEmpty ? 'a relaxed everyday-chat community' : circle),
+        spokenLang: _nativeLangName(),
+        registerPolicy: koreanRegisterPolicy,
+        garbledSignal: disableHeardConfirmation
+            ? FreeTalkGarbledSignal.heardConfirmDisabled
+            : FreeTalkGarbledSignal.heardConfirm,
+        earlierSummary: _rolloverSummary,
+        voiceNote: _voiceCharacterInstruction(_aiVoice),
+        extraBlocks: <String>[
+          if (allowMeaningCheck)
+            buildMeaningCheckPolicy(spokenLang: _nativeLangName()),
+          if (meaningClarifyAttempt != null)
+            buildMeaningClarifyNote(
+                spokenLang: _nativeLangName(),
+                chatLang: _targetLangName(),
+                attempt: meaningClarifyAttempt),
+          if (meaningResolvedSentence != null)
+            buildMeaningResolvedNote(
+                spokenLang: _nativeLangName(),
+                sentence: meaningResolvedSentence),
+        ],
+      );
+    }
     if (widget.userOpens) {
       return _buildListenerInstructions(
         outputLanguagePolicy: outputLanguagePolicy,
@@ -4213,10 +4244,15 @@ $userFixPolicy$finalLanguageRule''';
         previousTurnHadUserFix: usedPreviousUserFix,
         isStep2: step == ListeningStep.step2,
         freeTalk: _freeTalk,
+        freeTalkJudgment: meaningClarifyAttempt != null ||
+            (allowMeaningCheck && !correctionCapped),
       );
       _log(
         '[DIALOG-REASONING]',
-        'mode=Circle reasoning=${reasoning.effort} reason=${reasoning.reason}',
+        'mode=Circle reasoning=${reasoning.effort} reason=${reasoning.reason}'
+            '${_freeTalk ? ' allowCheck=$allowMeaningCheck capped=$correctionCapped '
+                'clarify=${meaningClarifyAttempt != null} '
+                'confirmed=$understandingConfirmed' : ''}',
       );
 
       await for (final delta in UnifiedBrain.streamCircleMemberTurn(
@@ -4279,6 +4315,15 @@ $userFixPolicy$finalLanguageRule''';
               'step=${step.value} '
               'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiOriginal.length} '
               'text="${aiOriginal.replaceAll(RegExp(r'\s+'), ' ')}"');
+      // 📏 [LENGTH-TRIM] 예산에 걸려 끊긴 꼬리는 마지막 완성 문장까지만 쓴다.
+      if (aiFinishReason == 'length' && aiOriginal.isNotEmpty) {
+        final trimmed = trimToLastCompleteSentence(aiOriginal);
+        if (trimmed != aiOriginal) {
+          _log('📏 [LENGTH-TRIM]',
+              'turn=$currentTurnId ${aiOriginal.length}→${trimmed.length}');
+          aiOriginal = trimmed;
+        }
+      }
       // reasoning 토큰이 completion 예산을 모두 써 버리면 HTTP 200이어도
       // 사용자에게 보낼 글자는 0이 될 수 있다. 이를 그냥 예외로 끝내면
       // 앱은 다시 듣기만 시작해 사용자에게는 AI가 대답을 깜빡한 것처럼
@@ -7487,7 +7532,8 @@ Return only the line itself.'''
         'reasoning_effort': reasoningEffort,
         // Reasoning tokens share this budget. 256 still reached `length` with
         // zero spoken characters on real Circle Talk turns (2026-10-09).
-        'max_completion_tokens': 512,
+        // 512도 Free Talk medium 추론이 다 써서 대사가 잘렸다(2026-11-27).
+        'max_completion_tokens': 1024,
         'stream': true,
         // 📏 입력 토큰을 추측하지 않고 서버가 센 값을 받는다. 프롬프트를 줄여
         //   첫 토큰이 빨라지는지 보려면 이 숫자가 기준선이어야 한다.
@@ -7599,7 +7645,8 @@ Return only the line itself.'''
               'reasoning_effort': reasoningEffort,
               // 스트리밍 첫 시도가 비었을 때의 단 한 번 복구 호출.
               // 추론이 답변 공간을 다 쓰지 않도록 같은 예산을 보장한다.
-              'max_completion_tokens': 512,
+              // 512도 Free Talk medium 추론이 다 써서 대사가 잘렸다(2026-11-27).
+              'max_completion_tokens': 1024,
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',
