@@ -531,6 +531,8 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   // 🧭 [FREE-TALK-COACH] 이번 방의 유저 줄(턴별 한 줄 지시의 근거)과
   //   마지막으로 교정 단계를 낸 유저 턴 번호(교정 간격 제한).
   final List<String> _freeTalkUserLines = <String>[];
+  // 🪜 [FREE-TALK-LEVEL] 같은 순서로, 그 줄을 AI가 [USER_FIX]로 고쳤는지.
+  final List<bool> _freeTalkLineFixed = <bool>[];
   int _lastFreeTalkCorrectionAt = -100;
   bool _freeTalkNoCorrection = false;
   // 기다리는 동안 받아쓰기를 자동 감지로 돌려 두었는가.
@@ -4191,6 +4193,7 @@ $userFixPolicy$finalLanguageRule''';
       final int freeTalkTurn = _freeTalkUserLines.length;
       if (_freeTalk && meaningAttempt == null && meaningClarifyAttempt == null) {
         _freeTalkUserLines.add(userOriginal.trim());
+        _freeTalkLineFixed.add(false);
         // "그만 고쳐/just talk"는 이 방 끝까지 지킨다. 프롬프트만으로는 몇 턴
         //   뒤 다시 고쳤다(PC 실험, 2026-11-27).
         if (isMeaningSkipReply(userOriginal)) _freeTalkNoCorrection = true;
@@ -4204,12 +4207,12 @@ $userFixPolicy$finalLanguageRule''';
           ? buildMeaningFinalNote(
               spokenLang: _nativeLangName(),
               clarifying: meaningClarifyAttempt != null,
-              allowCheck: allowMeaningCheck,
-              checkOnly: correctionCapped)
+              allowCheck: allowMeaningCheck)
           : null;
       final String coachNote = _freeTalk && meaningClarifyAttempt == null
           ? buildFreeTalkTurnNote(
               userLines: _freeTalkUserLines,
+              fixedLines: _freeTalkLineFixed,
               spokenLang: _nativeLangName(),
               aiLines: _recentHistory
                   .where((turn) => turn['role'] == 'assistant')
@@ -4252,6 +4255,7 @@ $userFixPolicy$finalLanguageRule''';
         'mode=Circle reasoning=${reasoning.effort} reason=${reasoning.reason}'
             '${_freeTalk ? ' allowCheck=$allowMeaningCheck capped=$correctionCapped '
                 'clarify=${meaningClarifyAttempt != null} '
+                'level=${freeTalkLearnerLevel(_freeTalkUserLines, fixedLines: _freeTalkLineFixed)} '
                 'confirmed=$understandingConfirmed' : ''}',
       );
 
@@ -4476,13 +4480,27 @@ $userFixPolicy$finalLanguageRule''';
       if (userFix != null) {
         aiOriginal = userFix.reply;
         // 🎟️ 타이핑한 줄은 잘못 들린 게 아니다. 고쳐 쓰지 않는다.
-        if (!_typedTurn &&
-            userLineFixIsPlausible(
-            original: userOriginal, fixed: userFix.userLine)) {
+        //   🩹 [FREE-TALK-LINE-FIX] Free Talk은 학습자 실수를 고치는 것이라
+        //   타이핑한 줄도 고치고, 조각을 문장으로 세우는 것도 받는다.
+        //   뜻을 되물은 뒤의 대답 턴은 설명(대화언어일 수도 있다)에서 하려던
+        //   말을 세운 것이라 낱말 대조 없이 받는다.
+        final bool clarifiedFix = _freeTalk && meaningClarifyAttempt != null;
+        if (clarifiedFix ||
+            ((_freeTalk || !_typedTurn) &&
+                (_freeTalk
+                    ? learnerLineFixIsPlausible(
+                        original: userOriginal, fixed: userFix.userLine)
+                    : userLineFixIsPlausible(
+                        original: userOriginal, fixed: userFix.userLine)))) {
           _log('🩹 [USER-FIX]',
-              'turn=$currentTurnId "$userOriginal" → "${userFix.userLine}"');
-          sttText = userOriginal;
+              'turn=$currentTurnId ${clarifiedFix ? 'clarified ' : ''}'
+                  '"$userOriginal" → "${userFix.userLine}"');
+          // 처음 하려던 말을 남긴다 — 대답(설명)보다 그쪽이 연습 근거다.
+          sttText = clarifiedFix ? meaningClarifyAttempt : userOriginal;
           userOriginal = userFix.userLine;
+          if (_freeTalk && _freeTalkLineFixed.isNotEmpty) {
+            _freeTalkLineFixed[_freeTalkLineFixed.length - 1] = true;
+          }
           _previousTurnHadUserFix = true;
           if (mounted) {
             setState(() {

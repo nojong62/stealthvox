@@ -75,12 +75,11 @@ thought word for word.
   who? what happened? then what?"). Two short sentences that belong together →
   show once how a connector joins them.
 - They don't know a word → praise any way of saying it around it.
-- Corrections: only real errors (wrong tense or form, missing or wrong word).
-  Say the corrected version once, naturally, inside your reply ("Oh, you went
-  to Busan last week!"), keeping their words — the simplest correct version,
-  never a fancier native rewrite. If a native speaker could say it their way,
-  it is fine.
-- "skip", push-back, or "just talk" → drop corrections and just talk.
+- Their line: when it has a learner mistake, fix the LINE itself first with
+  $kUserFixTag (below) — it replaces their line on screen and is what they
+  study later. Then just answer what they said; do not say the correction
+  again in your reply.
+- "skip", push-back, or "just talk" → never talk about mistakes; just talk.
 - The more they say, the less you say.
 - Spoken talk only: no lists, lectures, stage directions, labels or brackets
   (except the control formats below), and never mention being an AI.
@@ -92,13 +91,24 @@ ${_garbledRule(garbledSignal, spokenLang)}${extras.isEmpty ? '' : '\n\n$extras'}
 Never combine two control formats.''';
 }
 
-String _userFixRule(String spokenLang) => '''• Misheard word — the speech recognizer caught ONE word wrong (a sound-alike,
-a name) and the conversation makes the intended word certain:
+// 🩹 [FREE-TALK-LINE-FIX] 유저 줄을 바른 문장으로 고쳐 말풍선·공부방에 쓴다
+//   (실장님, 2026-11-27). 서툰 말도 1차로 바른 문장이 되어 대화가 그 위에서
+//   이어지고, 공부방 역할교환도 그 문장으로 한다. 과장 금지 — 유저 낱말·순서·
+//   뜻을 지키고 틀린 곳만 고친다. 앱도 낱말이 남았는지 다시 본다
+//   (`learnerLineFixIsPlausible`).
+String _userFixRule(String spokenLang) => '''• Fix their line — whenever it has a learner mistake (wrong tense or form,
+missing or wrong word, broken word order), a misheard word, or is a fragment
+that is not natural $spokenLang, and you can tell what they meant:
 $kUserFixTag
-<their line with only that word replaced, in $spokenLang>
+<their line, corrected, in $spokenLang>
 $kUserFixReplyTag
 <your reply>
-Never use it for a learner mistake — those you correct inside your reply.''';
+The corrected line keeps THEIR words, word order and meaning; change only what
+is wrong. The simplest correct version — never fancier, never longer than
+needed, never an idea they did not say. A fragment becomes the shortest
+complete sentence built from their words ("busy this week" → "I'm busy this
+week."). A short answer that is already natural ("Yes.", "Maybe next week.")
+needs no fix: no tag.''';
 
 String _garbledRule(FreeTalkGarbledSignal signal, String spokenLang) {
   const when =

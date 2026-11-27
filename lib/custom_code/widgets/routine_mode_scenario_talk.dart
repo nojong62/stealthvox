@@ -180,6 +180,8 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   // 🧭 [FREE-TALK-COACH] 이번 방의 유저 줄(턴별 한 줄 지시의 근거)과
   //   마지막으로 교정 단계를 낸 유저 턴 번호(교정 간격 제한).
   final List<String> _freeTalkUserLines = <String>[];
+  // 🪜 [FREE-TALK-LEVEL] 같은 순서로, 그 줄을 AI가 [USER_FIX]로 고쳤는지.
+  final List<bool> _freeTalkLineFixed = <bool>[];
   int _lastFreeTalkCorrectionAt = -100;
   bool _freeTalkNoCorrection = false;
   // 기다리는 동안 받아쓰기를 자동 감지로 돌려 두었는가.
@@ -3086,6 +3088,7 @@ $finalLanguageRule''';
       final int freeTalkTurn = _freeTalkUserLines.length;
       if (_freeTalk && meaningAttempt == null && meaningClarifyAttempt == null) {
         _freeTalkUserLines.add(userKorean.trim());
+        _freeTalkLineFixed.add(false);
         // "그만 고쳐/just talk"는 이 방 끝까지 지킨다.
         if (isMeaningSkipReply(userKorean)) _freeTalkNoCorrection = true;
       }
@@ -3098,12 +3101,12 @@ $finalLanguageRule''';
           ? buildMeaningFinalNote(
               spokenLang: _nativeLangName(),
               clarifying: meaningClarifyAttempt != null,
-              allowCheck: allowMeaningCheck,
-              checkOnly: correctionCapped)
+              allowCheck: allowMeaningCheck)
           : null;
       final String coachNote = _freeTalk && meaningClarifyAttempt == null
           ? buildFreeTalkTurnNote(
               userLines: _freeTalkUserLines,
+              fixedLines: _freeTalkLineFixed,
               spokenLang: _nativeLangName(),
               aiLines: _localMessages
                   .where((m) => m['role'] == 'SYSTEM')
@@ -3133,6 +3136,7 @@ $finalLanguageRule''';
         'mode=Scenario reasoning=${reasoning.effort} reason=${reasoning.reason}'
             '${_freeTalk ? ' allowCheck=$allowMeaningCheck capped=$correctionCapped '
                 'clarify=${meaningClarifyAttempt != null} '
+                'level=${freeTalkLearnerLevel(_freeTalkUserLines, fixedLines: _freeTalkLineFixed)} '
                 'confirmed=$understandingConfirmed resolved=${meaningAttempt != null}' : ''}',
       );
       final scenarioInstructions = _buildScenarioMemberInstructions(
@@ -3358,12 +3362,26 @@ $finalLanguageRule''';
       final userFix = parseUserLineFix(aiKorean);
       if (userFix != null) {
         aiKorean = userFix.reply;
-        if (userLineFixIsPlausible(
-            original: userKorean, fixed: userFix.userLine)) {
+        // 🩹 [FREE-TALK-LINE-FIX] Free Talk은 학습자 실수를 고친 줄이라 조각을
+        //   문장으로 세우는 것도 받는다(유저 낱말이 남았는지로 본다).
+        //   뜻을 되물은 뒤의 대답 턴은 설명(대화언어일 수도 있다)에서 하려던
+        //   말을 세운 것이라 낱말 대조 없이 받는다.
+        final bool clarifiedFix = _freeTalk && meaningClarifyAttempt != null;
+        if (clarifiedFix ||
+            (_freeTalk
+                ? learnerLineFixIsPlausible(
+                    original: userKorean, fixed: userFix.userLine)
+                : userLineFixIsPlausible(
+                    original: userKorean, fixed: userFix.userLine))) {
           _log('🩹 [USER-FIX]',
-              'turn=$turnNumber "$userKorean" → "${userFix.userLine}"');
-          sttText = userKorean;
+              'turn=$turnNumber ${clarifiedFix ? 'clarified ' : ''}'
+                  '"$userKorean" → "${userFix.userLine}"');
+          // 처음 하려던 말을 남긴다 — 대답(설명)보다 그쪽이 연습 근거다.
+          sttText = clarifiedFix ? meaningClarifyAttempt : userKorean;
           userKorean = userFix.userLine;
+          if (_freeTalk && _freeTalkLineFixed.isNotEmpty) {
+            _freeTalkLineFixed[_freeTalkLineFixed.length - 1] = true;
+          }
           _previousTurnHadUserFix = true;
           if (mounted) {
             setState(() {

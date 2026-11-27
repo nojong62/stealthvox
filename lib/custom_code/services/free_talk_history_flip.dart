@@ -33,6 +33,61 @@ import 'history_text_model.dart';
 import 'origin_pcm_store.dart';
 import 'origin_restoration.dart';
 
+/// 🩹 [FREE-TALK-LINE-FIX] 바꿀 때 넣은 뜻 문장(로비 Origin).
+const String kFreeTalkMeaningField = 'free_talk_meaning';
+
+/// 공부방 배울글로 대화방에서 고친 유저 문장을 그대로 쓸 수 있으면 그 문장.
+///
+/// 유저 줄(HOST)이고, 공부방에서 뜻 문장을 고치지 않았을 때만이다 — 뜻을
+/// 고쳤으면 그 뜻으로 새로 만들어야 한다. 대화방에서 이미 유저 낱말을 살려
+/// 바른 문장으로 고쳤으므로, 뜻에서 다시 번역하면 유저가 하지 않은 말로
+/// 부풀 수 있다(실장님, 2026-11-27).
+String? freeTalkKeptTargetLine(Map<String, dynamic>? data, String source) {
+  if (data == null) return null;
+  if ((data['role'] ?? '').toString() != 'HOST') return null;
+  final meaning = (data[kFreeTalkMeaningField] ?? '').toString().trim();
+  final spoken = (data[kMessageSpokenTextField] ?? '').toString().trim();
+  if (meaning.isEmpty || spoken.isEmpty) return null;
+  // 유저가 대화언어(로비 Origin)로 말한 줄은 고친 배울 언어 문장이 없다.
+  //   뜻 문장과 같은 문자면 그대로 쓰지 않고 새로 만든다 — 한국어로 말한
+  //   줄이 배울글까지 한국어로 남았다(실기기, 2026-11-27).
+  final spokenScript = _dominantScript(spoken);
+  if (spokenScript == null || spokenScript == _dominantScript(meaning)) {
+    return null;
+  }
+  return meaning == source.trim() ? spoken : null;
+}
+
+/// 글자가 가장 많은 문자 체계. 글자가 없으면 null.
+String? _dominantScript(String text) {
+  final counts = <String, int>{};
+  for (final rune in text.runes) {
+    final String? script;
+    if ((rune >= 0x41 && rune <= 0x5A) ||
+        (rune >= 0x61 && rune <= 0x7A) ||
+        (rune >= 0xC0 && rune <= 0x24F)) {
+      script = 'latin';
+    } else if ((rune >= 0xAC00 && rune <= 0xD7A3) ||
+        (rune >= 0x1100 && rune <= 0x11FF) ||
+        (rune >= 0x3130 && rune <= 0x318F)) {
+      script = 'hangul';
+    } else if (rune >= 0x3040 && rune <= 0x30FF) {
+      script = 'kana';
+    } else if (rune >= 0x4E00 && rune <= 0x9FFF) {
+      script = 'han';
+    } else if (rune >= 0x0400 && rune <= 0x04FF) {
+      script = 'cyrillic';
+    } else if (rune >= 0x0900 && rune <= 0x097F) {
+      script = 'devanagari';
+    } else {
+      script = null;
+    }
+    if (script != null) counts[script] = (counts[script] ?? 0) + 1;
+  }
+  if (counts.isEmpty) return null;
+  return counts.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
+}
+
 /// 바꾼 시각. 있으면 이미 평소 방이다.
 const String kFreeTalkFlippedAtField = 'free_talk_flipped_at';
 
@@ -318,6 +373,10 @@ class FreeTalkHistoryFlip {
         batch.update(doc.reference, <String, dynamic>{
           'original_text': meanings[doc.id],
           kMessageSpokenTextField: doc.data()['original_text'],
+          // 🩹 [FREE-TALK-LINE-FIX] 바꾼 뜻 문장. 공부방에서 유저가 이 뜻을
+          //   고치지 않았으면 배울글은 다시 만들지 않고 대화방에서 고친
+          //   문장(spoken_text)을 그대로 쓴다(`freeTalkKeptTargetLine`).
+          kFreeTalkMeaningField: meanings[doc.id],
           'translated_text': FieldValue.delete(),
         });
       }

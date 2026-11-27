@@ -29,6 +29,8 @@
 // 첫 턴이든 몇 번째 턴이든 실수가 있으면 매번 교정 과정을 거친다. 쉬는 턴은 없다.
 // ====================================================================
 
+import '/custom_code/services/user_line_fix.dart';
+
 const String kMeaningCheckTag = '[MEANING_CHECK]';
 const String kMeaningConfirmTag = '[MEANING_CONFIRM]';
 const String kMeaningSentenceTag = '[SENTENCE]';
@@ -111,7 +113,12 @@ you think they meant ("Do you mean ...? Or ...?"), and asks them to say it
 again — simplest words a beginner understands.''';
 }
 
-/// ② 유저가 되묻기에 대답한 턴에 붙는다. 뜻을 잡아 한 번 더 확인하게 한다.
+/// ② 유저가 되묻기에 대답한 턴에 붙는다. 뜻을 잡아 **바로 고쳐 잇는다**.
+///
+/// 🩹 [FREE-TALK-LINE-FIX] 예전에는 여기서 "이 말이에요? 직접 말해 보세요"
+/// ([kMeaningConfirmTag])로 따라 말하기를 시켰다. 이제는 하려던 말을 바른
+/// 문장으로 유저 줄에 넣고([kUserFixTag]) 곧바로 대화를 잇는다 — 서툰 말도
+/// 1차로 고쳐져 화면·공부방에 남고 대화는 끊기지 않는다(실장님, 2026-11-27).
 String buildMeaningClarifyNote({
   required String spokenLang,
   required String chatLang,
@@ -123,14 +130,15 @@ Earlier the user tried to say: "$safe". You did not understand it and asked
 what they meant. Their latest line is their answer. It may be in $spokenLang,
 in $chatLang, or a mix — understand it either way, together with the earlier
 attempt and the conversation.
-Do NOT reply to the content yet. Output exactly:
-$kMeaningConfirmTag
-<a very short, very easy $spokenLang line: "Do you mean this? If yes, say it yourself.">
-$kMeaningSentenceTag
-<what the user wanted to say, as one natural $spokenLang sentence>
-The sentence keeps the user's own words wherever possible and fits this
-conversation. If you still cannot tell what they mean, output the
-$kMeaningCheckTag format instead with an even simpler question.''';
+Now that you understand, output exactly:
+$kUserFixTag
+<what the user wanted to say, as one correct, natural $spokenLang sentence>
+$kUserFixReplyTag
+<your normal reply to that sentence>
+The sentence keeps the user's own words wherever possible, adds no idea they
+did not mean, and fits this conversation. Do not ask them to repeat it. If you
+still cannot tell what they mean, output the $kMeaningCheckTag format instead
+with an even simpler question.''';
 }
 
 /// 유저 말 바로 앞(맨 마지막)에 한 번 더 두는 교정 규칙. 긴 시스템 지시 속에
@@ -139,25 +147,52 @@ String? buildMeaningFinalNote({
   required String spokenLang,
   required bool clarifying,
   required bool allowCheck,
-  // 교정 간격이 안 찼다 — 되묻기(뜻이 막힐 때)만 된다.
-  bool checkOnly = false,
 }) {
   if (clarifying) {
-    return '''FINAL RULE FOR THIS TURN: the user is explaining what they meant. Do NOT reply
-to the content. Output ONLY:
-$kMeaningConfirmTag
-<a very short, very easy $spokenLang line: "Do you mean this? If yes, say it yourself.">
-$kMeaningSentenceTag
-<one natural $spokenLang sentence of what they meant>
+    return '''FINAL RULE FOR THIS TURN: the user is explaining what they meant. Start with
+$kUserFixTag and what they wanted to say as one correct, natural $spokenLang
+sentence, then $kUserFixReplyTag and your normal reply. Do not ask them to repeat it.
 Only if you still cannot tell, output $kMeaningCheckTag with an even simpler question.''';
   }
+  // 🩹 [FREE-TALK-LINE-FIX] 틀린 줄은 대답 앞에 [USER_FIX]로 고쳐 낸다.
+  //   예전처럼 대답 속에서 고쳐 말하지 않는다 — 고친 줄이 화면에 나온다.
+  const fixRule = '''FINAL RULE FOR THIS TURN: if the user's line has a mistake or is a broken
+fragment and you can tell what they meant, start with $kUserFixTag and their line
+corrected (their own words, only what is wrong fixed — nothing added), then
+$kUserFixReplyTag and your reply. Do not repeat the correction in the reply.''';
   if (allowCheck) {
-    return '''FINAL RULE FOR THIS TURN: reply normally. If the user's line has a mistake that
-matters, say the corrected version once inside your reply${checkOnly ? ' only if it blocks understanding (you corrected recently)' : ''} — do not ask them
-to repeat it. Only if you truly cannot tell what they meant, output $kMeaningCheckTag
-with a very short, very easy $spokenLang question.''';
+    return '''$fixRule
+Only if you truly cannot tell what they meant, output $kMeaningCheckTag with a
+very short, very easy $spokenLang question instead.''';
   }
-  return null;
+  return fixRule;
+}
+
+/// 🩹 [FREE-TALK-LINE-FIX] 고친 유저 줄이 **고친 것인지 다시 쓴 것인지** 본다.
+///
+/// 받아쓰기 복원용 [userLineFixIsPlausible](길이 0.5~2배)은 "busy this week" →
+/// "I'm busy this week."처럼 조각을 문장으로 세우는 것도 막는다. 여기서는 길이
+/// 대신 **유저 낱말이 남았는지**를 본다 — 유저 낱말의 절반 이상이 고친 줄에
+/// 있어야 하고, 낱말 수는 유저 말의 두 배·+5 중 큰 쪽을 넘지 않는다.
+bool learnerLineFixIsPlausible({
+  required String original,
+  required String fixed,
+}) {
+  final a = original.trim();
+  final b = fixed.trim();
+  if (a.isEmpty || b.isEmpty || a == b) return false;
+  final orig = _tokens(a);
+  final fix = _tokens(b);
+  if (orig.isEmpty || fix.isEmpty) return false;
+  // 짧은 조각("yesterday meeting, investor")은 주어·동사·관사를 채워야
+  //   문장이 된다 — 3낱말 → "I had a meeting with an investor yesterday."(8).
+  final maxWords = orig.length * 2 > orig.length + 5
+      ? orig.length * 2
+      : orig.length + 5;
+  if (fix.length > maxWords) return false;
+  final fixSet = fix.toSet();
+  final kept = orig.where(fixSet.contains).length;
+  return kept * 2 >= orig.length;
 }
 
 // ── 턴별 한 줄 지시(코드가 상황을 보고 그 턴에만) ────────────────────────
@@ -198,13 +233,18 @@ String buildFreeTalkTurnNote({
   List<String> aiLines = const <String>[],
   // 유저가 이 방에서 교정을 그만하라고 했다.
   bool noCorrection = false,
+  // 🪜 [FREE-TALK-LEVEL] [userLines]와 같은 순서로, 그 줄을 AI가 고쳐야 했는지.
+  List<bool> fixedLines = const <bool>[],
 }) {
   if (userLines.isEmpty) return '';
   final last = userLines.last;
   final n = _wordCount(last);
+  final level = freeTalkLearnerLevel(userLines, fixedLines: fixedLines);
   final notes = <String>[
+    _kFreeTalkLevelNotes[level - 1],
     if (noCorrection)
-      'The user asked you to stop correcting them. Do not correct anything for the rest of this conversation — just talk.',
+      // 🩹 줄 고치기([USER_FIX])는 말로 하는 교정이 아니라 화면·공부방용이라 남긴다.
+      'The user asked you to stop correcting them. Never talk about their mistakes in your reply for the rest of this conversation — just talk. Fixing their line with $kUserFixTag is silent and still fine.',
     if (n < 5)
       'THIS TURN: you may talk richly — 3 to 4 short sentences (a bit of your own story or opinion), ending with one easy way in.'
     else if (n < 15)
@@ -224,11 +264,12 @@ String buildFreeTalkTurnNote({
         '${used.isEmpty ? '' : ' Use a new one with a different shape — not like these you already gave: ${used.map((u) => '"$u"').join(', ')}. You may also ask about a new detail instead.'}');
   } else if (keywordStyle) {
     notes.add(
-        'The user is speaking in keywords. Echo it back as one simple sentence in their own words, then keep the talk going.');
+        'The user is speaking in keywords. Fix their line into one simple sentence from their own words with $kUserFixTag, then keep the talk going.');
   }
   // 🪜 쉬운 틀에 익숙해져 길게 말하면 한 단계 위로(실장님, 2026-11-27).
   //   쉬운 틀에 머물면 그 수준에서 굳는다.
-  final bool confident = userLines.length >= 3 &&
+  final bool confident = level == 3 &&
+      userLines.length >= 3 &&
       userLines.sublist(userLines.length - 3).every((u) => _wordCount(u) >= 15);
   if (confident && !noCorrection) {
     notes.add(
@@ -248,6 +289,48 @@ String buildFreeTalkTurnNote({
         'Sentence starts the user already uses: ${recent.join(', ')}. When they get stuck, point them to one of these instead of a new structure.');
   }
   return notes.join('\n');
+}
+
+// ── 🪜 [FREE-TALK-LEVEL] 유저 수준 3단계 ───────────────────────────────
+//
+// 유저가 **실제로 한 말**(고치기 전 원문)의 최근 3줄로 AI 답의 문장 구조를
+// 맞춘다(실장님, 2026-11-27). 아직 문장을 못 세우는 유저에게 긴 복문을 주면
+// 따라 하지 못하고, 잘하는 유저에게 단문만 주면 그 수준에서 굳는다.
+//   1 기초  평균 6낱말 미만, 또는 최근 줄 대부분을 AI가 고쳐야 했다(12낱말 미만)
+//   3 확장  평균 12낱말 이상, 고친 줄 1개 이하, 이유·조건 같은 절을 이미 쓴다
+//           (절이 없어도 평균 15낱말 이상이면)
+//   2 나머지
+// 말 양(THIS TURN)은 따로 정한다 — 수준은 **어떤 문장으로** 말할지다.
+
+const List<String> _kFreeTalkLevelNotes = <String>[
+  'LEVEL 1 — the user is just starting to build sentences. Use only very short, simple sentences: one idea each, about 5 to 8 words, present or simple past, everyday words. Join ideas with "and" at most. Your question is a very easy one they can answer in a few words.',
+  'LEVEL 2 — the user makes simple sentences. Use simple sentences linked with easy connectors (and, but, so, because) and everyday words. Ask one open question (what, where, how).',
+  'LEVEL 3 — the user talks in full sentences. Use natural conversational language: clauses with when, if, that, or which are fine, plus a few less common words, still clear. Ask why, what-if, or opinion questions.',
+];
+
+final RegExp _clauseWord = RegExp(
+    r"\b(because|when|if|that|which|who|while|although|though|since|before|after|until)\b",
+    caseSensitive: false);
+
+/// 최근 3줄(원문)로 본 유저 수준 1~3. [fixedLines]는 [userLines]와 같은 순서.
+int freeTalkLearnerLevel(List<String> userLines,
+    {List<bool> fixedLines = const <bool>[]}) {
+  if (userLines.isEmpty) return 1;
+  final start = userLines.length > 3 ? userLines.length - 3 : 0;
+  final recent = userLines.sublist(start);
+  final avg = recent.map(_wordCount).fold<int>(0, (a, b) => a + b) /
+      recent.length;
+  var fixed = 0;
+  for (var i = start; i < userLines.length; i++) {
+    if (i < fixedLines.length && fixedLines[i]) fixed++;
+  }
+  // 줄이 하나뿐이면 "대부분 고침"은 그 한 줄이 고쳐졌는지로 본다.
+  final mostlyFixed = fixed * 2 > recent.length;
+  if (avg < 6 || (mostlyFixed && avg < 12)) return 1;
+  final usesClauses = recent.any(_clauseWord.hasMatch);
+  // 절을 안 써도 고칠 것 없이 길게 이어 말하면(평균 15낱말+) 확장 단계다.
+  if (avg >= 12 && fixed <= 1 && (usesClauses || avg >= 15)) return 3;
+  return 2;
 }
 
 /// ③ 확인이 끝난 직후 턴에 붙는다. 그 문장 전체를 이어 받아 대화를 잇는다.

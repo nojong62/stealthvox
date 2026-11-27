@@ -1973,6 +1973,32 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     if (renderToNative) {
       return _renderStep2AiLineToNative(messageRef, source);
     }
+    // 🩹 [FREE-TALK-LINE-FIX] Free Talk 유저 줄은 대화방에서 이미 유저 낱말을
+    //   살린 바른 문장으로 고쳤다. 뜻을 고치지 않았으면 그 문장을 배울글로
+    //   그대로 쓴다 — 뜻에서 다시 번역하면 하지 않은 말로 부풀 수 있다.
+    DocumentSnapshot? cachedDoc;
+    for (final doc in _cachedDocs) {
+      if (doc.id == messageRef.id) {
+        cachedDoc = doc;
+        break;
+      }
+    }
+    final keptTarget = freeTalkKeptTargetLine(
+        cachedDoc?.data() as Map<String, dynamic>?, source);
+    if (keptTarget != null) {
+      try {
+        await messageRef.update(<String, dynamic>{
+          'translated_text': keptTarget,
+          'target_generated_by': 'free_talk_line',
+          'target_generated_at': FieldValue.serverTimestamp(),
+        });
+        debugPrint('[FREE-TALK-LINE-FIX] kept target msg=${messageRef.id}');
+        return true;
+      } catch (error) {
+        debugPrint('[FREE-TALK-LINE-FIX] keep failed msg=${messageRef.id} '
+            'reason=${error.runtimeType} → generate');
+      }
+    }
     try {
       final targetLanguage = (_sessionTargetLang ?? 'English').trim();
       final sourceName =

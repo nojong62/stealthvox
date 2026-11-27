@@ -161,12 +161,13 @@ void main() {
       expect(note, contains('"I felt"'));
     });
 
-    test('그만 고치라고 했으면 끝까지 교정하지 않는다', () {
+    test('그만 고치라고 했으면 끝까지 말로 교정하지 않는다(줄 고치기는 조용히 남는다)', () {
       final note = buildFreeTalkTurnNote(
           userLines: ['Just talk, please. I am tired of corrections and I want to talk now ok'],
           spokenLang: 'English',
           noCorrection: true);
-      expect(note, contains('Do not correct anything'));
+      expect(note, contains('Never talk about their mistakes'));
+      expect(note, contains('[USER_FIX] is silent'));
     });
 
     test('세 턴 연속 길게 말하면 한 단계 위로', () {
