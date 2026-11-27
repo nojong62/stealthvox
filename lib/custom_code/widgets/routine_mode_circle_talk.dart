@@ -4939,9 +4939,11 @@ $userFixPolicy$finalLanguageRule''';
     //   들어와도 준비된 음성을 밖에서 끊을 방법이 없다.
     _activeUtterance = utterance;
     try {
-      await utterance.done.timeout(timeout);
-    } on TimeoutException {
-      utterance.cancel();
+      // ⏳ [TTS-WAIT] [timeout]은 첫 소리까지만 — 재생 시간은 길이로 잡는다.
+      await waitForUtterancePlayback(utterance,
+          firstAudioTimeout: timeout,
+          onTimeout: (phase) => _log('⏳ [TTS-WAIT]',
+              'timeout phase=$phase len=${spokenText.length} → cancel'));
     } finally {
       if (identical(_activeUtterance, utterance)) _activeUtterance = null;
     }
@@ -5717,13 +5719,11 @@ $userFixPolicy$finalLanguageRule''';
       final prefetched = aiTtsPrefetch;
       if (prefetched != null) {
         aiUtterance = _ttsAdapter.speakPrefetched(prefetched);
-        try {
-          await aiUtterance.done.timeout(
-              const Duration(milliseconds: kFreeTalkAiTtsWaitTimeoutMs));
-        } on TimeoutException {
-          aiUtterance.cancel();
-          _log('⚠️ [PIPE-TIMEOUT]', 'AI TTS 20초 초과, 강제 진행');
-        }
+        await waitForUtterancePlayback(aiUtterance,
+            firstAudioTimeout:
+                const Duration(milliseconds: kFreeTalkAiTtsWaitTimeoutMs),
+            onTimeout: (phase) => _log('⚠️ [PIPE-TIMEOUT]',
+                'AI TTS timeout phase=$phase, 강제 진행'));
       }
       _log('🧠 [PIPE-09]', 'AI TTS 재생 완료');
 

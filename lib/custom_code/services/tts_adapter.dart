@@ -270,6 +270,52 @@ class TtsPrerollReport {
 }
 
 // ====================================================================
+// ⏳ [TTS-WAIT] 재생 끝 기다리기 — 합성 대기와 재생 시간을 따로 잰다
+// --------------------------------------------------------------------
+// 예전에는 요청부터 고정 15~20초로 잘랐다. Gemini TTS가 첫 소리까지 6초를
+// 쓰면 영어 160자(재생 10초)도 넘겨서 마지막 문장이 잘렸고, 취소가 끝나기
+// 전에 마이크를 열려다 "tts busy"로 건너뛰어 방이 멈췄다(실기기, 2026-11-27).
+// ====================================================================
+
+/// 재생 시간 상한. 넉넉하게 — 느린 한국어(초당 6~7자)도 다 읽게 둔다.
+Duration ttsPlaybackBudget(String text) =>
+    Duration(milliseconds: 8000 + text.length * 150);
+
+/// [utterance]가 끝날 때까지 기다린다. 첫 소리까지는 [firstAudioTimeout],
+/// 그 뒤 재생은 [budgetText] 길이로 잡은 시간까지. 넘기면 취소하고 **재생이
+/// 실제로 멈출 때까지** 기다린 뒤 false를 돌려준다(곧바로 마이크를 열어도
+/// `isBusy`에 걸리지 않게). [budgetText]는 같은 큐에서 앞 조각이 먼저 읽혀야
+/// 하는 꼬리 조각이면 전체 문장을 준다.
+Future<bool> waitForUtterancePlayback(
+  TtsUtterance utterance, {
+  Duration firstAudioTimeout = const Duration(seconds: 15),
+  String? budgetText,
+  void Function(String phase)? onTimeout,
+}) async {
+  var phase = 'first_audio';
+  try {
+    await Future.any<void>(<Future<void>>[
+      utterance.firstAudio,
+      utterance.done.then((_) {}),
+    ]).timeout(firstAudioTimeout);
+    phase = 'playback';
+    return await utterance.done
+        .timeout(ttsPlaybackBudget(budgetText ?? utterance.request.text));
+  } on TimeoutException {
+    onTimeout?.call(phase);
+    utterance.cancel();
+    try {
+      await utterance.done.timeout(const Duration(seconds: 2));
+    } on TimeoutException {
+      // 어댑터가 끝내 정리하지 못해도 호출자는 넘어간다.
+    }
+    // 어댑터는 done을 끝낸 뒤 finally에서 _current를 비운다 — 한 틱 양보.
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    return false;
+  }
+}
+
+// ====================================================================
 // 재생 핸들 — 파이프라인이 순서 보장에 쓰는 futures
 // ====================================================================
 class TtsUtterance {

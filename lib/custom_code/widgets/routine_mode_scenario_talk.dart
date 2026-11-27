@@ -856,12 +856,11 @@ $finalLanguageRule''';
       playbackCategory: 'scenario_ai',
     ));
     _activeUtterances.add(utterance);
-    try {
-      await utterance.done.timeout(const Duration(seconds: 20));
-    } on TimeoutException {
-      utterance.cancel();
-      _log('[KOREAN-TTS-TIMEOUT]', 'Scenario Talk PCM TTS exceeded 20s');
-    }
+    // ⏳ [TTS-WAIT] 첫 소리 20초, 재생은 길이로 잡은 시간까지.
+    await waitForUtterancePlayback(utterance,
+        firstAudioTimeout: const Duration(seconds: 20),
+        onTimeout: (phase) => _log('[KOREAN-TTS-TIMEOUT]',
+            'Scenario Talk TTS timeout phase=$phase len=${spoken.length}'));
   }
 
   /// 스트리밍 답변에서 첫 자연스러운 문장이 끝나는 위치를 찾는다.
@@ -3568,20 +3567,18 @@ $finalLanguageRule''';
           ));
           final tailUtterance = _aiTtsAdapter.speakPrefetched(tailPrefetch);
           _activeUtterances.add(tailUtterance);
-          try {
-            await tailUtterance.done.timeout(const Duration(seconds: 20));
-          } on TimeoutException {
-            // ⚠️ **머리는 건드리지 않는다.** 큐가 FIFO라 tail.done은 머리
-            //   재생이 끝난 뒤에야 완료된다 — 즉 이 상한을 넘겼다는 것은
-            //   "꼬리가 늦다"는 뜻이지 "머리가 잘못됐다"는 뜻이 아니다.
-            //   예전에는 여기서 headUtterance까지 취소해서, 멀쩡히 재생 중이던
-            //   앞 문장이 뚝 끊겼다("마지막 AI 대사 짤림", 2026-08-14 실기기).
-            tailUtterance.cancel();
-            _log(
-                '[KOREAN-TTS-TIMEOUT]',
-                'tail exceeded 20s headLen=${spokenHead.length} '
-                    'tailLen=${remaining.length} (head kept)');
-          }
+          // ⚠️ **머리는 건드리지 않는다.** 큐가 FIFO라 꼬리는 머리 재생이
+          //   끝난 뒤에야 소리가 난다. 예전에는 여기서 headUtterance까지
+          //   취소해서 앞 문장이 뚝 끊겼다("마지막 AI 대사 짤림", 2026-08-14).
+          // ⏳ [TTS-WAIT] 꼬리의 첫 소리 상한 = 머리 재생 시간 + 합성 15초.
+          //   예전 고정 20초는 긴 영어 대사에서 꼬리 끝을 잘랐다(2026-11-27).
+          await waitForUtterancePlayback(tailUtterance,
+              firstAudioTimeout: const Duration(seconds: 15) +
+                  ttsPlaybackBudget(spokenHead),
+              onTimeout: (phase) => _log(
+                  '[KOREAN-TTS-TIMEOUT]',
+                  'tail timeout phase=$phase headLen=${spokenHead.length} '
+                      'tailLen=${remaining.length} (head kept)'));
         } else {
           headUtterance.cancel();
           await _speakKoreanLine(aiKoreanFinal, step: step);
