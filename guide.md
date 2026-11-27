@@ -36,7 +36,10 @@
 - 인물은 **사진 1장을 먼저** 만들어 확인받는다(한 장짜리·콜라주 아님·한국인으로 보이는지). 그 뒤 그 사진으로 영상을 만든다.
 - 장면마다 인물의 자세·구도를 바꿔 요청한다(같은 사진에서 시작하면 자세가 똑같아진다).
 - 360p 영상도 1080x1920 전체 화면에 써도 된다(lanczos 확대 + 약한 unsharp). 크게 확대·일부 잘라 쓸 때만 720p.
-- 내려받기는 720p 원본. 작업 폴더 예: `tmp/shorts_freetalk/` (폰 녹화·대사 주입·조립 스크립트).
+- 내려받기는 720p 원본.
+- **작업 폴더는 G:** — 녹화·목소리·스크린샷·스크립트·중간 영상은 `G:\sv_work\stealth_vox\shorts_<이름>\`에 만든다
+  (예: `G:\sv_work\stealth_vox\shorts_ft3\`). 확정된 영상만 `C:\sv\stealth_vox\final\`에 저장한다.
+  조립 스크립트의 최종 출력 경로도 처음부터 `C:\sv\stealth_vox\final\`로 둔다.
 
 ## 📦 릴리스 빌드 (AAB)
 - 버전: `pubspec.yaml`의 `version: 1.0.N+N` — versionName과 versionCode를 같이 올린다
