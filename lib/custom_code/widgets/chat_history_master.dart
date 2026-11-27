@@ -623,11 +623,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   void initState() {
     super.initState();
     _historyId = widget.historyDoc.id;
-    // 🎙️ [VOICE-TIER] 등급은 방(대화)마다 한 번 정해 방 문서 `voice_tier`에
-    //   남긴다. 대화 직후 바로 넘어왔으면 그 대화의 등급을 그대로 저장한다.
-    //   목록에서 들어오면 저장된 등급을 쓰고, 없으면 소리가 처음 필요한
-    //   PRACTICE·MY STORY 연습 입구에서 한 번만 묻는다
-    //   ([_ensureStudyVoiceTier]). 고르기 전 글만 보는 동안은 기본 배율이다.
+    // 🎙️ [VOICE-TIER] 공부방은 **어디로 들어오든 로비 음성 등급**을 따른다
+    //   (실장님, 2026-11-27). 예전에는 목록으로 들어와 등급을 아직 안 고른
+    //   방이 글만 보는 동안 기본 배율로 시작해, 로비가 HD여도 0.5로 깎였다.
+    //   공부방 안에서 등급 팝업으로 **새로 고른** 방만 그 등급을 방 문서에
+    //   기억해(`voice_tier_chosen`) 그때부터 그 등급을 쓴다.
+    //   대화 직후 바로 넘어왔으면 그 대화의 등급(= 들어갈 때의 로비 등급)이고,
+    //   그 방은 다음에 등급을 다시 묻지 않는다([_saveRoomVoiceTier]).
     //   체험·게스트 미리보기는 무료라 묻지도 저장하지도 않는다.
     final carriedTier = VoiceTierSession.takeHandoff(widget.historyDoc.path);
     if (widget.studyTrial || widget.allowDuoGuestStudyPreview) {
@@ -640,7 +642,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       _saveRoomVoiceTier(VoiceTierSession.active);
       debugPrint('[VOICE-TIER] study carried=${VoiceTierSession.active.name}');
     } else {
-      VoiceTierSession.activate(VoiceTier.basic, reason: 'study_unchosen');
+      VoiceTierSession.activate(lobbyVoiceTier, reason: 'study_lobby');
       _roomVoiceTierLoad = _loadRoomVoiceTier();
     }
     debugPrint('[HISTORY-LIFECYCLE] init instance=$_instanceId '
@@ -7864,16 +7866,24 @@ RULES — follow exactly:
   /// 이것을 기다린다 — 읽기 전에 눌러도 다시 묻지 않게.
   Future<void> _roomVoiceTierLoad = Future<void>.value();
 
-  /// 방 문서의 `voice_tier`가 있으면 그 등급으로 연다.
+  /// 방 문서를 읽는다. `voice_tier`가 있으면 다시 묻지 않고, 공부방
+  /// 팝업으로 새로 고른 등급(`voice_tier_chosen`)일 때만 그 등급으로 연다.
+  /// 그 밖에는 입장할 때 건 로비 등급 그대로다.
   Future<void> _loadRoomVoiceTier() async {
     try {
       final snap = await widget.historyDoc.get();
-      final raw = (snap.data() as Map<String, dynamic>?)?['voice_tier'];
+      final data = snap.data() as Map<String, dynamic>?;
+      final raw = data?['voice_tier'];
       if (raw is String && raw.isNotEmpty) {
-        final tier = parseVoiceTier(raw);
-        VoiceTierSession.activate(tier, reason: 'study_saved');
         _voiceTierChosen = true;
-        debugPrint('[VOICE-TIER] study saved=${tier.name}');
+        if (data?['voice_tier_chosen'] == true) {
+          final tier = parseVoiceTier(raw);
+          VoiceTierSession.activate(tier, reason: 'study_saved_choice');
+          debugPrint('[VOICE-TIER] study chosen=${tier.name}');
+        } else {
+          debugPrint('[VOICE-TIER] study lobby=${VoiceTierSession.active.name} '
+              '(saved=$raw not chosen)');
+        }
       }
     } catch (e) {
       debugPrint('[VOICE-TIER] load $e');
@@ -7881,10 +7891,13 @@ RULES — follow exactly:
   }
 
   /// 이 방(대화)의 등급을 남긴다. 한 번 정하면 다시 묻지 않는다.
-  void _saveRoomVoiceTier(VoiceTier tier) {
-    unawaited(widget.historyDoc
-        .update(<String, dynamic>{'voice_tier': tier.name}).catchError(
-            (Object e) => debugPrint('[VOICE-TIER] save $e')));
+  /// [chosen]은 공부방 팝업으로 새로 고른 등급이다 — 그 방은 이후 로비 대신
+  /// 이 등급을 쓴다.
+  void _saveRoomVoiceTier(VoiceTier tier, {bool chosen = false}) {
+    unawaited(widget.historyDoc.update(<String, dynamic>{
+      'voice_tier': tier.name,
+      if (chosen) 'voice_tier_chosen': true,
+    }).catchError((Object e) => debugPrint('[VOICE-TIER] save $e')));
   }
 
   /// 🎙️ 소리가 처음 필요한 입구(PRACTICE·MY STORY 연습)에서 부른다.
@@ -7898,7 +7911,7 @@ RULES — follow exactly:
     if (tier == null || !mounted) return false;
     _voiceTierChosen = true;
     VoiceTierSession.activate(tier, reason: 'study_first_sound');
-    _saveRoomVoiceTier(tier);
+    _saveRoomVoiceTier(tier, chosen: true);
     BillingTicker.instance.setRate(billingRateFor(tier));
     return true;
   }
