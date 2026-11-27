@@ -6284,61 +6284,31 @@ $userFixPolicy$finalLanguageRule''';
   Widget _buildCircleTitle() {
     final circle = widget.circleDescription.trim();
     if (circle.isEmpty) return const SizedBox(height: 10);
-    // "내가 할 말이 있어" 방: 서클 주제 대신 버튼 이름을 두고, 첫 말을 꺼내기
-    // 전까지는 유저가 먼저라는 안내를 같이 보인다(AI 첫 마디가 없다).
-    if (widget.userOpens) {
-      final bool waitingFirstLine = _localMessages.isEmpty;
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-        child: Column(
-          children: [
-            Text(_uiCopy['circleMyTalk'],
-                style: TextStyle(
-                  color: const Color(0xFFA855F7),
-                  fontSize: 13 * _fontScale,
-                  fontWeight: FontWeight.bold,
-                )),
-            if (waitingFirstLine) ...[
-              const SizedBox(height: 6),
-              Text(
-                _uiCopy['circleMyTalkHint'],
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 14 * _fontScale,
-                  height: 1.4,
-                ),
-              ),
-            ],
-          ],
+    // "서클 주제"·"내가 할 말이 있어"·안내 문구는 뺐다 — 공간만 먹는다
+    //   (실장님, 2026-11-27). 실제 서클 내용이 있을 때만 은은한 박스에 담는다.
+    //   "내가 할 말이 있어" 방은 서클 내용이 없으므로 아무것도 두지 않는다.
+    if (widget.userOpens) return const SizedBox(height: 10);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Text(
+        circle,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white70,
+          fontSize: 13 * _fontScale,
+          fontWeight: FontWeight.w600,
+          height: 1.35,
+          letterSpacing: 0.2,
         ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-      child: Column(
-        children: [
-          Text(_uiCopy['circleTopic'],
-              style: TextStyle(
-                color: const Color(0xFFA855F7),
-                fontSize: 11 * _fontScale,
-                fontWeight: FontWeight.bold,
-              )),
-          const SizedBox(height: 3),
-          Text(
-            circle,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white70,
-              fontSize: 13 * _fontScale,
-              fontWeight: FontWeight.w600,
-              height: 1.35,
-              letterSpacing: 0.2,
-            ),
-          ),
-        ],
       ),
     );
   }

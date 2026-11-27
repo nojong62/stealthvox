@@ -4963,17 +4963,19 @@ $finalLanguageRule''';
   Widget _buildScenarioTitle() {
     final situation = _scenarioSituation.trim();
     if (situation.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+    // "시나리오 주제" 라벨은 뺐다 — 공간만 먹는다(실장님, 2026-11-27).
+    //   상황·역할만 은은한 박스에 담는다.
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
       child: Column(
         children: [
-          Text(_uiCopy['scenarioTopic'],
-              style: TextStyle(
-                color: const Color(0xFF60A5FA),
-                fontSize: 11 * _fontScale,
-                fontWeight: FontWeight.bold,
-              )),
-          const SizedBox(height: 3),
           Text(
             situation,
             maxLines: 2,
