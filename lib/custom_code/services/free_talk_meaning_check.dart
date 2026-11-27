@@ -240,17 +240,19 @@ String buildFreeTalkTurnNote({
   final last = userLines.last;
   final n = _wordCount(last);
   final level = freeTalkLearnerLevel(userLines, fixedLines: fixedLines);
+  // 🪜 말 양도 수준을 따른다(실장님, 2026-11-27). 예전에는 짧게 말하면
+  //   "3~4문장으로 풍성하게"를 붙여, 단어 세 개에 네 문장으로 답했다 —
+  //   1단계 유저에게 맞춘 답이 아니었다. 유저가 아주 길게 말하면(15낱말+)
+  //   그때만 반응을 짧게 줄여 유저가 이끌게 한다.
   final notes = <String>[
     _kFreeTalkLevelNotes[level - 1],
     if (noCorrection)
       // 🩹 줄 고치기([USER_FIX])는 말로 하는 교정이 아니라 화면·공부방용이라 남긴다.
       'The user asked you to stop correcting them. Never talk about their mistakes in your reply for the rest of this conversation — just talk. Fixing their line with $kUserFixTag is silent and still fine.',
-    if (n < 5)
-      'THIS TURN: you may talk richly — 3 to 4 short sentences (a bit of your own story or opinion), ending with one easy way in.'
-    else if (n < 15)
-      'THIS TURN: 2 sentences plus one question.'
+    if (level == 3 && n >= 15)
+      'THIS TURN: a short reaction plus one short question. The user is leading — follow them.'
     else
-      'THIS TURN: a short reaction plus one short question. The user is leading — follow them.',
+      _kFreeTalkLevelAmount[level - 1],
   ];
   final stuck = userLines.length >= 2 &&
       userLines.sublist(userLines.length - 2).every((u) => _wordCount(u) < 4);
@@ -293,43 +295,58 @@ String buildFreeTalkTurnNote({
 
 // ── 🪜 [FREE-TALK-LEVEL] 유저 수준 3단계 ───────────────────────────────
 //
-// 유저가 **실제로 한 말**(고치기 전 원문)의 최근 3줄로 AI 답의 문장 구조를
-// 맞춘다(실장님, 2026-11-27). 아직 문장을 못 세우는 유저에게 긴 복문을 주면
-// 따라 하지 못하고, 잘하는 유저에게 단문만 주면 그 수준에서 굳는다.
-//   1 기초  평균 6낱말 미만, 또는 최근 줄 대부분을 AI가 고쳐야 했다(12낱말 미만)
-//   3 확장  평균 12낱말 이상, 고친 줄 1개 이하, 이유·조건 같은 절을 이미 쓴다
-//           (절이 없어도 평균 15낱말 이상이면)
-//   2 나머지
-// 말 양(THIS TURN)은 따로 정한다 — 수준은 **어떤 문장으로** 말할지다.
+// 유저가 **실제로 한 말**(고치기 전 원문)의 **문장 구성**으로 AI 답의 구조와
+// 양을 맞춘다(실장님, 2026-11-27). 길이가 아니라 구성이다 — 길게 늘어놓은
+// 단어 나열은 1단계이고, 짧아도 절을 바르게 쓰면 3단계 쪽이다.
+//   줄마다:  1 주어 없는 단어 나열   2 주어·동사가 있는 단문(and·but·so로 이음)
+//            3 because·when·if 같은 절을 쓴 문장(AI가 고쳐야 했으면 2로 본다)
+//   유저 수준 = 최근 3줄 평균(1.6 미만 1, 2.5 이상 3, 그 사이 2).
+// 처음 말하기 전에는 1단계로 시작한다.
 
 const List<String> _kFreeTalkLevelNotes = <String>[
-  'LEVEL 1 — the user is just starting to build sentences. Use only very short, simple sentences: one idea each, about 5 to 8 words, present or simple past, everyday words. Join ideas with "and" at most. Your question is a very easy one they can answer in a few words.',
-  'LEVEL 2 — the user makes simple sentences. Use simple sentences linked with easy connectors (and, but, so, because) and everyday words. Ask one open question (what, where, how).',
-  'LEVEL 3 — the user talks in full sentences. Use natural conversational language: clauses with when, if, that, or which are fine, plus a few less common words, still clear. Ask why, what-if, or opinion questions.',
+  'LEVEL 1 — the user is not yet building sentences (single words or fragments). Use only very short, simple sentences: one idea each, about 4 to 7 words, present or simple past, everyday words. No linking words and no clauses. Your question is a very easy one they can answer in a few words.',
+  'LEVEL 2 — the user makes simple sentences. Use simple sentences, linked with easy connectors (and, but, so) where it helps, and everyday words. No clauses with if, when, or which. Ask one open question (what, where, how).',
+  'LEVEL 3 — the user builds sentences with clauses. Use natural conversational language: clauses with because, when, if, that, or which are fine, plus a few less common words, still clear. Ask why, what-if, or opinion questions.',
+];
+
+/// 수준별 말 양. 1단계 유저에게 긴 답은 따라올 수 없는 양이다.
+const List<String> _kFreeTalkLevelAmount = <String>[
+  'THIS TURN: at most 2 very short sentences, then one easy question. Keep it short.',
+  'THIS TURN: 2 sentences plus one question.',
+  'THIS TURN: 2 to 3 natural sentences plus one question.',
 ];
 
 final RegExp _clauseWord = RegExp(
     r"\b(because|when|if|that|which|who|while|although|though|since|before|after|until)\b",
     caseSensitive: false);
 
-/// 최근 3줄(원문)로 본 유저 수준 1~3. [fixedLines]는 [userLines]와 같은 순서.
+/// 주어가 있는가(문장으로 세웠는가). 주어 없는 단어 나열은 1단계다.
+final RegExp _subjectWord = RegExp(
+    r"\b(i|i'm|i've|i'll|i'd|you|he|she|we|they|it|it's|there|this|that|my|our|his|her|their)\b",
+    caseSensitive: false);
+
+/// 원문 한 줄의 구성 단계 1~3.
+int freeTalkLineLevel(String line, {bool fixed = false}) {
+  final words = _wordCount(line);
+  if (!_subjectWord.hasMatch(line) || words < 3) return 1;
+  if (_clauseWord.hasMatch(line) && words >= 7) return fixed ? 2 : 3;
+  return 2;
+}
+
+/// 최근 3줄(원문)의 구성으로 본 유저 수준 1~3. [fixedLines]는 [userLines]와
+/// 같은 순서로 그 줄을 AI가 고쳐야 했는지다.
 int freeTalkLearnerLevel(List<String> userLines,
     {List<bool> fixedLines = const <bool>[]}) {
   if (userLines.isEmpty) return 1;
   final start = userLines.length > 3 ? userLines.length - 3 : 0;
-  final recent = userLines.sublist(start);
-  final avg = recent.map(_wordCount).fold<int>(0, (a, b) => a + b) /
-      recent.length;
-  var fixed = 0;
+  var sum = 0;
   for (var i = start; i < userLines.length; i++) {
-    if (i < fixedLines.length && fixedLines[i]) fixed++;
+    sum += freeTalkLineLevel(userLines[i],
+        fixed: i < fixedLines.length && fixedLines[i]);
   }
-  // 줄이 하나뿐이면 "대부분 고침"은 그 한 줄이 고쳐졌는지로 본다.
-  final mostlyFixed = fixed * 2 > recent.length;
-  if (avg < 6 || (mostlyFixed && avg < 12)) return 1;
-  final usesClauses = recent.any(_clauseWord.hasMatch);
-  // 절을 안 써도 고칠 것 없이 길게 이어 말하면(평균 15낱말+) 확장 단계다.
-  if (avg >= 12 && fixed <= 1 && (usesClauses || avg >= 15)) return 3;
+  final avg = sum / (userLines.length - start);
+  if (avg < 1.6) return 1;
+  if (avg >= 2.5) return 3;
   return 2;
 }
 

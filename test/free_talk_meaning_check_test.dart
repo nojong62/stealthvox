@@ -139,11 +139,12 @@ void main() {
           MeaningConfirmReply.other);
     });
 
-    test('짧게만 말하면 길게, 길게 말하면 짧게', () {
-      expect(buildFreeTalkTurnNote(userLines: ['um... weekend'], spokenLang: 'English'),
-          contains('talk richly'));
+    test('말 양도 수준을 따른다: 단어만 말하면 짧게, 절로 길게 말하면 유저가 이끈다', () {
+      final short = buildFreeTalkTurnNote(userLines: ['um... weekend'], spokenLang: 'English');
+      expect(short, contains('LEVEL 1'));
+      expect(short, contains('at most 2 very short sentences'));
       final long = 'So I started tennis and it is harder than I expected because my coach is strict';
-      expect(buildFreeTalkTurnNote(userLines: [long], spokenLang: 'English'),
+      expect(buildFreeTalkTurnNote(userLines: [long, long, long], spokenLang: 'English'),
           contains('The user is leading'));
     });
 
@@ -170,8 +171,8 @@ void main() {
       expect(note, contains('[USER_FIX] is silent'));
     });
 
-    test('세 턴 연속 길게 말하면 한 단계 위로', () {
-      final long = 'I went to the park with my friends and we played soccer for two hours yesterday';
+    test('세 턴 연속 절로 길게 말하면(3단계) 한 단계 위로', () {
+      final long = 'I went to the park with my friends because the weather was nice and we played soccer';
       final note = buildFreeTalkTurnNote(
           userLines: [long, long, long], spokenLang: 'English');
       expect(note, contains('Stretch them'));
