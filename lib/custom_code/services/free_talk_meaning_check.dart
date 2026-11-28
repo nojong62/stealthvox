@@ -107,17 +107,27 @@ String buildMeaningCheckPolicy({required String spokenLang}) {
   //   단어로 쉽게 말하는 예를 한두 개 보여 주고 다시 해 보게 한다(실장님,
   //   2026-11-28). 생각을 너무 정확히 하려다 막힌 사람이 쉬운 말로 풀어 가는
   //   연습. 판단은 AI에게 맡긴다 — 낱말 수 같은 기준을 두지 않는다.
-  return '''• Meaning unclear — the user said a few words but you cannot tell what they
-want to say (often they are stuck trying to say a complex thought exactly).
-Words you can make sense of, even in a broken order, are NOT unclear — fix
-them with $kUserFixTag instead. Only when you truly cannot tell, do NOT
-reply to the content this turn. Output exactly:
+  // 🧩 [FREE-TALK-BUILD] 머뭇거리면 대신 완성하지 않고, 빠진 칸 하나를 물어
+  //   유저 조각으로 문장을 함께 조립한다(실장님, 2026-11-28). 끌어내기가
+  //   대신 말해 주기보다 말하는 힘으로 남는다. 두 번 물어도 안 되면 그때
+  //   쉬운 예를 보여 준다. 판단은 AI에게 — 낱말 수 기준을 두지 않는다.
+  return '''• Hesitating or unclear — the user gave only pieces of a thought: it trails
+off unfinished ("...and...", "...but..."), or you cannot tell what they want
+to say. Do NOT finish the thought for them and do NOT fix it with
+$kUserFixTag — that would put words in their mouth. Help them build the
+sentence themselves. Output exactly:
 $kMeaningCheckTag
-<your short, warm $spokenLang help>
-In it: take their words as hints and show one or two very easy ways to say
-it in short simple sentences that use their words ("You can say: ..."), then
-invite them to try it in their own words. Simplest words a beginner
-understands; no quiz, no long explanation.''';
+<your short, warm $spokenLang question>
+The question: start by echoing their own words ("Your exam date —"), then ask
+about ONE missing piece only — first what they want to do, then when or
+where, then why; skip anything the conversation already makes clear. They
+must be able to answer in two to four words, so their answer plus their
+earlier words make one sentence. Match their LEVEL: level 1 an either/or
+choice ("change it, or check it?"), level 2 a short what/when/why question,
+level 3 an open question. Ask it the way your character naturally would —
+not like a teacher. One question, no examples, no explanation.
+A line whose meaning you can tell, even in broken order, is NOT this case —
+fix it with $kUserFixTag.''';
 }
 
 /// ② 유저가 되묻기에 대답한 턴에 붙는다. 뜻을 잡아 **바로 고쳐 잇는다**.
@@ -132,20 +142,28 @@ String buildMeaningClarifyNote({
   required String attempt,
 }) {
   final safe = attempt.replaceAll(RegExp(r'[\r\n]+'), ' ').trim();
-  return '''[MEANING CLARIFICATION — THIS TURN ONLY]
-Earlier the user tried to say: "$safe". You did not understand it and asked
-what they meant. Their latest line is their answer. It may be in $spokenLang,
-in $chatLang, or a mix — understand it either way, together with the earlier
-attempt and the conversation.
-Now that you understand, output exactly:
+  return '''[BUILDING THE SENTENCE — THIS TURN ONLY]
+Earlier the user tried to say: "$safe". You asked them about a missing piece.
+Their latest line is their answer. It may be in $spokenLang, in $chatLang, or
+a mix — understand it either way, together with the earlier attempt and the
+conversation.
+Join their answer ONLY with that earlier attempt — never with an older topic
+from the conversation. If their answer is still vague ("I don't know", a
+single unsure word), they have not finished: do not guess.
+If you can now tell what they want to say, output exactly:
 $kUserFixTag
-<what the user wanted to say, as one correct, natural $spokenLang sentence>
+<their earlier pieces and this answer joined into one correct, natural
+$spokenLang sentence>
 $kUserFixReplyTag
 <your normal reply to that sentence>
-The sentence keeps the user's own words wherever possible, adds no idea they
-did not mean, and fits this conversation. Do not ask them to repeat it. If you
-still cannot tell what they mean, output the $kMeaningCheckTag format instead
-with even easier example ways to say it.''';
+The sentence is built from the user's own words (earlier and now), adds no
+idea they did not say, and is the simplest correct version. Do not ask them
+to repeat it.
+If one important piece is still missing and you have asked only once, output
+the $kMeaningCheckTag format again with one more easy question about that
+piece. If you already asked twice, output $kMeaningCheckTag with one or two
+very easy example sentences that use their words ("You can say: ..."), and
+invite them to try.''';
 }
 
 /// 유저 말 바로 앞(맨 마지막)에 한 번 더 두는 교정 규칙. 긴 시스템 지시 속에
@@ -156,10 +174,13 @@ String? buildMeaningFinalNote({
   required bool allowCheck,
 }) {
   if (clarifying) {
-    return '''FINAL RULE FOR THIS TURN: the user is explaining what they meant. Start with
-$kUserFixTag and what they wanted to say as one correct, natural $spokenLang
-sentence, then $kUserFixReplyTag and your normal reply. Do not ask them to repeat it.
-Only if you still cannot tell, output $kMeaningCheckTag with even easier example ways to say it.''';
+    return '''FINAL RULE FOR THIS TURN: the user is answering your question about their
+unfinished line. Join their answer only with that unfinished line (not an older
+topic). If together they make a clear thought, start with $kUserFixTag and that
+one correct, natural $spokenLang sentence, then $kUserFixReplyTag and your normal
+reply. If the answer is still vague ("I don't know", one unsure word), do not
+guess: output $kMeaningCheckTag with one more easy question about the same thing
+(after two questions: one or two easy example sentences instead).''';
   }
   // 🩹 [FREE-TALK-LINE-FIX] 틀린 줄은 대답 앞에 [USER_FIX]로 고쳐 낸다.
   //   예전처럼 대답 속에서 고쳐 말하지 않는다 — 고친 줄이 화면에 나온다.
@@ -169,9 +190,9 @@ corrected (their own words, only what is wrong fixed — nothing added), then
 $kUserFixReplyTag and your reply. Do not repeat the correction in the reply.''';
   if (allowCheck) {
     return '''$fixRule
-Only if you truly cannot tell what they want to say, output $kMeaningCheckTag
-and show one or two very easy ways to say it with their words, then invite
-them to try again.''';
+If their line trails off unfinished or you cannot tell what they want to say,
+do not finish it for them: output $kMeaningCheckTag with one easy question
+about the one missing piece, using their words.''';
   }
   return fixRule;
 }

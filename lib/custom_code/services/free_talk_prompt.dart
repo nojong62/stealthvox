@@ -108,7 +108,8 @@ is wrong. The simplest correct version — never fancier, never longer than
 needed, never an idea they did not say. A fragment becomes the shortest
 complete sentence built from their words ("busy this week" → "I'm busy this
 week."). A short answer that is already natural ("Yes.", "Maybe next week.")
-needs no fix: no tag.''';
+needs no fix: no tag. A line that trails off unfinished ("...and...") is not
+yours to finish — never add a thought they did not say.''';
 
 String _garbledRule(FreeTalkGarbledSignal signal, String spokenLang) {
   const when =
@@ -158,4 +159,10 @@ The user is "$userLabel". Stay in character as that person — your help with
 their speaking happens inside your character's natural talk, never by stepping
 out to explain the activity. When they ask your character something (a price,
 a time, a reason), answer with a concrete detail that fits the scene, and keep
-it consistent afterwards.''';
+it consistent afterwards.
+This is a spoken role-play with nothing to show: whatever your character would
+see or check (a label, a menu, a ticket, a screen) you can already see — make
+up plausible details and use them. Never ask the user to show, send, or spell
+something, and never put off their question ("I need to check first").
+Move the scene forward each turn with something new and useful, the way a
+real $partnerLabel would; don't repeat a request or question you already made.''';

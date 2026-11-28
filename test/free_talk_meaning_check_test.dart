@@ -155,7 +155,7 @@ void main() {
       expect(meaningCheckWorthIt('um... sleep'), isTrue);
       expect(meaningCheckWorthIt('  '), isFalse);
       expect(buildMeaningCheckPolicy(spokenLang: 'English'),
-          contains('one or two very easy ways'));
+          contains('ONE missing piece'));
     });
 
     test('그만 고치라고 했으면 끝까지 말로 교정하지 않는다(줄 고치기는 조용히 남는다)', () {
