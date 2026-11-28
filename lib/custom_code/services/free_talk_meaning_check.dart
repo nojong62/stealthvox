@@ -246,6 +246,20 @@ List<String> usedSentenceStarts(List<String> aiLines) {
 /// 대답 턴은 바로 고쳐 잇는다. 뜻이 잡히는지는 AI가 판단한다(실장님, 2026-11-28).
 bool meaningCheckWorthIt(String userLine) => userLine.trim().isNotEmpty;
 
+/// ⏱️ [FREE-TALK-REASONING] 이 유저 줄에 생각(medium 추론)이 필요한가.
+///
+/// AI 지시의 기준이 아니라 **속도용 거름망**이다 — 판단은 여전히 AI가 한다.
+/// 모든 턴을 medium으로 돌렸더니 첫 소리가 1~2초 늦었다(실장님, 2026-11-28).
+/// 말끝이 흐리거나(…, ..., and/but/so로 끝남) 머뭇거림(um, uh)이 있는 줄만
+/// medium, 나머지는 low로 바로 답한다. 시작 인사(AI 첫 말)는 원래 low다.
+bool freeTalkLineNeedsThought(String userLine) {
+  final t = userLine.trim().toLowerCase();
+  if (t.isEmpty) return false;
+  if (t.endsWith('...') || t.endsWith('…') || t.endsWith('-')) return true;
+  if (RegExp(r"\b(um+|uh+|erm|hmm+)\b").hasMatch(t)) return true;
+  return RegExp(r"\b(and|but|so|because|the|a|my|to|or)[\s.,…]*$").hasMatch(t);
+}
+
 /// 교정(직접 말하게 하는 단계)은 이 턴 수에 한 번까지. 뜻이 막히면 되묻기는 된다.
 const int kFreeTalkCorrectionEveryTurns = 2;
 

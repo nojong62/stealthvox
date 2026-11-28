@@ -4248,7 +4248,9 @@ $userFixPolicy$finalLanguageRule''';
         isStep2: step == ListeningStep.step2,
         freeTalk: _freeTalk,
         freeTalkJudgment: meaningClarifyAttempt != null ||
-            (allowMeaningCheck && !correctionCapped),
+            (allowMeaningCheck &&
+                !correctionCapped &&
+                freeTalkLineNeedsThought(userOriginal)),
       );
       _log(
         '[DIALOG-REASONING]',

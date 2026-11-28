@@ -19,6 +19,17 @@ void main() {
     });
   });
 
+  group('freeTalkLineNeedsThought', () {
+    test('말끝이 흐리거나 머뭇거리면 medium', () {
+      expect(freeTalkLineNeedsThought('um... interview... tomorrow... but...'), isTrue);
+      expect(freeTalkLineNeedsThought('the company and'), isTrue);
+    });
+    test('보통 문장·단어 나열은 low', () {
+      expect(freeTalkLineNeedsThought('very nervous, English question'), isFalse);
+      expect(freeTalkLineNeedsThought('I went to Busan last week.'), isFalse);
+    });
+  });
+
   group('meaningCheckAllowed', () {
     test('평소 방에서는 묻지 않는다', () {
       expect(meaningCheckAllowed(freeTalk: false), isFalse);

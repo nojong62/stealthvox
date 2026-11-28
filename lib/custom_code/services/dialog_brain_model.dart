@@ -77,7 +77,9 @@ DialogBrainReasoningDecision selectDialogBrainReasoning({
   if (hasSttCorrectionContext) {
     return const DialogBrainReasoningDecision('medium', 'stt_correction');
   }
-  if (previousTurnHadUserFix) {
+  // ⏱️ Free Talk은 거의 매 턴 줄을 고치므로 "교정 다음 턴 medium"을 쓰면 대부분이
+  //   medium이 되어 5초+ 걸렸다(실기기, 2026-11-28). 교정 판단은 low로도 된다.
+  if (previousTurnHadUserFix && !freeTalk) {
     return const DialogBrainReasoningDecision('medium', 'user_fix_context');
   }
   if (hasConversationContext && _hasAmbiguousMeaningScope(text)) {
