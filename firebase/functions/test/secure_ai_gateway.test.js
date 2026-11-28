@@ -331,35 +331,23 @@ test("app-written pause markup is used only when it fits one request", () => {
   assert.equal(chirpMarkupForRequest({ markup: "가".repeat(1700) }), null);
 });
 
-test("Gemini is the default for every language except Korean", () => {
+test("Gemini only when the app asks for it, never for Korean", () => {
   const en = { input: "Hello", language: "en", voice: "google-female",
-    response_format: "pcm" };
+    response_format: "pcm", engine: "gemini" };
   assert.equal(shouldUseGemini(en), true);
   assert.equal(shouldUseGemini({ ...en, response_format: "mp3" }), true);
   assert.equal(shouldUseGemini({ ...en, language: "ja", input: "こんにちは" }), true);
-  assert.equal(shouldUseGemini({ ...en, language: "es", input: "Hola" }), true);
+  // Conversation rooms send no engine: Chirp 3 HD.
+  assert.equal(shouldUseGemini({ ...en, engine: undefined }), false);
+  assert.equal(shouldUseGemini({ ...en, engine: "chirp" }), false);
   // Korean (by language or by Hangul) always stays on Chirp.
   assert.equal(shouldUseGemini({ ...en, language: "ko" }), false);
-  assert.equal(shouldUseGemini({ ...en, language: "ko", engine: "gemini" }), false);
   assert.equal(shouldUseGemini({ ...en, input: "안녕하세요" }), false);
-  // Unknown language codes stay on the dynamic Google route.
   assert.equal(shouldUseGemini({ ...en, language: "th" }), false);
-});
-
-test("Gemini steps aside for instructions, WaveNet tier, numeric speed and opt-outs", () => {
-  const en = { input: "Hello", language: "en", voice: "google-female",
-    response_format: "mp3" };
   assert.equal(shouldUseGemini({ ...en, instructions: "warm" }), false);
-  assert.equal(shouldUseGemini({ ...en, voice_tier: "basic" }), false);
-  assert.equal(shouldUseGemini({ ...en, engine: "chirp" }), false);
   assert.equal(shouldUseGemini({ ...en, response_format: "wav" }), false);
-  // Shadowing's chosen pace is a Chirp feature; a style prompt lifts that.
-  assert.equal(shouldUseGemini({ ...en, speed: 0.87 }), false);
-  assert.equal(shouldUseGemini({ ...en, speed: 1 }), true);
-  assert.equal(shouldUseGemini({ ...en, speed: 0.95, style_prompt: "x" }), true);
   assert.equal(
-    shouldUseGemini({ ...en, speed: 0.95, engine: "gemini", voice_tier: "basic" }),
-    true);
+    shouldUseGemini({ ...en, speed: 0.95, voice_tier: "basic" }), true);
 });
 
 test("Gemini kill switches", () => {

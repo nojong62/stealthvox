@@ -97,8 +97,8 @@ const MAX_TTS_INPUT_CHARS = 5000;
 
 // Gemini TTS runs through the same Google endpoint as Chirp, selected by
 // `voice.modelName`, and takes a natural-language style prompt that Chirp does
-// not. Every language except Korean goes to Gemini first (2026-11-22); Korean
-// always stays on Chirp 3 HD. A language Gemini does not have, or any failure,
+// not. Only requests that send `engine: "gemini"` use it (Study room role
+// swap, 2026-11-28); everything else and Korean always stay on Chirp 3 HD. A language Gemini does not have, or any failure,
 // falls back to Chirp so a preview-model change can never silence a screen.
 // Switches on the function (no app update needed):
 //   GEMINI_TTS_DISABLED=1  - Gemini off everywhere, even when the app asks.
@@ -775,17 +775,10 @@ function shouldUseGemini(body) {
   if (String(body.instructions || "").trim()) return false;
   const format = requestedAudioFormat(body);
   if (format !== "pcm" && format !== "mp3") return false;
-  if (engine !== "gemini") {
-    // Default routing for callers that did not ask for an engine.
-    if (process.env.GEMINI_TTS_DEFAULT === "0") return false;
-    // The cheaper WaveNet tier stays where it is.
-    if (voiceTierForRequest(body) === "basic") return false;
-    // Gemini has no numeric speed (e.g. shadowing's chosen pace); only Chirp
-    // honors it, so such requests stay on Chirp unless a style prompt is sent.
-    const speed = Number(body.speed);
-    if (Number.isFinite(speed) && speed > 0 && speed !== 1 &&
-        !String(body.style_prompt || "").trim()) return false;
-  }
+  // Gemini only when the app asks for it (Study room role swap). Conversation
+  // rooms stay on Chirp 3 HD (WaveNet for the basic tier): Gemini's ~3 s to
+  // first audio made every reply feel slow (2026-11-28).
+  if (engine !== "gemini") return false;
   return geminiLocaleAllowed(chirpLocaleForRequest(body));
 }
 

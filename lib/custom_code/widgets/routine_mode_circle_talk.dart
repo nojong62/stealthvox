@@ -4946,6 +4946,62 @@ $userFixPolicy$finalLanguageRule''';
     }
     _costTracker.recordTtsRequest(spokenText.length);
     _logTurnPerf('TTS_ENQUEUE');
+    // ⏱️ [TTS-SPLIT] 긴 대답은 첫 문장을 먼저 합성해 바로 재생하고, 나머지는
+    //   동시에 미리 받아 이어 붙인다. 통째로 보내면 143자에 첫 소리까지 7초가
+    //   걸렸다(실기기, 2026-11-28). 시나리오톡의 첫 문장 선재생과 같은 방식.
+    final headEnd =
+        RegExp(r'[.!?。！？][\"”’」』】)]*\s').firstMatch(spokenText)?.end;
+    if (headEnd != null &&
+        headEnd >= 8 &&
+        spokenText.length - headEnd >= 20) {
+      final head = spokenText.substring(0, headEnd).trim();
+      final tail = spokenText.substring(headEnd).trim();
+      final turnId = 'sys-${DateTime.now().microsecondsSinceEpoch}';
+      final headUtterance = _ttsAdapter.speak(TtsRequest(
+        text: head,
+        voiceId: voice,
+        speakerType: TtsSpeakerType.system,
+        turnId: turnId,
+        generationId: generationId,
+        language: _spokenLangName(step),
+        playbackCategory: 'system',
+        expectsMoreSegments: true,
+      ));
+      final tailUtterance = _ttsAdapter.speakPrefetched(_ttsAdapter.prefetch(
+          TtsRequest(
+        text: tail,
+        voiceId: voice,
+        speakerType: TtsSpeakerType.system,
+        turnId: turnId,
+        generationId: generationId,
+        language: _spokenLangName(step),
+        playbackCategory: 'system',
+        continuesPreviousSegment: true,
+      )));
+      _log('⏱️ [TTS-SPLIT]', 'head=${head.length} tail=${tail.length}');
+      _activeUtterance = headUtterance;
+      try {
+        await waitForUtterancePlayback(headUtterance,
+            firstAudioTimeout: timeout,
+            onTimeout: (phase) => _log('⏳ [TTS-WAIT]',
+                'timeout phase=$phase head len=${head.length} → cancel'));
+        if (generationId != _pipelineGeneration) {
+          tailUtterance.cancel();
+          return;
+        }
+        _activeUtterance = tailUtterance;
+        await waitForUtterancePlayback(tailUtterance,
+            firstAudioTimeout: timeout,
+            onTimeout: (phase) => _log('⏳ [TTS-WAIT]',
+                'timeout phase=$phase tail len=${tail.length} → cancel'));
+      } finally {
+        if (identical(_activeUtterance, headUtterance) ||
+            identical(_activeUtterance, tailUtterance)) {
+          _activeUtterance = null;
+        }
+      }
+      return;
+    }
     final utterance = _ttsAdapter.speak(TtsRequest(
       text: spokenText,
       voiceId: voice,
