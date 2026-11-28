@@ -1717,7 +1717,8 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
         buildMeaningClarifyNote(
             spokenLang: _nativeLangName(),
             chatLang: _targetLangName(),
-            attempt: meaningClarifyAttempt),
+            attempt: meaningClarifyAttempt,
+                round: _meaningRounds),
       if (meaningResolvedSentence != null)
         buildMeaningResolvedNote(
             spokenLang: _nativeLangName(), sentence: meaningResolvedSentence),
@@ -1778,7 +1779,8 @@ the subject, introduced a new fact, spoke briefly, or expressed an unusual view.
             buildMeaningClarifyNote(
                 spokenLang: _nativeLangName(),
                 chatLang: _targetLangName(),
-                attempt: meaningClarifyAttempt),
+                attempt: meaningClarifyAttempt,
+                round: _meaningRounds),
           if (meaningResolvedSentence != null)
             buildMeaningResolvedNote(
                 spokenLang: _nativeLangName(),
@@ -4207,7 +4209,8 @@ $userFixPolicy$finalLanguageRule''';
           ? buildMeaningFinalNote(
               spokenLang: _nativeLangName(),
               clarifying: meaningClarifyAttempt != null,
-              allowCheck: allowMeaningCheck)
+              allowCheck: allowMeaningCheck,
+              round: _meaningRounds)
           : null;
       final String coachNote = _freeTalk && meaningClarifyAttempt == null
           ? buildFreeTalkTurnNote(

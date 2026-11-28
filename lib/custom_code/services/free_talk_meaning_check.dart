@@ -140,6 +140,8 @@ String buildMeaningClarifyNote({
   required String spokenLang,
   required String chatLang,
   required String attempt,
+  // 🧩 이 대답이 몇 번째 질문에 대한 것인가(1부터). 2 이상이면 더 묻지 않는다.
+  int round = 1,
 }) {
   final safe = attempt.replaceAll(RegExp(r'[\r\n]+'), ' ').trim();
   return '''[BUILDING THE SENTENCE — THIS TURN ONLY]
@@ -159,11 +161,13 @@ $kUserFixReplyTag
 The sentence is built from the user's own words (earlier and now), adds no
 idea they did not say, and is the simplest correct version. Do not ask them
 to repeat it.
-If one important piece is still missing and you have asked only once, output
-the $kMeaningCheckTag format again with one more easy question about that
-piece. If you already asked twice, output $kMeaningCheckTag with one or two
-very easy example sentences that use their words ("You can say: ..."), and
-invite them to try.''';
+${round >= 2 ? '''You have already asked $round questions about this line. Do NOT ask another
+question. If you still cannot tell, output $kMeaningCheckTag with one or two
+very easy example sentences built from their words in "$safe" ("You can say:
+..."), and invite them to try one.''' : '''If one important piece is still missing, output the $kMeaningCheckTag format
+again with one more easy question about that same piece.'''}
+Every question or example is about "$safe" only — never about an older topic
+from the conversation.''';
 }
 
 /// 유저 말 바로 앞(맨 마지막)에 한 번 더 두는 교정 규칙. 긴 시스템 지시 속에
@@ -172,6 +176,7 @@ String? buildMeaningFinalNote({
   required String spokenLang,
   required bool clarifying,
   required bool allowCheck,
+  int round = 1,
 }) {
   if (clarifying) {
     return '''FINAL RULE FOR THIS TURN: the user is answering your question about their
@@ -179,8 +184,7 @@ unfinished line. Join their answer only with that unfinished line (not an older
 topic). If together they make a clear thought, start with $kUserFixTag and that
 one correct, natural $spokenLang sentence, then $kUserFixReplyTag and your normal
 reply. If the answer is still vague ("I don't know", one unsure word), do not
-guess: output $kMeaningCheckTag with one more easy question about the same thing
-(after two questions: one or two easy example sentences instead).''';
+guess: ${round >= 2 ? 'output $kMeaningCheckTag with one or two easy example sentences from their words — no more questions' : 'output $kMeaningCheckTag with one more easy question about the same thing'}.''';
   }
   // 🩹 [FREE-TALK-LINE-FIX] 틀린 줄은 대답 앞에 [USER_FIX]로 고쳐 낸다.
   //   예전처럼 대답 속에서 고쳐 말하지 않는다 — 고친 줄이 화면에 나온다.

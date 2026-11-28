@@ -19,6 +19,25 @@ void main() {
     });
   });
 
+  group('buildMeaningClarifyNote 회차', () {
+    test('첫 대답이면 한 번 더 물을 수 있다', () {
+      final n = buildMeaningClarifyNote(
+          spokenLang: 'English', chatLang: 'Korean', attempt: 'money... so', round: 1);
+      expect(n, contains('one more easy question'));
+      expect(n, isNot(contains('Do NOT ask another')));
+    });
+    test('두 번 물었으면 더 묻지 않고 예문만, 원래 말에 대해서만', () {
+      final n = buildMeaningClarifyNote(
+          spokenLang: 'English', chatLang: 'Korean', attempt: 'money... so', round: 2);
+      expect(n, contains('Do NOT ask another'));
+      expect(n, contains('never about an older topic'));
+      expect(
+          buildMeaningFinalNote(
+              spokenLang: 'English', clarifying: true, allowCheck: false, round: 2),
+          contains('no more questions'));
+    });
+  });
+
   group('freeTalkLineNeedsThought', () {
     test('말끝이 흐리거나 머뭇거리면 medium', () {
       expect(freeTalkLineNeedsThought('um... interview... tomorrow... but...'), isTrue);

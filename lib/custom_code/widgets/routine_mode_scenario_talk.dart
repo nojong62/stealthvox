@@ -709,7 +709,8 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
         buildMeaningClarifyNote(
             spokenLang: nativeLang,
             chatLang: targetLang,
-            attempt: meaningClarifyAttempt),
+            attempt: meaningClarifyAttempt,
+                round: _meaningRounds),
       if (meaningResolvedSentence != null)
         buildMeaningResolvedNote(
             spokenLang: nativeLang, sentence: meaningResolvedSentence),
@@ -761,7 +762,8 @@ or a correction format.
             buildMeaningClarifyNote(
                 spokenLang: nativeLang,
                 chatLang: targetLang,
-                attempt: meaningClarifyAttempt),
+                attempt: meaningClarifyAttempt,
+                round: _meaningRounds),
           if (meaningResolvedSentence != null)
             buildMeaningResolvedNote(
                 spokenLang: nativeLang, sentence: meaningResolvedSentence),
@@ -3101,7 +3103,8 @@ $finalLanguageRule''';
           ? buildMeaningFinalNote(
               spokenLang: _nativeLangName(),
               clarifying: meaningClarifyAttempt != null,
-              allowCheck: allowMeaningCheck)
+              allowCheck: allowMeaningCheck,
+              round: _meaningRounds)
           : null;
       final String coachNote = _freeTalk && meaningClarifyAttempt == null
           ? buildFreeTalkTurnNote(
