@@ -2,6 +2,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/free_talk_meaning_check.dart';
 
 void main() {
+  group('learnerLineFixIsPlausible', () {
+    test('단어 나열을 질문 두 개로 푼 교정은 받는다', () {
+      expect(
+          learnerLineFixIsPlausible(
+              original: 'morning, many people, crowded?',
+              fixed: 'Are there many people in the morning? Is it crowded?'),
+          isTrue);
+    });
+    test('유저 낱말이 거의 안 남은 다시 쓰기는 막는다', () {
+      expect(
+          learnerLineFixIsPlausible(
+              original: 'morning, many people, crowded?',
+              fixed: 'What time does the park usually open for runners?'),
+          isFalse);
+    });
+  });
+
   group('meaningCheckAllowed', () {
     test('평소 방에서는 묻지 않는다', () {
       expect(meaningCheckAllowed(freeTalk: false), isFalse);

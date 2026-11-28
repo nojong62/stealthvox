@@ -3545,6 +3545,25 @@ $finalLanguageRule''';
         });
         _scrollToBottom();
         _activeHostBubbleId = '';
+        // 🧩 [FREE-TALK-BUILD] Free Talk은 조용히 다시 듣지 않고 AI가 말로
+        //   되물어 다시 말하게 한다(글자 안내 대신, 서클톡과 같은 느낌).
+        //   다시 말한 줄은 위 흐름대로 이 자리를 대신한다.
+        if (_freeTalk) {
+          final askLine = _scenarioSpokenPhrase('retry', _nativeLangName());
+          setState(() {
+            _localMessages.add(<String, dynamic>{
+              'role': 'SYSTEM_ASKBACK',
+              'target': askLine,
+              'original': '',
+            });
+          });
+          _scrollToBottom();
+          _log('[UNCLEAR-TRANSCRIPT]',
+              'turn=$turnNumber free_talk → spoken ask-back');
+          responseCompleted = true;
+          await _speakKoreanLine(askLine, step: ListeningStep.step1);
+          return;
+        }
         _log(
           '[UNCLEAR-TRANSCRIPT]',
           'turn=$turnNumber len=${userKorean.trim().length} → silent_listen',
@@ -5163,11 +5182,17 @@ $finalLanguageRule''';
     //   역할 이름이 'HOST'가 아니라서 `_recentKoreanConversation()`·
     //   `_rolloverContextTurns()`·`_removeOrphanedHostBubbles()`가 전부 건너뛴다
     //   — 화면에만 남고 AI 문맥과 히스토리에는 닿지 않는다.
-    final bool isUnheard = role == 'HOST_UNHEARD';
+    // 🧩 [FREE-TALK-BUILD] Free Talk에서는 "이렇게 들었어요 — 다시 말해 주세요"
+    //   글자와 흐린 표시를 붙이지 않는다(실장님, 2026-11-28). AI의 되묻는 말이
+    //   다시 말하게 하고, 다시 말하면 이 줄은 고친 문장으로 바뀐다(서클톡과 같음).
+    //   대화언어(기본) 대화에서만 붙인다.
+    final bool isUnheard = role == 'HOST_UNHEARD' && !_freeTalk;
+    final bool isHostPending = role == 'HOST_UNHEARD' && _freeTalk;
     // 👂 되묻는 말. 상대 쪽에 세우되 'SYSTEM'이 아니라서 문맥·히스토리에는
     //   안 들어간다 — 자기 되묻기를 보고 따라 되묻는 고리를 끊는 자리다.
     final bool isAskBack = role == 'SYSTEM_ASKBACK';
-    final bool isHost = role == 'HOST' || role == 'HOST_TEMP' || isUnheard;
+    final bool isHost =
+        role == 'HOST' || role == 'HOST_TEMP' || isUnheard || isHostPending;
     final rawTarget = (msg['target'] ?? '').toString();
     final bool isThinking = (role == 'SYSTEM' && rawTarget.isEmpty) ||
         (role == 'HOST_TEMP' && rawTarget == '...') ||

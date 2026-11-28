@@ -215,9 +215,13 @@ bool learnerLineFixIsPlausible({
   if (orig.isEmpty || fix.isEmpty) return false;
   // 짧은 조각("yesterday meeting, investor")은 주어·동사·관사를 채워야
   //   문장이 된다 — 3낱말 → "I had a meeting with an investor yesterday."(8).
-  final maxWords = orig.length * 2 > orig.length + 5
-      ? orig.length * 2
-      : orig.length + 5;
+  // 📏 단어 나열은 질문 두 개로 풀며 꽤 늘어난다 — "morning, many people,
+  //   crowded?"(4) → "Are there many people in the morning? Is it crowded?"(10)가
+  //   예전 상한(9)에 막혔다(실기기, 2026-11-28). 지어낸 말은 아래 "유저 낱말
+  //   절반 이상 남기기"가 거른다.
+  final maxWords = orig.length * 3 > orig.length + 10
+      ? orig.length * 3
+      : orig.length + 10;
   if (fix.length > maxWords) return false;
   final fixSet = fix.toSet();
   final kept = orig.where(fixSet.contains).length;
